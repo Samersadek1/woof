@@ -2,7 +2,6 @@ import {
   LayoutDashboard,
   Users,
   Hotel,
-  Cat,
   Sun,
   TreePine,
   Scissors,
@@ -10,6 +9,9 @@ import {
   ClipboardList,
   LogOut,
   PawPrint,
+  Settings,
+  DoorOpen,
+  Sparkles,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,13 +19,17 @@ import { useAuth } from "@/contexts/AuthContext";
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
   { icon: Users, label: "Customers & Pets", path: "/customers" },
-  { icon: Hotel, label: "Dog Boarding", path: "/boarding" },
-  { icon: Cat, label: "Cattery", path: "/cattery" },
+  { icon: Hotel, label: "Boarding", path: "/boarding" },
   { icon: Sun, label: "Daycare", path: "/daycare" },
   { icon: TreePine, label: "Park Visitation", path: "/park" },
   { icon: Scissors, label: "Grooming", path: "/grooming" },
   { icon: Wallet, label: "Billing & Wallets", path: "/billing" },
   { icon: ClipboardList, label: "Staff Portal", path: "/staff" },
+  { icon: Sparkles, label: "AI Assistant", path: "/agent" },
+];
+
+const settingsItems = [
+  { icon: DoorOpen, label: "Rooms", path: "/settings/rooms" },
 ];
 
 const AppSidebar = () => {
@@ -40,12 +46,31 @@ const AppSidebar = () => {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-0.5 px-3 py-4 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 overflow-y-auto flex flex-col gap-0.5">
         {navItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}
             end={item.path === "/"}
+            className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            activeClassName="bg-sidebar-accent text-sidebar-primary"
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
+
+        {/* Settings section */}
+        <div className="mt-4 mb-1 px-3 flex items-center gap-2">
+          <Settings className="h-3 w-3 text-sidebar-foreground/50" />
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50">
+            Settings
+          </span>
+        </div>
+        {settingsItems.map((item) => (
+          <NavLink
+            key={item.path}
+            to={item.path}
             className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             activeClassName="bg-sidebar-accent text-sidebar-primary"
           >

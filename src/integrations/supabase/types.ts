@@ -61,6 +61,56 @@ export type Database = {
           },
         ]
       }
+      booking_items: {
+        Row: {
+          booking_id: string
+          category: string
+          condition_notes: string | null
+          created_at: string
+          description: string
+          id: string
+          photo_urls: string[]
+          quantity: number
+          return_notes: string | null
+          return_status: string | null
+          returned: boolean | null
+        }
+        Insert: {
+          booking_id: string
+          category: string
+          condition_notes?: string | null
+          created_at?: string
+          description: string
+          id?: string
+          photo_urls?: string[]
+          quantity?: number
+          return_notes?: string | null
+          return_status?: string | null
+          returned?: boolean | null
+        }
+        Update: {
+          booking_id?: string
+          category?: string
+          condition_notes?: string | null
+          created_at?: string
+          description?: string
+          id?: string
+          photo_urls?: string[]
+          quantity?: number
+          return_notes?: string | null
+          return_status?: string | null
+          returned?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_items_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_pets: {
         Row: {
           booking_id: string
@@ -120,6 +170,8 @@ export type Database = {
           notes: string | null
           original_room_type: Database["public"]["Enums"]["room_type"] | null
           owner_id: string
+          pickup_required: boolean
+          dropoff_required: boolean
           room_id: string
           staff_id: string | null
           status: Database["public"]["Enums"]["booking_status"]
@@ -143,6 +195,8 @@ export type Database = {
           notes?: string | null
           original_room_type?: Database["public"]["Enums"]["room_type"] | null
           owner_id: string
+          pickup_required?: boolean
+          dropoff_required?: boolean
           room_id: string
           staff_id?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
@@ -168,6 +222,8 @@ export type Database = {
           notes?: string | null
           original_room_type?: Database["public"]["Enums"]["room_type"] | null
           owner_id?: string
+          pickup_required?: boolean
+          dropoff_required?: boolean
           room_id?: string
           staff_id?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
@@ -486,14 +542,19 @@ export type Database = {
           appointment_date: string
           appointment_time: string | null
           booking_id: string | null
+          completed_at: string | null
           created_at: string
           duration_minutes: number | null
           groomer_id: string | null
+          groomer_name: string | null
           id: string
+          in_progress_at: string | null
+          no_show: boolean
           notes: string | null
           owner_id: string
           pet_id: string
           price: number | null
+          reminder_sent: boolean
           service: Database["public"]["Enums"]["grooming_service"]
           status: string
         }
@@ -501,14 +562,19 @@ export type Database = {
           appointment_date: string
           appointment_time?: string | null
           booking_id?: string | null
+          completed_at?: string | null
           created_at?: string
           duration_minutes?: number | null
           groomer_id?: string | null
+          groomer_name?: string | null
           id?: string
+          in_progress_at?: string | null
+          no_show?: boolean
           notes?: string | null
           owner_id: string
           pet_id: string
           price?: number | null
+          reminder_sent?: boolean
           service: Database["public"]["Enums"]["grooming_service"]
           status?: string
         }
@@ -516,14 +582,19 @@ export type Database = {
           appointment_date?: string
           appointment_time?: string | null
           booking_id?: string | null
+          completed_at?: string | null
           created_at?: string
           duration_minutes?: number | null
           groomer_id?: string | null
+          groomer_name?: string | null
           id?: string
+          in_progress_at?: string | null
+          no_show?: boolean
           notes?: string | null
           owner_id?: string
           pet_id?: string
           price?: number | null
+          reminder_sent?: boolean
           service?: Database["public"]["Enums"]["grooming_service"]
           status?: string
         }
@@ -771,6 +842,7 @@ export type Database = {
           membership_date: string | null
           membership_fee_paid: boolean
           notes: string | null
+          other_notes: string | null
           phone: string
           updated_at: string
           vet_name: string | null
@@ -796,6 +868,7 @@ export type Database = {
           membership_date?: string | null
           membership_fee_paid?: boolean
           notes?: string | null
+          other_notes?: string | null
           phone: string
           updated_at?: string
           vet_name?: string | null
@@ -821,6 +894,7 @@ export type Database = {
           membership_date?: string | null
           membership_fee_paid?: boolean
           notes?: string | null
+          other_notes?: string | null
           phone?: string
           updated_at?: string
           vet_name?: string | null
@@ -944,11 +1018,18 @@ export type Database = {
           medications: string | null
           microchip_number: string | null
           name: string
+          other_notes: string | null
           owner_id: string
           photo_url: string | null
           spayed_neutered: boolean | null
           species: Database["public"]["Enums"]["species"]
           updated_at: string
+          vaccicheck_distemper_tier: string | null
+          vaccicheck_hepatitis_tier: string | null
+          vaccicheck_immunity_rating: string | null
+          vaccicheck_parvovirus_tier: string | null
+          vaccicheck_report_url: string | null
+          vaccicheck_test_date: string | null
           vet_name: string | null
           vet_phone: string | null
           weight_kg: number | null
@@ -970,11 +1051,18 @@ export type Database = {
           medications?: string | null
           microchip_number?: string | null
           name: string
+          other_notes?: string | null
           owner_id: string
           photo_url?: string | null
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
+          vaccicheck_distemper_tier?: string | null
+          vaccicheck_hepatitis_tier?: string | null
+          vaccicheck_immunity_rating?: string | null
+          vaccicheck_parvovirus_tier?: string | null
+          vaccicheck_report_url?: string | null
+          vaccicheck_test_date?: string | null
           vet_name?: string | null
           vet_phone?: string | null
           weight_kg?: number | null
@@ -996,11 +1084,18 @@ export type Database = {
           medications?: string | null
           microchip_number?: string | null
           name?: string
+          other_notes?: string | null
           owner_id?: string
           photo_url?: string | null
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
+          vaccicheck_distemper_tier?: string | null
+          vaccicheck_hepatitis_tier?: string | null
+          vaccicheck_immunity_rating?: string | null
+          vaccicheck_parvovirus_tier?: string | null
+          vaccicheck_report_url?: string | null
+          vaccicheck_test_date?: string | null
           vet_name?: string | null
           vet_phone?: string | null
           weight_kg?: number | null

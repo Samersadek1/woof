@@ -7,7 +7,17 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/layouts/DashboardLayout";
 import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
+import CustomersPage from "@/pages/Customers";
+import OwnerProfilePage from "@/pages/OwnerProfile";
+import BoardingPage from "@/pages/Boarding";
+import PetProfilePage from "@/pages/PetProfile";
 import PlaceholderPage from "@/pages/PlaceholderPage";
+import RoomsAdminPage from "@/pages/RoomsAdmin";
+import BillingPage from "@/pages/Billing";
+import DaycarePage from "@/pages/Daycare";
+import AgentPage from "@/pages/Agent";
+import ParkPage from "@/pages/Park";
+import GroomingPage from "@/pages/Grooming";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -37,14 +47,21 @@ const App = () => (
             <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
             <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
               <Route path="/" element={<DashboardPage />} />
-              <Route path="/customers" element={<PlaceholderPage title="Customers & Pets" />} />
-              <Route path="/boarding" element={<PlaceholderPage title="Dog Boarding" />} />
-              <Route path="/cattery" element={<PlaceholderPage title="Cattery" />} />
-              <Route path="/daycare" element={<PlaceholderPage title="Daycare" />} />
-              <Route path="/park" element={<PlaceholderPage title="Park Visitation" />} />
-              <Route path="/grooming" element={<PlaceholderPage title="Grooming" />} />
-              <Route path="/billing" element={<PlaceholderPage title="Billing & Wallets" />} />
+              <Route path="/customers" element={<CustomersPage />} />
+              <Route path="/customers/:id" element={<OwnerProfilePage />} />
+              <Route path="/customers/:ownerId/pets/:petId" element={<PetProfilePage />} />
+              <Route path="/boarding" element={<BoardingPage />} />
+              <Route
+                path="/cattery"
+                element={<Navigate to="/boarding#cat-boarding" replace />}
+              />
+              <Route path="/daycare" element={<DaycarePage />} />
+              <Route path="/agent" element={<AgentPage />} />
+              <Route path="/park" element={<ParkPage />} />
+              <Route path="/grooming" element={<GroomingPage />} />
+              <Route path="/billing" element={<BillingPage />} />
               <Route path="/staff" element={<PlaceholderPage title="Staff Portal" />} />
+              <Route path="/settings/rooms" element={<RoomsAdminPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
