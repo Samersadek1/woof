@@ -115,20 +115,22 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
   const occ = occupancyTag(petCount);
   const capacityType = roomRow?.capacity_type ?? occ;
 
-  // Priority order: most specific key first, then broader fallbacks
+  // Priority order: service-prefixed keys first (e.g. boarding_presidential_suite_twin),
+  // then fall back to shorter variants
   const candidates = [
+    `${serviceType}_${roomType}_${occ}`,
+    `${serviceType}_${roomType}_${capacityType}`,
+    `${serviceType}_${roomType}`,
+    `${serviceType}_${roomType}_nightly`,
     `${roomType}_${occ}`,
     `${roomType}_${capacityType}`,
     `${roomType}_${occ}_nightly`,
     `${roomType}_${capacityType}_nightly`,
     roomType,
     `${roomType}_nightly`,
-    `${serviceType}_${roomType}_${occ}`,
-    `${serviceType}_${roomType}`,
-    `${serviceType}_${roomType}_nightly`,
   ];
   const pricingTableRate = candidates.reduce<number | undefined>((found, k) => found ?? prices[k], undefined);
-  const matchedKey = candidates.find((k) => k in prices) ?? `${roomType}_${occ}`;
+  const matchedKey = candidates.find((k) => k in prices) ?? `${serviceType}_${roomType}_${occ}`;
 
   const nightlyRate = pricingTableRate ?? roomRow?.nightly_rate ?? 0;
 
