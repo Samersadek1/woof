@@ -21,6 +21,17 @@ import { useDaycarePackages } from "@/hooks/useDaycare";
 import type { PetWithVaccinations } from "@/hooks/usePets";
 import { VaccinationEditor } from "@/components/VaccinationEditor";
 import type { VaccinationRow } from "@/components/VaccinationEditor";
+import {
+  useInvoicesForOwner,
+  useOwnerStatement,
+  useBillingAdjustments,
+  useFinaliseInvoice,
+  useProcessPayment,
+  useVoidInvoice,
+  formatAed,
+  type InvoiceWithItems,
+  type InvoiceStatus,
+} from "@/hooks/useBilling";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +74,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   ArrowLeft,
   Pencil,
   Plus,
@@ -76,6 +95,13 @@ import {
   AlertTriangle,
   BedDouble,
   ExternalLink,
+  FileText,
+  CreditCard,
+  Ban,
+  CheckCircle2,
+  Receipt,
+  Eye,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
@@ -115,6 +141,18 @@ const BOOKING_STATUS_BADGE: Record<BookingStatus, string> = {
   enquiry: "bg-amber-100 text-amber-800 border-amber-200",
   cancelled: "bg-red-100 text-red-700 border-red-200",
   no_show: "bg-rose-100 text-rose-700 border-rose-200",
+};
+
+const INVOICE_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  draft: { label: "Draft", className: "bg-slate-100 text-slate-600 border-slate-200" },
+  issued: { label: "Issued", className: "bg-blue-50 text-blue-700 border-blue-200" },
+  finalised: { label: "Finalised", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  paid: { label: "Paid", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  partially_paid: { label: "Partial", className: "bg-amber-50 text-amber-700 border-amber-200" },
+  outstanding: { label: "Outstanding", className: "bg-orange-50 text-orange-700 border-orange-200" },
+  overdue: { label: "Overdue", className: "bg-red-50 text-red-700 border-red-200" },
+  voided: { label: "Voided", className: "bg-gray-100 text-gray-500 border-gray-200" },
+  cancelled: { label: "Cancelled", className: "bg-gray-100 text-gray-500 border-gray-200" },
 };
 
 function bookingPetNames(b: BookingWithDetails): string {
@@ -218,6 +256,363 @@ function makePetForm(ownerId: string): PetInsert {
     photo_url: "",
   };
 }
+
+// ── Owner Billing Section ────────────────────────────────────────────────────
+
+function OwnerBillingSection({ ownerId }: { ownerId: string }) {
+  const navigate = useNavigate();
+  const statement = useOwnerStatement(ownerId);
+  const { data: invoices = [], isLoading: invoicesLoading } = useInvoicesForOwner(ownerId);
+  const { adjustments, isLoading: adjLoading } = useBillingAdjustments(ownerId);
+  const finalise = useFinaliseInvoice();
+  const processPayment = useProcessPayment();
+  const voidInvoice = useVoidInvoice();
+
+  const [payDialogInvoice, setPayDialogInvoice] = useState<InvoiceWithItems | null>(null);
+  const [payMethod, setPayMethod] = useState<"wallet" | "card" | "cash">("wallet");
+  const [payStaff, setPayStaff] = useState("");
+  const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
+
+  const handleFinalise = (inv: InvoiceWithItems) => {
+    finalise.mutate(inv.id, {
+      onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} finalised`),
+      onError: (err) => toast.error(err.message),
+    });
+  };
+
+  const handlePay = async () => {
+    if (!payDialogInvoice || !payStaff.trim()) {
+      toast.error("Enter staff name");
+      return;
+    }
+    const result = await processPayment.mutateAsync({
+      invoiceId: payDialogInvoice.id,
+      method: payMethod,
+      staffName: payStaff.trim(),
+    });
+    if (result.success) setPayDialogInvoice(null);
+  };
+
+  const handleVoid = (inv: InvoiceWithItems) => {
+    voidInvoice.mutate(
+      { invoiceId: inv.id, reason: "Voided from owner profile", refundAmount: 0, staffName: "admin" },
+      {
+        onSuccess: () => toast.success("Invoice voided"),
+        onError: (err) => toast.error(err.message),
+      },
+    );
+  };
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold flex items-center gap-2">
+          <Receipt className="h-5 w-5" />
+          Billing & Invoices
+        </h3>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => navigate("/billing")}
+        >
+          <FileText className="mr-1.5 h-4 w-4" />
+          Full Billing
+        </Button>
+      </div>
+
+      {/* Summary cards */}
+      {!statement.isLoading && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs uppercase text-muted-foreground">Wallet</p>
+              <p className="text-2xl font-bold tabular-nums mt-1">{formatAed(statement.walletBalance)}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs uppercase text-muted-foreground">Outstanding</p>
+              <p className={`text-2xl font-bold tabular-nums mt-1 ${statement.totalOutstanding > 0 ? "text-red-600" : ""}`}>
+                {formatAed(statement.totalOutstanding)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs uppercase text-muted-foreground">Net Position</p>
+              <p className={`text-2xl font-bold tabular-nums mt-1 ${statement.netPosition < 0 ? "text-red-600" : "text-emerald-600"}`}>
+                {formatAed(statement.netPosition)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Recent invoices */}
+      <Card>
+        <CardContent className="p-0">
+          {invoicesLoading ? (
+            <div className="p-6 space-y-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+          ) : invoices.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <FileText className="h-7 w-7 mb-2 opacity-40" />
+              <p className="text-sm">No invoices yet</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/40">
+                  <TableHead>Invoice</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Service</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invoices.slice(0, 10).map((inv) => {
+                  const sb = INVOICE_STATUS_BADGE[inv.status] ?? INVOICE_STATUS_BADGE.draft;
+                  const canFinalise = inv.status === "draft";
+                  const canPay = ["finalised", "issued", "outstanding", "overdue"].includes(inv.status);
+                  const canVoid = !["voided", "cancelled", "paid"].includes(inv.status);
+                  return (
+                    <TableRow key={inv.id}>
+                      <TableCell>
+                        <button type="button" className="text-sm font-medium text-primary hover:underline" onClick={() => setViewInvoice(inv)}>
+                          {inv.invoice_number ?? inv.id.slice(0, 8)}
+                        </button>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{format(parseISO(inv.created_at), "d MMM yyyy")}</TableCell>
+                      <TableCell className="text-sm capitalize">{inv.service_type?.replace(/_/g, " ") ?? "—"}</TableCell>
+                      <TableCell><Badge variant="outline" className={sb.className}>{sb.label}</Badge></TableCell>
+                      <TableCell className="text-sm font-semibold tabular-nums text-right">{formatAed(inv.total_aed)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setViewInvoice(inv)} title="View">
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                          {canFinalise && (
+                            <Button size="sm" variant="ghost" disabled={finalise.isPending} onClick={() => handleFinalise(inv)} title="Finalise">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          {canPay && (
+                            <Button size="sm" variant="ghost" className="text-emerald-600" onClick={() => { setPayDialogInvoice(inv); setPayStaff(""); setPayMethod("wallet"); }} title="Pay">
+                              <CreditCard className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          {canVoid && (
+                            <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleVoid(inv)} title="Void">
+                              <Ban className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Recent adjustments */}
+      {!adjLoading && adjustments.length > 0 && (
+        <div className="mt-4">
+          <p className="text-sm font-medium text-muted-foreground mb-2">Recent Adjustments</p>
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead>Date</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Reason</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Approved By</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {adjustments.slice(0, 5).map((adj) => (
+                    <TableRow key={adj.id}>
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{format(parseISO(adj.created_at), "d MMM yyyy")}</TableCell>
+                      <TableCell className="text-sm capitalize">{adj.adjustment_type.replace(/_/g, " ")}</TableCell>
+                      <TableCell className="text-sm max-w-[200px] truncate" title={adj.reason}>{adj.reason}</TableCell>
+                      <TableCell className="text-sm tabular-nums text-right">{adj.adjusted_amount != null ? formatAed(adj.adjusted_amount) : "—"}</TableCell>
+                      <TableCell className="text-sm">{adj.approved_by}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Pay dialog */}
+      {payDialogInvoice && (
+        <Dialog open={!!payDialogInvoice} onOpenChange={(o) => { if (!o) setPayDialogInvoice(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5" /> Process Payment
+              </DialogTitle>
+              <DialogDescription>
+                Invoice {payDialogInvoice.invoice_number ?? payDialogInvoice.id.slice(0, 8)} — {formatAed(payDialogInvoice.total_aed)}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 mt-2">
+              <div className="space-y-2">
+                <Label>Payment method</Label>
+                <Select value={payMethod} onValueChange={(v) => setPayMethod(v as "wallet" | "card" | "cash")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="wallet">Wallet</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
+                    <SelectItem value="cash">Cash</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Staff name <span className="text-destructive">*</span></Label>
+                <Input placeholder="Who is processing?" value={payStaff} onChange={(e) => setPayStaff(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter className="gap-2 pt-4">
+              <Button variant="outline" onClick={() => setPayDialogInvoice(null)} disabled={processPayment.isPending}>Cancel</Button>
+              <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
+                {processPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Pay {formatAed(payDialogInvoice.total_aed)}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Invoice detail dialog */}
+      {viewInvoice && (
+        <Dialog open={!!viewInvoice} onOpenChange={(o) => { if (!o) setViewInvoice(null); }}>
+          <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Invoice {viewInvoice.invoice_number ?? viewInvoice.id.slice(0, 8)}
+              </DialogTitle>
+              <DialogDescription>
+                Created {format(parseISO(viewInvoice.created_at), "d MMM yyyy")}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div id="invoice-print-area">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>INVOICE</div>
+                  <p style={{ color: "#666", marginTop: 4 }}>{viewInvoice.invoice_number ?? viewInvoice.id.slice(0, 8)}</p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <p style={{ color: "#666", fontSize: 13 }}>{format(parseISO(viewInvoice.created_at), "d MMMM yyyy")}</p>
+                  {viewInvoice.due_date && <p style={{ color: "#666", fontSize: 13 }}>Due: {viewInvoice.due_date}</p>}
+                  <Badge variant="outline" className={(INVOICE_STATUS_BADGE[viewInvoice.status] ?? INVOICE_STATUS_BADGE.draft).className}>
+                    {(INVOICE_STATUS_BADGE[viewInvoice.status] ?? INVOICE_STATUS_BADGE.draft).label}
+                  </Badge>
+                </div>
+              </div>
+
+              {viewInvoice.service_type && (
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
+                  Service: <span style={{ textTransform: "capitalize" }}>{viewInvoice.service_type.replace(/_/g, " ")}</span>
+                </p>
+              )}
+
+              <Separator className="my-3" />
+
+              {(viewInvoice.line_items ?? []).length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <TableHead>Description</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Unit Price</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(viewInvoice.line_items ?? []).map((li) => (
+                      <TableRow key={li.id}>
+                        <TableCell className="text-sm">{li.description ?? li.pricing_key ?? "—"}</TableCell>
+                        <TableCell className="text-sm text-right">{li.quantity}</TableCell>
+                        <TableCell className="text-sm text-right">{formatAed(li.unit_price)}</TableCell>
+                        <TableCell className="text-sm text-right font-semibold">{formatAed(li.line_total)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground py-4">No line items</p>
+              )}
+
+              <Separator className="my-3" />
+
+              <div className="flex flex-col items-end gap-1 text-sm">
+                <div className="flex justify-between w-60">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span>{formatAed(viewInvoice.subtotal_aed)}</span>
+                </div>
+                {viewInvoice.discount_aed > 0 && (
+                  <div className="flex justify-between w-60">
+                    <span className="text-muted-foreground">Discount ({viewInvoice.discount_pct}%)</span>
+                    <span className="text-emerald-600">-{formatAed(viewInvoice.discount_aed)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between w-60 font-bold text-lg border-t-2 border-foreground pt-2 mt-1">
+                  <span>Total</span>
+                  <span>{formatAed(viewInvoice.total_aed)}</span>
+                </div>
+              </div>
+
+              {viewInvoice.paid_at && (
+                <p className="mt-4 text-sm text-emerald-600">
+                  Paid on {format(parseISO(viewInvoice.paid_at), "d MMM yyyy")} via {viewInvoice.payment_method ?? "—"}
+                </p>
+              )}
+              {viewInvoice.voided_at && (
+                <p className="mt-4 text-sm text-destructive">
+                  Voided on {format(parseISO(viewInvoice.voided_at), "d MMM yyyy")}
+                  {viewInvoice.voided_reason ? ` — ${viewInvoice.voided_reason}` : ""}
+                </p>
+              )}
+            </div>
+
+            <DialogFooter className="gap-2 pt-4">
+              <Button variant="outline" onClick={() => setViewInvoice(null)}>Close</Button>
+              <Button onClick={() => {
+                const el = document.getElementById("invoice-print-area");
+                if (!el) return;
+                const w = window.open("", "_blank");
+                if (!w) return;
+                w.document.write(`<!DOCTYPE html><html><head><title>Invoice</title><style>
+                  * { margin:0; padding:0; box-sizing:border-box; }
+                  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; padding:40px; color:#111; font-size:14px; }
+                  table { width:100%; border-collapse:collapse; } th,td { padding:8px 12px; text-align:left; border-bottom:1px solid #eee; }
+                  th { background:#f5f5f5; font-size:12px; text-transform:uppercase; color:#666; }
+                  .footer { margin-top:40px; color:#999; font-size:12px; text-align:center; }
+                  @media print { body { padding:20px; } }
+                </style></head><body>${el.innerHTML}<div class="footer">Generated ${format(new Date(), "d MMM yyyy, HH:mm")}</div></body></html>`);
+                w.document.close(); w.focus(); w.print();
+              }}>
+                <Printer className="mr-2 h-4 w-4" /> Print
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </section>
+  );
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
 
 const OwnerProfilePage = () => {
   const { id } = useParams<{ id: string }>();
@@ -920,6 +1315,11 @@ const OwnerProfilePage = () => {
             </div>
           )}
         </section>
+
+        <Separator />
+
+        {/* ─── Billing & Invoices Section ─── */}
+        <OwnerBillingSection ownerId={id!} />
 
         <Separator />
 

@@ -51,10 +51,6 @@ const App = () => (
               <Route path="/customers/:id" element={<OwnerProfilePage />} />
               <Route path="/customers/:ownerId/pets/:petId" element={<PetProfilePage />} />
               <Route path="/boarding" element={<BoardingPage />} />
-              <Route
-                path="/cattery"
-                element={<Navigate to="/boarding#cat-boarding" replace />}
-              />
               <Route path="/daycare" element={<DaycarePage />} />
               <Route path="/agent" element={<AgentPage />} />
               <Route path="/park" element={<ParkPage />} />

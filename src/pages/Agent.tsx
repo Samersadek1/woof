@@ -64,7 +64,7 @@ Available tables and their key columns:
 - booking_pets: booking_id, pet_id (junction: links bookings to pets — always reach pets through bookings: booking_pets(...pets(...)))
 - pets: id, name, species, breed, owner_id  (species is usually "dog" or "cat")
 - owners: id, first_name, last_name, phone, member_type, wallet_balance
-- rooms: id, display_name, wing, room_type  (wing "cattery" = cat boarding rooms; other wings = dog boarding)
+- rooms: id, display_name, wing, room_type  (wing "cattery" = cat boarding rooms; all other wings = dog boarding)
 - daycare_sessions: id, pet_id, owner_id, package_id, session_date, checked_in, pickup_used, dropoff_used
 - daycare_packages: id, pet_id, owner_id, total_days, days_used
 - park_bookings: id, visit_date, slot_start, size_lane, pet_id, owner_id
@@ -82,9 +82,9 @@ Filters:
 - Comparisons on one column (object value): use lte, lt, gte, gt, neq, eq (ISO date strings for dates).
 - A booking occupies overnight dates from check_in_date (inclusive) through the day before check_out_date (check_out_date is the departure day, not counted as an occupied night). So for "who is in house on DATE": check_in_date <= DATE AND check_out_date > DATE.
 
-Example — dog boarding only (exclude wing "cattery") on 2026-04-10, excluding cancelled:
+Example — all boarding on 2026-04-10, excluding cancelled:
 {"action":"query","table":"bookings","select":"id,booking_ref,check_in_date,check_out_date,status,rooms(wing,display_name),booking_pets(pet_id,pets(name,species))","filter":{"check_in_date":{"lte":"2026-04-10"},"check_out_date":{"gt":"2026-04-10"},"status":{"neq":"cancelled"}}}
-Then count rows in booking_pets where pets.species is "dog" and rooms.wing is not "cattery".
+Use rooms.wing to distinguish dog rooms vs cat rooms (wing "cattery" = cat rooms).
 
 For who is checked in right now: "filter":{"status":"checked_in"} on bookings (add nested selects if names are needed).
 

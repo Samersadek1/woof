@@ -1,4 +1,6 @@
 import { differenceInCalendarDays, addDays, format, parseISO } from "date-fns";
+import { supabase } from "@/integrations/supabase/client";
+import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
 
 /**
  * Returns the number of nights between two ISO date strings.
@@ -73,4 +75,150 @@ export function generateDateRange(startDate: string, days: number): string[] {
   return Array.from({ length: days }, (_, i) =>
     format(addDays(base, i), "yyyy-MM-dd")
   );
+}
+
+// ── Auto-invoice creation for new bookings ──────────────────────────────────
+
+interface AutoInvoiceParams {
+  bookingId: string;
+  ownerId: string;
+  serviceType: ServiceType;
+  roomId: string;
+  roomType: string;
+  roomName?: string;
+  petCount: number;
+  checkInDate: string;
+  checkOutDate: string;
+  addons?: { key: string; label: string }[];
+}
+
+function occupancyTag(petCount: number): string {
+  if (petCount <= 1) return "single";
+  if (petCount === 2) return "twin";
+  return "multiple";
+}
+
+export async function createBookingInvoice(params: AutoInvoiceParams): Promise<void> {
+  const { bookingId, ownerId, serviceType, roomId, roomType, roomName, petCount, checkInDate, checkOutDate, addons = [] } = params;
+
+  const nights = differenceInCalendarDays(parseISO(checkOutDate), parseISO(checkInDate));
+  if (nights <= 0) return;
+
+  const [{ data: pricingRows }, { data: roomRow }] = await Promise.all([
+    supabase.from("pricing").select("key, amount_aed"),
+    supabase.from("rooms").select("nightly_rate, capacity_type").eq("id", roomId).single(),
+  ]);
+
+  const prices: Record<string, number> = {};
+  for (const r of pricingRows ?? []) prices[r.key] = r.amount_aed;
+
+  const occ = occupancyTag(petCount);
+  const capacityType = roomRow?.capacity_type ?? occ;
+
+  // Priority order: most specific key first, then broader fallbacks
+  const candidates = [
+    `${roomType}_${occ}`,
+    `${roomType}_${capacityType}`,
+    `${roomType}_${occ}_nightly`,
+    `${roomType}_${capacityType}_nightly`,
+    roomType,
+    `${roomType}_nightly`,
+    `${serviceType}_${roomType}_${occ}`,
+    `${serviceType}_${roomType}`,
+    `${serviceType}_${roomType}_nightly`,
+  ];
+  const pricingTableRate = candidates.reduce<number | undefined>((found, k) => found ?? prices[k], undefined);
+  const matchedKey = candidates.find((k) => k in prices) ?? `${roomType}_${occ}`;
+
+  const nightlyRate = pricingTableRate ?? roomRow?.nightly_rate ?? 0;
+
+  const typeLabel = roomType.replace(/_/g, " ");
+  const occLabel = petCount > 1 ? ` (${occ})` : "";
+  const lineLabel = roomName
+    ? `${roomName} — ${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`
+    : `${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`;
+  const lineItems: LineItem[] = [{
+    pricingKey: matchedKey,
+    label: lineLabel,
+    quantity: nights,
+    unitPrice: nightlyRate,
+    total: nightlyRate * nights,
+  }];
+
+  for (const addon of addons) {
+    const rate = prices[addon.key] ?? 0;
+    lineItems.push({ pricingKey: addon.key, label: addon.label, quantity: 1, unitPrice: rate, total: rate });
+  }
+
+  const subtotal = lineItems.reduce((s, li) => s + li.total, 0);
+
+  let discountPct = 0;
+  let discountAed = 0;
+  let total = subtotal;
+
+  try {
+    const { data: discData } = await supabase.rpc("apply_member_discount", {
+      p_owner_id: ownerId,
+      p_subtotal: subtotal,
+    });
+    const disc = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
+    if (disc) {
+      discountPct = disc.discount_pct;
+      discountAed = disc.discount_aed;
+      total = disc.final_aed;
+    }
+  } catch {
+    // RPC may not exist yet if migration hasn't been run — proceed without discount
+  }
+
+  const { data: ownerData } = await supabase.from("owners").select("member_type").eq("id", ownerId).single();
+
+  const breakdown: BillingBreakdown = {
+    lineItems,
+    subtotal,
+    discountPct,
+    discountAed,
+    total,
+    memberType: ownerData?.member_type ?? "standard",
+  };
+
+  const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  const { data: inv, error: invErr } = await supabase
+    .from("invoices")
+    .insert({
+      owner_id: ownerId,
+      service_type: serviceType,
+      service_id: bookingId,
+      status: "draft" as const,
+      subtotal_aed: breakdown.subtotal,
+      subtotal: breakdown.subtotal,
+      discount_pct: breakdown.discountPct,
+      discount_aed: breakdown.discountAed,
+      discount_amount: breakdown.discountAed,
+      total_aed: breakdown.total,
+      total: breakdown.total,
+      due_date: dueDate,
+      notes: null,
+    })
+    .select("id")
+    .single();
+
+  if (invErr) throw invErr;
+
+  const lineRows = breakdown.lineItems.map((li, idx) => ({
+    invoice_id: inv.id,
+    pricing_key: li.pricingKey,
+    description: li.label,
+    quantity: li.quantity,
+    unit_price: li.unitPrice,
+    line_total: li.total,
+    total_price: li.total,
+    sort_order: idx,
+  }));
+
+  if (lineRows.length > 0) {
+    const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);
+    if (liErr) throw liErr;
+  }
 }
