@@ -57,7 +57,6 @@ import {
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
 
-type ParkSize = Database["public"]["Enums"]["park_size"];
 type ParkDayStatus = Database["public"]["Enums"]["park_day_status"];
 
 const ANCHOR = new Date(2000, 0, 1);
@@ -90,16 +89,12 @@ function ownerLabel(o: { first_name: string; last_name: string }): string {
   return `${o.first_name} ${o.last_name}`.trim();
 }
 
-function bookingsForCell(
+function bookingsForSlot(
   bookings: ParkBookingWithJoins[],
   slotStart: string,
-  lane: ParkSize,
 ): ParkBookingWithJoins[] {
   const key = normalizeSlotTime(slotStart);
-  return bookings.filter(
-    (b) =>
-      normalizeSlotTime(b.slot_start) === key && b.size_lane === lane,
-  );
+  return bookings.filter((b) => normalizeSlotTime(b.slot_start) === key);
 }
 
 function primaryBooking(
@@ -263,7 +258,6 @@ const ParkPage = () => {
   const [sheetSlot, setSheetSlot] = useState<{
     slot_start: string;
     slot_end: string;
-    size_lane: ParkSize;
   } | null>(null);
 
   const [ownerId, setOwnerId] = useState<string | null>(null);
@@ -278,12 +272,12 @@ const ParkPage = () => {
     null,
   );
 
-  const openNewBooking = (slot_start: string, slot_end: string, size_lane: ParkSize) => {
+  const openNewBooking = (slot_start: string, slot_end: string) => {
     if (effectiveStatus === "closed") {
       toast.message("Park is closed — no bookings today.");
       return;
     }
-    setSheetSlot({ slot_start, slot_end, size_lane });
+    setSheetSlot({ slot_start, slot_end });
     setOwnerId(null);
     setOwnerLabel(null);
     setSelectedPetIds(new Set());
@@ -322,7 +316,7 @@ const ParkPage = () => {
           visit_date: dateStr,
           slot_start: sheetSlot.slot_start,
           slot_end: sheetSlot.slot_end,
-          size_lane: sheetSlot.size_lane,
+          size_lane: "big",
           owner_id: ownerId,
           pet_id: petId,
           is_assessment: isAssessment,
@@ -373,16 +367,11 @@ const ParkPage = () => {
   const slotLabelReadOnly = sheetSlot
     ? slotDisplayLabel(sheetSlot.slot_start, sheetSlot.slot_end)
     : "";
-  const laneReadOnly =
-    sheetSlot?.size_lane === "small" ? "Small dog" : "Big dog";
-
-  const bookingsByCell = useMemo(() => {
+  const bookingsBySlot = useMemo(() => {
     const map = new Map<string, ParkBookingWithJoins[]>();
     for (const slot of PARK_SLOTS) {
-      for (const lane of ["small", "big"] as const) {
-        const key = `${normalizeSlotTime(slot.slot_start)}:${lane}`;
-        map.set(key, bookingsForCell(bookings, slot.slot_start, lane));
-      }
+      const key = normalizeSlotTime(slot.slot_start);
+      map.set(key, bookingsForSlot(bookings, slot.slot_start));
     }
     return map;
   }, [bookings]);
@@ -480,129 +469,125 @@ const ParkPage = () => {
         )}
 
         <div className="rounded-xl border bg-card overflow-hidden">
-          <div className="grid grid-cols-[minmax(0,7rem)_1fr_1fr] gap-px bg-border text-sm font-medium">
+          <div className="grid grid-cols-[minmax(0,7rem)_1fr] gap-px bg-border text-sm font-medium">
             <div className="bg-muted/50 px-3 py-2">Time</div>
-            <div className="bg-muted/50 px-3 py-2 text-center">Small dog</div>
-            <div className="bg-muted/50 px-3 py-2 text-center">Big dog</div>
+            <div className="bg-muted/50 px-3 py-2 text-center">Park</div>
 
-            {PARK_SLOTS.map((slot) => (
-              <Fragment key={slot.slot_start}>
-                <div className="bg-background px-3 py-3 text-muted-foreground text-xs sm:text-sm">
-                  {slotDisplayLabel(slot.slot_start, slot.slot_end)}
-                </div>
-                {(["small", "big"] as const).map((lane) => {
-                  const key = `${normalizeSlotTime(slot.slot_start)}:${lane}`;
-                  const cellBookings = bookingsByCell.get(key) ?? [];
-                  const primary = primaryBooking(cellBookings);
-                  const isBooked = !!primary;
+            {PARK_SLOTS.map((slot) => {
+              const key = normalizeSlotTime(slot.slot_start);
+              const cellBookings = bookingsBySlot.get(key) ?? [];
+              const primary = primaryBooking(cellBookings);
+              const isBooked = !!primary;
 
-                  if (isBooked && primary) {
-                    return (
-                      <div key={key} className="bg-background p-1 min-h-[3.5rem]">
-                        <Popover
-                          open={popoverBooking?.id === primary.id}
-                          onOpenChange={(o) => {
-                            if (o) setPopoverBooking(primary);
-                            else setPopoverBooking(null);
-                          }}
-                        >
-                          <PopoverTrigger asChild>
-                            <button
-                              type="button"
-                              className="h-full min-h-[3.25rem] w-full rounded-md bg-amber-100 px-2 py-2 text-left text-xs font-semibold uppercase tracking-tight text-amber-950 border border-amber-200/80 hover:bg-amber-200/80 transition-colors"
-                            >
-                              <span className="line-clamp-2">
-                                {bookingDisplayLine(primary)}
-                                {cellBookings.length > 1
-                                  ? ` +${cellBookings.length - 1}`
-                                  : ""}
-                              </span>
-                            </button>
-                          </PopoverTrigger>
-                          <PopoverContent align="center" className="w-80">
-                            <div className="space-y-3">
-                              <div>
-                                <p className="text-xs uppercase text-muted-foreground">
-                                  Pet
-                                </p>
-                                <p className="font-medium">
-                                  {primary.pets?.name ??
-                                    primary.pet_name_raw ??
-                                    "—"}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs uppercase text-muted-foreground">
-                                  Owner
-                                </p>
-                                <p className="font-medium">
-                                  {primary.owners
-                                    ? ownerLabel(primary.owners)
-                                    : primary.owner_name_raw ?? "—"}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs uppercase text-muted-foreground">
-                                  Phone
-                                </p>
-                                <p className="font-medium">
-                                  {primary.owners?.phone ?? "—"}
-                                </p>
-                              </div>
-                              <BookingProfileNotes
-                                compact
-                                ownerOtherNotes={primary.owners?.other_notes}
-                                pets={[
-                                  {
-                                    name:
-                                      primary.pets?.name ??
-                                      primary.pet_name_raw ??
-                                      "Pet",
-                                    otherNotes: primary.pets?.other_notes,
-                                  },
-                                ]}
-                              />
-                              {primary.is_assessment && (
-                                <Badge variant="outline" className="text-xs">
-                                  Assessment
-                                </Badge>
-                              )}
-                              <Button
-                                type="button"
-                                variant="destructive"
-                                className="w-full"
-                                disabled={deleteBooking.isPending}
-                                onClick={() => handleDeleteBooking(primary)}
-                              >
-                                {deleteBooking.isPending && (
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                )}
-                                Cancel Booking
-                              </Button>
+              return (
+                <Fragment key={slot.slot_start}>
+                  <div className="bg-background px-3 py-3 text-muted-foreground text-xs sm:text-sm">
+                    {slotDisplayLabel(slot.slot_start, slot.slot_end)}
+                  </div>
+
+                  {isBooked && primary ? (
+                    <div className="bg-background p-1 min-h-[3.5rem]">
+                      <Popover
+                        open={popoverBooking?.id === primary.id}
+                        onOpenChange={(o) => {
+                          if (o) setPopoverBooking(primary);
+                          else setPopoverBooking(null);
+                        }}
+                      >
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="h-full min-h-[3.25rem] w-full rounded-md bg-amber-100 px-2 py-2 text-left text-xs font-semibold uppercase tracking-tight text-amber-950 border border-amber-200/80 hover:bg-amber-200/80 transition-colors"
+                          >
+                            <span className="line-clamp-2">
+                              {bookingDisplayLine(primary)}
+                              {cellBookings.length > 1
+                                ? ` +${cellBookings.length - 1}`
+                                : ""}
+                            </span>
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="center" className="w-80">
+                          <div className="space-y-3">
+                            <div>
+                              <p className="text-xs uppercase text-muted-foreground">
+                                Pet
+                              </p>
+                              <p className="font-medium">
+                                {primary.pets?.name ??
+                                  primary.pet_name_raw ??
+                                  "—"}
+                              </p>
                             </div>
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={key} className="bg-background p-1 min-h-[3.5rem]">
+                            <div>
+                              <p className="text-xs uppercase text-muted-foreground">
+                                Owner
+                              </p>
+                              <p className="font-medium">
+                                {primary.owners
+                                  ? ownerLabel(primary.owners)
+                                  : primary.owner_name_raw ?? "—"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs uppercase text-muted-foreground">
+                                Phone
+                              </p>
+                              <p className="font-medium">
+                                {primary.owners?.phone ?? "—"}
+                              </p>
+                            </div>
+                            <BookingProfileNotes
+                              compact
+                              ownerOtherNotes={primary.owners?.other_notes}
+                              pets={[
+                                {
+                                  name:
+                                    primary.pets?.name ??
+                                    primary.pet_name_raw ??
+                                    "Pet",
+                                  otherNotes: primary.pets?.other_notes,
+                                },
+                              ]}
+                            />
+                            {primary.is_assessment && (
+                              <Badge variant="outline" className="text-xs">
+                                Assessment
+                              </Badge>
+                            )}
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              className="w-full"
+                              disabled={deleteBooking.isPending}
+                              onClick={() => handleDeleteBooking(primary)}
+                            >
+                              {deleteBooking.isPending && (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              )}
+                              Cancel Booking
+                            </Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  ) : (
+                    <div className="bg-background p-1 min-h-[3.5rem]">
                       <button
                         type="button"
                         disabled={effectiveStatus === "closed"}
                         onClick={() =>
-                          openNewBooking(slot.slot_start, slot.slot_end, lane)
+                          openNewBooking(slot.slot_start, slot.slot_end)
                         }
                         className="flex h-full min-h-[3.25rem] w-full flex-col items-center justify-center rounded-md bg-muted/40 text-muted-foreground hover:bg-muted/70 disabled:opacity-40 disabled:pointer-events-none transition-colors"
                       >
                         <Plus className="h-5 w-5" />
                       </button>
                     </div>
-                  );
-                })}
-              </Fragment>
-            ))}
+                  )}
+                </Fragment>
+              );
+            })}
           </div>
           {bookingsLoading && (
             <p className="p-3 text-xs text-muted-foreground text-center">
@@ -626,11 +611,6 @@ const ParkPage = () => {
               <Label>Time slot</Label>
               <Input value={slotLabelReadOnly} readOnly className="bg-muted/50" />
             </div>
-            <div className="grid gap-2">
-              <Label>Size lane</Label>
-              <Input value={laneReadOnly} readOnly className="bg-muted/50" />
-            </div>
-
             <div className="grid gap-2">
               <Label>Owner</Label>
               <ParkOwnerSearch

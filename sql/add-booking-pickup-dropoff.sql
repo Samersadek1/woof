@@ -1,4 +1,4 @@
--- Pickup / drop-off transport flags for stays (boarding & cattery share `bookings`).
+-- Pickup / drop-off transport flags for boarding stays.
 -- pickup_required: staff should collect the pet for check-in (transport to kennel).
 -- dropoff_required: staff should return the pet after check-out (transport from kennel).
 
