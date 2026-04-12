@@ -1415,6 +1415,50 @@ export type Database = {
           },
         ]
       }
+      wallet_topup_requests: {
+        Row: {
+          id: string
+          owner_id: string
+          amount_requested: number
+          status: string
+          requested_by: string
+          requested_at: string
+          received_at: string | null
+          reminder_sent_at: string | null
+          notes: string | null
+        }
+        Insert: {
+          id?: string
+          owner_id: string
+          amount_requested: number
+          status?: string
+          requested_by?: string
+          requested_at?: string
+          received_at?: string | null
+          reminder_sent_at?: string | null
+          notes?: string | null
+        }
+        Update: {
+          id?: string
+          owner_id?: string
+          amount_requested?: number
+          status?: string
+          requested_by?: string
+          requested_at?: string
+          received_at?: string | null
+          reminder_sent_at?: string | null
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_topup_requests_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
