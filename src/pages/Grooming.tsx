@@ -119,7 +119,7 @@ function formatApptTime(t: string | null): string {
 }
 
 function groomerDisplay(a: GroomingAppointmentWithJoins): string {
-  if (a.groomer_name?.trim()) return a.groomer_name.trim();
+  if (a.grooming_notes?.trim()) return a.grooming_notes.trim();
   if (a.staff) return ownerDisplayName(a.staff.first_name, a.staff.last_name);
   return "—";
 }
@@ -480,7 +480,6 @@ const GroomingPage = () => {
   const [linkBoarding, setLinkBoarding] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
   const [bookingId, setBookingId] = useState<string | null>(null);
-  const [reminderSent, setReminderSent] = useState(false);
 
   const { data: pets = [] } = usePets(ownerId ?? "");
   const { data: bookingHits = [] } = useBookingsForGroomingLink(
@@ -558,7 +557,6 @@ const GroomingPage = () => {
     setLinkBoarding(false);
     setBookingSearch("");
     setBookingId(null);
-    setReminderSent(false);
     setSheetOpen(true);
   };
 
@@ -589,11 +587,10 @@ const GroomingPage = () => {
         owner_id: ownerId,
         pet_id: petId,
         groomer_id: null,
-        groomer_name: groomerName.trim() || null,
+        grooming_notes: groomerName.trim() || null,
         price: priceNum,
         notes: visitNotes.trim() || null,
         booking_id: linkBoarding ? bookingId : null,
-        reminder_sent: reminderSent,
       },
       {
         onSuccess: (appt) => {
@@ -618,8 +615,15 @@ const GroomingPage = () => {
             console.error("Auto-invoice failed:", err);
           });
         },
-        onError: (e) =>
-          toast.error(e instanceof Error ? e.message : "Could not create."),
+        onError: (e) => {
+          const msg =
+            e instanceof Error
+              ? e.message
+              : typeof e === "object" && e !== null && "message" in e
+                ? String((e as { message: string }).message)
+                : "Could not create.";
+          toast.error(msg);
+        },
       },
     );
   };
@@ -1010,22 +1014,6 @@ const GroomingPage = () => {
                   )}
                 </div>
               )}
-            </section>
-
-            <section className="space-y-2">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Reminders
-              </h3>
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                <Label htmlFor="reminder-sent" className="cursor-pointer">
-                  Reminder sent
-                </Label>
-                <Switch
-                  id="reminder-sent"
-                  checked={reminderSent}
-                  onCheckedChange={setReminderSent}
-                />
-              </div>
             </section>
           </div>
 

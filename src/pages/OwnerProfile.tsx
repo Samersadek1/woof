@@ -192,7 +192,7 @@ function parkLaneLabel(lane: ParkSize): string {
 }
 
 function groomerLine(g: GroomingAppointmentWithJoins): string {
-  if (g.groomer_name?.trim()) return g.groomer_name.trim();
+  if (g.grooming_notes?.trim()) return g.grooming_notes.trim();
   if (g.staff) return ownerDisplayName(g.staff.first_name, g.staff.last_name);
   return "—";
 }

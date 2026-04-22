@@ -125,7 +125,6 @@ export function useCreateGroomingAppointment() {
           ...row,
           status: row.status ?? "scheduled",
           no_show: row.no_show ?? false,
-          reminder_sent: row.reminder_sent ?? false,
         })
         .select()
         .single();
