@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, addDays, startOfWeek, differenceInCalendarDays, isToday, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import {
@@ -44,10 +44,13 @@ import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { CheckInSheet } from "@/components/CheckInSheet";
 import { CheckOutSheet } from "@/components/CheckOutSheet";
 import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
-import { formatBookingCell, bookingBelongingsCount, createBookingInvoice } from "@/lib/bookingUtils";
-import { ChevronLeft, ChevronRight, Plus, Loader2, ExternalLink, Eye, Luggage } from "lucide-react";
+import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
+import { resolveBoardingRate } from "@/lib/boardingPricing";
+import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
+import { ChevronLeft, ChevronRight, Plus, Loader2, ExternalLink, Eye, Luggage, Printer } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
+import { supabase } from "@/integrations/supabase/client";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
@@ -119,6 +122,142 @@ function nightsBetween(checkIn: string, checkOut: string): number {
   return differenceInCalendarDays(parseISO(checkOut), parseISO(checkIn));
 }
 
+function formatAed(value: number): string {
+  return `AED ${value.toLocaleString("en-AE", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): string {
+  const ownerName = ownerDisplayName(booking.owners?.first_name, booking.owners?.last_name);
+  const roomName = booking.rooms?.room_number ?? booking.rooms?.display_name ?? "—";
+  const notes = booking.notes || "No booking notes";
+  const bookingRef = booking.booking_ref ?? booking.id.slice(0, 8);
+  const status = booking.status.replace(/_/g, " ");
+  const nights = nightsBetween(booking.check_in_date, booking.check_out_date);
+  const petItems = booking.booking_pets
+    .map((bp) => {
+      const petName = bp.pets?.name ?? "Unknown pet";
+      const petNote = bp.pets?.other_notes?.trim();
+      const feeding = (bp.feeding_notes ?? bp.pets?.feeding_instructions ?? "").trim();
+      const medication = (bp.medication_notes ?? bp.pets?.medications ?? "").trim();
+      const special = (bp.special_instructions ?? "").trim();
+      return `<li>
+        <strong>${escapeHtml(petName)}</strong>
+        ${feeding ? `<div class="sub">Feeding: ${escapeHtml(feeding)}</div>` : `<div class="sub">Feeding: —</div>`}
+        ${medication ? `<div class="sub">Medication: ${escapeHtml(medication)}</div>` : `<div class="sub">Medication: —</div>`}
+        ${special ? `<div class="sub">Special instructions: ${escapeHtml(special)}</div>` : ""}
+        ${petNote ? `<div class="sub">Profile note: ${escapeHtml(petNote)}</div>` : ""}
+      </li>`;
+    })
+    .join("");
+  const ownerNote = booking.owners?.other_notes?.trim();
+  const tags = buildBoardingTags({
+    status: booking.status,
+    checkInDate: booking.check_in_date,
+    checkOutDate: booking.check_out_date,
+    todayDate,
+  }).map((tag) => `<span class="tag">${escapeHtml(tag.label)}</span>`).join("");
+  const belongingsCount = bookingBelongingsCount(booking);
+
+  return `
+    <section class="card">
+      <h1>Kennel Card</h1>
+      <div class="meta">Booking: ${escapeHtml(bookingRef)}</div>
+      <div class="meta">Status: ${escapeHtml(status)}</div>
+      <div class="tags">${tags || '<span class="tag">No tags</span>'}</div>
+
+      <div class="label">Pets (full list)</div>
+      <ul class="list">${petItems || "<li>—</li>"}</ul>
+
+      <div class="label">Owner</div>
+      <div class="value">${escapeHtml(ownerName)}</div>
+      <div class="sub">${ownerNote ? `Owner note: ${escapeHtml(ownerNote)}` : "Owner note: —"}</div>
+
+      <div class="grid">
+        <div><div class="label">Room</div><div class="value">${escapeHtml(roomName)}</div></div>
+        <div><div class="label">Nights</div><div class="value">${nights}</div></div>
+        <div><div class="label">Check-in</div><div class="value">${escapeHtml(booking.check_in_date)}</div></div>
+        <div><div class="label">Check-out</div><div class="value">${escapeHtml(booking.check_out_date)}</div></div>
+      </div>
+
+      <div class="grid">
+        <div><div class="label">Pickup</div><div class="value">${booking.pickup_required ? "Yes" : "No"}</div></div>
+        <div><div class="label">Drop-off</div><div class="value">${booking.dropoff_required ? "Yes" : "No"}</div></div>
+        <div><div class="label">Transport zone</div><div class="value">${escapeHtml(booking.transport_zone ?? "—")}</div></div>
+        <div><div class="label">Belongings</div><div class="value">${belongingsCount}</div></div>
+      </div>
+
+      <div class="grid">
+        <div><div class="label">Do Not Move</div><div class="value">${booking.do_not_move ? "Yes" : "No"}</div></div>
+        <div><div class="label">Staff ID</div><div class="value">${escapeHtml(booking.staff_id ?? "—")}</div></div>
+      </div>
+
+      <div class="label">Booking notes</div>
+      <div class="value">${escapeHtml(notes)}</div>
+    </section>
+  `;
+}
+
+async function hydrateBookingsForPrint(bookings: BookingWithDetails[]): Promise<BookingWithDetails[]> {
+  if (bookings.length === 0) return bookings;
+  const ids = bookings.map((b) => b.id);
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(
+      "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications)), booking_items(count)",
+    )
+    .in("id", ids);
+
+  if (error || !data) return bookings;
+  const byId = new Map<string, BookingWithDetails>();
+  for (const row of data as unknown as BookingWithDetails[]) byId.set(row.id, row);
+  return bookings.map((b) => byId.get(b.id) ?? b);
+}
+
+async function printKennelCards(bookings: BookingWithDetails[], printTitle: string) {
+  if (bookings.length === 0) return;
+  const todayDate = toDateStr(new Date());
+  const freshBookings = await hydrateBookingsForPrint(bookings);
+  const cardsHtml = freshBookings.map((b) => renderKennelCardHtml(b, todayDate)).join("");
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(printTitle)}</title><style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 20px; color: #111; }
+    .card { border: 2px solid #111; border-radius: 10px; padding: 14px; margin: 0 auto 16px; max-width: 720px; break-inside: avoid; page-break-inside: avoid; }
+    h1 { margin: 0 0 8px; font-size: 21px; }
+    .meta { margin: 2px 0; font-size: 13px; }
+    .label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: .04em; margin-top: 8px; }
+    .value { font-size: 14px; margin-top: 2px; white-space: pre-wrap; }
+    .sub { font-size: 12px; color: #555; margin-top: 2px; }
+    .grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 14px; margin-top: 6px; }
+    .list { margin: 4px 0 0 18px; padding: 0; font-size: 14px; }
+    .list li { margin-bottom: 4px; }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .tag { display: inline-block; border: 1px solid #ccc; border-radius: 999px; padding: 2px 8px; font-size: 11px; }
+    @media print {
+      body { padding: 8px; }
+      .card { margin-bottom: 12px; }
+    }
+  </style></head><body>${cardsHtml}</body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
+}
+
+async function printKennelCard(booking: BookingWithDetails) {
+  const bookingRef = booking.booking_ref ?? booking.id.slice(0, 8);
+  await printKennelCards([booking], `Kennel Card ${bookingRef}`);
+}
+
 // ─── initial form state ───────────────────────────────────────────────────────
 type NewBookingForm = {
   owner_id: string;
@@ -131,10 +270,17 @@ type NewBookingForm = {
   do_not_move: boolean;
   pickup_required: boolean;
   dropoff_required: boolean;
-  addon_transport_dubai: boolean;
-  addon_transport_abudhabi: boolean;
+  transport_zone: "dubai" | "abudhabi";
   addon_groom: boolean;
   addon_bath: boolean;
+  pet_care_by_pet_id: Record<
+    string,
+    {
+      feeding_notes: string;
+      medication_notes: string;
+      special_instructions: string;
+    }
+  >;
 };
 
 const BLANK_FORM: NewBookingForm = {
@@ -148,10 +294,10 @@ const BLANK_FORM: NewBookingForm = {
   do_not_move: false,
   pickup_required: false,
   dropoff_required: false,
-  addon_transport_dubai: false,
-  addon_transport_abudhabi: false,
+  transport_zone: "dubai",
   addon_groom: false,
   addon_bath: false,
+  pet_care_by_pet_id: {},
 };
 
 export type DogBoardingCalendarProps = {
@@ -204,6 +350,28 @@ export function DogBoardingCalendar({
   const createBooking = useCreateBooking();
   const updateBooking = useUpdateBooking();
 
+  const { data: transportRates = [] } = useQuery({
+    queryKey: ["pricing", "transport_zones", "boarding"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pricing")
+        .select("key, amount_aed")
+        .in("key", ["transport_dubai", "transport_abudhabi"]);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const activeTransportRate = transportRates.find(
+    (r) => r.key === `transport_${form.transport_zone}`,
+  );
+  const dogRatePetCount = Math.max(1, form.pet_ids.length);
+  const dogRatePreview = useQuery({
+    queryKey: ["boarding_rate_preview", "dog", form.room_id, dogRatePetCount],
+    enabled: !!form.room_id,
+    queryFn: async () => resolveBoardingRate(form.room_id, dogRatePetCount),
+  });
+
   const handleBelongingsFlowFinished = () => {
     queryClient.invalidateQueries({ queryKey: ["bookings"] });
     setDetailBooking(null);
@@ -253,8 +421,17 @@ export function DogBoardingCalendar({
 
   // clear pets when owner changes
   useEffect(() => {
-    setForm((f) => ({ ...f, pet_ids: [] }));
+    setForm((f) => ({ ...f, pet_ids: [], pet_care_by_pet_id: {} }));
   }, [form.owner_id]);
+
+  const getInitialPetCare = (petId: string) => {
+    const pet = ownerPets.find((p) => p.id === petId);
+    return {
+      feeding_notes: pet?.feeding_instructions ?? "",
+      medication_notes: pet?.medications ?? "",
+      special_instructions: pet?.other_notes ?? "",
+    };
+  };
 
   const togglePet = (petId: string) => {
     setForm((f) => ({
@@ -262,6 +439,14 @@ export function DogBoardingCalendar({
       pet_ids: f.pet_ids.includes(petId)
         ? f.pet_ids.filter((id) => id !== petId)
         : [...f.pet_ids, petId],
+      pet_care_by_pet_id: f.pet_ids.includes(petId)
+        ? Object.fromEntries(
+            Object.entries(f.pet_care_by_pet_id).filter(([id]) => id !== petId),
+          )
+        : {
+            ...f.pet_care_by_pet_id,
+            [petId]: f.pet_care_by_pet_id[petId] ?? getInitialPetCare(petId),
+          },
     }));
   };
 
@@ -288,10 +473,10 @@ export function DogBoardingCalendar({
       return;
     }
 
-    // build add-ons note suffix
+    const transportLabel = form.transport_zone === "abudhabi" ? "Abu Dhabi" : "Dubai";
     const addons = [
-      form.addon_transport_dubai && "Transport Dubai",
-      form.addon_transport_abudhabi && "Transport Abu Dhabi",
+      form.pickup_required && `Pickup (${transportLabel})`,
+      form.dropoff_required && `Drop-off (${transportLabel})`,
       form.addon_groom && "Full Groom on checkout",
       form.addon_bath && "Full Bath on checkout",
     ]
@@ -304,6 +489,7 @@ export function DogBoardingCalendar({
       check_in_date: form.check_in_date,
       check_out_date: form.check_out_date,
       pet_ids: form.pet_ids,
+      pet_care_by_pet_id: form.pet_care_by_pet_id,
       notes: [form.notes, addons ? `Add-ons: ${addons}` : ""]
         .filter(Boolean)
         .join("\n"),
@@ -320,8 +506,10 @@ export function DogBoardingCalendar({
         setNewBookingOpen(false);
 
         const addonItems: { key: string; label: string }[] = [];
-        if (form.addon_transport_dubai) addonItems.push({ key: "transport_dubai", label: "Transport Dubai" });
-        if (form.addon_transport_abudhabi) addonItems.push({ key: "transport_abudhabi", label: "Transport Abu Dhabi" });
+        const tKey = `transport_${form.transport_zone}`;
+        const tLabel = form.transport_zone === "abudhabi" ? "Transport Abu Dhabi" : "Transport Dubai";
+        if (form.pickup_required) addonItems.push({ key: tKey, label: `Pickup — ${tLabel}` });
+        if (form.dropoff_required) addonItems.push({ key: tKey, label: `Drop-off — ${tLabel}` });
         if (form.addon_groom) addonItems.push({ key: "grooming_full_groom", label: "Full Groom" });
         if (form.addon_bath) addonItems.push({ key: "grooming_full_bath", label: "Full Bath" });
 
@@ -597,11 +785,11 @@ export function DogBoardingCalendar({
                         className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent"
                         onClick={() => {
                           setForm((f) => ({ ...f, owner_id: o.id }));
-                          setOwnerSearch(`${o.first_name} ${o.last_name} — ${o.phone}`);
+                          setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`);
                           setOwnerPopOpen(false);
                         }}
                       >
-                        <span className="font-medium">{o.first_name} {o.last_name}</span>
+                        <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
                         <span className="ml-2 text-muted-foreground">{o.phone}</span>
                       </button>
                     ))}
@@ -640,6 +828,69 @@ export function DogBoardingCalendar({
               </div>
             )}
 
+            {form.pet_ids.length > 0 && (
+              <div className="space-y-3 rounded-md border p-3">
+                <Label className="text-sm font-medium">Per-pet care (prefilled from profile)</Label>
+                {form.pet_ids.map((petId) => {
+                  const pet = ownerPets.find((p) => p.id === petId);
+                  const care = form.pet_care_by_pet_id[petId] ?? getInitialPetCare(petId);
+                  return (
+                    <div key={petId} className="space-y-2 rounded border p-3">
+                      <p className="text-sm font-semibold">{pet?.name ?? "Pet"}</p>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Feeding notes</Label>
+                        <Textarea
+                          rows={2}
+                          value={care.feeding_notes}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              pet_care_by_pet_id: {
+                                ...f.pet_care_by_pet_id,
+                                [petId]: { ...care, feeding_notes: e.target.value },
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Medication notes</Label>
+                        <Textarea
+                          rows={2}
+                          value={care.medication_notes}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              pet_care_by_pet_id: {
+                                ...f.pet_care_by_pet_id,
+                                [petId]: { ...care, medication_notes: e.target.value },
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Special instructions</Label>
+                        <Textarea
+                          rows={2}
+                          value={care.special_instructions}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              pet_care_by_pet_id: {
+                                ...f.pet_care_by_pet_id,
+                                [petId]: { ...care, special_instructions: e.target.value },
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Room */}
             <div className="space-y-2">
               <Label>Room <span className="text-destructive">*</span></Label>
@@ -659,7 +910,6 @@ export function DogBoardingCalendar({
                         {wr.map((r) => (
                           <SelectItem key={r.id} value={r.id}>
                             {r.room_number} — <span className="capitalize text-muted-foreground">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
-                            {r.nightly_rate ? <span className="ml-1 text-xs text-muted-foreground">({r.nightly_rate} AED/night)</span> : null}
                           </SelectItem>
                         ))}
                       </div>
@@ -667,6 +917,24 @@ export function DogBoardingCalendar({
                   })}
                 </SelectContent>
               </Select>
+              {form.room_id && (
+                <div className="rounded-md border bg-muted/30 px-3 py-2">
+                  {dogRatePreview.isLoading ? (
+                    <p className="text-xs text-muted-foreground">Resolving mapped price...</p>
+                  ) : dogRatePreview.data ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Resolved nightly price ({dogRatePetCount} pet{dogRatePetCount !== 1 ? "s" : ""})
+                      </p>
+                      <p className="text-sm font-medium">
+                        {formatAed(dogRatePreview.data.unitPrice)} <span className="text-xs text-muted-foreground">({dogRatePreview.data.pricingKey})</span>
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Could not resolve mapped price yet.</p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Dates */}
@@ -703,7 +971,7 @@ export function DogBoardingCalendar({
                   }
                 />
                 <Label htmlFor="pickup_required" className="cursor-pointer font-normal">
-                  Pickup required (to facility)
+                  Pickup (to facility)
                 </Label>
               </div>
               <div className="flex items-center gap-2">
@@ -715,9 +983,31 @@ export function DogBoardingCalendar({
                   }
                 />
                 <Label htmlFor="dropoff_required" className="cursor-pointer font-normal">
-                  Drop-off required (after stay)
+                  Drop-off (after stay)
                 </Label>
               </div>
+              {(form.pickup_required || form.dropoff_required) && (
+                <div className="space-y-1 pt-1">
+                  <Label className="text-xs text-muted-foreground font-normal">Transport zone</Label>
+                  <Select
+                    value={form.transport_zone}
+                    onValueChange={(v) => setForm((f) => ({ ...f, transport_zone: v as "dubai" | "abudhabi" }))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dubai">Dubai</SelectItem>
+                      <SelectItem value="abudhabi">Abu Dhabi</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {activeTransportRate && (
+                    <p className="text-xs text-muted-foreground">
+                      AED {activeTransportRate.amount_aed}/trip
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <Separator />
@@ -727,8 +1017,6 @@ export function DogBoardingCalendar({
               <Label className="text-sm font-medium">Add-ons</Label>
               <div className="space-y-2">
                 {[
-                  { key: "addon_transport_dubai", label: "Transport — Dubai" },
-                  { key: "addon_transport_abudhabi", label: "Transport — Abu Dhabi" },
                   { key: "addon_groom", label: "Full Groom on checkout" },
                   { key: "addon_bath", label: "Full Bath on checkout" },
                 ].map(({ key, label }) => (
@@ -1082,14 +1370,21 @@ type CatBookingForm = {
   do_not_move: boolean;
   pickup_required: boolean;
   dropoff_required: boolean;
-  addon_transport_dubai: boolean;
-  addon_transport_abudhabi: boolean;
+  transport_zone: "dubai" | "abudhabi";
   addon_groom: boolean;
   addon_bath: boolean;
   cat_litter_type: string;
   cat_indoor_only: boolean;
   cat_ok_share_family: boolean;
   cat_special_diet: string;
+  pet_care_by_pet_id: Record<
+    string,
+    {
+      feeding_notes: string;
+      medication_notes: string;
+      special_instructions: string;
+    }
+  >;
 };
 
 const CAT_BLANK_FORM: CatBookingForm = {
@@ -1103,14 +1398,14 @@ const CAT_BLANK_FORM: CatBookingForm = {
   do_not_move: false,
   pickup_required: false,
   dropoff_required: false,
-  addon_transport_dubai: false,
-  addon_transport_abudhabi: false,
+  transport_zone: "dubai",
   addon_groom: false,
   addon_bath: false,
   cat_litter_type: "",
   cat_indoor_only: false,
   cat_ok_share_family: true,
   cat_special_diet: "",
+  pet_care_by_pet_id: {},
 };
 
 function buildCatPreferencesNote(f: CatBookingForm): string {
@@ -1186,6 +1481,28 @@ function CatBoardingCalendar({
   const createBookingMut = useCreateBooking();
   const updateBooking = useUpdateBooking();
 
+  const { data: catTransportRates = [] } = useQuery({
+    queryKey: ["pricing", "transport_zones", "boarding"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pricing")
+        .select("key, amount_aed")
+        .in("key", ["transport_dubai", "transport_abudhabi"]);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const catActiveTransportRate = catTransportRates.find(
+    (r) => r.key === `transport_${form.transport_zone}`,
+  );
+  const catRatePetCount = Math.max(1, form.pet_ids.length);
+  const catRatePreview = useQuery({
+    queryKey: ["boarding_rate_preview", "cat", form.room_id, catRatePetCount],
+    enabled: !!form.room_id,
+    queryFn: async () => resolveBoardingRate(form.room_id, catRatePetCount),
+  });
+
   const handleBelongingsFlowFinished = () => {
     queryClient.invalidateQueries({ queryKey: ["bookings"] });
     setDetailBooking(null);
@@ -1220,8 +1537,17 @@ function CatBoardingCalendar({
   };
 
   useEffect(() => {
-    setForm((f) => ({ ...f, pet_ids: [] }));
+    setForm((f) => ({ ...f, pet_ids: [], pet_care_by_pet_id: {} }));
   }, [form.owner_id]);
+
+  const getInitialPetCare = (petId: string) => {
+    const pet = ownerPets.find((p) => p.id === petId);
+    return {
+      feeding_notes: pet?.feeding_instructions ?? "",
+      medication_notes: pet?.medications ?? "",
+      special_instructions: pet?.other_notes ?? "",
+    };
+  };
 
   const togglePet = (petId: string) => {
     setForm((f) => ({
@@ -1229,6 +1555,14 @@ function CatBoardingCalendar({
       pet_ids: f.pet_ids.includes(petId)
         ? f.pet_ids.filter((id) => id !== petId)
         : [...f.pet_ids, petId],
+      pet_care_by_pet_id: f.pet_ids.includes(petId)
+        ? Object.fromEntries(
+            Object.entries(f.pet_care_by_pet_id).filter(([id]) => id !== petId),
+          )
+        : {
+            ...f.pet_care_by_pet_id,
+            [petId]: f.pet_care_by_pet_id[petId] ?? getInitialPetCare(petId),
+          },
     }));
   };
 
@@ -1255,9 +1589,10 @@ function CatBoardingCalendar({
       return;
     }
 
+    const catTransportLabel = form.transport_zone === "abudhabi" ? "Abu Dhabi" : "Dubai";
     const addons = [
-      form.addon_transport_dubai && "Transport Dubai",
-      form.addon_transport_abudhabi && "Transport Abu Dhabi",
+      form.pickup_required && `Pickup (${catTransportLabel})`,
+      form.dropoff_required && `Drop-off (${catTransportLabel})`,
       form.addon_groom && "Full Groom on checkout",
       form.addon_bath && "Full Bath on checkout",
     ]
@@ -1272,6 +1607,7 @@ function CatBoardingCalendar({
       check_in_date: form.check_in_date,
       check_out_date: form.check_out_date,
       pet_ids: form.pet_ids,
+      pet_care_by_pet_id: form.pet_care_by_pet_id,
       notes: [form.notes, catBlock, addons ? `Add-ons: ${addons}` : ""]
         .filter(Boolean)
         .join("\n\n"),
@@ -1288,8 +1624,10 @@ function CatBoardingCalendar({
         setNewBookingOpen(false);
 
         const addonItems: { key: string; label: string }[] = [];
-        if (form.addon_transport_dubai) addonItems.push({ key: "transport_dubai", label: "Transport Dubai" });
-        if (form.addon_transport_abudhabi) addonItems.push({ key: "transport_abudhabi", label: "Transport Abu Dhabi" });
+        const catTKey = `transport_${form.transport_zone}`;
+        const catTLabel = form.transport_zone === "abudhabi" ? "Transport Abu Dhabi" : "Transport Dubai";
+        if (form.pickup_required) addonItems.push({ key: catTKey, label: `Pickup — ${catTLabel}` });
+        if (form.dropoff_required) addonItems.push({ key: catTKey, label: `Drop-off — ${catTLabel}` });
         if (form.addon_groom) addonItems.push({ key: "grooming_full_groom", label: "Full Groom" });
         if (form.addon_bath) addonItems.push({ key: "grooming_full_bath", label: "Full Bath" });
 
@@ -1473,8 +1811,8 @@ function CatBoardingCalendar({
                 {ownerResults.length > 0 && (
                   <PopoverContent align="start" className="p-1 w-80">
                     {ownerResults.map((o) => (
-                      <button key={o.id} type="button" className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent" onClick={() => { setForm((f) => ({ ...f, owner_id: o.id })); setOwnerSearch(`${o.first_name} ${o.last_name} — ${o.phone}`); setOwnerPopOpen(false); }}>
-                        <span className="font-medium">{o.first_name} {o.last_name}</span>
+                      <button key={o.id} type="button" className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent" onClick={() => { setForm((f) => ({ ...f, owner_id: o.id })); setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`); setOwnerPopOpen(false); }}>
+                        <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
                         <span className="ml-2 text-muted-foreground">{o.phone}</span>
                       </button>
                     ))}
@@ -1503,6 +1841,69 @@ function CatBoardingCalendar({
               </div>
             )}
 
+            {form.pet_ids.length > 0 && (
+              <div className="space-y-3 rounded-md border p-3">
+                <Label className="text-sm font-medium">Per-cat care (prefilled from profile)</Label>
+                {form.pet_ids.map((petId) => {
+                  const pet = ownerPets.find((p) => p.id === petId);
+                  const care = form.pet_care_by_pet_id[petId] ?? getInitialPetCare(petId);
+                  return (
+                    <div key={petId} className="space-y-2 rounded border p-3">
+                      <p className="text-sm font-semibold">{pet?.name ?? "Cat"}</p>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Feeding notes</Label>
+                        <Textarea
+                          rows={2}
+                          value={care.feeding_notes}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              pet_care_by_pet_id: {
+                                ...f.pet_care_by_pet_id,
+                                [petId]: { ...care, feeding_notes: e.target.value },
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Medication notes</Label>
+                        <Textarea
+                          rows={2}
+                          value={care.medication_notes}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              pet_care_by_pet_id: {
+                                ...f.pet_care_by_pet_id,
+                                [petId]: { ...care, medication_notes: e.target.value },
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Special instructions</Label>
+                        <Textarea
+                          rows={2}
+                          value={care.special_instructions}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              pet_care_by_pet_id: {
+                                ...f.pet_care_by_pet_id,
+                                [petId]: { ...care, special_instructions: e.target.value },
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>Room <span className="text-destructive">*</span></Label>
               <Select value={form.room_id} onValueChange={(v) => setForm((f) => ({ ...f, room_id: v }))}>
@@ -1517,7 +1918,6 @@ function CatBoardingCalendar({
                         {tr.map((r) => (
                           <SelectItem key={r.id} value={r.id}>
                             {r.room_number} — <span className="capitalize text-muted-foreground">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
-                            {r.nightly_rate ? <span className="ml-1 text-xs text-muted-foreground">({r.nightly_rate} AED/night)</span> : null}
                           </SelectItem>
                         ))}
                       </div>
@@ -1525,6 +1925,24 @@ function CatBoardingCalendar({
                   })}
                 </SelectContent>
               </Select>
+              {form.room_id && (
+                <div className="rounded-md border bg-muted/30 px-3 py-2">
+                  {catRatePreview.isLoading ? (
+                    <p className="text-xs text-muted-foreground">Resolving mapped price...</p>
+                  ) : catRatePreview.data ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Resolved nightly price ({catRatePetCount} pet{catRatePetCount !== 1 ? "s" : ""})
+                      </p>
+                      <p className="text-sm font-medium">
+                        {formatAed(catRatePreview.data.unitPrice)} <span className="text-xs text-muted-foreground">({catRatePreview.data.pricingKey})</span>
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Could not resolve mapped price yet.</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1542,12 +1960,34 @@ function CatBoardingCalendar({
               <Label className="text-sm font-medium">Transport</Label>
               <div className="flex items-center gap-2">
                 <Checkbox id="pickup_cat" checked={form.pickup_required} onCheckedChange={(v) => setForm((f) => ({ ...f, pickup_required: !!v }))} />
-                <Label htmlFor="pickup_cat" className="cursor-pointer font-normal">Pickup required</Label>
+                <Label htmlFor="pickup_cat" className="cursor-pointer font-normal">Pickup (to facility)</Label>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox id="dropoff_cat" checked={form.dropoff_required} onCheckedChange={(v) => setForm((f) => ({ ...f, dropoff_required: !!v }))} />
-                <Label htmlFor="dropoff_cat" className="cursor-pointer font-normal">Drop-off required</Label>
+                <Label htmlFor="dropoff_cat" className="cursor-pointer font-normal">Drop-off (after stay)</Label>
               </div>
+              {(form.pickup_required || form.dropoff_required) && (
+                <div className="space-y-1 pt-1">
+                  <Label className="text-xs text-muted-foreground font-normal">Transport zone</Label>
+                  <Select
+                    value={form.transport_zone}
+                    onValueChange={(v) => setForm((f) => ({ ...f, transport_zone: v as "dubai" | "abudhabi" }))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dubai">Dubai</SelectItem>
+                      <SelectItem value="abudhabi">Abu Dhabi</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {catActiveTransportRate && (
+                    <p className="text-xs text-muted-foreground">
+                      AED {catActiveTransportRate.amount_aed}/trip
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <Separator />
@@ -1578,8 +2018,6 @@ function CatBoardingCalendar({
               <Label className="text-sm font-medium">Add-ons</Label>
               <div className="space-y-2">
                 {[
-                  { key: "addon_transport_dubai", label: "Transport — Dubai" },
-                  { key: "addon_transport_abudhabi", label: "Transport — Abu Dhabi" },
                   { key: "addon_groom", label: "Full Groom on checkout" },
                   { key: "addon_bath", label: "Full Bath on checkout" },
                 ].map(({ key, label }) => (
@@ -1670,6 +2108,10 @@ function CatBoardingCalendar({
                 {detailBooking.notes && <div className="space-y-1"><p className="text-xs uppercase text-muted-foreground font-medium">Notes</p><p className="text-sm whitespace-pre-line">{detailBooking.notes}</p></div>}
                 <Separator />
                 <div className="space-y-3">
+                  <Button variant="outline" className="w-full" onClick={() => void printKennelCard(detailBooking)}>
+                    <Printer className="mr-2 h-4 w-4" />
+                    Print Kennel Card
+                  </Button>
                   {detailBooking.status === "confirmed" && <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => { setBelongingsReadOnly(false); setCheckInSheetOpen(true); }}>Check In</Button>}
                   {detailBooking.status === "checked_in" && (
                     <div className="flex flex-col gap-2">
@@ -1702,6 +2144,103 @@ function CatBoardingCalendar({
 // ─── hub page ────────────────────────────────────────────────────────────────
 
 type Species = "dog" | "cat";
+type BoardingListPreset = "today" | "tomorrow" | "next7";
+
+function BoardingOperationsList({ species }: { species: Species }) {
+  const [datePreset, setDatePreset] = useState<BoardingListPreset>("today");
+  const [anchorDate, setAnchorDate] = useState(toDateStr(new Date()));
+
+  const rangeStart = useMemo(
+    () => (datePreset === "tomorrow" ? toDateStr(addDays(parseISO(anchorDate), 1)) : anchorDate),
+    [datePreset, anchorDate],
+  );
+  const rangeEnd = useMemo(
+    () => (datePreset === "next7" ? toDateStr(addDays(parseISO(rangeStart), 6)) : rangeStart),
+    [datePreset, rangeStart],
+  );
+
+  const { data: bookings = [], isLoading } = useBookings(rangeStart, rangeEnd);
+
+  const filtered = useMemo(() => {
+    const rows = bookings.filter((b) => {
+      const isCatRoom = b.rooms?.wing === "cattery";
+      if (species === "cat") return isCatRoom;
+      return !isCatRoom;
+    });
+
+    return rows.sort((a, b) => a.check_in_date.localeCompare(b.check_in_date));
+  }, [bookings, species]);
+
+  return (
+    <div className="p-6 space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant={datePreset === "today" ? "default" : "outline"} size="sm" onClick={() => setDatePreset("today")}>Today</Button>
+        <Button variant={datePreset === "tomorrow" ? "default" : "outline"} size="sm" onClick={() => setDatePreset("tomorrow")}>Tomorrow</Button>
+        <Button variant={datePreset === "next7" ? "default" : "outline"} size="sm" onClick={() => setDatePreset("next7")}>Next 7 days</Button>
+        <Input
+          type="date"
+          value={anchorDate}
+          onChange={(e) => {
+            setAnchorDate(e.target.value);
+            setDatePreset("today");
+          }}
+          className="w-44"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={filtered.length === 0}
+          onClick={() => void printKennelCards(filtered, `Kennel Cards ${species} ${rangeStart}${rangeEnd !== rangeStart ? ` to ${rangeEnd}` : ""}`)}
+        >
+          <Printer className="mr-1.5 h-4 w-4" />
+          Print full list
+        </Button>
+      </div>
+
+      <div className="rounded-lg border">
+        {isLoading ? (
+          <div className="p-3 space-y-2">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-11 w-full" />)}</div>
+        ) : filtered.length === 0 ? (
+          <p className="p-6 text-sm text-muted-foreground text-center">No boarding records for this range.</p>
+        ) : (
+          <div className="divide-y">
+            {filtered.map((booking) => {
+              const tags = buildBoardingTags({
+                status: booking.status,
+                checkInDate: booking.check_in_date,
+                checkOutDate: booking.check_out_date,
+                todayDate: toDateStr(new Date()),
+              });
+              const petNames = booking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ") || "—";
+              const owner = ownerDisplayName(booking.owners?.first_name, booking.owners?.last_name);
+              return (
+                <div key={booking.id} className="p-3 flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">{petNames} - {owner}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {booking.rooms?.display_name ?? "—"} - {booking.check_in_date} to {booking.check_out_date}
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {tags.map((tag) => (
+                        <Badge key={`${booking.id}-${tag.key}`} variant="outline" className={tagToneClass(tag.tone)}>
+                          {tag.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => void printKennelCard(booking)}>
+                    <Printer className="mr-1.5 h-4 w-4" />
+                    Kennel card
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function BoardingHubPage() {
   const navigate = useNavigate();
@@ -1711,6 +2250,7 @@ function BoardingHubPage() {
   const initialSpecies: Species =
     location.hash === `#${CAT_BOARDING_SECTION_ID}` ? "cat" : "dog";
   const [species, setSpecies] = useState<Species>(initialSpecies);
+  const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
 
   const [windowStart, setWindowStart] = useState(() =>
     startOfWeek(today, { weekStartsOn: 1 }),
@@ -1724,21 +2264,42 @@ function BoardingHubPage() {
       {/* ── Toolbar: week nav + species toggle + manage rooms ── */}
       <div className="flex items-center justify-between gap-4 px-6 py-3 border-b border-border bg-card shrink-0">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => setWindowStart((d) => addDays(d, -7))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setWindowStart(startOfWeek(today, { weekStartsOn: 1 }))}>
-            Today
-          </Button>
-          <Button variant="outline" size="icon" onClick={() => setWindowStart((d) => addDays(d, 7))}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <span className="ml-2 text-sm font-medium text-foreground">
-            {format(windowStart, "d MMM")} – {format(windowEnd, "d MMM yyyy")}
-          </span>
+          {viewMode === "calendar" && (
+            <>
+              <Button variant="outline" size="icon" onClick={() => setWindowStart((d) => addDays(d, -7))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setWindowStart(startOfWeek(today, { weekStartsOn: 1 }))}>
+                Today
+              </Button>
+              <Button variant="outline" size="icon" onClick={() => setWindowStart((d) => addDays(d, 7))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <span className="ml-2 text-sm font-medium text-foreground">
+                {format(windowStart, "d MMM")} – {format(windowEnd, "d MMM yyyy")}
+              </span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
+            <button
+              type="button"
+              className={`px-3 py-1.5 transition-colors ${viewMode === "calendar" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+              onClick={() => setViewMode("calendar")}
+            >
+              Calendar
+            </button>
+            <button
+              type="button"
+              className={`px-3 py-1.5 transition-colors ${viewMode === "list" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+              onClick={() => setViewMode("list")}
+            >
+              Operations list
+            </button>
+          </div>
+
           {/* Species toggle */}
           <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
             <button
@@ -1769,18 +2330,22 @@ function BoardingHubPage() {
 
       {/* ── Calendar (only one rendered at a time) ── */}
       <div className="flex-1 overflow-auto min-h-0">
-        {species === "dog" ? (
-          <DogBoardingCalendar
-            windowStart={windowStart}
-            onWindowStartChange={setWindowStart}
-            suppressToolbar
-          />
+        {viewMode === "calendar" ? (
+          species === "dog" ? (
+            <DogBoardingCalendar
+              windowStart={windowStart}
+              onWindowStartChange={setWindowStart}
+              suppressToolbar
+            />
+          ) : (
+            <CatBoardingCalendar
+              windowStart={windowStart}
+              onWindowStartChange={setWindowStart}
+              suppressToolbar
+            />
+          )
         ) : (
-          <CatBoardingCalendar
-            windowStart={windowStart}
-            onWindowStartChange={setWindowStart}
-            suppressToolbar
-          />
+          <BoardingOperationsList species={species} />
         )}
       </div>
     </div>

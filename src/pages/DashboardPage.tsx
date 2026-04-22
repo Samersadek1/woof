@@ -10,23 +10,6 @@ import { toast } from "sonner";
 
 // ── types ────────────────────────────────────────────────────────────────────
 
-interface CheckInRow {
-  id: string;
-  status: string;
-  petNames: string;
-  ownerLastName: string;
-  roomName: string;
-  overdue: boolean;
-}
-
-interface CheckOutRow {
-  id: string;
-  petNames: string;
-  ownerLastName: string;
-  nights: number;
-  vaxWarning: string | null;
-}
-
 interface VaxAlert {
   petName: string;
   ownerId: string;
@@ -65,8 +48,6 @@ interface DashboardData {
   daycareToday: number;
   parkToday: number;
   groomingToday: number;
-  checkIns: CheckInRow[];
-  checkOuts: CheckOutRow[];
   vaxAlerts: VaxAlert[];
   paymentsDue: PaymentRow[];
   paymentsOverdue: PaymentRow[];
@@ -102,8 +83,7 @@ async function fetchDashboardData(): Promise<DashboardData> {
     daycareRes,
     parkRes,
     groomingRes,
-    checkInsRes,
-    checkOutsRes,
+    overdueTodayRes,
     vaxWeekRes,
     vaxMonthRes,
     paymentsDueRes,
@@ -143,18 +123,12 @@ async function fetchDashboardData(): Promise<DashboardData> {
       .select("id")
       .eq("appointment_date", today)
       .neq("status", "cancelled"),
-    // Check-ins today
+    // Today's check-ins (minimal) — only for overdue pill (confirmed + past noon)
     supabase
       .from("bookings")
-      .select("id, status, check_in_date, owners!inner(last_name), rooms!inner(display_name), booking_pets(pet_id, pets(name))")
+      .select("id, status")
       .eq("check_in_date", today)
       .in("status", ["confirmed", "checked_in"]),
-    // Check-outs today
-    supabase
-      .from("bookings")
-      .select("id, check_in_date, check_out_date, owners!inner(last_name), rooms!inner(display_name), booking_pets(pet_id, pets(name, id))")
-      .eq("check_out_date", today)
-      .eq("status", "checked_in"),
     // Vax expiring this week (for pill count)
     supabase
       .from("vaccinations")
@@ -217,64 +191,9 @@ async function fetchDashboardData(): Promise<DashboardData> {
 
   const threshold = thresholdRes.data?.amount_aed ?? 5000;
 
-  // Process check-ins
-  const checkIns: CheckInRow[] = (checkInsRes.data ?? []).map((b: any) => {
-    const petNames = (b.booking_pets ?? [])
-      .map((bp: any) => bp.pets?.name)
-      .filter(Boolean)
-      .join(" & ");
-    return {
-      id: b.id,
-      status: b.status,
-      petNames: petNames || "—",
-      ownerLastName: b.owners?.last_name ?? "—",
-      roomName: b.rooms?.display_name ?? "—",
-      overdue: b.status === "confirmed" && pastNoon,
-    };
-  });
-  checkIns.sort((a, b) => (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1));
-
-  // Get pet IDs from check-outs for vax cross-check
-  const checkOutPetIds: string[] = [];
-  (checkOutsRes.data ?? []).forEach((b: any) => {
-    (b.booking_pets ?? []).forEach((bp: any) => {
-      if (bp.pets?.id) checkOutPetIds.push(bp.pets.id);
-    });
-  });
-
-  let checkOutVaxMap = new Map<string, { vaccine: string; daysLeft: number }>();
-  if (checkOutPetIds.length > 0) {
-    const { data: coVax } = await supabase
-      .from("vaccinations")
-      .select("pet_id, vaccine_name, expiry_date")
-      .in("pet_id", checkOutPetIds)
-      .gte("expiry_date", today)
-      .lte("expiry_date", weekEnd);
-    for (const v of coVax ?? []) {
-      const dl = differenceInCalendarDays(parseISO(v.expiry_date), new Date());
-      const existing = checkOutVaxMap.get(v.pet_id);
-      if (!existing || dl < existing.daysLeft) {
-        checkOutVaxMap.set(v.pet_id, { vaccine: v.vaccine_name, daysLeft: dl });
-      }
-    }
-  }
-
-  const checkOuts: CheckOutRow[] = (checkOutsRes.data ?? []).map((b: any) => {
-    const petNames = (b.booking_pets ?? [])
-      .map((bp: any) => bp.pets?.name)
-      .filter(Boolean)
-      .join(" & ");
-    const nights = differenceInCalendarDays(parseISO(b.check_out_date), parseISO(b.check_in_date));
-    let vaxWarning: string | null = null;
-    for (const bp of b.booking_pets ?? []) {
-      const vax = checkOutVaxMap.get(bp.pets?.id);
-      if (vax) {
-        vaxWarning = `vax expires ${vax.daysLeft}d`;
-        break;
-      }
-    }
-    return { id: b.id, petNames: petNames || "—", ownerLastName: b.owners?.last_name ?? "—", nights, vaxWarning };
-  });
+  const overdueCheckins = (overdueTodayRes.data ?? []).filter(
+    (b: { status: string }) => b.status === "confirmed" && pastNoon,
+  ).length;
 
   // Vax alerts
   const vaxAlerts: VaxAlert[] = (vaxMonthRes.data ?? []).map((v: any) => ({
@@ -349,7 +268,7 @@ async function fetchDashboardData(): Promise<DashboardData> {
   }
 
   return {
-    overdueCheckins: checkIns.filter((c) => c.overdue).length,
+    overdueCheckins,
     expiringVax: vaxWeekRes.data?.length ?? 0,
     pendingTopups: pendingTopupsRes.data?.length ?? 0,
     overdueInvoiceTotal,
@@ -358,8 +277,6 @@ async function fetchDashboardData(): Promise<DashboardData> {
     daycareToday: daycareRes.data?.length ?? 0,
     parkToday: parkRes.data?.length ?? 0,
     groomingToday: groomingRes.data?.length ?? 0,
-    checkIns,
-    checkOuts,
     vaxAlerts,
     paymentsDue,
     paymentsOverdue,
@@ -371,10 +288,36 @@ async function fetchDashboardData(): Promise<DashboardData> {
 
 // ── sub-components ───────────────────────────────────────────────────────────
 
-function OccupancyCard({ label, value, total, showBar }: { label: string; value: number; total?: number; showBar?: boolean; subtitle?: string }) {
+function OccupancyCard({
+  label,
+  value,
+  total,
+  showBar,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  total?: number;
+  showBar?: boolean;
+  subtitle?: string;
+  onClick?: () => void;
+}) {
   const pct = total ? Math.round((value / total) * 100) : 0;
+  const interactive = !!onClick;
   return (
-    <div className="bg-muted/50 rounded-lg p-3">
+    <div
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (!interactive) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick?.();
+        }
+      }}
+      className={`bg-muted/50 rounded-lg p-3 ${interactive ? "cursor-pointer hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""}`}
+    >
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="text-2xl font-medium mt-1">{value}</div>
       {showBar && total ? (
@@ -393,14 +336,34 @@ function OccupancyCard({ label, value, total, showBar }: { label: string; value:
   );
 }
 
-function Pill({ children, variant }: { children: React.ReactNode; variant: "red" | "amber" | "purple" | "blue" }) {
+function Pill({
+  children,
+  variant,
+  onClick,
+}: {
+  children: React.ReactNode;
+  variant: "red" | "amber" | "purple" | "blue";
+  onClick?: () => void;
+}) {
   const cls: Record<string, string> = {
     red: "bg-red-50 text-red-700",
     amber: "bg-amber-50 text-amber-700",
     purple: "bg-[#EEEDFE] text-[#3C3489]",
     blue: "bg-blue-50 text-blue-700",
   };
-  return <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cls[variant]}`}>{children}</span>;
+  const shared = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cls[variant]}`;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={`${shared} cursor-pointer border-0 hover:brightness-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+    );
+  }
+  return <span className={shared}>{children}</span>;
 }
 
 function Dot({ color }: { color: "green" | "amber" | "red" | "purple" | "gray" }) {
@@ -549,51 +512,58 @@ const DashboardPage = () => {
           <>
             {/* Alert strip */}
             <div className="flex gap-2 flex-wrap mb-5">
-              {data.overdueCheckins > 0 && <Pill variant="red">{data.overdueCheckins} check-in{data.overdueCheckins !== 1 ? "s" : ""} overdue</Pill>}
-              {data.expiringVax > 0 && <Pill variant="amber">{data.expiringVax} vaccination{data.expiringVax !== 1 ? "s" : ""} expiring this week</Pill>}
-              {data.pendingTopups > 0 && <Pill variant="purple">{data.pendingTopups} top-up request{data.pendingTopups !== 1 ? "s" : ""} pending</Pill>}
-              {data.overdueInvoiceTotal > 0 && <Pill variant="blue">{formatAed(data.overdueInvoiceTotal)} overdue invoices</Pill>}
+              {data.overdueCheckins > 0 && (
+                <Pill variant="red" onClick={() => navigate("/dashboard/checkins?service=boarding")}>
+                  {data.overdueCheckins} check-in{data.overdueCheckins !== 1 ? "s" : ""} overdue
+                </Pill>
+              )}
+              {data.expiringVax > 0 && (
+                <Pill variant="amber" onClick={() => navigate("/customers")}>
+                  {data.expiringVax} vaccination{data.expiringVax !== 1 ? "s" : ""} expiring this week
+                </Pill>
+              )}
+              {data.pendingTopups > 0 && (
+                <Pill variant="purple" onClick={() => navigate("/billing")}>
+                  {data.pendingTopups} top-up request{data.pendingTopups !== 1 ? "s" : ""} pending
+                </Pill>
+              )}
+              {data.overdueInvoiceTotal > 0 && (
+                <Pill variant="blue" onClick={() => navigate("/billing")}>
+                  {formatAed(data.overdueInvoiceTotal)} overdue invoices
+                </Pill>
+              )}
             </div>
 
             {/* Occupancy */}
             <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-2">Live occupancy</div>
             <div className="grid grid-cols-5 gap-2.5 mb-5">
-              <OccupancyCard label="Dogs boarding" value={data.dogsBoarding} total={DOG_ROOM_CAPACITY} showBar />
-              <OccupancyCard label="Cats boarding" value={data.catsBoarding} total={CAT_ROOM_CAPACITY} showBar />
-              <OccupancyCard label="Daycare today" value={data.daycareToday} />
-              <OccupancyCard label="Park visits today" value={data.parkToday} />
-              <OccupancyCard label="Grooming today" value={data.groomingToday} subtitle="appointments" />
-            </div>
-
-            {/* Today's movements */}
-            <div className="grid grid-cols-2 gap-3.5 mb-5">
-              {/* Check-ins */}
-              <CardSection title="Checking in today" count={data.checkIns.length} empty={data.checkIns.length === 0 ? "No check-ins scheduled for today" : undefined}>
-                {data.checkIns.map((ci) => (
-                  <Row key={ci.id} onClick={() => navigate("/boarding")}>
-                    <Dot color={ci.overdue ? "amber" : "green"} />
-                    <div className="flex-1 font-medium">{ci.petNames} — {ci.ownerLastName}</div>
-                    {ci.overdue ? <Chip variant="amber">overdue</Chip> : <span className="text-[11px] text-muted-foreground/70">{ci.roomName}</span>}
-                  </Row>
-                ))}
-              </CardSection>
-
-              {/* Check-outs */}
-              <CardSection title="Checking out today" count={data.checkOuts.length} empty={data.checkOuts.length === 0 ? "No check-outs scheduled for today" : undefined}>
-                {data.checkOuts.map((co) => (
-                  <Row key={co.id} onClick={() => navigate("/boarding")}>
-                    <Dot color={co.vaxWarning ? "amber" : "green"} />
-                    <div className="flex-1 font-medium">{co.petNames} — {co.ownerLastName}</div>
-                    {co.vaxWarning ? <Chip variant="amber">{co.vaxWarning}</Chip> : <span className="text-[11px] text-muted-foreground/70">{co.nights} night{co.nights !== 1 ? "s" : ""}</span>}
-                  </Row>
-                ))}
-              </CardSection>
+              <OccupancyCard
+                label="Dogs boarding"
+                value={data.dogsBoarding}
+                total={DOG_ROOM_CAPACITY}
+                showBar
+                onClick={() => navigate("/dashboard/checkins?service=boarding")}
+              />
+              <OccupancyCard
+                label="Cats boarding"
+                value={data.catsBoarding}
+                total={CAT_ROOM_CAPACITY}
+                showBar
+                onClick={() => navigate("/boarding")}
+              />
+              <OccupancyCard
+                label="Daycare today"
+                value={data.daycareToday}
+                onClick={() => navigate("/dashboard/checkins?service=daycare")}
+              />
+              <OccupancyCard label="Park visits today" value={data.parkToday} onClick={() => navigate("/park")} />
+              <OccupancyCard label="Grooming today" value={data.groomingToday} onClick={() => navigate("/grooming")} />
             </div>
 
             {/* Bottom 4 columns */}
             <div className="grid grid-cols-4 gap-3">
               {/* Vaccination alerts */}
-              <CardSection title="Vaccination alerts" count={data.vaxAlerts.length} empty={data.vaxAlerts.length === 0 ? undefined : undefined}>
+              <CardSection title="Vaccination alerts" count={data.vaxAlerts.length}>
                 {data.vaxAlerts.length === 0 ? (
                   <div className="py-6 flex flex-col items-center text-center text-xs text-muted-foreground">
                     <CheckCircle2 className="h-5 w-5 text-emerald-500 mb-1.5" />
@@ -615,7 +585,7 @@ const DashboardPage = () => {
               {/* Payments due today */}
               <CardSection title="Payments due today" empty={data.paymentsDue.length === 0 ? "No payments due today" : undefined}>
                 {data.paymentsDue.map((p) => (
-                  <Row key={p.id} onClick={() => navigate("/billing")}>
+                  <Row key={p.id} onClick={() => navigate(p.ownerId ? `/customers/${p.ownerId}` : "/billing")}>
                     <div className="flex-1">
                       <div className="font-medium text-[13px]">{p.ownerLastName}</div>
                       <div className="text-[11px] text-muted-foreground/70">{p.serviceType?.replace(/_/g, " ") ?? "—"} · {p.invoiceNumber ?? "—"}</div>
@@ -634,7 +604,7 @@ const DashboardPage = () => {
               {/* Payments overdue */}
               <CardSection title="Payments overdue" empty={data.paymentsOverdue.length === 0 ? "No overdue invoices" : undefined}>
                 {data.paymentsOverdue.map((p) => (
-                  <Row key={p.id} onClick={() => navigate("/billing")}>
+                  <Row key={p.id} onClick={() => navigate(p.ownerId ? `/customers/${p.ownerId}` : "/billing")}>
                     <div className="flex-1">
                       <div className="font-medium text-[13px]">{p.ownerLastName}</div>
                       <div className="text-[11px] text-muted-foreground/70">{p.serviceType?.replace(/_/g, " ") ?? "—"} · {p.daysOverdue} day{p.daysOverdue !== 1 ? "s" : ""} late</div>
@@ -656,24 +626,36 @@ const DashboardPage = () => {
                   <div key={tr.ownerId} className="py-2 border-b border-border last:border-b-0">
                     {tr.requestId ? (
                       <>
-                        <div className="flex items-center">
+                        <button
+                          type="button"
+                          className="flex w-full items-center rounded-md px-1 py-0.5 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => navigate(`/customers/${tr.ownerId}`)}
+                        >
                           <Dot color="purple" />
                           <div className="flex-1 font-medium text-[13px] ml-1.5">{tr.ownerName}</div>
                           <Chip variant="purple">pending {tr.daysPending}d</Chip>
-                        </div>
+                        </button>
                         <div className="pl-[13px] text-[11px] text-muted-foreground/70 mt-1">
                           Balance {formatAed(tr.walletBalance)} · requested {formatAed(tr.amountRequested ?? 0)}
                         </div>
                         <div className="pl-[13px] flex gap-1.5 mt-1.5">
                           <button
+                            type="button"
                             className="text-[11px] px-2 py-0.5 rounded border border-border bg-card text-muted-foreground hover:bg-muted"
-                            onClick={() => handleRemind(tr.requestId!)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemind(tr.requestId!);
+                            }}
                           >
                             Remind
                           </button>
                           <button
+                            type="button"
                             className="text-[11px] px-2 py-0.5 rounded border border-[#AFA9EC] bg-[#EEEDFE] text-[#3C3489] hover:bg-[#DDD9FC]"
-                            onClick={() => handleMarkReceived(tr.requestId!, tr.ownerId, tr.amountRequested ?? 0)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMarkReceived(tr.requestId!, tr.ownerId, tr.amountRequested ?? 0);
+                            }}
                           >
                             Mark received
                           </button>
@@ -681,11 +663,19 @@ const DashboardPage = () => {
                       </>
                     ) : (
                       <div className="flex items-center gap-1.5">
-                        <Dot color="gray" />
-                        <div className="flex-1 text-muted-foreground text-xs">{tr.ownerName} — no request sent</div>
                         <button
+                          type="button"
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => navigate(`/customers/${tr.ownerId}`)}
+                        >
+                          <Dot color="gray" />
+                          <span className="text-muted-foreground text-xs truncate">{tr.ownerName} — no request sent</span>
+                        </button>
+                        <button
+                          type="button"
                           className="text-[11px] px-2 py-0.5 rounded border border-border bg-card text-muted-foreground hover:bg-muted whitespace-nowrap"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             const suggested = Math.ceil((data.lowBalanceThreshold - tr.walletBalance) / 1000) * 1000;
                             handleRequestTopup(tr.ownerId, Math.max(suggested, 1000));
                           }}

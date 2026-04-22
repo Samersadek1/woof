@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { resolveBoardingRate } from "@/lib/boardingPricing";
+import { getPricingAmountByKey, groomingServiceToPricingKey, resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import {
   useRefundWallet,
   type WalletMutationPayload,
@@ -63,6 +65,7 @@ export interface LineItemRow {
   description: string | null;
   quantity: number;
   unit_price: number;
+  /** Mapped from total_price — the DB column is total_price */
   line_total: number;
   sort_order: number;
 }
@@ -86,6 +89,9 @@ export interface InvoiceWithItems {
   voided_reason: string | null;
   created_at: string;
   line_items: LineItemRow[];
+  booking_ref: string | null;
+  booking_check_in: string | null;
+  booking_check_out: string | null;
 }
 
 export interface StatementRow {
@@ -212,32 +218,114 @@ export function usePricing() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Hook 2: useBillingCalculator
+// Hook 1b: useServiceRates — aggregated view of all service rate tables
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface GroomingRateRow { id: string; service: string; label: string; price_aed: number; duration_minutes: number | null; is_active: boolean }
+export interface ParkRateRow { id: string; label: string; price_per_slot_aed: number; is_active: boolean }
+export interface DaycarePackageTypeRow { id: string; name: string; total_days: number; base_price_aed: number; is_active: boolean; sort_order: number }
+export interface AddonRateRow { id: string; addon_type: string; label: string; price_aed: number; unit: string; applicable_services: string[]; is_active: boolean }
+
+export function useServiceRates() {
+  const groomingQuery = useQuery({
+    queryKey: ["grooming_service_rates"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("grooming_service_rates").select("*").order("service");
+      if (error) throw error;
+      return data as GroomingRateRow[];
+    },
+  });
+
+  const parkQuery = useQuery({
+    queryKey: ["park_rates"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("park_rates").select("*");
+      if (error) throw error;
+      return data as ParkRateRow[];
+    },
+  });
+
+  const daycareQuery = useQuery({
+    queryKey: ["daycare_package_types"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("daycare_package_types").select("*").order("sort_order");
+      if (error) throw error;
+      return data as DaycarePackageTypeRow[];
+    },
+  });
+
+  const addonQuery = useQuery({
+    queryKey: ["addon_rates"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("addon_rates").select("*").order("addon_type");
+      if (error) throw error;
+      return data as AddonRateRow[];
+    },
+  });
+
+  const queryClient = useQueryClient();
+
+  const updateGroomingRate = async (id: string, price_aed: number) => {
+    const { error } = await supabase.from("grooming_service_rates").update({ price_aed, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ["grooming_service_rates"] });
+  };
+
+  const updateParkRate = async (id: string, price_per_slot_aed: number) => {
+    const { error } = await supabase.from("park_rates").update({ price_per_slot_aed, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ["park_rates"] });
+  };
+
+  const updateDaycareType = async (id: string, base_price_aed: number) => {
+    const { error } = await supabase.from("daycare_package_types").update({ base_price_aed, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ["daycare_package_types"] });
+  };
+
+  const updateAddonRate = async (id: string, price_aed: number) => {
+    const { error } = await supabase.from("addon_rates").update({ price_aed, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ["addon_rates"] });
+  };
+
+  return {
+    groomingRates: groomingQuery.data ?? [],
+    parkRates: parkQuery.data ?? [],
+    daycarePackageTypes: daycareQuery.data ?? [],
+    addonRates: addonQuery.data ?? [],
+    updateGroomingRate,
+    updateParkRate,
+    updateDaycareType,
+    updateAddonRate,
+    isLoading: groomingQuery.isLoading || parkQuery.isLoading || daycareQuery.isLoading || addonQuery.isLoading,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Hook 2: useBillingCalculator (reads from service-specific rate tables)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 type ServiceParams =
   | {
       type: "boarding";
-      pricingKey: string;
+      roomId: string;
+      petCount: number;
       nights: number;
-      addons?: { pricingKey: string; label: string; qty?: number }[];
+      addons?: { addonType: string; label: string; qty?: number }[];
     }
-  | { type: "grooming"; pricingKey: string }
+  | { type: "grooming"; service: string }
   | { type: "park"; slots?: number }
-  | { type: "daycare_session"; days?: number }
-  | { type: "daycare_package"; pricingKey: string }
-  | { type: "transport"; pricingKey: string; trips?: number }
+  | { type: "daycare_package"; packageTypeId: string; pickup?: boolean; dropoff?: boolean; transportZone?: string }
   | { type: "membership"; pricingKey: string };
 
 export function useBillingCalculator(
   ownerId: string | null,
   params: ServiceParams | null,
 ): { breakdown: BillingBreakdown | null; isLoading: boolean } {
-  const { getPrice, isLoading: pricingLoading } = usePricing();
-
   const discountQuery = useQuery({
-    queryKey: ["member_discount", ownerId, params],
-    enabled: !!ownerId && !!params && !pricingLoading,
+    queryKey: ["member_discount_v2", ownerId, params],
+    enabled: !!ownerId && !!params,
     queryFn: async () => {
       if (!ownerId || !params) return null;
 
@@ -245,117 +333,80 @@ export function useBillingCalculator(
 
       switch (params.type) {
         case "boarding": {
-          const unitPrice = getPrice(params.pricingKey);
-          lineItems.push({
-            pricingKey: params.pricingKey,
-            label: params.pricingKey.replace(/_/g, " "),
-            quantity: params.nights,
-            unitPrice,
-            total: unitPrice * params.nights,
-          });
-          for (const addon of params.addons ?? []) {
-            const ap = getPrice(addon.pricingKey);
-            const qty = addon.qty ?? 1;
-            lineItems.push({
-              pricingKey: addon.pricingKey,
-              label: addon.label,
-              quantity: qty,
-              unitPrice: ap,
-              total: ap * qty,
-            });
+          const occ = params.petCount <= 1 ? "single" : params.petCount === 2 ? "twin" : "multiple";
+          const resolved = await resolveBoardingRate(params.roomId, params.petCount);
+          const rate = resolved.unitPrice;
+          lineItems.push({ pricingKey: resolved.pricingKey, label: `Room (${occ})`, quantity: params.nights, unitPrice: rate, total: rate * params.nights });
+
+          if (params.addons?.length) {
+            const priceMap = await resolveAddonPricesForKeys(params.addons.map((a) => a.addonType));
+            for (const a of params.addons) {
+              const p = priceMap.get(a.addonType) ?? 0;
+              const q = a.qty ?? 1;
+              lineItems.push({ pricingKey: a.addonType, label: a.label, quantity: q, unitPrice: p, total: p * q });
+            }
           }
           break;
         }
         case "grooming": {
-          const p = getPrice(params.pricingKey);
-          lineItems.push({
-            pricingKey: params.pricingKey,
-            label: params.pricingKey.replace(/_/g, " "),
-            quantity: 1,
-            unitPrice: p,
-            total: p,
-          });
+          const { data: rate } = await supabase
+            .from("grooming_service_rates").select("price_aed, label").eq("service", params.service).single();
+          let p = rate?.price_aed ?? 0;
+          let label = rate?.label ?? params.service;
+          if (p === 0) {
+            const pk = groomingServiceToPricingKey(params.service);
+            if (pk) {
+              const fallback = await getPricingAmountByKey(pk);
+              if (fallback != null) {
+                p = fallback;
+                if (!rate?.label) label = pk.replace(/^grooming_/, "").replace(/_/g, " ");
+              }
+            }
+          }
+          lineItems.push({ pricingKey: `grooming:${params.service}`, label, quantity: 1, unitPrice: p, total: p });
           break;
         }
         case "park": {
+          const slotFromPricing = await getPricingAmountByKey("park_slot");
+          const { data: rates } = await supabase.from("park_rates").select("price_per_slot_aed").eq("is_active", true).limit(1);
+          const p = slotFromPricing ?? rates?.[0]?.price_per_slot_aed ?? 0;
           const slots = params.slots ?? 1;
-          const p = getPrice("park_slot");
-          lineItems.push({
-            pricingKey: "park_slot",
-            label: "Park slot",
-            quantity: slots,
-            unitPrice: p,
-            total: p * slots,
-          });
-          break;
-        }
-        case "daycare_session": {
-          const days = params.days ?? 1;
-          const p = getPrice("daycare_single_day");
-          lineItems.push({
-            pricingKey: "daycare_single_day",
-            label: "Daycare day",
-            quantity: days,
-            unitPrice: p,
-            total: p * days,
-          });
+          lineItems.push({ pricingKey: "park:slot", label: "Park slot", quantity: slots, unitPrice: p, total: p * slots });
           break;
         }
         case "daycare_package": {
-          const p = getPrice(params.pricingKey);
-          lineItems.push({
-            pricingKey: params.pricingKey,
-            label: params.pricingKey.replace(/_/g, " "),
-            quantity: 1,
-            unitPrice: p,
-            total: p,
-          });
-          break;
-        }
-        case "transport": {
-          const trips = params.trips ?? 1;
-          const p = getPrice(params.pricingKey);
-          lineItems.push({
-            pricingKey: params.pricingKey,
-            label: params.pricingKey.replace(/_/g, " "),
-            quantity: trips,
-            unitPrice: p,
-            total: p * trips,
-          });
+          const { data: pkgType } = await supabase
+            .from("daycare_package_types").select("name, total_days, base_price_aed").eq("id", params.packageTypeId).single();
+          if (pkgType) {
+            lineItems.push({ pricingKey: `daycare:${pkgType.name}`, label: pkgType.name, quantity: 1, unitPrice: pkgType.base_price_aed, total: pkgType.base_price_aed });
+            if (params.pickup || params.dropoff) {
+              const tKey = params.transportZone === "abudhabi" ? "transport_abudhabi" : "transport_dubai";
+              const tMap = await resolveAddonPricesForKeys([tKey]);
+              const tp = tMap.get(tKey) ?? 0;
+              if (params.pickup) lineItems.push({ pricingKey: tKey, label: `Pickup × ${pkgType.total_days}`, quantity: pkgType.total_days, unitPrice: tp, total: tp * pkgType.total_days });
+              if (params.dropoff) lineItems.push({ pricingKey: tKey, label: `Drop-off × ${pkgType.total_days}`, quantity: pkgType.total_days, unitPrice: tp, total: tp * pkgType.total_days });
+            }
+          }
           break;
         }
         case "membership": {
+          const { getPrice } = await loadPricingMap();
           const p = getPrice(params.pricingKey);
-          lineItems.push({
-            pricingKey: params.pricingKey,
-            label: params.pricingKey.replace(/_/g, " "),
-            quantity: 1,
-            unitPrice: p,
-            total: p,
-          });
+          lineItems.push({ pricingKey: params.pricingKey, label: params.pricingKey.replace(/_/g, " "), quantity: 1, unitPrice: p, total: p });
           break;
         }
       }
 
       const subtotal = lineItems.reduce((s, li) => s + li.total, 0);
 
-      const { data: discData, error: discErr } = await supabase.rpc(
-        "apply_member_discount",
-        { p_owner_id: ownerId, p_subtotal: subtotal },
-      );
-      if (discErr) throw discErr;
+      let disc = { discount_pct: 0, discount_aed: 0, final_aed: subtotal };
+      try {
+        const { data: discData } = await supabase.rpc("apply_member_discount", { p_owner_id: ownerId, p_subtotal: subtotal });
+        const row = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
+        if (row) disc = row;
+      } catch { /* proceed without discount */ }
 
-      const disc = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0] ?? {
-        discount_pct: 0,
-        discount_aed: 0,
-        final_aed: subtotal,
-      };
-
-      const { data: ownerData } = await supabase
-        .from("owners")
-        .select("member_type")
-        .eq("id", ownerId)
-        .single();
+      const { data: ownerData } = await supabase.from("owners").select("member_type").eq("id", ownerId).single();
 
       return {
         lineItems,
@@ -370,8 +421,15 @@ export function useBillingCalculator(
 
   return {
     breakdown: discountQuery.data ?? null,
-    isLoading: pricingLoading || discountQuery.isLoading,
+    isLoading: discountQuery.isLoading,
   };
+}
+
+async function loadPricingMap() {
+  const { data } = await supabase.from("pricing").select("key, amount_aed");
+  const map: Record<string, number> = {};
+  for (const r of data ?? []) map[r.key] = r.amount_aed;
+  return { getPrice: (k: string) => map[k] ?? 0 };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -399,16 +457,16 @@ export function useCreateInvoice() {
         .from("invoices")
         .insert({
           owner_id: input.ownerId,
+          booking_id: input.serviceId ?? null,
           service_type: input.serviceType,
-          service_id: input.serviceId ?? null,
           status: "draft" as const,
-          subtotal_aed: input.breakdown.subtotal,
           subtotal: input.breakdown.subtotal,
+          subtotal_aed: input.breakdown.subtotal,
           discount_pct: input.breakdown.discountPct,
           discount_aed: input.breakdown.discountAed,
           discount_amount: input.breakdown.discountAed,
-          total_aed: input.breakdown.total,
           total: input.breakdown.total,
+          total_aed: input.breakdown.total,
           due_date: dueDate,
           notes: input.notes ?? null,
         })
@@ -417,15 +475,15 @@ export function useCreateInvoice() {
 
       if (invErr) throw invErr;
 
-      const lineRows = input.breakdown.lineItems.map((li, idx) => ({
+      const lineRows = input.breakdown.lineItems.map((li, i) => ({
         invoice_id: inv.id,
-        pricing_key: li.pricingKey,
         description: li.label,
         quantity: li.quantity,
         unit_price: li.unitPrice,
-        line_total: li.total,
         total_price: li.total,
-        sort_order: idx,
+        pricing_key: li.pricingKey ?? null,
+        service_type: input.serviceType,
+        sort_order: i,
       }));
 
       if (lineRows.length > 0) {
@@ -503,72 +561,125 @@ export function useProcessPayment() {
       input: ProcessPaymentInput,
     ): Promise<ProcessPaymentResult> => {
       if (input.method === "wallet") {
-        const { data, error } = await supabase.rpc("process_wallet_payment", {
+        const { data, error: rpcErr } = await supabase.rpc("process_wallet_payment", {
           p_invoice_id: input.invoiceId,
           p_performed_by: input.staffName,
         });
-        if (error) throw error;
 
-        const result = data as {
-          success: boolean;
-          amount_charged?: number;
-          new_balance?: number;
-          error?: string;
-          shortfall?: number;
-        };
+        // If RPC exists and succeeded, use its result
+        if (!rpcErr) {
+          const result = data as {
+            success: boolean;
+            amount_charged?: number;
+            new_balance?: number;
+            error?: string;
+            shortfall?: number;
+          };
 
-        if (result.success) {
-          toast.success(`${formatAed(result.amount_charged!)} deducted from wallet`);
+          if (result.success) {
+            toast.success(`${formatAed(result.amount_charged!)} deducted from wallet`);
+          } else {
+            toast.error(result.error ?? (result.shortfall ? `Insufficient balance — shortfall of ${formatAed(result.shortfall)}` : "Wallet payment failed"));
+          }
+
+          return {
+            success: result.success,
+            method: "wallet",
+            amountCharged: result.amount_charged ?? 0,
+            newWalletBalance: result.new_balance,
+            error: result.error,
+            shortfall: result.shortfall,
+          };
         }
 
-        return {
-          success: result.success,
-          method: "wallet",
-          amountCharged: result.amount_charged ?? 0,
-          newWalletBalance: result.new_balance,
-          error: result.error,
-          shortfall: result.shortfall,
-        };
+        // Fallback: client-side wallet deduction (used before process_wallet_payment RPC is deployed)
+        const { data: inv, error: invErr } = await supabase
+          .from("invoices")
+          .select("owner_id, total, total_aed")
+          .eq("id", input.invoiceId)
+          .single();
+        if (invErr) throw invErr;
+
+        const { data: ownerRow, error: ownerErr } = await supabase
+          .from("owners")
+          .select("wallet_balance")
+          .eq("id", inv.owner_id)
+          .single();
+        if (ownerErr) throw ownerErr;
+
+        const amount = inv.total_aed || inv.total || 0;
+        const currentBalance = ownerRow.wallet_balance ?? 0;
+
+        if (currentBalance < amount) {
+          const shortfall = amount - currentBalance;
+          toast.error(`Insufficient balance — shortfall of ${formatAed(shortfall)}`);
+          return { success: false, method: "wallet", amountCharged: 0, shortfall };
+        }
+
+        const newBalance = Math.round((currentBalance - amount) * 100) / 100;
+
+        await supabase.from("owners").update({ wallet_balance: newBalance }).eq("id", inv.owner_id);
+        await supabase.from("invoices").update({
+          status: "paid" as const,
+          payment_method: "wallet",
+          amount_paid: amount,
+        }).eq("id", input.invoiceId);
+        await supabase.from("wallet_transactions").insert({
+          owner_id: inv.owner_id,
+          transaction_type: "deduction" as const,
+          amount: -amount,
+          balance_after: newBalance,
+          notes: `Invoice payment via wallet — ${input.staffName}`,
+          reference_id: input.invoiceId,
+          reference_type: "invoice",
+        });
+
+        toast.success(`${formatAed(amount)} deducted from wallet`);
+        return { success: true, method: "wallet", amountCharged: amount, newWalletBalance: newBalance };
       }
 
       // Card or cash payment
       const { data: invoice, error: fetchErr } = await supabase
         .from("invoices")
-        .select("owner_id, total_aed, total")
+        .select("owner_id, total, total_aed")
         .eq("id", input.invoiceId)
         .single();
       if (fetchErr) throw fetchErr;
 
-      const amount = invoice.total_aed || invoice.total;
+      const amount = invoice.total_aed || invoice.total || 0;
 
       const { error: updateErr } = await supabase
         .from("invoices")
         .update({
           status: "paid" as const,
           payment_method: input.method,
-          paid_at: new Date().toISOString(),
           amount_paid: amount,
         })
         .eq("id", input.invoiceId);
       if (updateErr) throw updateErr;
 
-      // Record a zero-balance wallet transaction for audit trail
-      const { data: owner } = await supabase
-        .from("owners")
-        .select("wallet_balance")
-        .eq("id", invoice.owner_id)
-        .single();
+      // Record audit trail transaction (non-blocking — may fail if schema migration not yet run)
+      try {
+        const { data: owner } = await supabase
+          .from("owners")
+          .select("wallet_balance")
+          .eq("id", invoice.owner_id)
+          .single();
 
-      const txType = input.method === "card" ? "card_payment" : "cash_payment";
-      await supabase.from("wallet_transactions").insert({
-        owner_id: invoice.owner_id,
-        amount: 0,
-        balance_after: owner?.wallet_balance ?? 0,
-        transaction_type: txType as "card_payment" | "cash_payment",
-        invoice_id: input.invoiceId,
-        performed_by: input.staffName,
-        notes: `Paid by ${input.method}`,
-      });
+        const txType = input.method === "card" ? "card_payment" : "cash_payment";
+        await supabase.from("wallet_transactions").insert({
+          owner_id: invoice.owner_id,
+          amount: 0,
+          balance_after: owner?.wallet_balance ?? 0,
+          transaction_type: txType as "card_payment" | "cash_payment",
+          invoice_id: input.invoiceId,
+          performed_by: input.staffName,
+          notes: `Paid by ${input.method}`,
+        });
+      } catch {
+        // Audit trail insert failed (likely schema migration not yet applied) — payment itself succeeded
+        console.warn("Audit trail insert skipped — run sql/fix-invoice-schema.sql to enable full audit logging");
+      }
 
       toast.success(`${formatAed(amount)} recorded — paid by ${input.method}`);
 
@@ -607,7 +718,7 @@ export function useVoidInvoice() {
     ): Promise<{ success: boolean; refundAed: number }> => {
       const { data: invoice, error: fetchErr } = await supabase
         .from("invoices")
-        .select("owner_id, total_aed, total")
+        .select("owner_id, total, total_aed")
         .eq("id", input.invoiceId)
         .single();
       if (fetchErr) throw fetchErr;
@@ -615,9 +726,8 @@ export function useVoidInvoice() {
       const { error: voidErr } = await supabase
         .from("invoices")
         .update({
-          status: "voided" as const,
-          voided_at: new Date().toISOString(),
-          voided_reason: input.reason,
+          status: "cancelled" as const,
+          notes: input.reason,
         })
         .eq("id", input.invoiceId);
       if (voidErr) throw voidErr;
@@ -637,7 +747,7 @@ export function useVoidInvoice() {
         owner_id: invoice.owner_id,
         invoice_id: input.invoiceId,
         adjustment_type: "cancellation_refund",
-        original_amount: invoice.total_aed || invoice.total,
+        original_amount: invoice.total_aed || invoice.total || 0,
         adjusted_amount: input.refundAmount,
         reason: input.reason,
         approved_by: input.staffName,
@@ -728,7 +838,25 @@ export function useOwnerStatement(ownerId: string) {
       const { data, error } = await supabase.rpc("get_statement_of_account", {
         p_owner_id: ownerId,
       });
-      if (error) throw error;
+      // Fall back to direct query if RPC not yet deployed
+      if (error) {
+        const { data: rows, error: qErr } = await supabase
+          .from("invoices")
+          .select("id, invoice_number, status, total, total_aed, created_at, due_date, booking_id")
+          .eq("owner_id", ownerId)
+          .order("created_at", { ascending: false });
+        if (qErr) throw qErr;
+        return (rows ?? []).map((r) => ({
+          invoice_id: r.id,
+          invoice_number: r.invoice_number,
+          service_type: null as string | null,
+          status: r.status,
+          total_aed: r.total_aed || r.total || 0,
+          created_at: r.created_at,
+          due_date: r.due_date,
+          days_overdue: 0,
+        })) as StatementRow[];
+      }
       return (data ?? []) as StatementRow[];
     },
   });
@@ -750,7 +878,7 @@ export function useOwnerStatement(ownerId: string) {
   const invoices = statementQuery.data ?? [];
   const walletBalance = ownerQuery.data?.wallet_balance ?? 0;
 
-  const UNPAID: string[] = ["draft", "outstanding", "overdue", "finalised", "issued"];
+  const UNPAID: string[] = ["draft", "finalised", "issued", "outstanding", "overdue", "partially_paid"];
   const totalOutstanding = invoices
     .filter((i) => UNPAID.includes(i.status))
     .reduce((sum, i) => sum + i.total_aed, 0);
@@ -893,37 +1021,55 @@ export function useInvoicesForOwner(
     queryFn: async () => {
       let q = supabase
         .from("invoices")
-        .select("*, line_items:invoice_line_items(*)")
+        .select("*, line_items:invoice_line_items(*), bookings(booking_ref, check_in_date, check_out_date)")
         .eq("owner_id", ownerId)
         .order("created_at", { ascending: false });
 
       if (filters?.status) q = q.eq("status", filters.status);
-      if (filters?.serviceType)
-        q = q.eq("service_type", filters.serviceType);
 
       const { data, error } = await q;
       if (error) throw error;
 
-      return (data ?? []).map((inv) => ({
-        id: inv.id,
-        invoice_number: inv.invoice_number,
-        owner_id: inv.owner_id,
-        service_type: inv.service_type,
-        service_id: inv.service_id,
-        status: inv.status as InvoiceStatus,
-        subtotal_aed: inv.subtotal_aed ?? inv.subtotal,
-        discount_pct: inv.discount_pct,
-        discount_aed: inv.discount_aed ?? inv.discount_amount,
-        total_aed: inv.total_aed ?? inv.total,
-        payment_method: inv.payment_method as PaymentMethod | null,
-        paid_at: inv.paid_at,
-        due_date: inv.due_date,
-        notes: inv.notes,
-        voided_at: inv.voided_at,
-        voided_reason: inv.voided_reason,
-        created_at: inv.created_at,
-        line_items: ((inv as Record<string, unknown>).line_items as LineItemRow[]) ?? [],
-      })) as InvoiceWithItems[];
+      type RawLineItem = { id: string; description: string; quantity: number; unit_price: number; total_price: number; service_type: string | null };
+      type RawBooking = { booking_ref: string | null; check_in_date: string; check_out_date: string } | null;
+
+      return (data ?? []).map((inv) => {
+        const raw = inv as Record<string, unknown>;
+        const lineItems = (raw.line_items as RawLineItem[] | null) ?? [];
+        const booking = raw.bookings as RawBooking;
+
+        return {
+          id: inv.id,
+          invoice_number: inv.invoice_number,
+          owner_id: inv.owner_id,
+          service_type: inv.service_type ?? null,
+          service_id: inv.booking_id,
+          status: inv.status as InvoiceStatus,
+          subtotal_aed: inv.subtotal_aed || inv.subtotal || 0,
+          discount_pct: inv.discount_pct,
+          discount_aed: inv.discount_aed || inv.discount_amount || 0,
+          total_aed: inv.total_aed || inv.total || 0,
+          payment_method: inv.payment_method as PaymentMethod | null,
+          paid_at: inv.paid_at ?? (inv.status === "paid" ? inv.updated_at : null),
+          due_date: inv.due_date,
+          notes: inv.notes,
+          voided_at: inv.voided_at ?? (inv.status === "cancelled" ? inv.updated_at : null),
+          voided_reason: inv.voided_reason ?? (inv.status === "cancelled" ? inv.notes : null),
+          created_at: inv.created_at,
+          line_items: lineItems.map((li, idx) => ({
+            id: li.id,
+            pricing_key: (li as Record<string, unknown>).pricing_key as string | null ?? null,
+            description: li.description,
+            quantity: li.quantity,
+            unit_price: li.unit_price,
+            line_total: li.total_price,
+            sort_order: (li as Record<string, unknown>).sort_order as number ?? idx,
+          })),
+          booking_ref: booking?.booking_ref ?? null,
+          booking_check_in: booking?.check_in_date ?? null,
+          booking_check_out: booking?.check_out_date ?? null,
+        };
+      }) as InvoiceWithItems[];
     },
   });
 }

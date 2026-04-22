@@ -216,6 +216,19 @@ export function useAddDaycareDay() {
       dropoff_used,
       logged_by,
     }: AddDaycareDayPayload) => {
+      // Prevent duplicate same-day check-ins for the same pet.
+      const { data: existing, error: existingErr } = await supabase
+        .from("daycare_sessions")
+        .select("id")
+        .eq("pet_id", pet_id)
+        .eq("session_date", session_date)
+        .limit(1);
+
+      if (existingErr) throw existingErr;
+      if ((existing?.length ?? 0) > 0) {
+        throw new Error("Pet is already checked in for this date");
+      }
+
       // cast until types.ts is regenerated to include the new columns
       const insert = {
         session_date,

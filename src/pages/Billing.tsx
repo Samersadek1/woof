@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
+import { ownerDisplayName } from "@/lib/bookingUtils";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import {
   useWalletTransactions,
@@ -18,6 +19,7 @@ import {
   useCalculateCancellationRefund,
   useOwnerStatement,
   usePricing,
+  useServiceRates,
   formatAed,
   type InvoiceStatus,
   type InvoiceWithItems,
@@ -206,7 +208,11 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
   const handlePay = async () => {
     if (!staffName.trim()) { toast.error("Enter staff name"); return; }
     const result = await processPayment.mutateAsync({ invoiceId: invoice.id, method, staffName: staffName.trim() });
-    if (result.success) onClose();
+    if (result.success) {
+      onClose();
+    } else if (!result.success && method === "wallet") {
+      // wallet errors are toasted inside useProcessPayment — just keep the dialog open
+    }
   };
 
   return (
@@ -540,23 +546,25 @@ function OwnerSearchBar({ onSelect, selectedLabel, selectedOwnerId, onClear }: O
   return (
     <div ref={wrapperRef} className="relative max-w-lg">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-      <Input className="pl-9" placeholder="Search owner by name or phone…" value={query} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} autoComplete="off" />
+      <Input className="pl-9" placeholder="Search client or pet name / phone…" value={query} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} autoComplete="off" />
       {open && query.length >= 1 && (
         <div className="absolute z-50 mt-1 w-full rounded-lg border bg-popover shadow-md overflow-hidden">
           {isLoading ? (
             <div className="p-3 space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
           ) : !owners || owners.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">No owners found</p>
+            <p className="p-3 text-sm text-muted-foreground">No clients or pets found</p>
           ) : (
             <ul className="max-h-64 overflow-y-auto divide-y">
               {owners.map((o) => {
-                const label = `${o.first_name} ${o.last_name}`;
+                const label = ownerDisplayName(o.first_name, o.last_name);
+                const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
+                const details = [petNames, o.phone].filter(Boolean).join(" · ");
                 return (
                   <li key={o.id} className="flex items-stretch">
                     <button type="button" className="flex-1 min-w-0 flex items-center justify-between gap-2 px-4 py-2.5 text-sm hover:bg-muted/60 text-left transition-colors"
                       onMouseDown={(e) => { e.preventDefault(); onSelect(o.id, label); setQuery(""); setOpen(false); }}>
                       <span className="font-medium truncate">{label}</span>
-                      <span className="text-muted-foreground text-xs shrink-0">{o.phone}</span>
+                      <span className="text-muted-foreground text-xs shrink-0">{details}</span>
                     </button>
                     <button type="button" className="shrink-0 px-3 flex items-center justify-center border-l hover:bg-muted/80 transition-colors" title="Open profile"
                       onMouseDown={(e) => { e.preventDefault(); navigate(`/customers/${o.id}`); setOpen(false); }}>
@@ -595,7 +603,7 @@ function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: s
           <div role="button" tabIndex={0} className="space-y-1.5 cursor-pointer rounded-lg p-1 -m-1 outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => navigate(`/customers/${owner.id}`)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/customers/${owner.id}`); } }}>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-xl font-semibold">{owner.first_name} {owner.last_name}</h2>
+              <h2 className="text-xl font-semibold">{ownerDisplayName(owner.first_name, owner.last_name)}</h2>
               <Badge variant="outline" className={MEMBER_BADGE[owner.member_type]}>{owner.member_type.charAt(0).toUpperCase() + owner.member_type.slice(1)}</Badge>
             </div>
             <p className="text-sm text-muted-foreground">{owner.phone}</p>
@@ -748,8 +756,8 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                 {invoices.map((inv) => {
                   const sb = INVOICE_STATUS_BADGE[inv.status] ?? INVOICE_STATUS_BADGE.draft;
                   const canFinalise = inv.status === "draft";
-                  const canPay = ["finalised", "issued", "outstanding", "overdue"].includes(inv.status);
-                  const canVoid = !["voided", "cancelled"].includes(inv.status);
+                  const canPay = ["finalised", "issued", "outstanding", "overdue", "partially_paid"].includes(inv.status);
+                  const canVoid = !["cancelled", "voided", "paid"].includes(inv.status);
                   return (
                     <TableRow key={inv.id}>
                       <TableCell>
@@ -763,8 +771,8 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                       <TableCell className="text-sm font-semibold tabular-nums text-right">{formatAed(inv.total_aed)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <Button size="sm" variant="ghost" onClick={() => setViewInvoice(inv)} title="View invoice">
-                            <Eye className="h-3.5 w-3.5" />
+                          <Button size="sm" variant="outline" onClick={() => setViewInvoice(inv)} title="View invoice">
+                            <Eye className="mr-1 h-3.5 w-3.5" /> View
                           </Button>
                           {canFinalise && (
                             <Button size="sm" variant="outline" disabled={finalise.isPending} onClick={() => handleFinalise(inv)}>
@@ -802,37 +810,27 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
 // ── PricingTab ───────────────────────────────────────────────────────────────
 
 function PricingTab() {
-  const { allRows, updatePrices, isLoading } = usePricing();
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
+  const {
+    groomingRates, parkRates, daycarePackageTypes, addonRates,
+    updateGroomingRate, updateParkRate, updateDaycareType, updateAddonRate,
+    isLoading,
+  } = useServiceRates();
+  const [saving, setSaving] = useState<string | null>(null);
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, typeof allRows>();
-    for (const row of allRows) {
-      const cat = row.category || "general";
-      if (!map.has(cat)) map.set(cat, []);
-      map.get(cat)!.push(row);
-    }
-    return map;
-  }, [allRows]);
-
-  const hasEdits = Object.keys(edits).length > 0;
-
-  const handleSave = async () => {
-    if (!hasEdits) return;
-    setSaving(true);
+  const saveRate = async (type: string, id: string, value: string) => {
+    const num = parseFloat(value);
+    if (isNaN(num) || num < 0) return;
+    setSaving(id);
     try {
-      const updates: Record<string, number> = {};
-      for (const [key, val] of Object.entries(edits)) {
-        const num = parseFloat(val);
-        if (!isNaN(num) && num >= 0) updates[key] = num;
-      }
-      if (Object.keys(updates).length > 0) await updatePrices(updates);
-      setEdits({});
+      if (type === "grooming") await updateGroomingRate(id, num);
+      else if (type === "park") await updateParkRate(id, num);
+      else if (type === "daycare") await updateDaycareType(id, num);
+      else if (type === "addon") await updateAddonRate(id, num);
+      toast.success("Rate saved");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
@@ -840,69 +838,151 @@ function PricingTab() {
     return <div className="space-y-3 p-4">{[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>;
   }
 
-  if (allRows.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
-        <Receipt className="h-8 w-8 mb-2 opacity-40" />
-        <p className="text-sm">No pricing keys configured yet</p>
-        <p className="text-xs mt-1">Add pricing rows in Supabase to manage them here</p>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Edit prices below. Changes save in batch.</p>
-        <Button size="sm" disabled={!hasEdits || saving} onClick={handleSave}>
-          {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          Save Changes
-        </Button>
-      </div>
+      <p className="text-sm text-muted-foreground">Service rates are used to auto-price bookings. Press Enter or blur to save.</p>
 
-      {[...grouped.entries()].map(([category, rows]) => (
-        <Card key={category}>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">{category}</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead className="min-w-[200px]">Key</TableHead>
-                  <TableHead className="min-w-[200px]">Label</TableHead>
-                  <TableHead className="text-right min-w-[140px]">Amount (AED)</TableHead>
+      {/* Grooming Rates */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming Services</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="min-w-[180px]">Service</TableHead>
+                <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {groomingRates.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="text-sm">{r.label}</TableCell>
+                  <TableCell className="text-right">
+                    <Input
+                      type="number" min="0" step="1"
+                      className="w-[120px] ml-auto text-right h-8 text-sm"
+                      defaultValue={r.price_aed}
+                      onBlur={(e) => saveRate("grooming", r.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      disabled={saving === r.id}
+                    />
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.key}>
-                    <TableCell className="text-sm font-mono text-muted-foreground">{row.key}</TableCell>
-                    <TableCell className="text-sm">{row.label || "—"}</TableCell>
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="w-[120px] ml-auto text-right h-8 text-sm"
-                        value={edits[row.key] ?? row.amount_aed.toString()}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (parseFloat(val) === row.amount_aed) {
-                            setEdits((prev) => { const n = { ...prev }; delete n[row.key]; return n; });
-                          } else {
-                            setEdits((prev) => ({ ...prev, [row.key]: val }));
-                          }
-                        }}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ))}
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Park Rates */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Park</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="min-w-[180px]">Slot Type</TableHead>
+                <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {parkRates.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="text-sm">{r.label}</TableCell>
+                  <TableCell className="text-right">
+                    <Input
+                      type="number" min="0" step="1"
+                      className="w-[120px] ml-auto text-right h-8 text-sm"
+                      defaultValue={r.price_per_slot_aed}
+                      onBlur={(e) => saveRate("park", r.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      disabled={saving === r.id}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Daycare Package Types */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Daycare Packages</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="min-w-[180px]">Package</TableHead>
+                <TableHead className="text-center w-20">Days</TableHead>
+                <TableHead className="text-right min-w-[140px]">Base Price (AED)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {daycarePackageTypes.map((t) => (
+                <TableRow key={t.id}>
+                  <TableCell className="text-sm">{t.name}</TableCell>
+                  <TableCell className="text-center text-sm text-muted-foreground">{t.total_days}</TableCell>
+                  <TableCell className="text-right">
+                    <Input
+                      type="number" min="0" step="1"
+                      className="w-[120px] ml-auto text-right h-8 text-sm"
+                      defaultValue={t.base_price_aed}
+                      onBlur={(e) => saveRate("daycare", t.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      disabled={saving === t.id}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Add-on Rates */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Add-ons (Transport, Grooming on Boarding)</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="min-w-[180px]">Add-on</TableHead>
+                <TableHead className="w-20">Unit</TableHead>
+                <TableHead className="min-w-[120px]">Applies to</TableHead>
+                <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {addonRates.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="text-sm">{r.label}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{r.unit}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{r.applicable_services.join(", ") || "—"}</TableCell>
+                  <TableCell className="text-right">
+                    <Input
+                      type="number" min="0" step="1"
+                      className="w-[120px] ml-auto text-right h-8 text-sm"
+                      defaultValue={r.price_aed}
+                      onBlur={(e) => saveRate("addon", r.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      disabled={saving === r.id}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -962,7 +1042,7 @@ const BillingPage = () => {
                   <WalletTab ownerId={selectedOwnerId} owner={owner} />
                 </TabsContent>
                 <TabsContent value="invoices" className="mt-6 space-y-6">
-                  <InvoicesTab ownerId={selectedOwnerId} ownerName={`${owner.first_name} ${owner.last_name}`} />
+                  <InvoicesTab ownerId={selectedOwnerId} ownerName={ownerDisplayName(owner.first_name, owner.last_name)} />
                 </TabsContent>
                 <TabsContent value="pricing" className="mt-6">
                   <PricingTab />

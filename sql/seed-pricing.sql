@@ -1,6 +1,6 @@
--- Seed pricing rows for every room_type × occupancy combination.
--- Uses each room's nightly_rate as the default. Twin = 1.5×, Multiple = 2×.
--- Safe to run multiple times — ON CONFLICT skips existing keys.
+-- Deprecated: legacy generated pricing seed.
+-- Use sql/seed-pricing-2026-04-01.sql for current explicit service rates.
+-- This file remains for backward compatibility only.
 
 -- Single occupancy (base rate from rooms)
 INSERT INTO pricing (key, amount_aed, label, category)

@@ -19,23 +19,86 @@ export const queryKeys = {
   owner: (id: string) => ["owners", id] as const,
 };
 
+function ownerSearchScore(owner: OwnerWithPetCount, term: string): number {
+  const first = (owner.first_name ?? "").toLowerCase();
+  const last = (owner.last_name ?? "").toLowerCase();
+  const full = `${first} ${last}`.trim();
+  const phone = (owner.phone ?? "").toLowerCase();
+  const petNames = (owner.pets ?? []).map((p) => (p.name ?? "").toLowerCase());
+  const joinedPetNames = petNames.join(" ");
+
+  if (full.startsWith(term)) return 0;
+  if (petNames.some((name) => name.startsWith(term))) return 1;
+  if (first.startsWith(term) || last.startsWith(term)) return 2;
+  if (phone.startsWith(term)) return 3;
+  if (full.includes(term)) return 4;
+  if (joinedPetNames.includes(term)) return 5;
+  if (phone.includes(term)) return 6;
+  return 9;
+}
+
 export function useOwners(searchTerm?: string) {
   return useQuery({
     queryKey: queryKeys.owners(searchTerm),
     queryFn: async () => {
-      let query = supabase
+      const baseQuery = supabase
         .from("owners")
         .select("*, pets(name, breed)")
         .order("last_name", { ascending: true });
 
       if (searchTerm) {
-        const term = `%${searchTerm}%`;
-        query = query.or(
-          `first_name.ilike.${term},last_name.ilike.${term},phone.ilike.${term}`
-        );
+        const trimmed = searchTerm.trim();
+        if (!trimmed) {
+          const { data, error } = await baseQuery;
+          if (error) throw error;
+          return data as OwnerWithPetCount[];
+        }
+
+        const ilike = `%${trimmed}%`;
+        const [ownersRes, petsRes] = await Promise.all([
+          supabase
+            .from("owners")
+            .select("*, pets(name, breed)")
+            .or(`first_name.ilike.${ilike},last_name.ilike.${ilike},phone.ilike.${ilike}`),
+          supabase
+            .from("pets")
+            .select("owner_id")
+            .ilike("name", ilike),
+        ]);
+
+        if (ownersRes.error) throw ownersRes.error;
+        if (petsRes.error) throw petsRes.error;
+
+        const merged = new Map<string, OwnerWithPetCount>();
+        for (const owner of ownersRes.data ?? []) {
+          merged.set(owner.id, owner as OwnerWithPetCount);
+        }
+
+        const petOwnerIds = Array.from(new Set((petsRes.data ?? []).map((row) => row.owner_id)));
+        const missingOwnerIds = petOwnerIds.filter((id) => !merged.has(id));
+
+        if (missingOwnerIds.length > 0) {
+          const { data: extraOwners, error: extraErr } = await supabase
+            .from("owners")
+            .select("*, pets(name, breed)")
+            .in("id", missingOwnerIds);
+          if (extraErr) throw extraErr;
+          for (const owner of extraOwners ?? []) {
+            merged.set(owner.id, owner as OwnerWithPetCount);
+          }
+        }
+
+        const lowered = trimmed.toLowerCase();
+        return Array.from(merged.values()).sort((a, b) => {
+          const scoreDiff = ownerSearchScore(a, lowered) - ownerSearchScore(b, lowered);
+          if (scoreDiff !== 0) return scoreDiff;
+          const lastDiff = (a.last_name ?? "").localeCompare(b.last_name ?? "");
+          if (lastDiff !== 0) return lastDiff;
+          return (a.first_name ?? "").localeCompare(b.first_name ?? "");
+        });
       }
 
-      const { data, error } = await query;
+      const { data, error } = await baseQuery;
       if (error) throw error;
       return data as OwnerWithPetCount[];
     },

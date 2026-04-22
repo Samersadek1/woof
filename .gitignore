@@ -25,3 +25,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cursor MCP — contains Supabase Personal Access Token, never commit
+.cursor/mcp.json
+.cursor/mcp.local.json
+
+# Local tooling / Supabase temp
+.claude/
+supabase/.temp/

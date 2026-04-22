@@ -8,8 +8,16 @@ import {
   subDays,
 } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
+import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { useOwners } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  GROOMING_PRICING_FALLBACK_KEYS,
+  GROOMING_SERVICE_TO_PRICING_KEY,
+  groomingServiceToPricingKey,
+} from "@/lib/addonPricing";
 import {
   useGroomingAppointments,
   useGroomingGlobalSearch,
@@ -112,7 +120,7 @@ function formatApptTime(t: string | null): string {
 
 function groomerDisplay(a: GroomingAppointmentWithJoins): string {
   if (a.groomer_name?.trim()) return a.groomer_name.trim();
-  if (a.staff) return `${a.staff.first_name} ${a.staff.last_name}`.trim();
+  if (a.staff) return ownerDisplayName(a.staff.first_name, a.staff.last_name);
   return "—";
 }
 
@@ -200,7 +208,7 @@ function GroomingOwnerSearch({
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
       <Input
         className="pl-9"
-        placeholder="Search owner by name or phone…"
+        placeholder="Search client or pet name / phone…"
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -217,11 +225,13 @@ function GroomingOwnerSearch({
               <Skeleton className="h-8 w-full" />
             </div>
           ) : !owners?.length ? (
-            <p className="p-3 text-sm text-muted-foreground">No owners found</p>
+            <p className="p-3 text-sm text-muted-foreground">No clients or pets found</p>
           ) : (
             <ul className="max-h-56 overflow-y-auto divide-y">
               {owners.map((o) => {
-                const label = `${o.first_name} ${o.last_name}`;
+                const label = ownerDisplayName(o.first_name, o.last_name);
+                const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
+                const details = [petNames, o.phone].filter(Boolean).join(" · ");
                 return (
                   <li key={o.id}>
                     <button
@@ -236,7 +246,7 @@ function GroomingOwnerSearch({
                     >
                       <span className="font-medium">{label}</span>
                       <span className="ml-2 text-xs text-muted-foreground">
-                        {o.phone}
+                        {details}
                       </span>
                     </button>
                   </li>
@@ -261,7 +271,7 @@ function AppointmentCard({
 
   const status = a.status;
   const ownerName = a.owners
-    ? `${a.owners.first_name} ${a.owners.last_name}`
+    ? ownerDisplayName(a.owners.first_name, a.owners.last_name)
     : "—";
   const phone = a.owners?.phone ?? "";
   const petName = a.pets?.name ?? "—";
@@ -477,6 +487,58 @@ const GroomingPage = () => {
     linkBoarding ? bookingSearch : "",
   );
 
+  const { data: groomingRates = [] } = useQuery({
+    queryKey: ["grooming_service_rates"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("grooming_service_rates")
+        .select("service, label, price_aed, duration_minutes")
+        .eq("is_active", true);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: groomingPriceCard = [] } = useQuery({
+    queryKey: ["pricing", "grooming_rate_card"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pricing")
+        .select("key, amount_aed")
+        .in("key", GROOMING_PRICING_FALLBACK_KEYS);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const rateMap = useMemo(() => {
+    const priceByPk = new Map(groomingPriceCard.map((r) => [r.key, r.amount_aed]));
+    const m: Record<string, { price_aed: number; duration_minutes: number | null }> = {};
+    for (const r of groomingRates) {
+      m[r.service] = { price_aed: r.price_aed, duration_minutes: r.duration_minutes };
+    }
+    for (const svc of Object.keys(GROOMING_SERVICE_TO_PRICING_KEY)) {
+      const pk = groomingServiceToPricingKey(svc);
+      const fallback = pk ? priceByPk.get(pk) : undefined;
+      const cur = m[svc];
+      if (typeof fallback === "number" && (!cur || cur.price_aed === 0)) {
+        m[svc] = {
+          price_aed: fallback,
+          duration_minutes: cur?.duration_minutes ?? null,
+        };
+      }
+    }
+    return m;
+  }, [groomingRates, groomingPriceCard]);
+
+  useEffect(() => {
+    const rate = rateMap[service];
+    if (rate) {
+      setPrice(String(rate.price_aed));
+      if (rate.duration_minutes) setDurationMin(rate.duration_minutes);
+    }
+  }, [service, rateMap]);
+
   const selectedPet = useMemo(
     () => pets.find((p) => p.id === petId),
     [pets, petId],
@@ -534,9 +596,27 @@ const GroomingPage = () => {
         reminder_sent: reminderSent,
       },
       {
-        onSuccess: () => {
+        onSuccess: (appt) => {
           toast.success("Appointment created.");
           setSheetOpen(false);
+
+          const svcLabel = SERVICE_OPTIONS.find((o) => o.value === service)?.label ?? service.replace(/_/g, " ");
+          createServiceInvoice({
+            ownerId: ownerId!,
+            serviceType: "grooming",
+            referenceId: appt.id,
+            lineItems: [{
+              description: `${svcLabel} — ${format(apptDate, "d MMM yyyy")}`,
+              quantity: 1,
+              unitPrice: priceNum,
+              pricingKey: `grooming:${service}`,
+              serviceType: "grooming",
+            }],
+          }).then(() => {
+            toast.success("Draft invoice created");
+          }).catch((err) => {
+            console.error("Auto-invoice failed:", err);
+          });
         },
         onError: (e) =>
           toast.error(e instanceof Error ? e.message : "Could not create."),
@@ -669,7 +749,7 @@ const GroomingPage = () => {
                           <TableCell>{r.pets?.name ?? "—"}</TableCell>
                           <TableCell>
                             {r.owners
-                              ? `${r.owners.first_name} ${r.owners.last_name}`
+                              ? ownerDisplayName(r.owners.first_name, r.owners.last_name)
                               : "—"}
                           </TableCell>
                           <TableCell>{serviceLabel(r.service)}</TableCell>
@@ -915,7 +995,7 @@ const GroomingPage = () => {
                             </span>
                             <span className="block text-muted-foreground text-xs">
                               {b.owners
-                                ? `${b.owners.first_name} ${b.owners.last_name}`
+                                ? ownerDisplayName(b.owners.first_name, b.owners.last_name)
                                 : "—"}{" "}
                               · {format(parseISO(b.check_in_date), "d MMM")} –{" "}
                               {format(parseISO(b.check_out_date), "d MMM")}

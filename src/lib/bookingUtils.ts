@@ -1,6 +1,8 @@
 import { differenceInCalendarDays, addDays, format, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
+import { resolveBoardingRate } from "@/lib/boardingPricing";
+import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
 
 /**
  * Returns the number of nights between two ISO date strings.
@@ -26,6 +28,13 @@ export function formatBookingCell(petNames: string[], ownerLastName: string): st
     .join(" – ")
     .toUpperCase();
   return full.length > 30 ? `${full.slice(0, 30)}…` : full;
+}
+
+/**
+ * Safely joins first + last name, omitting null/undefined parts.
+ */
+export function ownerDisplayName(first: string | null | undefined, last: string | null | undefined): string {
+  return [first, last].filter(Boolean).join(" ") || "—";
 }
 
 /**
@@ -77,82 +86,42 @@ export function generateDateRange(startDate: string, days: number): string[] {
   );
 }
 
-// ── Auto-invoice creation for new bookings ──────────────────────────────────
+// ── Shared auto-invoice creation ─────────────────────────────────────────────
 
-interface AutoInvoiceParams {
-  bookingId: string;
+export interface ServiceInvoiceLineItem {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  pricingKey?: string;
+  serviceType?: string;
+}
+
+export interface CreateServiceInvoiceParams {
   ownerId: string;
   serviceType: ServiceType;
-  roomId: string;
-  roomType: string;
-  roomName?: string;
-  petCount: number;
-  checkInDate: string;
-  checkOutDate: string;
-  addons?: { key: string; label: string }[];
+  /** The booking/appointment/package/park-booking id */
+  referenceId: string;
+  lineItems: ServiceInvoiceLineItem[];
+  notes?: string | null;
+  invoiceStatus?: "draft" | "finalised";
 }
 
-function occupancyTag(petCount: number): string {
-  if (petCount <= 1) return "single";
-  if (petCount === 2) return "twin";
-  return "multiple";
-}
+/**
+ * Shared invoice creator used by all service flows (boarding, grooming, park,
+ * daycare). Applies member discount, writes both `_aed` and non-suffixed
+ * columns for backwards compatibility, and creates line items.
+ */
+export async function createServiceInvoice(params: CreateServiceInvoiceParams): Promise<string> {
+  const {
+    ownerId,
+    serviceType,
+    referenceId,
+    lineItems,
+    notes,
+    invoiceStatus = "draft",
+  } = params;
 
-export async function createBookingInvoice(params: AutoInvoiceParams): Promise<void> {
-  const { bookingId, ownerId, serviceType, roomId, roomType, roomName, petCount, checkInDate, checkOutDate, addons = [] } = params;
-
-  const nights = differenceInCalendarDays(parseISO(checkOutDate), parseISO(checkInDate));
-  if (nights <= 0) return;
-
-  const [{ data: pricingRows }, { data: roomRow }] = await Promise.all([
-    supabase.from("pricing").select("key, amount_aed"),
-    supabase.from("rooms").select("nightly_rate, capacity_type").eq("id", roomId).single(),
-  ]);
-
-  const prices: Record<string, number> = {};
-  for (const r of pricingRows ?? []) prices[r.key] = r.amount_aed;
-
-  const occ = occupancyTag(petCount);
-  const capacityType = roomRow?.capacity_type ?? occ;
-
-  // Priority order: service-prefixed keys first (e.g. boarding_presidential_suite_twin),
-  // then fall back to shorter variants
-  const candidates = [
-    `${serviceType}_${roomType}_${occ}`,
-    `${serviceType}_${roomType}_${capacityType}`,
-    `${serviceType}_${roomType}`,
-    `${serviceType}_${roomType}_nightly`,
-    `${roomType}_${occ}`,
-    `${roomType}_${capacityType}`,
-    `${roomType}_${occ}_nightly`,
-    `${roomType}_${capacityType}_nightly`,
-    roomType,
-    `${roomType}_nightly`,
-  ];
-  const pricingTableRate = candidates.reduce<number | undefined>((found, k) => found ?? prices[k], undefined);
-  const matchedKey = candidates.find((k) => k in prices) ?? `${serviceType}_${roomType}_${occ}`;
-
-  const nightlyRate = pricingTableRate ?? roomRow?.nightly_rate ?? 0;
-
-  const typeLabel = roomType.replace(/_/g, " ");
-  const occLabel = petCount > 1 ? ` (${occ})` : "";
-  const lineLabel = roomName
-    ? `${roomName} — ${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`
-    : `${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`;
-  const lineItems: LineItem[] = [{
-    pricingKey: matchedKey,
-    label: lineLabel,
-    quantity: nights,
-    unitPrice: nightlyRate,
-    total: nightlyRate * nights,
-  }];
-
-  for (const addon of addons) {
-    const rate = prices[addon.key] ?? 0;
-    lineItems.push({ pricingKey: addon.key, label: addon.label, quantity: 1, unitPrice: rate, total: rate });
-  }
-
-  const subtotal = lineItems.reduce((s, li) => s + li.total, 0);
+  const subtotal = lineItems.reduce((s, li) => s + li.unitPrice * li.quantity, 0);
 
   let discountPct = 0;
   let discountAed = 0;
@@ -170,57 +139,120 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
       total = disc.final_aed;
     }
   } catch {
-    // RPC may not exist yet if migration hasn't been run — proceed without discount
+    // RPC may not exist yet — proceed without discount
   }
 
-  const { data: ownerData } = await supabase.from("owners").select("member_type").eq("id", ownerId).single();
-
-  const breakdown: BillingBreakdown = {
-    lineItems,
-    subtotal,
-    discountPct,
-    discountAed,
-    total,
-    memberType: ownerData?.member_type ?? "standard",
-  };
-
   const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const isBoardingReference = serviceType === "boarding";
 
   const { data: inv, error: invErr } = await supabase
     .from("invoices")
     .insert({
       owner_id: ownerId,
+      // booking_id is FK-bound to bookings. Non-boarding services should link
+      // via service_id to avoid FK failures on appointment/session/package ids.
+      booking_id: isBoardingReference ? referenceId : null,
+      service_id: referenceId,
       service_type: serviceType,
-      service_id: bookingId,
-      status: "draft" as const,
-      subtotal_aed: breakdown.subtotal,
-      subtotal: breakdown.subtotal,
-      discount_pct: breakdown.discountPct,
-      discount_aed: breakdown.discountAed,
-      discount_amount: breakdown.discountAed,
-      total_aed: breakdown.total,
-      total: breakdown.total,
+      status: invoiceStatus,
+      subtotal,
+      subtotal_aed: subtotal,
+      discount_pct: discountPct,
+      discount_aed: discountAed,
+      discount_amount: discountAed,
+      total,
+      total_aed: total,
       due_date: dueDate,
-      notes: null,
+      notes: notes ?? null,
     })
     .select("id")
     .single();
 
   if (invErr) throw invErr;
 
-  const lineRows = breakdown.lineItems.map((li, idx) => ({
+  const lineRows = lineItems.map((li, i) => ({
     invoice_id: inv.id,
-    pricing_key: li.pricingKey,
-    description: li.label,
+    description: li.description,
     quantity: li.quantity,
     unit_price: li.unitPrice,
-    line_total: li.total,
-    total_price: li.total,
-    sort_order: idx,
+    total_price: li.unitPrice * li.quantity,
+    pricing_key: li.pricingKey ?? null,
+    service_type: li.serviceType ?? serviceType,
+    sort_order: i,
   }));
 
   if (lineRows.length > 0) {
     const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);
     if (liErr) throw liErr;
   }
+
+  return inv.id;
+}
+
+// ── Boarding-specific invoice helper ─────────────────────────────────────────
+
+function occupancyTag(petCount: number): string {
+  if (petCount <= 1) return "single";
+  if (petCount === 2) return "twin";
+  return "multiple";
+}
+
+interface AutoInvoiceParams {
+  bookingId: string;
+  ownerId: string;
+  serviceType: ServiceType;
+  roomId: string;
+  roomType: string;
+  roomName?: string;
+  petCount: number;
+  checkInDate: string;
+  checkOutDate: string;
+  addons?: { key: string; label: string }[];
+}
+
+export async function createBookingInvoice(params: AutoInvoiceParams): Promise<void> {
+  const { bookingId, ownerId, roomId, roomType, roomName, petCount, checkInDate, checkOutDate, addons = [] } = params;
+
+  const nights = differenceInCalendarDays(parseISO(checkOutDate), parseISO(checkInDate));
+  if (nights <= 0) return;
+
+  const [addonPriceMap, rateResolved] = await Promise.all([
+    resolveAddonPricesForKeys(addons.map((a) => a.key)),
+    resolveBoardingRate(roomId, petCount),
+  ]);
+
+  const occ = occupancyTag(petCount);
+  const nightlyRate = rateResolved.unitPrice;
+
+  const typeLabel = roomType.replace(/_/g, " ");
+  const occLabel = petCount > 1 ? ` (${occ})` : "";
+  const lineLabel = roomName
+    ? `${roomName} — ${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`
+    : `${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`;
+
+  const lineItems: ServiceInvoiceLineItem[] = [{
+    description: lineLabel,
+    quantity: nights,
+    unitPrice: nightlyRate,
+    pricingKey: rateResolved.pricingKey,
+    serviceType: "boarding",
+  }];
+
+  for (const addon of addons) {
+    const rate = addonPriceMap.get(addon.key) ?? 0;
+    lineItems.push({
+      description: addon.label,
+      quantity: 1,
+      unitPrice: rate,
+      pricingKey: addon.key,
+      serviceType: "addon",
+    });
+  }
+
+  await createServiceInvoice({
+    ownerId,
+    serviceType: "boarding",
+    referenceId: bookingId,
+    lineItems,
+  });
 }

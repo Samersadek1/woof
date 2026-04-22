@@ -14,7 +14,7 @@ import {
   useOwnerParkBookings,
   type ParkBookingWithJoins,
 } from "@/hooks/usePark";
-import { calculateNights } from "@/lib/bookingUtils";
+import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { usePets, useCreatePet, getVaccinationStatus } from "@/hooks/usePets";
 import { useDaycarePackages } from "@/hooks/useDaycare";
@@ -193,7 +193,7 @@ function parkLaneLabel(lane: ParkSize): string {
 
 function groomerLine(g: GroomingAppointmentWithJoins): string {
   if (g.groomer_name?.trim()) return g.groomer_name.trim();
-  if (g.staff) return `${g.staff.first_name} ${g.staff.last_name}`.trim();
+  if (g.staff) return ownerDisplayName(g.staff.first_name, g.staff.last_name);
   return "—";
 }
 
@@ -521,8 +521,18 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
               </div>
 
               {viewInvoice.service_type && (
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
                   Service: <span style={{ textTransform: "capitalize" }}>{viewInvoice.service_type.replace(/_/g, " ")}</span>
+                </p>
+              )}
+              {viewInvoice.booking_ref && (
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
+                  Booking: <span style={{ fontWeight: 500 }}>{viewInvoice.booking_ref}</span>
+                </p>
+              )}
+              {viewInvoice.booking_check_in && viewInvoice.booking_check_out && (
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
+                  Stay: {format(parseISO(viewInvoice.booking_check_in), "d MMM yyyy")} → {format(parseISO(viewInvoice.booking_check_out), "d MMM yyyy")}
                 </p>
               )}
 
@@ -572,13 +582,22 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                 </div>
               </div>
 
+              {viewInvoice.payment_method && (
+                <div className="flex justify-between w-60 ml-auto text-sm mt-1">
+                  <span className="text-muted-foreground">Payment method</span>
+                  <span className="capitalize">{viewInvoice.payment_method}</span>
+                </div>
+              )}
+
               {viewInvoice.paid_at && (
-                <p className="mt-4 text-sm text-emerald-600">
+                <p className="mt-4 text-sm text-emerald-600 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4" />
                   Paid on {format(parseISO(viewInvoice.paid_at), "d MMM yyyy")} via {viewInvoice.payment_method ?? "—"}
                 </p>
               )}
               {viewInvoice.voided_at && (
-                <p className="mt-4 text-sm text-destructive">
+                <p className="mt-4 text-sm text-destructive flex items-center gap-1.5">
+                  <Ban className="h-4 w-4" />
                   Voided on {format(parseISO(viewInvoice.voided_at), "d MMM yyyy")}
                   {viewInvoice.voided_reason ? ` — ${viewInvoice.voided_reason}` : ""}
                 </p>
@@ -626,6 +645,7 @@ const OwnerProfilePage = () => {
     useOwnerGroomingAppointments(id!);
   const { data: ownerParkBookings = [], isLoading: parkHistoryLoading } =
     useOwnerParkBookings(id!);
+  const ownerStatement = useOwnerStatement(id!);
   const updateOwner = useUpdateOwner();
   const deleteOwner = useDeleteOwner();
   const createPet = useCreatePet();
@@ -859,7 +879,7 @@ const OwnerProfilePage = () => {
           <CardContent className="flex flex-col gap-6 p-6 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1.5">
               <h2 className="text-2xl font-semibold">
-                {owner.first_name} {owner.last_name}
+                {ownerDisplayName(owner.first_name, owner.last_name)}
               </h2>
               <p className="text-sm text-muted-foreground">{owner.phone}</p>
               {owner.email && (
@@ -885,6 +905,17 @@ const OwnerProfilePage = () => {
             </div>
 
             <div className="flex items-center gap-6">
+              {!ownerStatement.isLoading && ownerStatement.totalOutstanding > 0 && (
+                <div className="text-right">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-amber-600">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Outstanding
+                  </div>
+                  <p className={`mt-1 text-3xl font-bold tabular-nums ${ownerStatement.totalOutstanding > 500 ? "text-red-600" : "text-amber-600"}`}>
+                    AED {ownerStatement.totalOutstanding.toFixed(2)}
+                  </p>
+                </div>
+              )}
               <div className="text-right">
                 <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-wide">
                   <Wallet className="h-3.5 w-3.5" />
@@ -1361,8 +1392,7 @@ const OwnerProfilePage = () => {
                         to={`/customers/${bookingDetail.stay.owner_id}`}
                         className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
                       >
-                        {bookingDetail.stay.owners.first_name}{" "}
-                        {bookingDetail.stay.owners.last_name}
+                        {ownerDisplayName(bookingDetail.stay.owners.first_name, bookingDetail.stay.owners.last_name)}
                         <ExternalLink className="h-3 w-3" />
                       </Link>
                     ) : (
@@ -1886,7 +1916,7 @@ const OwnerProfilePage = () => {
             <AlertDialogDescription>
               This will permanently delete{" "}
               <span className="font-medium text-foreground">
-                {owner?.first_name} {owner?.last_name}
+                {ownerDisplayName(owner?.first_name ?? null, owner?.last_name ?? null)}
               </span>{" "}
               and all their pet profiles from the database. This action cannot
               be undone.

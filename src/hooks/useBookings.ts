@@ -10,7 +10,15 @@ type BookingPetInsert = Database["public"]["Tables"]["booking_pets"]["Insert"];
 
 export type BookingPetDetail = {
   pet_id: string;
-  pets: { name: string; other_notes: string | null } | null;
+  feeding_notes: string | null;
+  medication_notes: string | null;
+  special_instructions: string | null;
+  pets: {
+    name: string;
+    other_notes: string | null;
+    feeding_instructions: string | null;
+    medications: string | null;
+  } | null;
 };
 
 export type BookingWithDetails = Booking & {
@@ -22,7 +30,7 @@ export type BookingWithDetails = Booking & {
 };
 
 const BOOKING_BASE_SELECT =
-  "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, pets(name, other_notes))";
+  "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications))";
 
 const BOOKING_DETAIL_SELECT =
   `${BOOKING_BASE_SELECT}, booking_items(count)`;
@@ -30,6 +38,14 @@ const BOOKING_DETAIL_SELECT =
 /** Payload accepted by useCreateBooking — booking fields + pet_ids to link */
 export type CreateBookingPayload = Omit<BookingInsert, "id" | "created_at" | "updated_at"> & {
   pet_ids: string[];
+  pet_care_by_pet_id?: Record<
+    string,
+    {
+      feeding_notes?: string | null;
+      medication_notes?: string | null;
+      special_instructions?: string | null;
+    }
+  >;
 };
 
 export const queryKeys = {
@@ -209,7 +225,7 @@ export function useCreateBooking() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ pet_ids, ...bookingData }: CreateBookingPayload) => {
+    mutationFn: async ({ pet_ids, pet_care_by_pet_id, ...bookingData }: CreateBookingPayload) => {
       const { data: booking, error: bookingError } = await supabase
         .from("bookings")
         .insert(bookingData)
@@ -222,6 +238,9 @@ export function useCreateBooking() {
         const bookingPets: BookingPetInsert[] = pet_ids.map((pet_id) => ({
           booking_id: booking.id,
           pet_id,
+          feeding_notes: pet_care_by_pet_id?.[pet_id]?.feeding_notes ?? null,
+          medication_notes: pet_care_by_pet_id?.[pet_id]?.medication_notes ?? null,
+          special_instructions: pet_care_by_pet_id?.[pet_id]?.special_instructions ?? null,
         }));
 
         const { error: petsError } = await supabase

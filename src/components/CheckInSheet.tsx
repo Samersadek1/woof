@@ -25,6 +25,7 @@ import {
 } from "@/hooks/useBookingItems";
 import { useCheckIn, useUpdateBooking } from "@/hooks/useBookings";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 export const OVERVIEW_ITEM_DESCRIPTION = "Overview — belongings (group photo)";
 
@@ -38,6 +39,14 @@ type DraftRow = {
   quantity: number;
   condition_notes: string;
   photo_urls: string[];
+};
+
+type CareRow = {
+  id: string;
+  petName: string;
+  feeding_notes: string;
+  medication_notes: string;
+  special_instructions: string;
 };
 
 function newRow(category: "personal" | "food"): DraftRow {
@@ -102,6 +111,8 @@ export function CheckInSheet({
   const [overviewUrls, setOverviewUrls] = useState<string[]>([]);
   const [overviewDbId, setOverviewDbId] = useState<string | undefined>();
   const [actualCheckInDate, setActualCheckInDate] = useState(bookedCheckInDate);
+  const [careRows, setCareRows] = useState<CareRow[]>([]);
+  const [careLoading, setCareLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -136,6 +147,36 @@ export function CheckInSheet({
   useEffect(() => {
     if (open) setActualCheckInDate(bookedCheckInDate);
   }, [open, bookedCheckInDate]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setCareLoading(true);
+    void supabase
+      .from("booking_pets")
+      .select("id, feeding_notes, medication_notes, special_instructions, pets(name, feeding_instructions, medications, other_notes)")
+      .eq("booking_id", bookingId)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setCareRows([]);
+          setCareLoading(false);
+          return;
+        }
+        const mapped = (data ?? []).map((row: any) => ({
+          id: row.id,
+          petName: row.pets?.name ?? "Pet",
+          feeding_notes: row.feeding_notes ?? row.pets?.feeding_instructions ?? "",
+          medication_notes: row.medication_notes ?? row.pets?.medications ?? "",
+          special_instructions: row.special_instructions ?? row.pets?.other_notes ?? "",
+        }));
+        setCareRows(mapped);
+        setCareLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, bookingId]);
 
   const close = () => {
     onOpenChange(false);
@@ -232,10 +273,25 @@ export function CheckInSheet({
     }
   };
 
+  const saveCareRows = async () => {
+    for (const row of careRows) {
+      const { error } = await supabase
+        .from("booking_pets")
+        .update({
+          feeding_notes: row.feeding_notes.trim() || null,
+          medication_notes: row.medication_notes.trim() || null,
+          special_instructions: row.special_instructions.trim() || null,
+        })
+        .eq("id", row.id);
+      if (error) throw error;
+    }
+  };
+
   const handleSaveItemsOnly = async () => {
     setBusy(true);
     try {
       await saveItemsCore();
+      await saveCareRows();
       toast.success("Belongings saved");
       close();
     } catch (e: unknown) {
@@ -249,6 +305,7 @@ export function CheckInSheet({
     setBusy(true);
     try {
       await saveItemsCore();
+      await saveCareRows();
       await runCheckInAfterSave();
       toast.success("Checked in · belongings saved");
       close();
@@ -468,6 +525,24 @@ export function CheckInSheet({
                   {readOnlyList(personalServer, "Personal belongings")}
                   {readOnlyList(foodServer, "Food & medication")}
                   <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Pet care details</p>
+                  {careLoading ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : careRows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No pet care details found</p>
+                  ) : (
+                    careRows.map((row) => (
+                      <div key={row.id} className="rounded border p-2 text-sm space-y-1.5">
+                        <p className="font-medium">{row.petName}</p>
+                        <p><span className="text-muted-foreground">Feeding:</span> {row.feeding_notes || "—"}</p>
+                        <p><span className="text-muted-foreground">Medication:</span> {row.medication_notes || "—"}</p>
+                        <p><span className="text-muted-foreground">Special:</span> {row.special_instructions || "—"}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="space-y-2">
                     <p className="text-xs font-semibold uppercase text-muted-foreground">Overview photos</p>
                     {overviewServer?.photo_urls?.length ? (
                       <div className="flex flex-wrap gap-1">
@@ -483,6 +558,63 @@ export function CheckInSheet({
               )
             ) : (
               <>
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold">Pet care details</p>
+                  <p className="text-xs text-muted-foreground">Prefilled from profile and editable for this booking/check-in.</p>
+                  {careLoading ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : careRows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No pet care details found</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {careRows.map((row) => (
+                        <div key={row.id} className="rounded border p-3 space-y-2">
+                          <p className="text-sm font-semibold">{row.petName}</p>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Feeding notes</Label>
+                            <Input
+                              value={row.feeding_notes}
+                              onChange={(e) =>
+                                setCareRows((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id ? { ...r, feeding_notes: e.target.value } : r,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Medication notes</Label>
+                            <Input
+                              value={row.medication_notes}
+                              onChange={(e) =>
+                                setCareRows((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id ? { ...r, medication_notes: e.target.value } : r,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Special instructions</Label>
+                            <Input
+                              value={row.special_instructions}
+                              onChange={(e) =>
+                                setCareRows((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id ? { ...r, special_instructions: e.target.value } : r,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="actual-checkin">Check-in date (if different from booked)</Label>
                   <Input

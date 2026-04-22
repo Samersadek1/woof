@@ -14,6 +14,100 @@ export type Database = {
   }
   public: {
     Tables: {
+      addon_rates: {
+        Row: {
+          addon_type: Database["public"]["Enums"]["addon_type"]
+          applicable_services: string[]
+          id: string
+          is_active: boolean
+          label: string
+          price_aed: number
+          unit: string
+          updated_at: string
+        }
+        Insert: {
+          addon_type: Database["public"]["Enums"]["addon_type"]
+          applicable_services?: string[]
+          id?: string
+          is_active?: boolean
+          label: string
+          price_aed?: number
+          unit?: string
+          updated_at?: string
+        }
+        Update: {
+          addon_type?: Database["public"]["Enums"]["addon_type"]
+          applicable_services?: string[]
+          id?: string
+          is_active?: boolean
+          label?: string
+          price_aed?: number
+          unit?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      billing_adjustments: {
+        Row: {
+          adjusted_amount: number | null
+          adjustment_type: string
+          approved_by: string
+          booking_id: string | null
+          created_at: string | null
+          id: string
+          invoice_id: string | null
+          original_amount: number | null
+          owner_id: string | null
+          reason: string
+        }
+        Insert: {
+          adjusted_amount?: number | null
+          adjustment_type: string
+          approved_by: string
+          booking_id?: string | null
+          created_at?: string | null
+          id?: string
+          invoice_id?: string | null
+          original_amount?: number | null
+          owner_id?: string | null
+          reason: string
+        }
+        Update: {
+          adjusted_amount?: number | null
+          adjustment_type?: string
+          approved_by?: string
+          booking_id?: string | null
+          created_at?: string | null
+          id?: string
+          invoice_id?: string | null
+          original_amount?: number | null
+          owner_id?: string | null
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_adjustments_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_adjustments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_adjustments_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_addons: {
         Row: {
           addon_type: Database["public"]["Enums"]["addon_type"]
@@ -69,7 +163,7 @@ export type Database = {
           created_at: string
           description: string
           id: string
-          photo_urls: string[]
+          photo_urls: string[] | null
           quantity: number
           return_notes: string | null
           return_status: string | null
@@ -82,7 +176,7 @@ export type Database = {
           created_at?: string
           description: string
           id?: string
-          photo_urls?: string[]
+          photo_urls?: string[] | null
           quantity?: number
           return_notes?: string | null
           return_status?: string | null
@@ -95,7 +189,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
-          photo_urls?: string[]
+          photo_urls?: string[] | null
           quantity?: number
           return_notes?: string | null
           return_status?: string | null
@@ -163,6 +257,7 @@ export type Database = {
           check_out_date: string
           created_at: string
           do_not_move: boolean
+          dropoff_required: boolean
           extended_from_booking_id: string | null
           id: string
           is_extension: boolean
@@ -171,7 +266,6 @@ export type Database = {
           original_room_type: Database["public"]["Enums"]["room_type"] | null
           owner_id: string
           pickup_required: boolean
-          dropoff_required: boolean
           room_id: string
           staff_id: string | null
           status: Database["public"]["Enums"]["booking_status"]
@@ -188,6 +282,7 @@ export type Database = {
           check_out_date: string
           created_at?: string
           do_not_move?: boolean
+          dropoff_required?: boolean
           extended_from_booking_id?: string | null
           id?: string
           is_extension?: boolean
@@ -196,7 +291,6 @@ export type Database = {
           original_room_type?: Database["public"]["Enums"]["room_type"] | null
           owner_id: string
           pickup_required?: boolean
-          dropoff_required?: boolean
           room_id: string
           staff_id?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
@@ -215,6 +309,7 @@ export type Database = {
           check_out_date?: string
           created_at?: string
           do_not_move?: boolean
+          dropoff_required?: boolean
           extended_from_booking_id?: string | null
           id?: string
           is_extension?: boolean
@@ -223,7 +318,6 @@ export type Database = {
           original_room_type?: Database["public"]["Enums"]["room_type"] | null
           owner_id?: string
           pickup_required?: boolean
-          dropoff_required?: boolean
           room_id?: string
           staff_id?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
@@ -316,42 +410,84 @@ export type Database = {
           },
         ]
       }
+      daycare_package_types: {
+        Row: {
+          base_price_aed: number
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+          total_days: number
+          updated_at: string
+        }
+        Insert: {
+          base_price_aed: number
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+          total_days: number
+          updated_at?: string
+        }
+        Update: {
+          base_price_aed?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+          total_days?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       daycare_packages: {
         Row: {
           created_at: string
           days_used: number
+          dropoff_included: boolean
           expiry_date: string | null
           id: string
           notes: string | null
           owner_id: string
+          package_type_id: string | null
           pet_id: string
+          pickup_included: boolean
           price_paid: number | null
           purchase_date: string
           total_days: number
+          transport_zone: string | null
         }
         Insert: {
           created_at?: string
           days_used?: number
+          dropoff_included?: boolean
           expiry_date?: string | null
           id?: string
           notes?: string | null
           owner_id: string
+          package_type_id?: string | null
           pet_id: string
+          pickup_included?: boolean
           price_paid?: number | null
           purchase_date: string
           total_days: number
+          transport_zone?: string | null
         }
         Update: {
           created_at?: string
           days_used?: number
+          dropoff_included?: boolean
           expiry_date?: string | null
           id?: string
           notes?: string | null
           owner_id?: string
+          package_type_id?: string | null
           pet_id?: string
+          pickup_included?: boolean
           price_paid?: number | null
           purchase_date?: string
           total_days?: number
+          transport_zone?: string | null
         }
         Relationships: [
           {
@@ -359,6 +495,13 @@ export type Database = {
             columns: ["owner_id"]
             isOneToOne: false
             referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daycare_packages_package_type_id_fkey"
+            columns: ["package_type_id"]
+            isOneToOne: false
+            referencedRelation: "daycare_package_types"
             referencedColumns: ["id"]
           },
           {
@@ -376,11 +519,15 @@ export type Database = {
           checked_in_at: string | null
           checked_out_at: string | null
           created_at: string
+          dropoff_used: boolean
           id: string
+          logged_by: string | null
           notes: string | null
           owner_id: string
           package_id: string | null
           pet_id: string
+          pickup_used: boolean
+          remark: string | null
           session_date: string
           staff_id: string | null
         }
@@ -389,11 +536,15 @@ export type Database = {
           checked_in_at?: string | null
           checked_out_at?: string | null
           created_at?: string
+          dropoff_used?: boolean
           id?: string
+          logged_by?: string | null
           notes?: string | null
           owner_id: string
           package_id?: string | null
           pet_id: string
+          pickup_used?: boolean
+          remark?: string | null
           session_date: string
           staff_id?: string | null
         }
@@ -402,11 +553,15 @@ export type Database = {
           checked_in_at?: string | null
           checked_out_at?: string | null
           created_at?: string
+          dropoff_used?: boolean
           id?: string
+          logged_by?: string | null
           notes?: string | null
           owner_id?: string
           package_id?: string | null
           pet_id?: string
+          pickup_used?: boolean
+          remark?: string | null
           session_date?: string
           staff_id?: string | null
         }
@@ -542,11 +697,12 @@ export type Database = {
           appointment_date: string
           appointment_time: string | null
           booking_id: string | null
+          coat_type: string | null
           completed_at: string | null
           created_at: string
           duration_minutes: number | null
           groomer_id: string | null
-          groomer_name: string | null
+          grooming_notes: string | null
           id: string
           in_progress_at: string | null
           no_show: boolean
@@ -554,19 +710,20 @@ export type Database = {
           owner_id: string
           pet_id: string
           price: number | null
-          reminder_sent: boolean
           service: Database["public"]["Enums"]["grooming_service"]
           status: string
+          visit_notes: string | null
         }
         Insert: {
           appointment_date: string
           appointment_time?: string | null
           booking_id?: string | null
+          coat_type?: string | null
           completed_at?: string | null
           created_at?: string
           duration_minutes?: number | null
           groomer_id?: string | null
-          groomer_name?: string | null
+          grooming_notes?: string | null
           id?: string
           in_progress_at?: string | null
           no_show?: boolean
@@ -574,19 +731,20 @@ export type Database = {
           owner_id: string
           pet_id: string
           price?: number | null
-          reminder_sent?: boolean
           service: Database["public"]["Enums"]["grooming_service"]
           status?: string
+          visit_notes?: string | null
         }
         Update: {
           appointment_date?: string
           appointment_time?: string | null
           booking_id?: string | null
+          coat_type?: string | null
           completed_at?: string | null
           created_at?: string
           duration_minutes?: number | null
           groomer_id?: string | null
-          groomer_name?: string | null
+          grooming_notes?: string | null
           id?: string
           in_progress_at?: string | null
           no_show?: boolean
@@ -594,9 +752,9 @@ export type Database = {
           owner_id?: string
           pet_id?: string
           price?: number | null
-          reminder_sent?: boolean
           service?: Database["public"]["Enums"]["grooming_service"]
           status?: string
+          visit_notes?: string | null
         }
         Relationships: [
           {
@@ -628,6 +786,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      grooming_service_rates: {
+        Row: {
+          duration_minutes: number | null
+          id: string
+          is_active: boolean
+          label: string
+          price_aed: number
+          service: Database["public"]["Enums"]["grooming_service"]
+          updated_at: string
+        }
+        Insert: {
+          duration_minutes?: number | null
+          id?: string
+          is_active?: boolean
+          label: string
+          price_aed?: number
+          service: Database["public"]["Enums"]["grooming_service"]
+          updated_at?: string
+        }
+        Update: {
+          duration_minutes?: number | null
+          id?: string
+          is_active?: boolean
+          label?: string
+          price_aed?: number
+          service?: Database["public"]["Enums"]["grooming_service"]
+          updated_at?: string
+        }
+        Relationships: []
       }
       handover_logs: {
         Row: {
@@ -670,8 +858,11 @@ export type Database = {
           description: string
           id: string
           invoice_id: string
+          line_total: number | null
+          pricing_key: string | null
           quantity: number
           service_type: string | null
+          sort_order: number | null
           total_price: number
           unit_price: number
         }
@@ -680,8 +871,11 @@ export type Database = {
           description: string
           id?: string
           invoice_id: string
+          line_total?: number | null
+          pricing_key?: string | null
           quantity?: number
           service_type?: string | null
+          sort_order?: number | null
           total_price: number
           unit_price: number
         }
@@ -690,8 +884,11 @@ export type Database = {
           description?: string
           id?: string
           invoice_id?: string
+          line_total?: number | null
+          pricing_key?: string | null
           quantity?: number
           service_type?: string | null
+          sort_order?: number | null
           total_price?: number
           unit_price?: number
         }
@@ -710,6 +907,7 @@ export type Database = {
           amount_paid: number
           booking_id: string | null
           created_at: string
+          discount_aed: number | null
           discount_amount: number
           discount_pct: number
           due_date: string | null
@@ -718,16 +916,24 @@ export type Database = {
           issue_date: string
           notes: string | null
           owner_id: string
+          paid_at: string | null
           payment_method: Database["public"]["Enums"]["payment_method"] | null
+          service_id: string | null
+          service_type: string | null
           status: Database["public"]["Enums"]["invoice_status"]
           subtotal: number
+          subtotal_aed: number | null
           total: number
+          total_aed: number | null
           updated_at: string
+          voided_at: string | null
+          voided_reason: string | null
         }
         Insert: {
           amount_paid?: number
           booking_id?: string | null
           created_at?: string
+          discount_aed?: number | null
           discount_amount?: number
           discount_pct?: number
           due_date?: string | null
@@ -736,16 +942,24 @@ export type Database = {
           issue_date?: string
           notes?: string | null
           owner_id: string
+          paid_at?: string | null
           payment_method?: Database["public"]["Enums"]["payment_method"] | null
+          service_id?: string | null
+          service_type?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal?: number
+          subtotal_aed?: number | null
           total?: number
+          total_aed?: number | null
           updated_at?: string
+          voided_at?: string | null
+          voided_reason?: string | null
         }
         Update: {
           amount_paid?: number
           booking_id?: string | null
           created_at?: string
+          discount_aed?: number | null
           discount_amount?: number
           discount_pct?: number
           due_date?: string | null
@@ -754,11 +968,18 @@ export type Database = {
           issue_date?: string
           notes?: string | null
           owner_id?: string
+          paid_at?: string | null
           payment_method?: Database["public"]["Enums"]["payment_method"] | null
+          service_id?: string | null
+          service_type?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal?: number
+          subtotal_aed?: number | null
           total?: number
+          total_aed?: number | null
           updated_at?: string
+          voided_at?: string | null
+          voided_reason?: string | null
         }
         Relationships: [
           {
@@ -825,25 +1046,38 @@ export type Database = {
       owners: {
         Row: {
           address: string | null
+          always_full_refund: boolean | null
           always_same_room: boolean
+          billing_notes: string | null
           camera_required: boolean
           created_at: string
+          customer_id: string | null
+          deferred_payment: boolean | null
           email: string | null
           emergency_contact_name: string | null
           emergency_contact_phone: string | null
           emirates_id: string | null
+          extra_discount_pct: number | null
           first_name: string
           how_heard: string | null
           id: string
           is_msh_owned: boolean
           is_vip: boolean
-          last_name: string
+          last_name: string | null
+          low_balance_threshold_override: number | null
           member_type: Database["public"]["Enums"]["member_type"]
           membership_date: string | null
           membership_fee_paid: boolean
           notes: string | null
+          notify_birthday: boolean
+          notify_boarding: boolean
+          notify_boarding_reminder: boolean
+          notify_daycare: boolean
+          notify_grooming: boolean
+          notify_vaccination: boolean
           other_notes: string | null
-          phone: string
+          phone: string | null
+          phone2: string | null
           updated_at: string
           vet_name: string | null
           vet_phone: string | null
@@ -851,25 +1085,38 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          always_full_refund?: boolean | null
           always_same_room?: boolean
+          billing_notes?: string | null
           camera_required?: boolean
           created_at?: string
+          customer_id?: string | null
+          deferred_payment?: boolean | null
           email?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
           emirates_id?: string | null
+          extra_discount_pct?: number | null
           first_name: string
           how_heard?: string | null
           id?: string
           is_msh_owned?: boolean
           is_vip?: boolean
-          last_name: string
+          last_name?: string | null
+          low_balance_threshold_override?: number | null
           member_type?: Database["public"]["Enums"]["member_type"]
           membership_date?: string | null
           membership_fee_paid?: boolean
           notes?: string | null
+          notify_birthday?: boolean
+          notify_boarding?: boolean
+          notify_boarding_reminder?: boolean
+          notify_daycare?: boolean
+          notify_grooming?: boolean
+          notify_vaccination?: boolean
           other_notes?: string | null
-          phone: string
+          phone?: string | null
+          phone2?: string | null
           updated_at?: string
           vet_name?: string | null
           vet_phone?: string | null
@@ -877,25 +1124,38 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          always_full_refund?: boolean | null
           always_same_room?: boolean
+          billing_notes?: string | null
           camera_required?: boolean
           created_at?: string
+          customer_id?: string | null
+          deferred_payment?: boolean | null
           email?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
           emirates_id?: string | null
+          extra_discount_pct?: number | null
           first_name?: string
           how_heard?: string | null
           id?: string
           is_msh_owned?: boolean
           is_vip?: boolean
-          last_name?: string
+          last_name?: string | null
+          low_balance_threshold_override?: number | null
           member_type?: Database["public"]["Enums"]["member_type"]
           membership_date?: string | null
           membership_fee_paid?: boolean
           notes?: string | null
+          notify_birthday?: boolean
+          notify_boarding?: boolean
+          notify_boarding_reminder?: boolean
+          notify_daycare?: boolean
+          notify_grooming?: boolean
+          notify_vaccination?: boolean
           other_notes?: string | null
-          phone?: string
+          phone?: string | null
+          phone2?: string | null
           updated_at?: string
           vet_name?: string | null
           vet_phone?: string | null
@@ -1000,6 +1260,30 @@ export type Database = {
         }
         Relationships: []
       }
+      park_rates: {
+        Row: {
+          id: string
+          is_active: boolean
+          label: string
+          price_per_slot_aed: number
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          is_active?: boolean
+          label?: string
+          price_per_slot_aed?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          is_active?: boolean
+          label?: string
+          price_per_slot_aed?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       pets: {
         Row: {
           active: boolean
@@ -1024,12 +1308,6 @@ export type Database = {
           spayed_neutered: boolean | null
           species: Database["public"]["Enums"]["species"]
           updated_at: string
-          vaccicheck_distemper_tier: string | null
-          vaccicheck_hepatitis_tier: string | null
-          vaccicheck_immunity_rating: string | null
-          vaccicheck_parvovirus_tier: string | null
-          vaccicheck_report_url: string | null
-          vaccicheck_test_date: string | null
           vet_name: string | null
           vet_phone: string | null
           weight_kg: number | null
@@ -1057,12 +1335,6 @@ export type Database = {
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
-          vaccicheck_distemper_tier?: string | null
-          vaccicheck_hepatitis_tier?: string | null
-          vaccicheck_immunity_rating?: string | null
-          vaccicheck_parvovirus_tier?: string | null
-          vaccicheck_report_url?: string | null
-          vaccicheck_test_date?: string | null
           vet_name?: string | null
           vet_phone?: string | null
           weight_kg?: number | null
@@ -1090,12 +1362,6 @@ export type Database = {
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
-          vaccicheck_distemper_tier?: string | null
-          vaccicheck_hepatitis_tier?: string | null
-          vaccicheck_immunity_rating?: string | null
-          vaccicheck_parvovirus_tier?: string | null
-          vaccicheck_report_url?: string | null
-          vaccicheck_test_date?: string | null
           vet_name?: string | null
           vet_phone?: string | null
           weight_kg?: number | null
@@ -1109,6 +1375,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      pricing: {
+        Row: {
+          amount_aed: number
+          category: string
+          id: string
+          key: string
+          label: string
+          updated_at: string | null
+          updated_by: string | null
+        }
+        Insert: {
+          amount_aed?: number
+          category: string
+          id?: string
+          key: string
+          label: string
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Update: {
+          amount_aed?: number
+          category?: string
+          id?: string
+          key?: string
+          label?: string
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Relationships: []
       }
       rooms: {
         Row: {
@@ -1125,6 +1421,8 @@ export type Database = {
           max_pets: number
           nightly_rate: number | null
           notes: string | null
+          pricing_category: string | null
+          pricing_size_tier: string | null
           room_number: string
           room_type: Database["public"]["Enums"]["room_type"]
           street_name: string | null
@@ -1144,6 +1442,8 @@ export type Database = {
           max_pets?: number
           nightly_rate?: number | null
           notes?: string | null
+          pricing_category?: string | null
+          pricing_size_tier?: string | null
           room_number: string
           room_type: Database["public"]["Enums"]["room_type"]
           street_name?: string | null
@@ -1163,6 +1463,8 @@ export type Database = {
           max_pets?: number
           nightly_rate?: number | null
           notes?: string | null
+          pricing_category?: string | null
+          pricing_size_tier?: string | null
           room_number?: string
           room_type?: Database["public"]["Enums"]["room_type"]
           street_name?: string | null
@@ -1358,17 +1660,64 @@ export type Database = {
           },
         ]
       }
+      wallet_topup_requests: {
+        Row: {
+          amount_requested: number
+          id: string
+          notes: string | null
+          owner_id: string
+          received_at: string | null
+          reminder_sent_at: string | null
+          requested_at: string | null
+          requested_by: string
+          status: string
+        }
+        Insert: {
+          amount_requested: number
+          id?: string
+          notes?: string | null
+          owner_id: string
+          received_at?: string | null
+          reminder_sent_at?: string | null
+          requested_at?: string | null
+          requested_by?: string
+          status?: string
+        }
+        Update: {
+          amount_requested?: number
+          id?: string
+          notes?: string | null
+          owner_id?: string
+          received_at?: string | null
+          reminder_sent_at?: string | null
+          requested_at?: string | null
+          requested_by?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_topup_requests_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wallet_transactions: {
         Row: {
           amount: number
           balance_after: number
           created_at: string
           id: string
+          invoice_id: string | null
           notes: string | null
           owner_id: string
           payment_method: Database["public"]["Enums"]["payment_method"] | null
+          performed_by: string | null
           reference_id: string | null
           reference_type: string | null
+          service_type: string | null
           staff_id: string | null
           transaction_type: Database["public"]["Enums"]["transaction_type"]
         }
@@ -1377,11 +1726,14 @@ export type Database = {
           balance_after: number
           created_at?: string
           id?: string
+          invoice_id?: string | null
           notes?: string | null
           owner_id: string
           payment_method?: Database["public"]["Enums"]["payment_method"] | null
+          performed_by?: string | null
           reference_id?: string | null
           reference_type?: string | null
+          service_type?: string | null
           staff_id?: string | null
           transaction_type: Database["public"]["Enums"]["transaction_type"]
         }
@@ -1390,15 +1742,25 @@ export type Database = {
           balance_after?: number
           created_at?: string
           id?: string
+          invoice_id?: string | null
           notes?: string | null
           owner_id?: string
           payment_method?: Database["public"]["Enums"]["payment_method"] | null
+          performed_by?: string | null
           reference_id?: string | null
           reference_type?: string | null
+          service_type?: string | null
           staff_id?: string | null
           transaction_type?: Database["public"]["Enums"]["transaction_type"]
         }
         Relationships: [
+          {
+            foreignKeyName: "wallet_transactions_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "wallet_transactions_owner_id_fkey"
             columns: ["owner_id"]
@@ -1415,56 +1777,94 @@ export type Database = {
           },
         ]
       }
-      wallet_topup_requests: {
-        Row: {
-          id: string
-          owner_id: string
-          amount_requested: number
-          status: string
-          requested_by: string
-          requested_at: string
-          received_at: string | null
-          reminder_sent_at: string | null
-          notes: string | null
-        }
-        Insert: {
-          id?: string
-          owner_id: string
-          amount_requested: number
-          status?: string
-          requested_by?: string
-          requested_at?: string
-          received_at?: string | null
-          reminder_sent_at?: string | null
-          notes?: string | null
-        }
-        Update: {
-          id?: string
-          owner_id?: string
-          amount_requested?: number
-          status?: string
-          requested_by?: string
-          requested_at?: string
-          received_at?: string | null
-          reminder_sent_at?: string | null
-          notes?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "wallet_topup_requests_owner_id_fkey"
-            columns: ["owner_id"]
-            isOneToOne: false
-            referencedRelation: "owners"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      apply_member_discount: {
+        Args: { p_owner_id: string; p_subtotal: number }
+        Returns: {
+          discount_aed: number
+          discount_pct: number
+          final_aed: number
+        }[]
+      }
+      calculate_cancellation_refund: {
+        Args: {
+          p_invoice_id: string
+          p_owner_id: string
+          p_service_start: string
+        }
+        Returns: {
+          hours_notice: number
+          override_active: boolean
+          policy_label: string
+          refund_aed: number
+          refund_pct: number
+        }[]
+      }
+      flag_overdue_invoices: { Args: never; Returns: number }
+      get_price: { Args: { p_key: string }; Returns: number }
+      get_statement_of_account: {
+        Args: { p_owner_id: string }
+        Returns: {
+          created_at: string
+          days_overdue: number
+          due_date: string
+          invoice_id: string
+          invoice_number: string
+          service_type: string
+          status: string
+          total_aed: number
+        }[]
+      }
+      is_off_peak: {
+        Args: { check_in_date: string; check_out_date: string }
+        Returns: boolean
+      }
+      process_wallet_payment: {
+        Args: { p_invoice_id: string; p_performed_by: string }
+        Returns: Json
+      }
+      resolve_boarding_line_price: {
+        Args: {
+          p_base_key: string
+          p_check_in_date: string
+          p_check_out_date: string
+          p_quantity: number
+          p_tier?: string
+        }
+        Returns: {
+          discount_amount: number
+          discount_pct: number
+          pricing_key: string
+          subtotal: number
+          total: number
+          unit_price: number
+          vat: number
+        }[]
+      }
+      resolve_boarding_pricing_key: {
+        Args: {
+          p_base_key: string
+          p_check_in_date: string
+          p_check_out_date: string
+        }
+        Returns: string
+      }
+      resolve_line_price: {
+        Args: { p_pricing_key: string; p_quantity: number; p_tier?: string }
+        Returns: {
+          discount_amount: number
+          discount_pct: number
+          subtotal: number
+          total: number
+          unit_price: number
+          vat: number
+        }[]
+      }
+      tier_discount_pct: { Args: { tier: string }; Returns: number }
     }
     Enums: {
       addon_type:
@@ -1498,6 +1898,10 @@ export type Database = {
         | "paid"
         | "partially_paid"
         | "cancelled"
+        | "finalised"
+        | "outstanding"
+        | "overdue"
+        | "voided"
       member_type: "standard" | "silver" | "gold"
       park_day_status: "open" | "closed" | "assessment_only"
       park_size: "small" | "big"
@@ -1537,6 +1941,8 @@ export type Database = {
         | "refund"
         | "membership_fee"
         | "adjustment"
+        | "card_payment"
+        | "cash_payment"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1698,6 +2104,10 @@ export const Constants = {
         "paid",
         "partially_paid",
         "cancelled",
+        "finalised",
+        "outstanding",
+        "overdue",
+        "voided",
       ],
       member_type: ["standard", "silver", "gold"],
       park_day_status: ["open", "closed", "assessment_only"],
@@ -1741,6 +2151,8 @@ export const Constants = {
         "refund",
         "membership_fee",
         "adjustment",
+        "card_payment",
+        "cash_payment",
       ],
     },
   },

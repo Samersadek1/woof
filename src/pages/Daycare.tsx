@@ -1,9 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { format, parseISO } from "date-fns";
+import { addDays, format, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
+import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
+import { buildDaycareTags, tagToneClass } from "@/lib/operationsTags";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import {
   useDaycarePackages,
   useSessionsByPackage,
@@ -110,8 +114,19 @@ interface OwnerComboboxProps {
   placeholder?:  string;
 }
 
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const maybeMessage = (error as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.trim().length > 0) {
+      return maybeMessage;
+    }
+  }
+  return "Unknown error";
+}
+
 function OwnerCombobox({
-  selectedId, selectedLabel, onSelect, onClear, placeholder = "Search owner by name or phone…",
+  selectedId, selectedLabel, onSelect, onClear, placeholder = "Search client or pet name / phone…",
 }: OwnerComboboxProps) {
   const [query, setQuery]   = useState("");
   const [open, setOpen]     = useState(false);
@@ -158,12 +173,13 @@ function OwnerCombobox({
               {[1, 2].map(i => <Skeleton key={i} className="h-7 w-full" />)}
             </div>
           ) : !owners?.length ? (
-            <p className="p-3 text-sm text-muted-foreground">No owners found</p>
+            <p className="p-3 text-sm text-muted-foreground">No clients or pets found</p>
           ) : (
             <ul className="max-h-52 overflow-y-auto divide-y">
               {owners.map(o => {
-                const label = `${o.first_name} ${o.last_name}`;
+                const label = ownerDisplayName(o.first_name, o.last_name);
                 const petCount = o.pets?.length ?? 0;
+                const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
                 return (
                   <li key={o.id}>
                     <button
@@ -178,7 +194,7 @@ function OwnerCombobox({
                     >
                       <span className="font-medium">{label}</span>
                       <span className="text-xs text-muted-foreground">
-                        {petCount} dog{petCount !== 1 ? "s" : ""} · {o.phone}
+                        {petCount} pet{petCount !== 1 ? "s" : ""}{petNames ? ` · ${petNames}` : ""}{o.phone ? ` · ${o.phone}` : ""}
                       </span>
                     </button>
                   </li>
@@ -548,6 +564,17 @@ function PlannerTab() {
 
   const [ownerId, setOwnerId] = useState<string | null>(ownerIdParam);
   const [packageId, setPackageId] = useState<string | null>(packageIdParam);
+  const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
+  const [billingChoiceByPet, setBillingChoiceByPet] = useState<Record<string, string>>({});
+  const [checkInDraft, setCheckInDraft] = useState({
+    session_date: TODAY,
+    pickup_used: false,
+    dropoff_used: false,
+    transport_zone: "dubai" as "dubai" | "abudhabi",
+    logged_by: "",
+    remark: "",
+  });
+  const [isSubmittingCheckIn, setIsSubmittingCheckIn] = useState(false);
 
   useEffect(() => {
     setOwnerId(ownerIdParam);
@@ -560,19 +587,47 @@ function PlannerTab() {
 
   const resolvedOwnerLabel =
     ownerFromUrl?.id === ownerId
-      ? `${ownerFromUrl.first_name} ${ownerFromUrl.last_name}`
+      ? ownerDisplayName(ownerFromUrl.first_name, ownerFromUrl.last_name)
       : null;
 
   const { data: pets } = usePets(ownerId ?? "");
   const { data: packages } = useDaycarePackages(ownerId ?? "");
+  const addDay = useAddDaycareDay();
   const { data: sessions, isLoading: sessionsLoading } =
     useSessionsByPackage(packageId ?? "");
+  const { data: pricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
+    queryKey: ["pricing", "daycare_checkin"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pricing")
+        .select("key, amount_aed")
+        .in("key", ["daycare_single_day"]);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const { data: transportPricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
+    queryKey: ["pricing", "transport_zones", "daycare"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pricing")
+        .select("key, amount_aed")
+        .in("key", ["transport_dubai", "transport_abudhabi"]);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
 
   const selectedPkg = packages?.find((p) => p.id === packageId) ?? null;
   const selectedPet = pets?.find((p) => p.id === selectedPkg?.pet_id) ?? null;
 
   const pickupsUsed = sessions?.filter((s) => s.pickup_used).length ?? 0;
   const dropoffsUsed = sessions?.filter((s) => s.dropoff_used).length ?? 0;
+  const daycareSinglePrice = pricingRows.find((r) => r.key === "daycare_single_day")?.amount_aed ?? 0;
+  const transportRate = useMemo(() => {
+    const key = checkInDraft.transport_zone === "abudhabi" ? "transport_abudhabi" : "transport_dubai";
+    return transportPricingRows.find((r) => r.key === key)?.amount_aed ?? 0;
+  }, [transportPricingRows, checkInDraft.transport_zone]);
 
   useEffect(() => {
     if (!packageId || !packages?.length) return;
@@ -582,15 +637,46 @@ function PlannerTab() {
     }
   }, [packages, packageId, ownerId, setSearchParams]);
 
+  function getUsablePackagesForPet(petId: string) {
+    return (packages ?? []).filter((pkg) => {
+      if (pkg.pet_id !== petId) return false;
+      if ((pkg.days_used ?? 0) >= (pkg.total_days ?? 0)) return false;
+      if (pkg.expiry_date && pkg.expiry_date < TODAY) return false;
+      return true;
+    });
+  }
+
+  useEffect(() => {
+    setBillingChoiceByPet((prev) => {
+      const next: Record<string, string> = {};
+      for (const petId of selectedPetIds) {
+        const usable = getUsablePackagesForPet(petId);
+        const prevChoice = prev[petId];
+        if (prevChoice === "single" || usable.some((pkg) => pkg.id === prevChoice)) {
+          next[petId] = prevChoice;
+        } else if (usable.length > 0) {
+          next[petId] = usable[0].id;
+        } else {
+          next[petId] = "single";
+        }
+      }
+      return next;
+    });
+  }, [selectedPetIds, packages]);
+
   const handleOwnerSelect = (id: string, _label: string) => {
     setOwnerId(id);
     setPackageId(null);
+    setSelectedPetIds([]);
+    setBillingChoiceByPet({});
     syncPlannerSearchParams(setSearchParams, id, null);
   };
 
   const handleOwnerClear = () => {
     setOwnerId(null);
     setPackageId(null);
+    setSelectedPetIds([]);
+    setBillingChoiceByPet({});
     syncPlannerSearchParams(setSearchParams, null, null);
   };
 
@@ -599,50 +685,317 @@ function PlannerTab() {
     return `${pet?.name ?? "Unknown"} — ${pkg.days_used}/${pkg.total_days}`;
   }
 
+  const togglePetSelection = (petId: string, checked: boolean) => {
+    setSelectedPetIds((prev) => {
+      if (checked) {
+        if (prev.includes(petId)) return prev;
+        return [...prev, petId];
+      }
+      return prev.filter((id) => id !== petId);
+    });
+  };
+
+  const handleCheckInSelected = async () => {
+    if (!ownerId) {
+      toast.error("Select a client first");
+      return;
+    }
+    if (selectedPetIds.length === 0) {
+      toast.error("Select at least one dog");
+      return;
+    }
+
+    setIsSubmittingCheckIn(true);
+    const failures: string[] = [];
+    let successCount = 0;
+
+    for (const petId of selectedPetIds) {
+      const pet = pets?.find((p) => p.id === petId);
+      const petName = pet?.name ?? "Pet";
+      const choice = billingChoiceByPet[petId] ?? "single";
+      const chosenPackageId = choice === "single" ? null : choice;
+
+      try {
+        const session = await addDay.mutateAsync({
+          session_date: checkInDraft.session_date,
+          pet_id: petId,
+          owner_id: ownerId,
+          package_id: chosenPackageId,
+          pickup_used: checkInDraft.pickup_used,
+          dropoff_used: checkInDraft.dropoff_used,
+          logged_by: checkInDraft.logged_by || null,
+          remark: checkInDraft.remark || null,
+        });
+
+        if (!chosenPackageId) {
+          const zoneLabel = checkInDraft.transport_zone === "abudhabi" ? "Abu Dhabi" : "Dubai";
+          const lineItems: {
+            description: string;
+            quantity: number;
+            unitPrice: number;
+            pricingKey?: string;
+            serviceType?: string;
+          }[] = [{
+            description: `${petName} — Daycare single day`,
+            quantity: 1,
+            unitPrice: daycareSinglePrice,
+            pricingKey: "daycare_single_day",
+            serviceType: "daycare",
+          }];
+
+          if (checkInDraft.pickup_used) {
+            lineItems.push({
+              description: `${petName} — Pickup transport (${zoneLabel})`,
+              quantity: 1,
+              unitPrice: transportRate,
+              pricingKey: `transport_${checkInDraft.transport_zone}`,
+              serviceType: "addon",
+            });
+          }
+          if (checkInDraft.dropoff_used) {
+            lineItems.push({
+              description: `${petName} — Drop-off transport (${zoneLabel})`,
+              quantity: 1,
+              unitPrice: transportRate,
+              pricingKey: `transport_${checkInDraft.transport_zone}`,
+              serviceType: "addon",
+            });
+          }
+
+          await createServiceInvoice({
+            ownerId,
+            serviceType: "daycare",
+            referenceId: session.id,
+            lineItems,
+            notes: checkInDraft.remark || null,
+            invoiceStatus: "finalised",
+          });
+        }
+
+        successCount += 1;
+      } catch (error) {
+        const message = extractErrorMessage(error);
+        failures.push(`${petName}: ${message}`);
+      }
+    }
+
+    setIsSubmittingCheckIn(false);
+
+    if (successCount > 0) {
+      toast.success(`Checked in ${successCount} dog${successCount !== 1 ? "s" : ""}`);
+      setSelectedPetIds([]);
+      setBillingChoiceByPet({});
+      setCheckInDraft((prev) => ({
+        ...prev,
+        pickup_used: false,
+        dropoff_used: false,
+        logged_by: "",
+        remark: "",
+      }));
+    }
+
+    if (failures.length > 0) {
+      toast.error(`Some check-ins failed: ${failures.join(" | ")}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Selectors */}
-      <div className="flex flex-col sm:flex-row gap-3 max-w-2xl">
-        <div className="flex-1 space-y-1">
-          <Label className="text-xs uppercase tracking-wide text-muted-foreground">Client / Dog</Label>
-          <OwnerCombobox
-            selectedId={
-              ownerId && (resolvedOwnerLabel || ownerDetailLoading)
-                ? ownerId
-                : null
-            }
-            selectedLabel={
-              ownerDetailLoading
-                ? "Loading…"
-                : resolvedOwnerLabel
-            }
-            onSelect={handleOwnerSelect}
-            onClear={handleOwnerClear}
-          />
-        </div>
+      {/* Search-first check-in */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Daycare Check-in</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Search owner or dog</Label>
+            <OwnerCombobox
+              selectedId={
+                ownerId && (resolvedOwnerLabel || ownerDetailLoading)
+                  ? ownerId
+                  : null
+              }
+              selectedLabel={
+                ownerDetailLoading
+                  ? "Loading…"
+                  : resolvedOwnerLabel
+              }
+              onSelect={handleOwnerSelect}
+              onClear={handleOwnerClear}
+              placeholder="Search by client name, pet name, or phone…"
+            />
+          </div>
 
-        <div className="flex-1 space-y-1">
-          <Label className="text-xs uppercase tracking-wide text-muted-foreground">Package</Label>
-          <Select
-            value={packageId ?? ""}
-            onValueChange={(pid) => {
-              setPackageId(pid);
-              syncPlannerSearchParams(setSearchParams, ownerId, pid);
-            }}
-            disabled={!ownerId || !packages?.length}
-          >
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder={!ownerId ? "Select client first" : packages?.length ? "Select package" : "No packages"} />
-            </SelectTrigger>
-            <SelectContent>
-              {packages?.map(pkg => (
-                <SelectItem key={pkg.id} value={pkg.id}>
-                  {pkgLabel(pkg)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+          {!!ownerId && (
+            <>
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Select dog(s)</Label>
+                {!pets?.length ? (
+                  <p className="text-sm text-muted-foreground">No pets found for this client.</p>
+                ) : (
+                  <div className="rounded-lg border divide-y">
+                    {pets.map((pet) => {
+                      const checked = selectedPetIds.includes(pet.id);
+                      const usablePackages = getUsablePackagesForPet(pet.id);
+                      return (
+                        <div key={pet.id} className="p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id={`checkin_pet_${pet.id}`}
+                                checked={checked}
+                                onCheckedChange={(v) => togglePetSelection(pet.id, v === true)}
+                              />
+                              <Label htmlFor={`checkin_pet_${pet.id}`} className="font-medium">
+                                {pet.name}
+                              </Label>
+                            </div>
+                            <Badge variant="outline" className={usablePackages.length > 0 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : ""}>
+                              {usablePackages.length > 0 ? `${usablePackages.length} active package${usablePackages.length !== 1 ? "s" : ""}` : "No active package"}
+                            </Badge>
+                          </div>
+
+                          {checked && (
+                            <div className="pl-6 max-w-md space-y-1">
+                              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Billing path</Label>
+                              <Select
+                                value={billingChoiceByPet[pet.id] ?? (usablePackages[0]?.id ?? "single")}
+                                onValueChange={(value) => {
+                                  setBillingChoiceByPet((prev) => ({ ...prev, [pet.id]: value }));
+                                }}
+                              >
+                                <SelectTrigger className="h-8">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="single">Single day (invoice now)</SelectItem>
+                                  {usablePackages.map((pkg) => (
+                                    <SelectItem key={pkg.id} value={pkg.id}>
+                                      Use package ({pkg.total_days - pkg.days_used} remaining)
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="checkin_session_date">Date</Label>
+                  <Input
+                    id="checkin_session_date"
+                    type="date"
+                    value={checkInDraft.session_date}
+                    onChange={(e) => setCheckInDraft((prev) => ({ ...prev, session_date: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="checkin_logged_by">Logged by</Label>
+                  <Input
+                    id="checkin_logged_by"
+                    value={checkInDraft.logged_by}
+                    onChange={(e) => setCheckInDraft((prev) => ({ ...prev, logged_by: e.target.value }))}
+                    placeholder="Staff name"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Transport options</Label>
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="checkin_pickup"
+                      checked={checkInDraft.pickup_used}
+                      onCheckedChange={(v) => setCheckInDraft((prev) => ({ ...prev, pickup_used: v === true }))}
+                    />
+                    <Label htmlFor="checkin_pickup" className="text-sm">Pickup</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="checkin_dropoff"
+                      checked={checkInDraft.dropoff_used}
+                      onCheckedChange={(v) => setCheckInDraft((prev) => ({ ...prev, dropoff_used: v === true }))}
+                    />
+                    <Label htmlFor="checkin_dropoff" className="text-sm">Drop-off</Label>
+                  </div>
+                </div>
+                {(checkInDraft.pickup_used || checkInDraft.dropoff_used) && (
+                  <div className="max-w-xs space-y-1.5">
+                    <Label>Transport zone</Label>
+                    <Select
+                      value={checkInDraft.transport_zone}
+                      onValueChange={(value) => setCheckInDraft((prev) => ({
+                        ...prev,
+                        transport_zone: value as "dubai" | "abudhabi",
+                      }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="dubai">Dubai</SelectItem>
+                        <SelectItem value="abudhabi">Abu Dhabi</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Transport rate: AED {transportRate.toFixed(2)} / trip</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="checkin_remark">Remark</Label>
+                <Textarea
+                  id="checkin_remark"
+                  rows={2}
+                  value={checkInDraft.remark}
+                  onChange={(e) => setCheckInDraft((prev) => ({ ...prev, remark: e.target.value }))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Single-day check-ins create a finalized invoice immediately using the single-day daycare rate.
+                </p>
+              </div>
+
+              <Button
+                onClick={handleCheckInSelected}
+                disabled={isSubmittingCheckIn || selectedPetIds.length === 0}
+              >
+                {isSubmittingCheckIn && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Check in {selectedPetIds.length > 0 ? `${selectedPetIds.length} pet${selectedPetIds.length !== 1 ? "s" : ""}` : "selected pets"}
+              </Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Planner package selector */}
+      <div className="max-w-xl space-y-1">
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground">Package planner view</Label>
+        <Select
+          value={packageId ?? ""}
+          onValueChange={(pid) => {
+            setPackageId(pid);
+            syncPlannerSearchParams(setSearchParams, ownerId, pid);
+          }}
+          disabled={!ownerId || !packages?.length}
+        >
+          <SelectTrigger className="h-9">
+            <SelectValue placeholder={!ownerId ? "Select client from check-in above" : packages?.length ? "Select package" : "No packages"} />
+          </SelectTrigger>
+          <SelectContent>
+            {packages?.map(pkg => (
+              <SelectItem key={pkg.id} value={pkg.id}>
+                {pkgLabel(pkg)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Empty state */}
@@ -739,7 +1092,7 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
             <p className="font-semibold truncate">
               {pkg.pets?.name ?? "Unknown Pet"}
               <span className="font-normal text-muted-foreground"> — </span>
-              {pkg.owners ? `${pkg.owners.first_name} ${pkg.owners.last_name}` : "Unknown Owner"}
+              {pkg.owners ? ownerDisplayName(pkg.owners.first_name, pkg.owners.last_name) : "Unknown Owner"}
             </p>
             <div className="flex items-center gap-1.5 flex-wrap">
               <Badge variant="outline" className={MEMBER_BADGE[memberType] ?? MEMBER_BADGE.standard}>
@@ -788,21 +1141,169 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
 
 // ── Packages tab: NewPackageSheet ─────────────────────────────────────────────
 
+interface PkgTypeRow { id: string; name: string; total_days: number; base_price_aed: number; sort_order: number }
+
+type DaycareListPreset = "today" | "tomorrow" | "next7";
+
+function DaycareOperationsTab() {
+  const [datePreset, setDatePreset] = useState<DaycareListPreset>("today");
+  const [anchorDate, setAnchorDate] = useState(TODAY);
+
+  const rangeStart = useMemo(
+    () => (datePreset === "tomorrow" ? format(addDays(parseISO(anchorDate), 1), "yyyy-MM-dd") : anchorDate),
+    [datePreset, anchorDate],
+  );
+  const rangeEnd = useMemo(
+    () => (datePreset === "next7" ? format(addDays(parseISO(rangeStart), 6), "yyyy-MM-dd") : rangeStart),
+    [datePreset, rangeStart],
+  );
+
+  const { data: sessions = [], isLoading } = useQuery({
+    queryKey: ["daycare_sessions", "operations", rangeStart, rangeEnd],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("daycare_sessions")
+        .select("id, session_date, checked_in, checked_in_at, notes, package_id, pickup_used, dropoff_used, pets(name), owners(first_name, last_name)")
+        .gte("session_date", rangeStart)
+        .lte("session_date", rangeEnd)
+        .order("session_date", { ascending: true })
+        .order("checked_in_at", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Operations Filters</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button size="sm" variant={datePreset === "today" ? "default" : "outline"} onClick={() => setDatePreset("today")}>Today</Button>
+          <Button size="sm" variant={datePreset === "tomorrow" ? "default" : "outline"} onClick={() => setDatePreset("tomorrow")}>Tomorrow</Button>
+          <Button size="sm" variant={datePreset === "next7" ? "default" : "outline"} onClick={() => setDatePreset("next7")}>Next 7 days</Button>
+          <Input
+            type="date"
+            value={anchorDate}
+            onChange={(e) => {
+              setAnchorDate(e.target.value);
+              setDatePreset("today");
+            }}
+            className="w-44"
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Daycare Operations List</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-11 w-full" />)}
+            </div>
+          ) : sessions.length === 0 ? (
+            <p className="py-6 text-sm text-muted-foreground text-center">No daycare sessions found for this range.</p>
+          ) : (
+            <div className="space-y-2">
+              {sessions.map((s: any) => {
+                const owner = ownerDisplayName(s.owners?.first_name, s.owners?.last_name);
+                const tags = buildDaycareTags({
+                  sessionDate: s.session_date,
+                  todayDate: TODAY,
+                  checkedIn: Boolean(s.checked_in),
+                  packageId: s.package_id,
+                });
+                return (
+                  <div key={s.id} className="rounded-md border px-3 py-2 text-sm flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{s.pets?.name ?? "—"} - {owner}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {format(parseISO(s.session_date), "d MMM yyyy")} · {s.notes || "No notes"}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {tags.map((tag) => (
+                          <Badge key={`${s.id}-${tag.key}`} variant="outline" className={tagToneClass(tag.tone)}>
+                            {tag.label}
+                          </Badge>
+                        ))}
+                        {s.pickup_used && <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200">Pickup</Badge>}
+                        {s.dropoff_used && <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200">Drop-off</Badge>}
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {s.checked_in_at ? format(parseISO(s.checked_in_at), "HH:mm") : "—"}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const createPackage = useCreateDaycarePackage();
 
   const [ownerId,    setOwnerId]    = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
   const [form, setForm] = useState({
-    pet_id:        "",
-    total_days:    12,
-    purchase_date: TODAY,
-    expiry_date:   "",
-    price_paid:    "",
-    notes:         "",
+    pet_id:         "",
+    package_type_id: "",
+    purchase_date:  TODAY,
+    expiry_date:    "",
+    pickup:         false,
+    dropoff:        false,
+    transport_zone: "dubai" as "dubai" | "abudhabi",
+    price_override: "",
+    notes:          "",
   });
 
   const { data: pets } = usePets(ownerId ?? "");
+
+  const { data: packageTypes = [] } = useQuery<PkgTypeRow[]>({
+    queryKey: ["daycare_package_types"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("daycare_package_types")
+        .select("id, name, total_days, base_price_aed, sort_order")
+        .eq("is_active", true)
+        .order("sort_order");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: packageTransportPricing = [] } = useQuery<{ key: string; amount_aed: number }[]>({
+    queryKey: ["pricing", "transport_zones", "daycare"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pricing")
+        .select("key, amount_aed")
+        .in("key", ["transport_dubai", "transport_abudhabi"]);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const selectedType = packageTypes.find(t => t.id === form.package_type_id) ?? null;
+
+  const transportRate = useMemo(() => {
+    const key = form.transport_zone === "abudhabi" ? "transport_abudhabi" : "transport_dubai";
+    return packageTransportPricing.find((r) => r.key === key)?.amount_aed ?? 0;
+  }, [packageTransportPricing, form.transport_zone]);
+
+  const totalDays = selectedType?.total_days ?? 0;
+  const basePrice = selectedType?.base_price_aed ?? 0;
+  const pickupTotal = form.pickup ? totalDays * transportRate : 0;
+  const dropoffTotal = form.dropoff ? totalDays * transportRate : 0;
+  const calculatedPrice = basePrice + pickupTotal + dropoffTotal;
+  const displayPrice = form.price_override ? parseFloat(form.price_override) || 0 : calculatedPrice;
 
   const setField = (field: string, value: unknown) =>
     setForm(f => ({ ...f, [field]: value }));
@@ -810,7 +1311,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
   const resetAndClose = () => {
     setOwnerId(null);
     setOwnerLabel(null);
-    setForm({ pet_id: "", total_days: 12, purchase_date: TODAY, expiry_date: "", price_paid: "", notes: "" });
+    setForm({ pet_id: "", package_type_id: "", purchase_date: TODAY, expiry_date: "", pickup: false, dropoff: false, transport_zone: "dubai", price_override: "", notes: "" });
     onClose();
   };
 
@@ -820,18 +1321,70 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
       toast.error("Select a client and pet");
       return;
     }
+    if (!selectedType) {
+      toast.error("Select a package type");
+      return;
+    }
+
+    const pricePaid = displayPrice;
+
     createPackage.mutate({
-      owner_id:      ownerId,
-      pet_id:        form.pet_id,
-      total_days:    form.total_days,
-      purchase_date: form.purchase_date,
-      expiry_date:   form.expiry_date   || null,
-      price_paid:    form.price_paid    ? parseFloat(form.price_paid) : null,
-      notes:         form.notes         || null,
-      days_used:     0,
-    }, {
-      onSuccess: () => { toast.success("Package created"); resetAndClose(); },
-      onError:   (err) => toast.error(err.message),
+      owner_id:        ownerId,
+      pet_id:          form.pet_id,
+      total_days:      selectedType.total_days,
+      purchase_date:   form.purchase_date,
+      expiry_date:     form.expiry_date || null,
+      price_paid:      pricePaid,
+      notes:           form.notes || null,
+      days_used:       0,
+      package_type_id: selectedType.id,
+      pickup_included: form.pickup,
+      dropoff_included: form.dropoff,
+      transport_zone:  (form.pickup || form.dropoff) ? form.transport_zone : null,
+    } as Parameters<typeof createPackage.mutate>[0], {
+      onSuccess: (pkg) => {
+        toast.success("Package created");
+        resetAndClose();
+
+        const lineItems: { description: string; quantity: number; unitPrice: number; pricingKey?: string; serviceType?: string }[] = [{
+          description: `${selectedType.name} — ${selectedType.total_days} days`,
+          quantity: 1,
+          unitPrice: basePrice,
+          pricingKey: `daycare:${selectedType.name.toLowerCase().replace(/\s+/g, "_")}`,
+          serviceType: "daycare",
+        }];
+        const zoneLabel = form.transport_zone === "abudhabi" ? "Abu Dhabi" : "Dubai";
+        if (form.pickup) {
+          lineItems.push({
+            description: `Pickup transport (${zoneLabel}) × ${totalDays} days`,
+            quantity: totalDays,
+            unitPrice: transportRate,
+            pricingKey: `transport_${form.transport_zone}`,
+            serviceType: "addon",
+          });
+        }
+        if (form.dropoff) {
+          lineItems.push({
+            description: `Drop-off transport (${zoneLabel}) × ${totalDays} days`,
+            quantity: totalDays,
+            unitPrice: transportRate,
+            pricingKey: `transport_${form.transport_zone}`,
+            serviceType: "addon",
+          });
+        }
+
+        createServiceInvoice({
+          ownerId: ownerId!,
+          serviceType: "daycare",
+          referenceId: pkg.id,
+          lineItems,
+        }).then(() => {
+          toast.success("Draft invoice created");
+        }).catch((err) => {
+          console.error("Daycare auto-invoice failed:", err);
+        });
+      },
+      onError: (err) => toast.error(err.message),
     });
   };
 
@@ -840,7 +1393,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
           <SheetTitle>New Daycare Package</SheetTitle>
-          <SheetDescription>Add a prepaid day care package for a pet.</SheetDescription>
+          <SheetDescription>Sell a prepaid daycare package for a pet.</SheetDescription>
         </SheetHeader>
 
         <form onSubmit={handleSave} className="mt-6 space-y-4">
@@ -872,30 +1425,73 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
             </Select>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="pkg_days">Total days <span className="text-destructive">*</span></Label>
-              <Input
-                id="pkg_days"
-                type="number"
-                min="1"
-                value={form.total_days}
-                onChange={(e) => setField("total_days", parseInt(e.target.value) || 1)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="pkg_price">Price paid (AED)</Label>
-              <Input
-                id="pkg_price"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={form.price_paid}
-                onChange={(e) => setField("price_paid", e.target.value)}
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="pkg_type">Package <span className="text-destructive">*</span></Label>
+            <Select
+              value={form.package_type_id}
+              onValueChange={(v) => { setField("package_type_id", v); setField("price_override", ""); }}
+            >
+              <SelectTrigger id="pkg_type">
+                <SelectValue placeholder="Select package type" />
+              </SelectTrigger>
+              <SelectContent>
+                {packageTypes.map(t => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name} — {t.total_days} days — AED {t.base_price_aed}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+
+          {selectedType && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Transport</h4>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="pkg_pickup"
+                      checked={form.pickup}
+                      onCheckedChange={(v) => setField("pickup", v === true)}
+                    />
+                    <Label htmlFor="pkg_pickup" className="text-sm">Pickup</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="pkg_dropoff"
+                      checked={form.dropoff}
+                      onCheckedChange={(v) => setField("dropoff", v === true)}
+                    />
+                    <Label htmlFor="pkg_dropoff" className="text-sm">Drop-off</Label>
+                  </div>
+                </div>
+                {(form.pickup || form.dropoff) && (
+                  <div className="space-y-1.5">
+                    <Label>Transport zone</Label>
+                    <Select
+                      value={form.transport_zone}
+                      onValueChange={(v) => setField("transport_zone", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="dubai">Dubai</SelectItem>
+                        <SelectItem value="abudhabi">Abu Dhabi</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      AED {transportRate}/trip × {totalDays} days
+                      {form.pickup && form.dropoff ? " × 2 (pickup + drop-off)" : ""}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <Separator />
+            </>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
@@ -919,6 +1515,46 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
             </div>
           </div>
 
+          {selectedType && (
+            <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>{selectedType.name}</span>
+                <span>AED {basePrice.toFixed(2)}</span>
+              </div>
+              {form.pickup && (
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>Pickup ({totalDays} trips)</span>
+                  <span>AED {pickupTotal.toFixed(2)}</span>
+                </div>
+              )}
+              {form.dropoff && (
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>Drop-off ({totalDays} trips)</span>
+                  <span>AED {dropoffTotal.toFixed(2)}</span>
+                </div>
+              )}
+              <Separator />
+              <div className="flex justify-between font-semibold">
+                <span>Total</span>
+                <span>AED {calculatedPrice.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="pkg_price_override">Price override (AED)</Label>
+            <Input
+              id="pkg_price_override"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder={calculatedPrice ? calculatedPrice.toFixed(2) : "0.00"}
+              value={form.price_override}
+              onChange={(e) => setField("price_override", e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Leave blank to use calculated price</p>
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="pkg_notes">Notes</Label>
             <Textarea
@@ -931,9 +1567,9 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
 
           <Separator />
 
-          <Button type="submit" className="w-full" disabled={createPackage.isPending}>
+          <Button type="submit" className="w-full" disabled={createPackage.isPending || !selectedType}>
             {createPackage.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save Package
+            Save Package{displayPrice > 0 ? ` — AED ${displayPrice.toFixed(2)}` : ""}
           </Button>
         </form>
       </SheetContent>
@@ -1008,8 +1644,8 @@ function PackagesTab() {
 
 const DaycarePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab =
-    searchParams.get("tab") === "packages" ? "packages" : "planner";
+  const requestedTab = searchParams.get("tab");
+  const tab = requestedTab === "packages" || requestedTab === "operations" ? requestedTab : "planner";
 
   const setTab = (value: string) => {
     setSearchParams(
@@ -1029,11 +1665,16 @@ const DaycarePage = () => {
         <Tabs value={tab} onValueChange={setTab} className="space-y-6">
           <TabsList>
             <TabsTrigger value="planner">Planner</TabsTrigger>
+            <TabsTrigger value="operations">Operations</TabsTrigger>
             <TabsTrigger value="packages">Packages</TabsTrigger>
           </TabsList>
 
           <TabsContent value="planner" className="mt-0">
             <PlannerTab />
+          </TabsContent>
+
+          <TabsContent value="operations" className="mt-0">
+            <DaycareOperationsTab />
           </TabsContent>
 
           <TabsContent value="packages" className="mt-0">

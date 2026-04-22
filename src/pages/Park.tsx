@@ -8,8 +8,11 @@ import {
   subDays,
 } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
+import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { useOwners } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import {
   useParkBookings,
   useParkDayFlag,
@@ -86,7 +89,7 @@ function slotDisplayLabel(slot_start: string, slot_end: string): string {
 }
 
 function ownerLabel(o: { first_name: string; last_name: string }): string {
-  return `${o.first_name} ${o.last_name}`.trim();
+  return ownerDisplayName(o.first_name, o.last_name);
 }
 
 function bookingsForSlot(
@@ -108,7 +111,7 @@ function bookingDisplayLine(b: ParkBookingWithJoins): string {
     b.pets?.name?.toUpperCase() ?? b.pet_name_raw?.toUpperCase() ?? "PET";
   const own =
     b.owners
-      ? `${b.owners.first_name} ${b.owners.last_name}`.toUpperCase()
+      ? ownerDisplayName(b.owners.first_name, b.owners.last_name).toUpperCase()
       : b.owner_name_raw?.toUpperCase() ?? "OWNER";
   return `${pet} – ${own}`;
 }
@@ -166,7 +169,7 @@ function ParkOwnerSearch({
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
       <Input
         className="pl-9"
-        placeholder="Search owner by name or phone…"
+        placeholder="Search client or pet name / phone…"
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -183,11 +186,13 @@ function ParkOwnerSearch({
               <Skeleton className="h-8 w-full" />
             </div>
           ) : !owners?.length ? (
-            <p className="p-3 text-sm text-muted-foreground">No owners found</p>
+            <p className="p-3 text-sm text-muted-foreground">No clients or pets found</p>
           ) : (
             <ul className="max-h-56 overflow-y-auto divide-y">
               {owners.map((o) => {
-                const label = `${o.first_name} ${o.last_name}`;
+                const label = ownerDisplayName(o.first_name, o.last_name);
+                const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
+                const details = [petNames, o.phone].filter(Boolean).join(" · ");
                 return (
                   <li key={o.id}>
                     <button
@@ -202,7 +207,7 @@ function ParkOwnerSearch({
                     >
                       <span className="font-medium">{label}</span>
                       <span className="ml-2 text-xs text-muted-foreground">
-                        {o.phone}
+                        {details}
                       </span>
                     </button>
                   </li>
@@ -238,6 +243,31 @@ const ParkPage = () => {
   const createBooking = useCreateParkBooking();
   const deleteBooking = useDeleteParkBooking();
   const setDayFlag = useSetParkDayFlag();
+
+  const { data: parkSlotFromPricing } = useQuery({
+    queryKey: ["pricing", "park_slot"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("pricing").select("amount_aed").eq("key", "park_slot").maybeSingle();
+      if (error) throw error;
+      return data?.amount_aed ?? null;
+    },
+  });
+  const { data: parkRates = [] } = useQuery({
+    queryKey: ["park_rates"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("park_rates")
+        .select("price_per_slot_aed")
+        .eq("is_active", true)
+        .limit(1);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const slotPrice =
+    typeof parkSlotFromPricing === "number" && parkSlotFromPricing > 0
+      ? parkSlotFromPricing
+      : (parkRates[0]?.price_per_slot_aed ?? 0);
 
   const effectiveStatus: ParkDayStatus = dayFlag?.status ?? "open";
 
@@ -311,8 +341,9 @@ const ParkPage = () => {
     }
 
     try {
+      const createdIds: string[] = [];
       for (const petId of selectedPetIds) {
-        await createBooking.mutateAsync({
+        const booking = await createBooking.mutateAsync({
           visit_date: dateStr,
           slot_start: sheetSlot.slot_start,
           slot_end: sheetSlot.slot_end,
@@ -321,7 +352,9 @@ const ParkPage = () => {
           pet_id: petId,
           is_assessment: isAssessment,
           notes: bookingNotes.trim() || null,
+          price: slotPrice,
         });
+        createdIds.push(booking.id);
       }
       toast.success(
         selectedPetIds.size === 1
@@ -329,6 +362,23 @@ const ParkPage = () => {
           : `${selectedPetIds.size} bookings saved.`,
       );
       closeSheet();
+
+      if (slotPrice > 0 && ownerId) {
+        for (const id of createdIds) {
+          createServiceInvoice({
+            ownerId,
+            serviceType: "park",
+            referenceId: id,
+            lineItems: [{
+              description: `Park slot — ${format(parseISO(dateStr), "d MMM yyyy")} ${sheetSlot.slot_start}–${sheetSlot.slot_end}`,
+              quantity: 1,
+              unitPrice: slotPrice,
+              pricingKey: "park:standard_slot",
+              serviceType: "park",
+            }],
+          }).catch((err) => console.error("Park auto-invoice failed:", err));
+        }
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Could not save booking.";
       toast.error(msg);

@@ -9,7 +9,7 @@ import {
 } from "@/hooks/useGrooming";
 import { usePetBookings, type BookingWithDetails } from "@/hooks/useBookings";
 import { usePetParkBookings, type ParkBookingWithJoins } from "@/hooks/usePark";
-import { calculateNights } from "@/lib/bookingUtils";
+import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { VaccinationEditor } from "@/components/VaccinationEditor";
 import { PetDocuments } from "@/components/PetDocuments";
@@ -153,7 +153,7 @@ function parkLaneLabel(lane: ParkSize): string {
 
 function groomerLine(g: GroomingAppointmentWithJoins): string {
   if (g.groomer_name?.trim()) return g.groomer_name.trim();
-  if (g.staff) return `${g.staff.first_name} ${g.staff.last_name}`.trim();
+  if (g.staff) return ownerDisplayName(g.staff.first_name, g.staff.last_name);
   return "—";
 }
 
