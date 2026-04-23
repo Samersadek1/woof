@@ -27,7 +27,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -50,6 +49,7 @@ import {
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   ChevronLeft,
   ChevronRight,
@@ -62,18 +62,24 @@ import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
 
 type ParkDayStatus = Database["public"]["Enums"]["park_day_status"];
+type AssessmentStatus = Database["public"]["Enums"]["assessment_status"];
 
 const ANCHOR = new Date(2000, 0, 1);
 
-/** 10 hourly slots: 08:00–09:00 … 17:00–18:00 */
+/** 30-minute slots: 08:00–08:30 … 17:30–18:00 */
 const PARK_SLOTS: { slot_start: string; slot_end: string }[] = Array.from(
-  { length: 10 },
+  { length: 20 },
   (_, i) => {
-    const h = 8 + i;
+    const totalMinutes = 8 * 60 + i * 30;
+    const endMinutes = totalMinutes + 30;
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    const eh = Math.floor(endMinutes / 60);
+    const em = endMinutes % 60;
     const pad = (n: number) => String(n).padStart(2, "0");
     return {
-      slot_start: `${pad(h)}:00:00`,
-      slot_end: `${pad(h + 1)}:00:00`,
+      slot_start: `${pad(h)}:${pad(m)}:00`,
+      slot_end: `${pad(eh)}:${pad(em)}:00`,
     };
   },
 );
@@ -81,6 +87,20 @@ const PARK_SLOTS: { slot_start: string; slot_end: string }[] = Array.from(
 function normalizeSlotTime(t: string): string {
   const m = t.match(/^(\d{2}:\d{2}:\d{2})/);
   return m ? m[1] : t.slice(0, 8);
+}
+
+function slotMinutes(t: string): number {
+  const time = normalizeSlotTime(t);
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function minutesToTime(total: number): string {
+  const clamped = Math.max(0, Math.min(total, 24 * 60));
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:00`;
 }
 
 function slotDisplayLabel(slot_start: string, slot_end: string): string {
@@ -97,8 +117,12 @@ function bookingsForSlot(
   bookings: ParkBookingWithJoins[],
   slotStart: string,
 ): ParkBookingWithJoins[] {
-  const key = normalizeSlotTime(slotStart);
-  return bookings.filter((b) => normalizeSlotTime(b.slot_start) === key);
+  const startM = slotMinutes(slotStart);
+  return bookings.filter((b) => {
+    const bookingStart = slotMinutes(b.slot_start);
+    const bookingEnd = slotMinutes(b.slot_end);
+    return bookingStart <= startM && startM < bookingEnd;
+  });
 }
 
 function primaryBooking(
@@ -114,7 +138,13 @@ function bookingDisplayLine(b: ParkBookingWithJoins): string {
     b.owners
       ? ownerDisplayName(b.owners.first_name, b.owners.last_name).toUpperCase()
       : b.owner_name_raw?.toUpperCase() ?? "OWNER";
-  return `${pet} – ${own}`;
+  return `${b.is_assessment ? "ASS · " : ""}${pet} – ${own}`;
+}
+
+function bookingTimeRangeLabel(b: ParkBookingWithJoins): string {
+  const start = parse(normalizeSlotTime(b.slot_start), "HH:mm:ss", ANCHOR);
+  const end = parse(normalizeSlotTime(b.slot_end), "HH:mm:ss", ANCHOR);
+  return `${format(start, "h:mm a")} - ${format(end, "h:mm a")}`;
 }
 
 // ── Owner search (typeahead) ─────────────────────────────────────────────────
@@ -294,14 +324,21 @@ const ParkPage = () => {
     slot_start: string;
     slot_end: string;
   } | null>(null);
+  const [durationMinutes, setDurationMinutes] = useState(30);
 
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
   const [selectedPetIds, setSelectedPetIds] = useState<Set<string>>(new Set());
-  const [isAssessment, setIsAssessment] = useState(false);
+  const [bookingType, setBookingType] = useState<"park" | "assessment">("park");
   const [bookingNotes, setBookingNotes] = useState("");
 
   const { data: pets = [] } = usePets(ownerId ?? "");
+  const filteredPets = useMemo(() => {
+    if (bookingType !== "assessment") return pets;
+    return pets.filter((p) =>
+      ["not_assessed", "scheduled"].includes((p.assessment_status as AssessmentStatus) ?? "not_assessed"),
+    );
+  }, [pets, bookingType]);
 
   const [popoverBooking, setPopoverBooking] = useState<ParkBookingWithJoins | null>(
     null,
@@ -313,10 +350,11 @@ const ParkPage = () => {
       return;
     }
     setSheetSlot({ slot_start, slot_end });
+    setDurationMinutes(30);
     setOwnerId(null);
     setOwnerLabel(null);
     setSelectedPetIds(new Set());
-    setIsAssessment(effectiveStatus === "assessment_only");
+    setBookingType(effectiveStatus === "assessment_only" ? "assessment" : "park");
     setBookingNotes("");
     setSheetOpen(true);
   };
@@ -347,13 +385,26 @@ const ParkPage = () => {
 
     try {
       const createdIds: string[] = [];
-      const groupedRate = parkGroupPricing(selectedPetIds.size, parkPriceMap);
-      const perBookingPrice = selectedPetIds.size > 0 ? groupedRate.total / selectedPetIds.size : slotPrice;
+      const slotStartMinutes = slotMinutes(sheetSlot.slot_start);
+      const slotEndMinutes = Math.min(slotStartMinutes + durationMinutes, 18 * 60);
+      const effectiveEnd =
+        slotEndMinutes > slotStartMinutes
+          ? minutesToTime(slotEndMinutes)
+          : minutesToTime(slotStartMinutes + 30);
+      const isAssessment = bookingType === "assessment";
+      const groupedRate = isAssessment
+        ? { total: 0, label: "Assessment", pricingKey: "assessment" as const }
+        : parkGroupPricing(selectedPetIds.size, parkPriceMap);
+      const perBookingPrice = isAssessment
+        ? 0
+        : selectedPetIds.size > 0
+          ? groupedRate.total / selectedPetIds.size
+          : slotPrice;
       for (const petId of selectedPetIds) {
         const booking = await createBooking.mutateAsync({
           visit_date: dateStr,
           slot_start: sheetSlot.slot_start,
-          slot_end: sheetSlot.slot_end,
+          slot_end: effectiveEnd,
           size_lane: "big",
           owner_id: ownerId,
           pet_id: petId,
@@ -362,6 +413,16 @@ const ParkPage = () => {
           price: perBookingPrice,
         });
         createdIds.push(booking.id);
+        if (isAssessment) {
+          const { error: petError } = await supabase
+            .from("pets")
+            .update({
+              assessment_status: "scheduled",
+              assessment_date: dateStr,
+            })
+            .eq("id", petId);
+          if (petError) throw petError;
+        }
       }
       toast.success(
         selectedPetIds.size === 1
@@ -370,7 +431,7 @@ const ParkPage = () => {
       );
       closeSheet();
 
-      if (groupedRate.total > 0 && ownerId && createdIds.length > 0) {
+      if (!isAssessment && groupedRate.total > 0 && ownerId && createdIds.length > 0) {
         createServiceInvoice({
           ownerId,
           serviceType: "park",
@@ -420,7 +481,12 @@ const ParkPage = () => {
   };
 
   const slotLabelReadOnly = sheetSlot
-    ? slotDisplayLabel(sheetSlot.slot_start, sheetSlot.slot_end)
+    ? slotDisplayLabel(
+        sheetSlot.slot_start,
+        minutesToTime(
+          Math.min(slotMinutes(sheetSlot.slot_start) + durationMinutes, 18 * 60),
+        ),
+      )
     : "";
   const bookingsBySlot = useMemo(() => {
     const map = new Map<string, ParkBookingWithJoins[]>();
@@ -552,8 +618,15 @@ const ParkPage = () => {
                         <PopoverTrigger asChild>
                           <button
                             type="button"
-                            className="h-full min-h-[3.25rem] w-full rounded-md bg-amber-100 px-2 py-2 text-left text-xs font-semibold uppercase tracking-tight text-amber-950 border border-amber-200/80 hover:bg-amber-200/80 transition-colors"
+                            className={`h-full min-h-[3.25rem] w-full rounded-md px-2 py-2 text-left text-xs font-semibold uppercase tracking-tight border transition-colors ${
+                              primary.is_assessment
+                                ? "bg-amber-100 text-amber-950 border-amber-300 hover:bg-amber-200/80"
+                                : "bg-sky-100 text-sky-900 border-sky-300 hover:bg-sky-200/80"
+                            }`}
                           >
+                            <div className="mb-1 text-[10px] font-medium normal-case opacity-80">
+                              {bookingTimeRangeLabel(primary)}
+                            </div>
                             <span className="line-clamp-2">
                               {bookingDisplayLine(primary)}
                               {cellBookings.length > 1
@@ -564,6 +637,14 @@ const ParkPage = () => {
                         </PopoverTrigger>
                         <PopoverContent align="center" className="w-80">
                           <div className="space-y-3">
+                            <div>
+                              <p className="text-xs uppercase text-muted-foreground">
+                                Duration
+                              </p>
+                              <p className="font-medium">
+                                {bookingTimeRangeLabel(primary)}
+                              </p>
+                            </div>
                             <div>
                               <p className="text-xs uppercase text-muted-foreground">
                                 Pet
@@ -667,6 +748,23 @@ const ParkPage = () => {
               <Input value={slotLabelReadOnly} readOnly className="bg-muted/50" />
             </div>
             <div className="grid gap-2">
+              <Label>Duration</Label>
+              <Select
+                value={String(durationMinutes)}
+                onValueChange={(v) => setDurationMinutes(Number(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">30 minutes</SelectItem>
+                  <SelectItem value="60">60 minutes</SelectItem>
+                  <SelectItem value="90">90 minutes</SelectItem>
+                  <SelectItem value="120">120 minutes</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
               <Label>Owner</Label>
               <ParkOwnerSearch
                 selectedOwnerId={ownerId}
@@ -690,11 +788,11 @@ const ParkPage = () => {
                 <p className="text-sm text-muted-foreground">
                   Select an owner to list pets.
                 </p>
-              ) : pets.length === 0 ? (
+              ) : filteredPets.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No pets on file.</p>
               ) : (
                 <ul className="space-y-2 rounded-md border p-3 max-h-48 overflow-y-auto">
-                  {pets.map((p) => (
+                  {filteredPets.map((p) => (
                     <li key={p.id} className="flex items-center gap-2">
                       <Checkbox
                         id={`park-pet-${p.id}`}
@@ -713,15 +811,28 @@ const ParkPage = () => {
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2">
-              <Label htmlFor="park-assessment" className="cursor-pointer">
-                Assessment visit
-              </Label>
-              <Switch
-                id="park-assessment"
-                checked={isAssessment}
-                onCheckedChange={setIsAssessment}
-              />
+            <div className="space-y-2 rounded-lg border px-3 py-3">
+              <Label>Booking type</Label>
+              <RadioGroup
+                value={bookingType}
+                onValueChange={(v) => setBookingType(v as "park" | "assessment")}
+                disabled={effectiveStatus === "assessment_only"}
+                className="grid gap-2"
+              >
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <RadioGroupItem value="park" id="park-type-park" />
+                  Park visit
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <RadioGroupItem value="assessment" id="park-type-assessment" />
+                  Assessment
+                </label>
+              </RadioGroup>
+              {bookingType === "assessment" && (
+                <p className="text-xs text-amber-700">
+                  Assessment visits are scheduled as zero-charge park slots.
+                </p>
+              )}
             </div>
 
             <div className="grid gap-2">

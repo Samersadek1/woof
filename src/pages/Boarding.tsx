@@ -8,6 +8,7 @@ import {
   useRooms,
   useCreateBooking,
   useUpdateBooking,
+  isAssessmentRequiredError,
 } from "@/hooks/useBookings";
 import type { BookingWithDetails, CreateBookingPayload } from "@/hooks/useBookings";
 import { useOwners } from "@/hooks/useOwners";
@@ -70,6 +71,30 @@ type CatRoomType =
   | "cattery_super_presidential"
   | "cattery_presidential"
   | "cattery_deluxe";
+
+function showAssessmentRequiredToast(options: {
+  err: Error;
+  navigate: ReturnType<typeof useNavigate>;
+  ownerId: string;
+  petId?: string;
+  petName?: string;
+}) {
+  const { err, navigate, ownerId, petId, petName } = options;
+  if (!isAssessmentRequiredError(err)) {
+    toast.error(err.message || "Failed to create booking");
+    return;
+  }
+  toast.error(`${petName ?? "This pet"} hasn't completed a behavioural assessment yet.`, {
+    description: err.message,
+    action: petId
+      ? {
+          label: "Schedule Assessment",
+          onClick: () =>
+            navigate(`/customers/${ownerId}/pets/${petId}?schedule_assessment=1`),
+        }
+      : undefined,
+  });
+}
 
 const DAYS = 14;
 const ROOM_COL_W = 160; // px
@@ -163,9 +188,31 @@ function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): s
         <strong>${escapeHtml(petName)}</strong>
         ${feeding ? `<div class="sub">Feeding: ${escapeHtml(feeding)}</div>` : `<div class="sub">Feeding: —</div>`}
         ${medication ? `<div class="sub">Medication: ${escapeHtml(medication)}</div>` : `<div class="sub">Medication: —</div>`}
-        ${special ? `<div class="sub">Special instructions: ${escapeHtml(special)}</div>` : ""}
-        ${petNote ? `<div class="sub">Profile note: ${escapeHtml(petNote)}</div>` : ""}
+        ${special ? `<div class="sub">Special instructions: ${escapeHtml(special)}</div>` : `<div class="sub">Special instructions: —</div>`}
+        ${petNote ? `<div class="sub">Profile note: ${escapeHtml(petNote)}</div>` : `<div class="sub">Profile note: —</div>`}
       </li>`;
+    })
+    .join("");
+  const petChecklistCards = booking.booking_pets
+    .map((bp) => {
+      const petName = bp.pets?.name ?? "Unknown pet";
+      const feeding = (bp.feeding_notes ?? bp.pets?.feeding_instructions ?? "").trim() || "—";
+      const medication = (bp.medication_notes ?? bp.pets?.medications ?? "").trim() || "—";
+      const special = (bp.special_instructions ?? "").trim() || "—";
+      return `<div class="pet-check">
+        <div class="pet-check-title">${escapeHtml(petName)}</div>
+        <div class="row-checks">
+          <div class="check-item"><span class="checkbox"></span> Feeding AM</div>
+          <div class="check-item"><span class="checkbox"></span> Feeding PM</div>
+          <div class="check-item"><span class="checkbox"></span> Medication AM</div>
+          <div class="check-item"><span class="checkbox"></span> Medication PM</div>
+          <div class="check-item"><span class="checkbox"></span> Walk / Potty</div>
+          <div class="check-item"><span class="checkbox"></span> Water refill</div>
+        </div>
+        <div class="inst"><span class="inst-label">Feeding instructions:</span> ${escapeHtml(feeding)}</div>
+        <div class="inst"><span class="inst-label">Medication instructions:</span> ${escapeHtml(medication)}</div>
+        <div class="inst"><span class="inst-label">Special instructions:</span> ${escapeHtml(special)}</div>
+      </div>`;
     })
     .join("");
   const ownerNote = booking.owners?.other_notes?.trim();
@@ -213,9 +260,24 @@ function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): s
         <div><div class="label">Belongings</div><div class="value">${belongingsCount}</div></div>
       </div>
 
+      <div class="label">Belongings checklist</div>
+      <div class="row-checks">
+        <div class="check-item"><span class="checkbox"></span> Food</div>
+        <div class="check-item"><span class="checkbox"></span> Medication pack</div>
+        <div class="check-item"><span class="checkbox"></span> Leash / Harness</div>
+        <div class="check-item"><span class="checkbox"></span> Toy</div>
+        <div class="check-item"><span class="checkbox"></span> Bed / Blanket</div>
+        <div class="check-item"><span class="checkbox"></span> Other items</div>
+      </div>
+
       <div class="grid">
         <div><div class="label">Do Not Move</div><div class="value">${booking.do_not_move ? "Yes" : "No"}</div></div>
         <div><div class="label">Created by</div><div class="value">${escapeHtml(createdBy)}</div></div>
+      </div>
+
+      <div class="label">Care task boxes</div>
+      <div class="care-grid">
+        ${petChecklistCards || '<div class="value">—</div>'}
       </div>
 
       <div class="label">Booking notes</div>
@@ -261,6 +323,14 @@ async function printKennelCards(bookings: BookingWithDetails[], printTitle: stri
     .list li { margin-bottom: 4px; }
     .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .tag { display: inline-block; border: 1px solid #ccc; border-radius: 999px; padding: 2px 8px; font-size: 11px; }
+    .care-grid { display: grid; gap: 8px; margin-top: 6px; }
+    .pet-check { border: 1px solid #222; border-radius: 8px; padding: 8px; }
+    .pet-check-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+    .row-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; margin-top: 4px; }
+    .check-item { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+    .checkbox { width: 12px; height: 12px; border: 1.5px solid #222; display: inline-block; border-radius: 2px; }
+    .inst { font-size: 12px; margin-top: 3px; }
+    .inst-label { font-weight: 600; }
     @media print {
       body { padding: 8px; }
       .card { margin-bottom: 12px; }
@@ -534,6 +604,7 @@ export function DogBoardingCalendar({
       dropoff_required: form.dropoff_required,
       staff_id: null,
       status: "confirmed",
+      booking_type: "boarding",
     };
 
     createBooking.mutate(payload, {
@@ -575,7 +646,14 @@ export function DogBoardingCalendar({
           toast.error("Invoice not created: " + (err?.message ?? "unknown error"));
         });
       },
-      onError: (err) => toast.error(err.message || "Failed to create booking"),
+      onError: (err) =>
+        showAssessmentRequiredToast({
+          err,
+          navigate,
+          ownerId: form.owner_id,
+          petId: form.pet_ids[0],
+          petName: pets.find((p) => p.id === form.pet_ids[0])?.name,
+        }),
     });
   };
 
@@ -1696,6 +1774,7 @@ function CatBoardingCalendar({
       dropoff_required: form.dropoff_required,
       staff_id: null,
       status: "confirmed",
+      booking_type: "boarding",
     };
 
     createBookingMut.mutate(payload, {
@@ -1737,7 +1816,14 @@ function CatBoardingCalendar({
           toast.error("Invoice not created: " + (err?.message ?? "unknown error"));
         });
       },
-      onError: (err) => toast.error(err.message || "Failed to create booking"),
+      onError: (err) =>
+        showAssessmentRequiredToast({
+          err,
+          navigate,
+          ownerId: form.owner_id,
+          petId: form.pet_ids[0],
+          petName: pets.find((p) => p.id === form.pet_ids[0])?.name,
+        }),
     });
   };
 

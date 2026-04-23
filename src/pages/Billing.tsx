@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { addonRateUiGroup } from "@/lib/groomingCatalog";
+import GroomingPricingGrid from "@/components/billing/GroomingPricingGrid";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import {
   useWalletTransactions,
@@ -979,7 +980,13 @@ function PricingTab() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">Service rates are used to auto-price bookings. Press Enter or blur to save.</p>
+      <Tabs defaultValue="core" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="core">Core Pricing</TabsTrigger>
+          <TabsTrigger value="grooming-v2">Grooming (v2)</TabsTrigger>
+        </TabsList>
 
+        <TabsContent value="core" className="mt-0 space-y-6">
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Live Rate Card (pricing table)</CardTitle>
@@ -1121,7 +1128,7 @@ function PricingTab() {
       {/* Grooming Rates */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming Services</CardTitle>
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming Services (Legacy v1)</CardTitle>
           <p className="text-xs text-muted-foreground font-normal pt-1">
             Default service prices are pinned to the live rate card keys below. Brushing has no dedicated rate-card key and remains from `grooming_service_rates`.
           </p>
@@ -1403,6 +1410,22 @@ function PricingTab() {
           </CardContent>
         </Card>
       ) : null}
+        </TabsContent>
+
+        <TabsContent value="grooming-v2" className="mt-0 space-y-6">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming (v2) — Package × Size Grid</CardTitle>
+              <p className="text-xs text-muted-foreground font-normal pt-1">
+                Live 5 × 4 grid (Grande, Bijoux, Deshedding Long/Smooth, Bath & Blow across S/M/L/XL).
+              </p>
+            </CardHeader>
+            <CardContent className="p-0">
+              <GroomingPricingGrid />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

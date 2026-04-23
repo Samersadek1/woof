@@ -9,7 +9,7 @@ import {
 } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
-import { useOwners } from "@/hooks/useOwners";
+import { useOwner, useOwners } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -94,6 +94,19 @@ const SERVICE_BADGE: Record<GroomingService, string> = {
   deshedding: "bg-orange-100 text-orange-800 border-orange-200",
   brushing: "bg-teal-100 text-teal-800 border-teal-200",
   pawdicure: "bg-pink-100 text-pink-800 border-pink-200",
+};
+
+type GroomingPackageV2 =
+  | "grande"
+  | "bijoux"
+  | "deshedding_long"
+  | "deshedding_smooth"
+  | "bath_blow";
+
+const GROOMING_PACKAGE_BY_SERVICE: Partial<Record<GroomingService, GroomingPackageV2>> = {
+  full_groom: "grande",
+  full_bath: "bath_blow",
+  deshedding: "deshedding_smooth",
 };
 
 function serviceLabel(s: GroomingService): string {
@@ -474,6 +487,7 @@ const GroomingPage = () => {
   const [bookingId, setBookingId] = useState<string | null>(null);
 
   const { data: pets = [] } = usePets(ownerId ?? "");
+  const { data: selectedOwner } = useOwner(ownerId ?? "");
   const { data: bookingHits = [] } = useBookingsForGroomingLink(
     linkBoarding ? bookingSearch : "",
   );
@@ -522,18 +536,47 @@ const GroomingPage = () => {
     return m;
   }, [groomingRates, groomingPriceCard]);
 
-  useEffect(() => {
-    const rate = rateMap[service];
-    if (rate) {
-      setPrice(String(rate.price_aed));
-      if (rate.duration_minutes) setDurationMin(rate.duration_minutes);
-    }
-  }, [service, rateMap]);
-
   const selectedPet = useMemo(
     () => pets.find((p) => p.id === petId),
     [pets, petId],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPrice = async () => {
+      const rate = rateMap[service];
+      if (rate && !cancelled) {
+        setPrice(String(rate.price_aed));
+        if (rate.duration_minutes) setDurationMin(rate.duration_minutes);
+      }
+
+      const pkg = GROOMING_PACKAGE_BY_SERVICE[service];
+      if (!pkg) return;
+
+      const ownerTier = (selectedOwner?.member_type ?? "standard") as string;
+      const petSize = ((selectedPet as any)?.size_category as "S" | "M" | "L" | "XL" | undefined) ?? "M";
+      try {
+        const { data, error } = await supabase.rpc("resolve_grooming_price", {
+          p_package: pkg,
+          p_size: petSize,
+          p_quantity: 1,
+          p_tier: ownerTier,
+        });
+        if (error) throw error;
+        const row = (data as { unit_price: number }[] | null)?.[0];
+        if (!cancelled && row && typeof row.unit_price === "number") {
+          setPrice(String(row.unit_price));
+        }
+      } catch {
+        // Keep legacy fallback when resolver or size mapping is unavailable.
+      }
+    };
+
+    loadPrice();
+    return () => {
+      cancelled = true;
+    };
+  }, [service, rateMap, selectedOwner?.member_type, selectedPet]);
 
   const openNewSheet = () => {
     setApptDate(day);

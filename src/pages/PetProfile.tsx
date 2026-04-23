@@ -1,14 +1,19 @@
-import { useState, useRef, useMemo } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useState, useRef, useMemo, useEffect } from "react";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { format, parse, differenceInYears, differenceInMonths, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { usePet, useUpdatePet, useAddVaccination, useDeleteVaccination } from "@/hooks/usePets";
+import { useUpdateAssessment } from "@/hooks/useAssessment";
 import {
   useGroomingHistory,
   type GroomingAppointmentWithJoins,
 } from "@/hooks/useGrooming";
 import { usePetBookings, type BookingWithDetails } from "@/hooks/useBookings";
-import { usePetParkBookings, type ParkBookingWithJoins } from "@/hooks/usePark";
+import {
+  usePetParkBookings,
+  useCreateParkBooking,
+  type ParkBookingWithJoins,
+} from "@/hooks/usePark";
 import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
@@ -58,6 +63,7 @@ import {
   BookImage,
   BedDouble,
   ExternalLink,
+  CalendarCheck2,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
@@ -66,17 +72,42 @@ type PetUpdate = Database["public"]["Tables"]["pets"]["Update"];
 type AssessmentStatus = Database["public"]["Enums"]["assessment_status"];
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
 type ParkSize = Database["public"]["Enums"]["park_size"];
+type PetSizeCategory = Database["public"]["Enums"]["pet_size_category"];
+
+const PARK_ASSESSMENT_SLOTS = Array.from({ length: 20 }, (_, i) => {
+  const totalMinutes = 8 * 60 + i * 30;
+  const endMinutes = totalMinutes + 30;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  const eh = Math.floor(endMinutes / 60);
+  const em = endMinutes % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    start: `${pad(h)}:${pad(m)}:00`,
+    end: `${pad(eh)}:${pad(em)}:00`,
+    label: `${pad(h)}:${pad(m)} - ${pad(eh)}:${pad(em)}`,
+  };
+});
 
 const ASSESSMENT_BADGE: Record<AssessmentStatus, string> = {
   not_assessed: "bg-slate-100 text-slate-600 border-slate-200",
+  scheduled: "bg-amber-100 text-amber-800 border-amber-200",
   passed: "bg-emerald-100 text-emerald-700 border-emerald-200",
   failed: "bg-red-100 text-red-700 border-red-200",
 };
 
 const ASSESSMENT_LABEL: Record<AssessmentStatus, string> = {
   not_assessed: "Not Assessed",
+  scheduled: "Scheduled",
   passed: "Passed",
   failed: "Failed",
+};
+
+const SIZE_CATEGORY_LABEL: Record<PetSizeCategory, string> = {
+  S: "Small (up to 10kg)",
+  M: "Medium (10-20kg)",
+  L: "Large (20-35kg)",
+  XL: "X-Large (35kg+)",
 };
 
 const VAC_STATUS_BADGE: Record<string, string> = {
@@ -169,6 +200,7 @@ function petAge(dob: string | null): string {
 const PetProfilePage = () => {
   const { ownerId, petId } = useParams<{ ownerId: string; petId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const { data: pet, isLoading } = usePet(petId!);
   const { data: petStays = [], isLoading: staysLoading } = usePetBookings(petId ?? "");
@@ -178,6 +210,8 @@ const PetProfilePage = () => {
   );
   const { data: petPark = [], isLoading: parkLoading } = usePetParkBookings(petId ?? "");
   const updatePet = useUpdatePet();
+  const updateAssessment = useUpdateAssessment();
+  const createParkBooking = useCreateParkBooking();
   const addVaccination = useAddVaccination();
   const deleteVaccination = useDeleteVaccination();
 
@@ -186,6 +220,14 @@ const PetProfilePage = () => {
   const [historyServiceFilter, setHistoryServiceFilter] =
     useState<HistoryServiceFilter>("all");
   const [bookingDetail, setBookingDetail] = useState<BookingDetailSelection | null>(null);
+  const [assessmentSheetOpen, setAssessmentSheetOpen] = useState(false);
+  const [assessmentDate, setAssessmentDate] = useState(
+    format(new Date(), "yyyy-MM-dd"),
+  );
+  const [assessmentSlot, setAssessmentSlot] = useState(PARK_ASSESSMENT_SLOTS[2].start);
+  const [assessmentNotesDraft, setAssessmentNotesDraft] = useState("");
+  const [assessmentEditorOpen, setAssessmentEditorOpen] = useState(false);
+  const [failNotes, setFailNotes] = useState("");
 
   const bookingTimeline = useMemo(() => {
     type Row =
@@ -245,6 +287,14 @@ const PetProfilePage = () => {
   }, [bookingTimeline, historyServiceFilter]);
 
   const historyLoading = staysLoading || groomingLoading || parkLoading;
+
+  useEffect(() => {
+    if (!pet) return;
+    setAssessmentNotesDraft(pet.assessment_notes ?? "");
+    if (searchParams.get("schedule_assessment") === "1") {
+      setAssessmentSheetOpen(true);
+    }
+  }, [pet?.id, pet?.assessment_notes, searchParams]);
 
   // photo upload
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -319,6 +369,79 @@ const PetProfilePage = () => {
       },
       onError: (err) => toast.error(err.message || "Failed to update pet"),
     });
+  };
+
+  const scheduleAssessment = async () => {
+    if (!pet || !ownerId) return;
+    try {
+      const selectedSlot = PARK_ASSESSMENT_SLOTS.find((s) => s.start === assessmentSlot) ?? PARK_ASSESSMENT_SLOTS[2];
+      await createParkBooking.mutateAsync({
+        owner_id: ownerId,
+        pet_id: pet.id,
+        visit_date: assessmentDate,
+        slot_start: selectedSlot.start,
+        slot_end: selectedSlot.end,
+        size_lane: "big",
+        is_assessment: true,
+        notes: "Assessment booking",
+        price: 0,
+      });
+      await updateAssessment.mutateAsync({
+        pet_id: pet.id,
+        status: "scheduled",
+        date: assessmentDate,
+        notes: assessmentNotesDraft || undefined,
+      });
+      toast.success("Assessment scheduled.");
+      setAssessmentSheetOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Could not schedule assessment.");
+    }
+  };
+
+  const markPassed = async () => {
+    if (!pet) return;
+    try {
+      await updateAssessment.mutateAsync({
+        pet_id: pet.id,
+        status: "passed",
+        date: format(new Date(), "yyyy-MM-dd"),
+        notes: assessmentNotesDraft || undefined,
+      });
+      toast.success("Assessment marked as passed.");
+    } catch (err: any) {
+      toast.error(err?.message || "Could not update status.");
+    }
+  };
+
+  const markFailed = async () => {
+    if (!pet) return;
+    try {
+      await updateAssessment.mutateAsync({
+        pet_id: pet.id,
+        status: "failed",
+        date: format(new Date(), "yyyy-MM-dd"),
+        notes: failNotes || assessmentNotesDraft || undefined,
+      });
+      toast.success("Assessment marked as failed.");
+      setFailNotes("");
+    } catch (err: any) {
+      toast.error(err?.message || "Could not update status.");
+    }
+  };
+
+  const saveAssessmentNotes = async () => {
+    if (!pet) return;
+    try {
+      await updatePet.mutateAsync({
+        id: pet.id,
+        assessment_notes: assessmentNotesDraft || null,
+      });
+      toast.success("Assessment notes updated.");
+      setAssessmentEditorOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Could not save notes.");
+    }
   };
 
   // ── loading / not found ──────────────────────────────────────────────────
@@ -468,6 +591,115 @@ const PetProfilePage = () => {
                 )}
               </div>
             ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarCheck2 className="h-4 w-4" />
+              Assessment
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                  Status
+                </p>
+                <Badge variant="outline" className={ASSESSMENT_BADGE[assessmentStatus]}>
+                  {ASSESSMENT_LABEL[assessmentStatus]}
+                </Badge>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                  Assessment date
+                </p>
+                <p className="text-sm">
+                  {pet.assessment_date
+                    ? format(parseISO(pet.assessment_date), "d MMM yyyy")
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                  Assessed by
+                </p>
+                <p className="text-sm">{pet.assessed_by ?? "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                  Size category
+                </p>
+                <p className="text-sm">
+                  {pet.size_category
+                    ? SIZE_CATEGORY_LABEL[pet.size_category as PetSizeCategory]
+                    : "—"}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                  Notes
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAssessmentEditorOpen((v) => !v)}
+                >
+                  Edit Notes
+                </Button>
+              </div>
+              {assessmentEditorOpen ? (
+                <div className="space-y-2">
+                  <Textarea
+                    value={assessmentNotesDraft}
+                    onChange={(e) => setAssessmentNotesDraft(e.target.value)}
+                    rows={4}
+                    placeholder="Assessment notes…"
+                  />
+                  <Button size="sm" onClick={saveAssessmentNotes} disabled={updatePet.isPending}>
+                    Save Notes
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-sm whitespace-pre-line">
+                  {pet.assessment_notes || "—"}
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {(assessmentStatus === "not_assessed" || assessmentStatus === "failed") && (
+                <Button variant="outline" onClick={() => setAssessmentSheetOpen(true)}>
+                  Schedule Assessment
+                </Button>
+              )}
+              {assessmentStatus === "scheduled" && (
+                <>
+                  <Button onClick={markPassed} disabled={updateAssessment.isPending}>
+                    Mark as Passed
+                  </Button>
+                  <div className="flex gap-2 items-center">
+                    <Input
+                      value={failNotes}
+                      onChange={(e) => setFailNotes(e.target.value)}
+                      placeholder="Failure notes"
+                      className="w-[220px]"
+                    />
+                    <Button
+                      variant="destructive"
+                      onClick={markFailed}
+                      disabled={updateAssessment.isPending}
+                    >
+                      Mark as Failed
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -965,6 +1197,61 @@ const PetProfilePage = () => {
         </SheetContent>
       </Sheet>
 
+      <Sheet open={assessmentSheetOpen} onOpenChange={setAssessmentSheetOpen}>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Schedule Assessment</SheetTitle>
+            <SheetDescription>
+              Assessment bookings are created as zero-charge park slots.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-6 space-y-4">
+            <div className="space-y-2">
+              <Label>Assessment date</Label>
+              <Input
+                type="date"
+                value={assessmentDate}
+                onChange={(e) => setAssessmentDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Time slot</Label>
+              <Select value={assessmentSlot} onValueChange={setAssessmentSlot}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PARK_ASSESSMENT_SLOTS.map((slot) => (
+                    <SelectItem key={slot.start} value={slot.start}>
+                      {slot.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                rows={3}
+                value={assessmentNotesDraft}
+                onChange={(e) => setAssessmentNotesDraft(e.target.value)}
+                placeholder="Optional assessment notes"
+              />
+            </div>
+            <Button
+              className="w-full"
+              onClick={scheduleAssessment}
+              disabled={createParkBooking.isPending || updateAssessment.isPending}
+            >
+              {(createParkBooking.isPending || updateAssessment.isPending) && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Save Schedule
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
       {/* ══════════════════════════════════════════
           EDIT PET DRAWER
       ══════════════════════════════════════════ */}
@@ -1138,6 +1425,7 @@ const PetProfilePage = () => {
                 <SelectTrigger id="edit_assessment"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="not_assessed">Not Assessed</SelectItem>
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
                   <SelectItem value="passed">Passed</SelectItem>
                   <SelectItem value="failed">Failed</SelectItem>
                 </SelectContent>

@@ -51,7 +51,7 @@ export default async function handler(req, res) {
   const { data: actor } = await admin
     .from("staff")
     .select("role, active, email")
-    .eq("email", user.email)
+    .ilike("email", user.email)
     .maybeSingle();
   if (!actor || !actor.active || !["admin", "management"].includes(actor.role)) {
     return json(res, 403, { error: "Insufficient permissions" });

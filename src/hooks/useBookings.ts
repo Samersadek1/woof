@@ -48,6 +48,11 @@ export type CreateBookingPayload = Omit<BookingInsert, "id" | "created_at" | "up
   >;
 };
 
+export function isAssessmentRequiredError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("has not passed behavioural assessment");
+}
+
 export const queryKeys = {
   bookings: (startDate: string, endDate: string) =>
     ["bookings", startDate, endDate] as const,
@@ -226,9 +231,13 @@ export function useCreateBooking() {
 
   return useMutation({
     mutationFn: async ({ pet_ids, pet_care_by_pet_id, ...bookingData }: CreateBookingPayload) => {
+      const payload: BookingInsert = {
+        ...bookingData,
+        booking_type: bookingData.booking_type ?? "boarding",
+      };
       const { data: booking, error: bookingError } = await supabase
         .from("bookings")
-        .insert(bookingData)
+        .insert(payload)
         .select()
         .single();
 

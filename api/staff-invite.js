@@ -41,7 +41,7 @@ export default async function handler(req, res) {
   const { data: actor, error: actorErr } = await service
     .from("staff")
     .select("role, active, email")
-    .eq("email", user.email)
+    .ilike("email", user.email)
     .maybeSingle();
   if (actorErr) return json(res, 500, { error: actorErr.message });
   if (!actor || !actor.active || !["admin", "management"].includes(actor.role)) {

@@ -1875,6 +1875,7 @@ const OwnerProfilePage = () => {
                   <SelectTrigger id="pet_assessment"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="not_assessed">Not Assessed</SelectItem>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
                     <SelectItem value="passed">Passed</SelectItem>
                     <SelectItem value="failed">Failed</SelectItem>
                   </SelectContent>

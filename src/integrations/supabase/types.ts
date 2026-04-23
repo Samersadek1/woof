@@ -252,6 +252,7 @@ export type Database = {
           actual_check_in_at: string | null
           actual_check_out_at: string | null
           booking_ref: string | null
+          booking_type: Database["public"]["Enums"]["booking_type"] | null
           camera_link: string | null
           check_in_date: string
           check_out_date: string
@@ -277,6 +278,7 @@ export type Database = {
           actual_check_in_at?: string | null
           actual_check_out_at?: string | null
           booking_ref?: string | null
+          booking_type?: Database["public"]["Enums"]["booking_type"] | null
           camera_link?: string | null
           check_in_date: string
           check_out_date: string
@@ -304,6 +306,7 @@ export type Database = {
           actual_check_in_at?: string | null
           actual_check_out_at?: string | null
           booking_ref?: string | null
+          booking_type?: Database["public"]["Enums"]["booking_type"] | null
           camera_link?: string | null
           check_in_date?: string
           check_out_date?: string
@@ -786,6 +789,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      grooming_package_rates: {
+        Row: {
+          amount_aed: number
+          id: string
+          notes: string | null
+          package: Database["public"]["Enums"]["grooming_package"]
+          size: Database["public"]["Enums"]["pet_size_category"]
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          amount_aed?: number
+          id?: string
+          notes?: string | null
+          package: Database["public"]["Enums"]["grooming_package"]
+          size: Database["public"]["Enums"]["pet_size_category"]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          amount_aed?: number
+          id?: string
+          notes?: string | null
+          package?: Database["public"]["Enums"]["grooming_package"]
+          size?: Database["public"]["Enums"]["pet_size_category"]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
       }
       grooming_service_rates: {
         Row: {
@@ -1287,6 +1320,9 @@ export type Database = {
       pets: {
         Row: {
           active: boolean
+          assessed_by: string | null
+          assessment_date: string | null
+          assessment_notes: string | null
           assessment_status: Database["public"]["Enums"]["assessment_status"]
           behavioural_notes: string | null
           breed: string | null
@@ -1305,6 +1341,8 @@ export type Database = {
           other_notes: string | null
           owner_id: string
           photo_url: string | null
+          registration_invoiced: boolean
+          size_category: Database["public"]["Enums"]["pet_size_category"] | null
           spayed_neutered: boolean | null
           species: Database["public"]["Enums"]["species"]
           updated_at: string
@@ -1314,6 +1352,9 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          assessed_by?: string | null
+          assessment_date?: string | null
+          assessment_notes?: string | null
           assessment_status?: Database["public"]["Enums"]["assessment_status"]
           behavioural_notes?: string | null
           breed?: string | null
@@ -1332,6 +1373,10 @@ export type Database = {
           other_notes?: string | null
           owner_id: string
           photo_url?: string | null
+          registration_invoiced?: boolean
+          size_category?:
+            | Database["public"]["Enums"]["pet_size_category"]
+            | null
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
@@ -1341,6 +1386,9 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          assessed_by?: string | null
+          assessment_date?: string | null
+          assessment_notes?: string | null
           assessment_status?: Database["public"]["Enums"]["assessment_status"]
           behavioural_notes?: string | null
           breed?: string | null
@@ -1359,6 +1407,10 @@ export type Database = {
           other_notes?: string | null
           owner_id?: string
           photo_url?: string | null
+          registration_invoiced?: boolean
+          size_category?:
+            | Database["public"]["Enums"]["pet_size_category"]
+            | null
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
@@ -1403,6 +1455,36 @@ export type Database = {
           label?: string
           updated_at?: string | null
           updated_by?: string | null
+        }
+        Relationships: []
+      }
+      pricing_legacy_archive: {
+        Row: {
+          amount_aed: number
+          archived_at: string
+          archived_reason: string
+          category: string
+          key: string
+          label: string
+          updated_at: string | null
+        }
+        Insert: {
+          amount_aed: number
+          archived_at?: string
+          archived_reason: string
+          category: string
+          key: string
+          label: string
+          updated_at?: string | null
+        }
+        Update: {
+          amount_aed?: number
+          archived_at?: string
+          archived_reason?: string
+          category?: string
+          key?: string
+          label?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -1853,6 +1935,22 @@ export type Database = {
         }
         Returns: string
       }
+      resolve_grooming_price: {
+        Args: {
+          p_package: Database["public"]["Enums"]["grooming_package"]
+          p_quantity?: number
+          p_size: Database["public"]["Enums"]["pet_size_category"]
+          p_tier?: string
+        }
+        Returns: {
+          discount_amount: number
+          discount_pct: number
+          subtotal: number
+          total: number
+          unit_price: number
+          vat: number
+        }[]
+      }
       resolve_line_price: {
         Args: { p_pricing_key: string; p_quantity: number; p_tier?: string }
         Returns: {
@@ -1876,7 +1974,7 @@ export type Database = {
         | "grooming_deshedding"
         | "grooming_brushing"
         | "other"
-      assessment_status: "not_assessed" | "passed" | "failed"
+      assessment_status: "not_assessed" | "passed" | "failed" | "scheduled"
       booking_status:
         | "enquiry"
         | "confirmed"
@@ -1884,7 +1982,21 @@ export type Database = {
         | "checked_out"
         | "cancelled"
         | "no_show"
+      booking_type:
+        | "boarding"
+        | "daycare"
+        | "park"
+        | "grooming"
+        | "transport"
+        | "training"
+        | "assessment"
       capacity_type: "single" | "twin" | "twin_plus" | "multiple"
+      grooming_package:
+        | "grande"
+        | "bijoux"
+        | "deshedding_long"
+        | "deshedding_smooth"
+        | "bath_blow"
       grooming_service:
         | "full_groom"
         | "full_bath"
@@ -1907,6 +2019,7 @@ export type Database = {
       park_size: "small" | "big"
       payment_method: "wallet" | "card" | "cash"
       pet_gender: "male" | "female"
+      pet_size_category: "S" | "M" | "L" | "XL"
       room_type:
         | "presidential_super"
         | "presidential_standard"
@@ -2080,7 +2193,7 @@ export const Constants = {
         "grooming_brushing",
         "other",
       ],
-      assessment_status: ["not_assessed", "passed", "failed"],
+      assessment_status: ["not_assessed", "passed", "failed", "scheduled"],
       booking_status: [
         "enquiry",
         "confirmed",
@@ -2089,7 +2202,23 @@ export const Constants = {
         "cancelled",
         "no_show",
       ],
+      booking_type: [
+        "boarding",
+        "daycare",
+        "park",
+        "grooming",
+        "transport",
+        "training",
+        "assessment",
+      ],
       capacity_type: ["single", "twin", "twin_plus", "multiple"],
+      grooming_package: [
+        "grande",
+        "bijoux",
+        "deshedding_long",
+        "deshedding_smooth",
+        "bath_blow",
+      ],
       grooming_service: [
         "full_groom",
         "full_bath",
@@ -2114,6 +2243,7 @@ export const Constants = {
       park_size: ["small", "big"],
       payment_method: ["wallet", "card", "cash"],
       pet_gender: ["male", "female"],
+      pet_size_category: ["S", "M", "L", "XL"],
       room_type: [
         "presidential_super",
         "presidential_standard",
