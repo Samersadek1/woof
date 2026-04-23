@@ -1,6 +1,7 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Loader2, PawPrint } from "lucide-react";
+import type { EmailOtpType, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,8 @@ import { useAuth } from "@/contexts/AuthContext";
 const SetupPasswordPage = () => {
   const navigate = useNavigate();
   const { session, loading } = useAuth();
+  const [inviteSession, setInviteSession] = useState<Session | null>(null);
+  const [resolvingInvite, setResolvingInvite] = useState(true);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
@@ -20,11 +23,64 @@ const SetupPasswordPage = () => {
     return password.length >= 8 && password === confirmPassword;
   }, [password, confirmPassword]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveInviteSession = async () => {
+      if (session) {
+        if (!cancelled) {
+          setInviteSession(session);
+          setResolvingInvite(false);
+        }
+        return;
+      }
+
+      try {
+        const url = new URL(window.location.href);
+        const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
+        const searchParams = url.searchParams;
+
+        const code = searchParams.get("code") || hashParams.get("code");
+        if (code) {
+          const { data, error: codeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (codeError) throw codeError;
+          if (!cancelled) setInviteSession(data.session ?? null);
+        } else {
+          const tokenHash = searchParams.get("token_hash") || hashParams.get("token_hash");
+          const type = (searchParams.get("type") || hashParams.get("type")) as EmailOtpType | null;
+          if (tokenHash && type) {
+            const { data, error: otpError } = await supabase.auth.verifyOtp({
+              token_hash: tokenHash,
+              type,
+            });
+            if (otpError) throw otpError;
+            if (!cancelled) setInviteSession(data.session ?? null);
+          }
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setError(err?.message || "Could not verify invite link.");
+        }
+      } finally {
+        if (!cancelled) {
+          setResolvingInvite(false);
+        }
+      }
+    };
+
+    resolveInviteSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  const activeSession = session ?? inviteSession;
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setMessage(null);
-    if (!session) {
+    if (!activeSession) {
       setError("Invite session is missing. Please open the invite link again.");
       return;
     }
@@ -84,10 +140,10 @@ const SetupPasswordPage = () => {
             />
           </div>
 
-          {loading && (
+          {(loading || resolvingInvite) && (
             <p className="text-sm text-muted-foreground">Verifying invite session...</p>
           )}
-          {!loading && !session && (
+          {!loading && !resolvingInvite && !activeSession && (
             <p className="text-sm text-destructive">
               No active invite session found. Open the invite link from your email.
             </p>
@@ -95,7 +151,11 @@ const SetupPasswordPage = () => {
           {error && <p className="text-sm text-destructive">{error}</p>}
           {message && <p className="text-sm text-emerald-700">{message}</p>}
 
-          <Button type="submit" className="w-full" disabled={saving || loading || !session}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={saving || loading || resolvingInvite || !activeSession}
+          >
             {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
