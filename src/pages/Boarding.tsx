@@ -45,6 +45,7 @@ import { CheckInSheet } from "@/components/CheckInSheet";
 import { CheckOutSheet } from "@/components/CheckOutSheet";
 import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
+import { boardCheckoutGroomingAddon } from "@/lib/groomingCatalog";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
 import { ChevronLeft, ChevronRight, Plus, Loader2, ExternalLink, Eye, Luggage, Printer } from "lucide-react";
@@ -510,8 +511,14 @@ export function DogBoardingCalendar({
         const tLabel = form.transport_zone === "abudhabi" ? "Transport Abu Dhabi" : "Transport Dubai";
         if (form.pickup_required) addonItems.push({ key: tKey, label: `Pickup — ${tLabel}` });
         if (form.dropoff_required) addonItems.push({ key: tKey, label: `Drop-off — ${tLabel}` });
-        if (form.addon_groom) addonItems.push({ key: "grooming_full_groom", label: "Full Groom" });
-        if (form.addon_bath) addonItems.push({ key: "grooming_full_bath", label: "Full Bath" });
+        if (form.addon_groom) {
+          const line = boardCheckoutGroomingAddon("full_groom");
+          if (line) addonItems.push(line);
+        }
+        if (form.addon_bath) {
+          const line = boardCheckoutGroomingAddon("full_bath");
+          if (line) addonItems.push(line);
+        }
 
         createBookingInvoice({
           bookingId: booking.id,
@@ -1628,8 +1635,14 @@ function CatBoardingCalendar({
         const catTLabel = form.transport_zone === "abudhabi" ? "Transport Abu Dhabi" : "Transport Dubai";
         if (form.pickup_required) addonItems.push({ key: catTKey, label: `Pickup — ${catTLabel}` });
         if (form.dropoff_required) addonItems.push({ key: catTKey, label: `Drop-off — ${catTLabel}` });
-        if (form.addon_groom) addonItems.push({ key: "grooming_full_groom", label: "Full Groom" });
-        if (form.addon_bath) addonItems.push({ key: "grooming_full_bath", label: "Full Bath" });
+        if (form.addon_groom) {
+          const line = boardCheckoutGroomingAddon("full_groom");
+          if (line) addonItems.push(line);
+        }
+        if (form.addon_bath) {
+          const line = boardCheckoutGroomingAddon("full_bath");
+          if (line) addonItems.push(line);
+        }
 
         createBookingInvoice({
           bookingId: booking.id,

@@ -3,6 +3,7 @@ import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName } from "@/lib/bookingUtils";
+import { addonRateUiGroup } from "@/lib/groomingCatalog";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import {
   useWalletTransactions,
@@ -20,6 +21,7 @@ import {
   useOwnerStatement,
   usePricing,
   useServiceRates,
+  type AddonRateRow,
   formatAed,
   type InvoiceStatus,
   type InvoiceWithItems,
@@ -817,6 +819,19 @@ function PricingTab() {
   } = useServiceRates();
   const [saving, setSaving] = useState<string | null>(null);
 
+  const { groomingAddOnRates, transportAddOnRates, otherAddOnRates } = useMemo(() => {
+    const grooming: AddonRateRow[] = [];
+    const transport: AddonRateRow[] = [];
+    const other: AddonRateRow[] = [];
+    for (const r of addonRates) {
+      const g = addonRateUiGroup(r);
+      if (g === "grooming") grooming.push(r);
+      else if (g === "transport") transport.push(r);
+      else other.push(r);
+    }
+    return { groomingAddOnRates: grooming, transportAddOnRates: transport, otherAddOnRates: other };
+  }, [addonRates]);
+
   const saveRate = async (type: string, id: string, value: string) => {
     const num = parseFloat(value);
     if (isNaN(num) || num < 0) return;
@@ -846,6 +861,9 @@ function PricingTab() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming Services</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            Per-service list (`grooming_service_rates` / Grooming app). Extras and à-la-carte lines are under Add-ons — Grooming.
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -946,10 +964,13 @@ function PricingTab() {
         </CardContent>
       </Card>
 
-      {/* Add-on Rates */}
+      {/* Add-on rates — split so grooming lines stay with the grooming catalog */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Add-ons (Transport, Grooming on Boarding)</CardTitle>
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Add-ons — Grooming</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            Same catalog as boarding “groom on checkout” and grooming extras. Set <code className="text-xs">applicable_services</code> to include <code className="text-xs">grooming</code> in Supabase to classify new rows.
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -962,27 +983,115 @@ function PricingTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {addonRates.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="text-sm">{r.label}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{r.unit}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{r.applicable_services.join(", ") || "—"}</TableCell>
-                  <TableCell className="text-right">
-                    <Input
-                      type="number" min="0" step="1"
-                      className="w-[120px] ml-auto text-right h-8 text-sm"
-                      defaultValue={r.price_aed}
-                      onBlur={(e) => saveRate("addon", r.id, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      disabled={saving === r.id}
-                    />
-                  </TableCell>
+              {groomingAddOnRates.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-sm text-muted-foreground py-6 text-center">No grooming add-on rows (or all classified as transport).</TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                groomingAddOnRates.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="text-sm">{r.label}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{r.unit}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{r.applicable_services.join(", ") || "—"}</TableCell>
+                    <TableCell className="text-right">
+                      <Input
+                        type="number" min="0" step="1"
+                        className="w-[120px] ml-auto text-right h-8 text-sm"
+                        defaultValue={r.price_aed}
+                        onBlur={(e) => saveRate("addon", r.id, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        disabled={saving === r.id}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Add-ons — Transport &amp; boarding</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="min-w-[180px]">Add-on</TableHead>
+                <TableHead className="w-20">Unit</TableHead>
+                <TableHead className="min-w-[120px]">Applies to</TableHead>
+                <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {transportAddOnRates.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-sm text-muted-foreground py-6 text-center">No transport or boarding add-on rows.</TableCell>
+                </TableRow>
+              ) : (
+                transportAddOnRates.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="text-sm">{r.label}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{r.unit}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{r.applicable_services.join(", ") || "—"}</TableCell>
+                    <TableCell className="text-right">
+                      <Input
+                        type="number" min="0" step="1"
+                        className="w-[120px] ml-auto text-right h-8 text-sm"
+                        defaultValue={r.price_aed}
+                        onBlur={(e) => saveRate("addon", r.id, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        disabled={saving === r.id}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {otherAddOnRates.length > 0 ? (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Add-ons — Other</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/40">
+                  <TableHead className="min-w-[180px]">Add-on</TableHead>
+                  <TableHead className="w-20">Unit</TableHead>
+                  <TableHead className="min-w-[120px]">Applies to</TableHead>
+                  <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {otherAddOnRates.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="text-sm">{r.label}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{r.unit}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{r.applicable_services.join(", ") || "—"}</TableCell>
+                    <TableCell className="text-right">
+                      <Input
+                        type="number" min="0" step="1"
+                        className="w-[120px] ml-auto text-right h-8 text-sm"
+                        defaultValue={r.price_aed}
+                        onBlur={(e) => saveRate("addon", r.id, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        disabled={saving === r.id}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

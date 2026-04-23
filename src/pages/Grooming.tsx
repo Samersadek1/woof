@@ -81,18 +81,11 @@ import {
 import { toast } from "sonner";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { cn } from "@/lib/utils";
-import type { Database } from "@/integrations/supabase/types";
-
-type GroomingService = Database["public"]["Enums"]["grooming_service"];
-
-const SERVICE_OPTIONS: { value: GroomingService; label: string }[] = [
-  { value: "full_groom", label: "Full Groom" },
-  { value: "full_bath", label: "Full Bath" },
-  { value: "nail_clip", label: "Nail Clip" },
-  { value: "deshedding", label: "Deshedding" },
-  { value: "brushing", label: "Brushing" },
-  { value: "pawdicure", label: "Pawdicure" },
-];
+import {
+  GROOMING_SERVICE_OPTIONS,
+  labelForGroomingService,
+  type GroomingService,
+} from "@/lib/groomingCatalog";
 
 const SERVICE_BADGE: Record<GroomingService, string> = {
   full_groom: "bg-purple-100 text-purple-800 border-purple-200",
@@ -104,7 +97,7 @@ const SERVICE_BADGE: Record<GroomingService, string> = {
 };
 
 function serviceLabel(s: GroomingService): string {
-  return SERVICE_OPTIONS.find((o) => o.value === s)?.label ?? s;
+  return labelForGroomingService(s);
 }
 
 function formatApptTime(t: string | null): string {
@@ -597,7 +590,7 @@ const GroomingPage = () => {
           toast.success("Appointment created.");
           setSheetOpen(false);
 
-          const svcLabel = SERVICE_OPTIONS.find((o) => o.value === service)?.label ?? service.replace(/_/g, " ");
+          const svcLabel = labelForGroomingService(service);
           createServiceInvoice({
             ownerId: ownerId!,
             serviceType: "grooming",
@@ -864,7 +857,7 @@ const GroomingPage = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {SERVICE_OPTIONS.map((o) => (
+                    {GROOMING_SERVICE_OPTIONS.map((o) => (
                       <SelectItem key={o.value} value={o.value}>
                         {o.label}
                       </SelectItem>

@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
+import { serviceTypeForBoardingAddonKey } from "@/lib/groomingCatalog";
 
 /**
  * Returns the number of nights between two ISO date strings.
@@ -245,7 +246,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
       quantity: 1,
       unitPrice: rate,
       pricingKey: addon.key,
-      serviceType: "addon",
+      serviceType: serviceTypeForBoardingAddonKey(addon.key),
     });
   }
 

@@ -15,6 +15,7 @@ import {
   type ParkBookingWithJoins,
 } from "@/hooks/usePark";
 import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
+import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { usePets, useCreatePet, getVaccinationStatus } from "@/hooks/usePets";
 import { useDaycarePackages } from "@/hooks/useDaycare";
@@ -108,7 +109,6 @@ import type { Database } from "@/integrations/supabase/types";
 
 type MemberType = Database["public"]["Enums"]["member_type"];
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
-type GroomingService = Database["public"]["Enums"]["grooming_service"];
 type ParkSize = Database["public"]["Enums"]["park_size"];
 type OwnerUpdate = Database["public"]["Tables"]["owners"]["Update"];
 type PetInsert = Database["public"]["Tables"]["pets"]["Insert"];
@@ -165,15 +165,6 @@ function bookingPetNames(b: BookingWithDetails): string {
 function formatBookingStatus(status: BookingStatus): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
-
-const GROOM_SERVICE_LABEL: Record<GroomingService, string> = {
-  full_groom: "Full Groom",
-  full_bath: "Full Bath",
-  nail_clip: "Nail Clip",
-  deshedding: "Deshedding",
-  brushing: "Brushing",
-  pawdicure: "Pawdicure",
-};
 
 const TIME_ANCHOR = new Date(2000, 0, 1);
 
@@ -1192,9 +1183,9 @@ const OwnerProfilePage = () => {
                           </TableCell>
                           <TableCell
                             className="text-sm max-w-[220px] truncate"
-                            title={`${g.pets?.name ?? "—"} · ${GROOM_SERVICE_LABEL[g.service]}`}
+                            title={`${g.pets?.name ?? "—"} · ${labelForGroomingService(g.service)}`}
                           >
-                            {g.pets?.name ?? "—"} · {GROOM_SERVICE_LABEL[g.service]}
+                            {g.pets?.name ?? "—"} · {labelForGroomingService(g.service)}
                           </TableCell>
                         </TableRow>
                       );
@@ -1506,7 +1497,7 @@ const OwnerProfilePage = () => {
                   <div className="space-y-1">
                     <p className="text-xs uppercase text-muted-foreground font-medium">Service</p>
                     <p className="text-sm font-medium">
-                      {GROOM_SERVICE_LABEL[bookingDetail.groom.service]}
+                      {labelForGroomingService(bookingDetail.groom.service)}
                     </p>
                   </div>
                   <div className="space-y-1">

@@ -10,6 +10,7 @@ import {
 import { usePetBookings, type BookingWithDetails } from "@/hooks/useBookings";
 import { usePetParkBookings, type ParkBookingWithJoins } from "@/hooks/usePark";
 import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
+import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { VaccinationEditor } from "@/components/VaccinationEditor";
 import { PetDocuments } from "@/components/PetDocuments";
@@ -64,7 +65,6 @@ import type { Database } from "@/integrations/supabase/types";
 type PetUpdate = Database["public"]["Tables"]["pets"]["Update"];
 type AssessmentStatus = Database["public"]["Enums"]["assessment_status"];
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
-type GroomingService = Database["public"]["Enums"]["grooming_service"];
 type ParkSize = Database["public"]["Enums"]["park_size"];
 
 const ASSESSMENT_BADGE: Record<AssessmentStatus, string> = {
@@ -89,15 +89,6 @@ const VAC_STATUS_LABEL: Record<string, string> = {
   valid: "Valid",
   expiring_soon: "Expiring Soon",
   expired: "Expired",
-};
-
-const GROOM_SERVICE_LABEL: Record<GroomingService, string> = {
-  full_groom: "Full Groom",
-  full_bath: "Full Bath",
-  nail_clip: "Nail Clip",
-  deshedding: "Deshedding",
-  brushing: "Brushing",
-  pawdicure: "Pawdicure",
 };
 
 const BOOKING_STATUS_BADGE: Record<BookingStatus, string> = {
@@ -618,9 +609,9 @@ const PetProfilePage = () => {
                           </TableCell>
                           <TableCell
                             className="text-sm max-w-[220px] truncate"
-                            title={`${GROOM_SERVICE_LABEL[g.service]} · ${groomerLine(g)}`}
+                            title={`${labelForGroomingService(g.service)} · ${groomerLine(g)}`}
                           >
-                            {GROOM_SERVICE_LABEL[g.service]} · {groomerLine(g)}
+                            {labelForGroomingService(g.service)} · {groomerLine(g)}
                           </TableCell>
                         </TableRow>
                       );
@@ -854,7 +845,7 @@ const PetProfilePage = () => {
                 <div className="space-y-1">
                   <p className="text-xs uppercase text-muted-foreground font-medium">Service</p>
                   <p className="text-sm font-medium">
-                    {GROOM_SERVICE_LABEL[bookingDetail.groom.service]}
+                    {labelForGroomingService(bookingDetail.groom.service)}
                   </p>
                 </div>
                 <div className="space-y-1">

@@ -1,6 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
 
-/** Maps `grooming_service` enum / UI values → `pricing.key` (April 2026 rate card). */
+/**
+ * Maps `grooming_service` enum / UI values → `pricing.key` (April 2026 rate card).
+ * Labels and service lists for the app live in `groomingCatalog.ts` — keep keys in sync
+ * with Boarding “groom on checkout” (see `boardCheckoutGroomingAddon`).
+ */
 export const GROOMING_SERVICE_TO_PRICING_KEY: Record<string, string> = {
   full_groom: "grooming_full_groom",
   full_bath: "grooming_full_bath",
