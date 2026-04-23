@@ -29,7 +29,6 @@ export type DaycareSessionWithDetails = DaycareSession & {
 // ── Shared attendance payload ─────────────────────────────────────────────────
 //
 //   remark        → notes  (DB column name)
-//   staff_id      → staff_id (UUID FK to staff table)
 //   pickup_used   → pickup_used  (BOOLEAN — column added to daycare_sessions)
 //   dropoff_used  → dropoff_used (BOOLEAN — column added to daycare_sessions)
 //   logged_by     → logged_by   (TEXT    — column added to daycare_sessions)
@@ -45,8 +44,6 @@ export type AttendancePayload = {
   logged_by?:    string | null;
   /** Saved to `notes` column */
   remark?:       string | null;
-  /** UUID FK to staff table */
-  staff_id?:     string | null;
 };
 
 // ── Internal helper: increment days_used on a package by delta ────────────────
@@ -136,7 +133,7 @@ export type MarkAttendedPayload = AttendancePayload & {
 /**
  * Marks an existing daycare session as attended:
  *   - Sets checked_in=true, checked_in_at=now()
- *   - Persists pickup_used, dropoff_used, logged_by, remark(→notes), staff_id
+ *   - Persists pickup_used, dropoff_used, logged_by, remark(→notes)
  *   - Increments days_used on the linked package by 1
  */
 export function useMarkSessionAttended() {
@@ -147,7 +144,6 @@ export function useMarkSessionAttended() {
       sessionId,
       package_id,
       remark,
-      staff_id,
       pickup_used,
       dropoff_used,
       logged_by,
@@ -156,7 +152,6 @@ export function useMarkSessionAttended() {
         checked_in:    true,
         checked_in_at: new Date().toISOString(),
         ...(remark       !== undefined && { notes:        remark       }),
-        ...(staff_id     !== undefined && { staff_id:     staff_id     }),
         ...(pickup_used  !== undefined && { pickup_used:  pickup_used  }),
         ...(dropoff_used !== undefined && { dropoff_used: dropoff_used }),
         ...(logged_by    !== undefined && { logged_by:    logged_by    }),
@@ -211,7 +206,6 @@ export function useAddDaycareDay() {
       owner_id,
       package_id,
       remark,
-      staff_id,
       pickup_used,
       dropoff_used,
       logged_by,
@@ -238,7 +232,6 @@ export function useAddDaycareDay() {
         checked_in:    true,
         checked_in_at: new Date().toISOString(),
         notes:         remark      ?? null,
-        staff_id:      staff_id    ?? null,
         pickup_used:   pickup_used  ?? false,
         dropoff_used:  dropoff_used ?? false,
         logged_by:     logged_by    ?? null,
@@ -280,14 +273,12 @@ export function useUpdateDaycareSession() {
     mutationFn: async ({
       sessionId,
       remark,
-      staff_id,
       pickup_used,
       dropoff_used,
       logged_by,
     }: UpdateSessionPayload) => {
       const updateObj = {
         ...(remark       !== undefined && { notes:        remark       }),
-        ...(staff_id     !== undefined && { staff_id:     staff_id     }),
         ...(pickup_used  !== undefined && { pickup_used:  pickup_used  }),
         ...(dropoff_used !== undefined && { dropoff_used: dropoff_used }),
         ...(logged_by    !== undefined && { logged_by:    logged_by    }),

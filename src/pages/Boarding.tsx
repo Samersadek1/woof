@@ -176,6 +176,15 @@ function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): s
     todayDate,
   }).map((tag) => `<span class="tag">${escapeHtml(tag.label)}</span>`).join("");
   const belongingsCount = bookingBelongingsCount(booking);
+  const createdByFromNotes =
+    booking.notes
+      ?.split("\n")
+      .find((line) => line.trim().toLowerCase().startsWith("created by:"))
+      ?.split(":")
+      .slice(1)
+      .join(":")
+      .trim() || null;
+  const createdBy = createdByFromNotes || booking.staff_id || "—";
 
   return `
     <section class="card">
@@ -206,7 +215,7 @@ function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): s
 
       <div class="grid">
         <div><div class="label">Do Not Move</div><div class="value">${booking.do_not_move ? "Yes" : "No"}</div></div>
-        <div><div class="label">Staff ID</div><div class="value">${escapeHtml(booking.staff_id ?? "—")}</div></div>
+        <div><div class="label">Created by</div><div class="value">${escapeHtml(createdBy)}</div></div>
       </div>
 
       <div class="label">Booking notes</div>
@@ -275,7 +284,7 @@ type NewBookingForm = {
   check_out_date: string;
   pet_ids: string[];
   notes: string;
-  staff_id: string;
+  staff_name: string;
   do_not_move: boolean;
   pickup_required: boolean;
   dropoff_required: boolean;
@@ -299,7 +308,7 @@ const BLANK_FORM: NewBookingForm = {
   check_out_date: "",
   pet_ids: [],
   notes: "",
-  staff_id: "",
+  staff_name: "",
   do_not_move: false,
   pickup_required: false,
   dropoff_required: false,
@@ -513,13 +522,17 @@ export function DogBoardingCalendar({
       check_out_date: form.check_out_date,
       pet_ids: form.pet_ids,
       pet_care_by_pet_id: form.pet_care_by_pet_id,
-      notes: [form.notes, addons ? `Add-ons: ${addons}` : ""]
+      notes: [
+        form.notes,
+        form.staff_name.trim() ? `Created by: ${form.staff_name.trim()}` : "",
+        addons ? `Add-ons: ${addons}` : "",
+      ]
         .filter(Boolean)
         .join("\n"),
       do_not_move: form.do_not_move,
       pickup_required: form.pickup_required,
       dropoff_required: form.dropoff_required,
-      staff_id: form.staff_id || null,
+      staff_id: null,
       status: "confirmed",
     };
 
@@ -1105,8 +1118,8 @@ export function DogBoardingCalendar({
               <Label>Staff name</Label>
               <Input
                 placeholder="Who is creating this booking?"
-                value={form.staff_id}
-                onChange={(e) => setForm((f) => ({ ...f, staff_id: e.target.value }))}
+                value={form.staff_name}
+                onChange={(e) => setForm((f) => ({ ...f, staff_name: e.target.value }))}
               />
             </div>
 
@@ -1414,7 +1427,7 @@ type CatBookingForm = {
   check_out_date: string;
   pet_ids: string[];
   notes: string;
-  staff_id: string;
+  staff_name: string;
   do_not_move: boolean;
   pickup_required: boolean;
   dropoff_required: boolean;
@@ -1442,7 +1455,7 @@ const CAT_BLANK_FORM: CatBookingForm = {
   check_out_date: "",
   pet_ids: [],
   notes: "",
-  staff_id: "",
+  staff_name: "",
   do_not_move: false,
   pickup_required: false,
   dropoff_required: false,
@@ -1670,13 +1683,18 @@ function CatBoardingCalendar({
       check_out_date: form.check_out_date,
       pet_ids: form.pet_ids,
       pet_care_by_pet_id: form.pet_care_by_pet_id,
-      notes: [form.notes, catBlock, addons ? `Add-ons: ${addons}` : ""]
+      notes: [
+        form.notes,
+        form.staff_name.trim() ? `Created by: ${form.staff_name.trim()}` : "",
+        catBlock,
+        addons ? `Add-ons: ${addons}` : "",
+      ]
         .filter(Boolean)
         .join("\n\n"),
       do_not_move: form.do_not_move,
       pickup_required: form.pickup_required,
       dropoff_required: form.dropoff_required,
-      staff_id: form.staff_id || null,
+      staff_id: null,
       status: "confirmed",
     };
 
@@ -2128,7 +2146,7 @@ function CatBoardingCalendar({
 
             <div className="space-y-2">
               <Label>Staff name</Label>
-              <Input placeholder="Who is creating this booking?" value={form.staff_id} onChange={(e) => setForm((f) => ({ ...f, staff_id: e.target.value }))} />
+              <Input placeholder="Who is creating this booking?" value={form.staff_name} onChange={(e) => setForm((f) => ({ ...f, staff_name: e.target.value }))} />
             </div>
 
             <Button type="submit" className="w-full" disabled={createBookingMut.isPending}>

@@ -363,14 +363,12 @@ export function useBillingCalculator(
             .single();
           let p = rate?.price_aed ?? 0;
           let label = rate?.label ?? params.service;
-          if (p === 0) {
-            const pk = groomingServiceToPricingKey(params.service);
-            if (pk) {
-              const fallback = await getPricingAmountByKey(pk);
-              if (fallback != null) {
-                p = fallback;
-                if (!rate?.label) label = pk.replace(/^grooming_/, "").replace(/_/g, " ");
-              }
+          const pk = groomingServiceToPricingKey(params.service);
+          if (pk) {
+            const live = await getPricingAmountByKey(pk);
+            if (live != null) {
+              p = live;
+              if (!rate?.label) label = pk.replace(/^grooming_/, "").replace(/_/g, " ");
             }
           }
           lineItems.push({ pricingKey: `grooming:${params.service}`, label, quantity: 1, unitPrice: p, total: p });

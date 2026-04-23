@@ -113,7 +113,6 @@ function formatApptTime(t: string | null): string {
 
 function groomerDisplay(a: GroomingAppointmentWithJoins): string {
   if (a.grooming_notes?.trim()) return a.grooming_notes.trim();
-  if (a.staff) return ownerDisplayName(a.staff.first_name, a.staff.last_name);
   return "—";
 }
 
@@ -513,7 +512,7 @@ const GroomingPage = () => {
       const pk = groomingServiceToPricingKey(svc);
       const fallback = pk ? priceByPk.get(pk) : undefined;
       const cur = m[svc];
-      if (typeof fallback === "number" && (!cur || cur.price_aed === 0)) {
+      if (typeof fallback === "number") {
         m[svc] = {
           price_aed: fallback,
           duration_minutes: cur?.duration_minutes ?? null,

@@ -41,10 +41,31 @@ function buildPricingKeyCandidates(room: BoardingRoomRow, petCount: number): str
   const tier = occupancyTier(petCount);
   const legacyTier = legacyOccupancyKey(petCount);
   const out: string[] = [];
+  const roomType = room.room_type ?? "";
+
+  const canonicalRoomTypeBases: Record<string, string> = {
+    presidential_super: "presidential",
+    presidential_standard: "presidential",
+    royal_suite_single: "royal",
+    single_royal: "royal",
+    royal_annex: "royal",
+    royal_suite_double: "royal",
+    double_royal: "royal",
+    family_room: "family_family",
+    cattery_deluxe: "cattery_deluxe",
+    cattery_presidential: "cattery_presidential",
+    cattery_super_presidential: "cattery_super_presidential",
+  };
+  const canonicalBase = canonicalRoomTypeBases[roomType];
 
   if (room.pricing_category) {
     out.push(`${room.pricing_category}_${tier}`);
     out.push(room.pricing_category);
+  }
+
+  if (canonicalBase) {
+    out.push(`${canonicalBase}_${tier}`);
+    out.push(canonicalBase);
   }
 
   if (room.room_type) {

@@ -6,10 +6,10 @@ import { supabase } from "@/integrations/supabase/client";
  * with Boarding “groom on checkout” (see `boardCheckoutGroomingAddon`).
  */
 export const GROOMING_SERVICE_TO_PRICING_KEY: Record<string, string> = {
-  full_groom: "grooming_full_groom",
+  full_groom: "grooming_grande_s",
   full_bath: "grooming_full_bath",
   nail_clip: "grooming_nail_clip",
-  deshedding: "grooming_deshed_long_m",
+  deshedding: "grooming_deshed_smooth_s",
   pawdicure: "grooming_pawdicure",
   // brushing: no single rate-card line — use `grooming_service_rates` only
 };

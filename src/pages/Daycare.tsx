@@ -100,6 +100,7 @@ const MEMBER_BADGE: Record<string, string> = {
   standard: "bg-slate-100 text-slate-700 border-slate-200",
   silver:   "bg-blue-50  text-blue-700  border-blue-200",
   gold:     "bg-amber-50 text-amber-700 border-amber-200",
+  platinum: "bg-violet-50 text-violet-700 border-violet-200",
 };
 
 function creditColour(remaining: number) {
@@ -1347,11 +1348,18 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
         .from("daycare_package_types")
         .select("id, name, total_days, base_price_aed, sort_order")
         .eq("is_active", true)
+        .eq("total_days", 12)
         .order("sort_order");
       if (error) throw error;
       return data ?? [];
     },
   });
+
+  useEffect(() => {
+    if (packageTypes.length === 1 && !form.package_type_id) {
+      setForm((prev) => ({ ...prev, package_type_id: packageTypes[0].id }));
+    }
+  }, [packageTypes, form.package_type_id]);
 
   const { data: packageTransportPricing = [] } = useQuery<{ key: string; amount_aed: number }[]>({
     queryKey: ["pricing", "transport_zones", "daycare"],
@@ -1505,9 +1513,10 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
             <Select
               value={form.package_type_id}
               onValueChange={(v) => { setField("package_type_id", v); setField("price_override", ""); }}
+              disabled={packageTypes.length <= 1}
             >
               <SelectTrigger id="pkg_type">
-                <SelectValue placeholder="Select package type" />
+                <SelectValue placeholder={packageTypes.length <= 1 ? "12-day package" : "Select package type"} />
               </SelectTrigger>
               <SelectContent>
                 {packageTypes.map(t => (

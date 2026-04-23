@@ -37,6 +37,15 @@ function ownerSearchScore(owner: OwnerWithPetCount, term: string): number {
   return 9;
 }
 
+function ownerMatchesTerm(owner: OwnerWithPetCount, term: string): boolean {
+  const first = (owner.first_name ?? "").toLowerCase();
+  const last = (owner.last_name ?? "").toLowerCase();
+  const full = `${first} ${last}`.trim();
+  const phone = (owner.phone ?? "").toLowerCase();
+  const petNames = (owner.pets ?? []).map((p) => (p.name ?? "").toLowerCase()).join(" ");
+  return full.includes(term) || first.includes(term) || last.includes(term) || phone.includes(term) || petNames.includes(term);
+}
+
 export function useOwners(searchTerm?: string) {
   return useQuery({
     queryKey: queryKeys.owners(searchTerm),
@@ -89,13 +98,15 @@ export function useOwners(searchTerm?: string) {
         }
 
         const lowered = trimmed.toLowerCase();
-        return Array.from(merged.values()).sort((a, b) => {
+        return Array.from(merged.values())
+          .filter((owner) => ownerMatchesTerm(owner, lowered))
+          .sort((a, b) => {
           const scoreDiff = ownerSearchScore(a, lowered) - ownerSearchScore(b, lowered);
           if (scoreDiff !== 0) return scoreDiff;
           const lastDiff = (a.last_name ?? "").localeCompare(b.last_name ?? "");
           if (lastDiff !== 0) return lastDiff;
           return (a.first_name ?? "").localeCompare(b.first_name ?? "");
-        });
+          });
       }
 
       const { data, error } = await baseQuery;

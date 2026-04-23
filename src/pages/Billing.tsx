@@ -92,6 +92,7 @@ const MEMBER_BADGE: Record<MemberType, string> = {
   standard: "bg-slate-100 text-slate-700 border-slate-200",
   silver: "bg-blue-50 text-blue-700 border-blue-200",
   gold: "bg-amber-50 text-amber-700 border-amber-200",
+  platinum: "bg-violet-50 text-violet-700 border-violet-200",
 };
 
 const TX_BADGE: Record<string, { label: string; className: string }> = {
@@ -129,6 +130,21 @@ const CANONICAL_PRICING_KEYS: Array<{ key: string; label: string; category: stri
   { key: "transport_dubai", label: "Transport Dubai private", category: "transport" },
   { key: "transport_abudhabi", label: "Transport Other Emirates", category: "transport" },
 ];
+
+const MEMBERSHIP_DISCOUNT_KEYS: Array<{ tier: "Standard" | "Silver" | "Gold" | "Platinum"; key: string; defaultPct: number }> = [
+  { tier: "Standard", key: "", defaultPct: 0 },
+  { tier: "Silver", key: "membership_discount_silver", defaultPct: 10 },
+  { tier: "Gold", key: "membership_discount_gold", defaultPct: 20 },
+  { tier: "Platinum", key: "membership_discount_platinum", defaultPct: 30 },
+];
+
+const GROOMING_SERVICE_RATE_CARD_KEYS: Record<string, string> = {
+  full_groom: "grooming_grande_s",
+  full_bath: "grooming_full_bath",
+  nail_clip: "grooming_nail_clip",
+  deshedding: "grooming_deshed_smooth_s",
+  pawdicure: "grooming_pawdicure",
+};
 
 // ── WalletModal ──────────────────────────────────────────────────────────────
 
@@ -876,27 +892,54 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
 function PricingTab() {
   const { allRows, updatePrice } = usePricing();
   const {
-    groomingRates, parkRates, daycarePackageTypes, addonRates,
-    updateGroomingRate, updateParkRate, updateDaycareType, updateAddonRate,
+    groomingRates, daycarePackageTypes, addonRates,
+    updateGroomingRate, updateDaycareType, updateAddonRate,
     isLoading,
   } = useServiceRates();
   const [saving, setSaving] = useState<string | null>(null);
+  const daycare12DayTypes = useMemo(
+    () => daycarePackageTypes.filter((t) => t.is_active && t.total_days === 12),
+    [daycarePackageTypes],
+  );
+  const boardingRateRows = useMemo(
+    () =>
+      (allRows ?? [])
+        .filter((r) => r.category === "boarding")
+        .sort((a, b) => a.key.localeCompare(b.key)),
+    [allRows],
+  );
+  const groomingRateCardRows = useMemo(
+    () =>
+      (allRows ?? [])
+        .filter((r) => r.category === "grooming")
+        .sort((a, b) => a.key.localeCompare(b.key)),
+    [allRows],
+  );
   const canonicalByKey = useMemo(
     () => new Map((allRows ?? []).map((r) => [r.key, r])),
     [allRows],
   );
 
-  const { groomingAddOnRates, transportAddOnRates, otherAddOnRates } = useMemo(() => {
+  const { groomingAddOnRates, transportAddOnRates, boardingAddOnRates, otherAddOnRates } = useMemo(() => {
     const grooming: AddonRateRow[] = [];
     const transport: AddonRateRow[] = [];
+    const boarding: AddonRateRow[] = [];
     const other: AddonRateRow[] = [];
     for (const r of addonRates) {
       const g = addonRateUiGroup(r);
       if (g === "grooming") grooming.push(r);
-      else if (g === "transport") transport.push(r);
+      else if (g === "transport") {
+        if (r.addon_type.startsWith("transport_")) transport.push(r);
+        else boarding.push(r);
+      }
       else other.push(r);
     }
-    return { groomingAddOnRates: grooming, transportAddOnRates: transport, otherAddOnRates: other };
+    return {
+      groomingAddOnRates: grooming,
+      transportAddOnRates: transport,
+      boardingAddOnRates: boarding,
+      otherAddOnRates: other,
+    };
   }, [addonRates]);
 
   const saveRate = async (type: string, id: string, value: string) => {
@@ -905,7 +948,6 @@ function PricingTab() {
     setSaving(id);
     try {
       if (type === "grooming") await updateGroomingRate(id, num);
-      else if (type === "park") await updateParkRate(id, num);
       else if (type === "daycare") await updateDaycareType(id, num);
       else if (type === "addon") await updateAddonRate(id, num);
       toast.success("Rate saved");
@@ -983,12 +1025,105 @@ function PricingTab() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Membership Discounts</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            Live policy used by invoices via `apply_member_discount` (database function).
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="min-w-[180px]">Tier</TableHead>
+                <TableHead className="text-right min-w-[140px]">Discount</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {MEMBERSHIP_DISCOUNT_KEYS.map((row) => {
+                const live = row.key ? canonicalByKey.get(row.key) : null;
+                return (
+                  <TableRow key={row.tier}>
+                    <TableCell className="text-sm">{row.tier}</TableCell>
+                    <TableCell className="text-right">
+                      {row.key ? (
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="w-[120px] ml-auto text-right h-8 text-sm"
+                          defaultValue={live?.amount_aed ?? row.defaultPct}
+                          onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                          disabled={saving === `key:${row.key}`}
+                        />
+                      ) : (
+                        <span className="text-sm font-medium">0%</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Boarding Rates</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            Live boarding pricing keys used by room pricing resolver (including off-peak keys).
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="min-w-[220px]">Label</TableHead>
+                <TableHead className="min-w-[180px]">Key</TableHead>
+                <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {boardingRateRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-sm text-muted-foreground py-6 text-center">
+                    No boarding pricing keys found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                boardingRateRows.map((row) => (
+                  <TableRow key={row.key}>
+                    <TableCell className="text-sm">{row.label || row.key}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{row.key}</TableCell>
+                    <TableCell className="text-right">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="w-[140px] ml-auto text-right h-8 text-sm"
+                        defaultValue={row.amount_aed}
+                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        disabled={saving === `key:${row.key}`}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
       {/* Grooming Rates */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming Services</CardTitle>
           <p className="text-xs text-muted-foreground font-normal pt-1">
-            Per-service list (`grooming_service_rates` / Grooming app). Extras and à-la-carte lines are under Add-ons — Grooming.
+            Default service prices are pinned to the live rate card keys below. Brushing has no dedicated rate-card key and remains from `grooming_service_rates`.
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -1004,14 +1139,26 @@ function PricingTab() {
                 <TableRow key={r.id}>
                   <TableCell className="text-sm">{r.label}</TableCell>
                   <TableCell className="text-right">
+                    {(() => {
+                      const key = GROOMING_SERVICE_RATE_CARD_KEYS[r.service];
+                      const live = key ? canonicalByKey.get(key) : null;
+                      return (
                     <Input
-                      type="number" min="0" step="1"
+                      type="number" min="0" step="0.01"
                       className="w-[120px] ml-auto text-right h-8 text-sm"
-                      defaultValue={r.price_aed}
-                      onBlur={(e) => saveRate("grooming", r.id, e.target.value)}
+                      defaultValue={live?.amount_aed ?? r.price_aed}
+                      onBlur={(e) => {
+                        if (key) {
+                          saveCanonicalKey(key, e.target.value);
+                        } else {
+                          saveRate("grooming", r.id, e.target.value);
+                        }
+                      }}
                       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      disabled={saving === r.id}
+                      disabled={saving === r.id || (key ? saving === `key:${key}` : false)}
                     />
+                      );
+                    })()}
                   </TableCell>
                 </TableRow>
               ))}
@@ -1020,49 +1167,64 @@ function PricingTab() {
         </CardContent>
       </Card>
 
-      {/* Park Rates */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Park</CardTitle>
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming Rate Card (Size Tiers & Packages)</CardTitle>
           <p className="text-xs text-muted-foreground font-normal pt-1">
-            Legacy service table. Live park visit billing uses the Rate Card keys above (`park_1_dog`, `park_2_dogs`, ...).
+            Full grooming catalog from `pricing` category `grooming` (Grande, Bijoux, Deshed long/smooth, and extras).
           </p>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40">
-                <TableHead className="min-w-[180px]">Slot Type</TableHead>
+                <TableHead className="min-w-[220px]">Label</TableHead>
+                <TableHead className="min-w-[180px]">Key</TableHead>
                 <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {parkRates.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="text-sm">{r.label}</TableCell>
-                  <TableCell className="text-right">
-                    <Input
-                      type="number" min="0" step="1"
-                      className="w-[120px] ml-auto text-right h-8 text-sm"
-                      defaultValue={r.price_per_slot_aed}
-                      onBlur={(e) => saveRate("park", r.id, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      disabled={saving === r.id}
-                    />
+              {groomingRateCardRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-sm text-muted-foreground py-6 text-center">
+                    No grooming pricing keys found.
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                groomingRateCardRows.map((row) => (
+                  <TableRow key={row.key}>
+                    <TableCell className="text-sm">{row.label || row.key}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{row.key}</TableCell>
+                    <TableCell className="text-right">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="w-[140px] ml-auto text-right h-8 text-sm"
+                        defaultValue={row.amount_aed}
+                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        disabled={saving === `key:${row.key}`}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        Park legacy table is intentionally hidden to avoid stale values. Live park billing is controlled only by Rate Card keys above (`park_1_dog`, `park_2_dogs`, `park_3_dogs`, `park_extra_dog`).
+      </div>
 
       {/* Daycare Package Types */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Daycare Packages</CardTitle>
           <p className="text-xs text-muted-foreground font-normal pt-1">
-            Package base prices for prepaid bundles. Single-day daycare billing uses the Rate Card keys above (`daycare_*`).
+            MSH currently sells only a 12-day package. Single-day daycare billing uses the Rate Card keys above (`daycare_*`).
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -1075,22 +1237,30 @@ function PricingTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {daycarePackageTypes.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell className="text-sm">{t.name}</TableCell>
-                  <TableCell className="text-center text-sm text-muted-foreground">{t.total_days}</TableCell>
-                  <TableCell className="text-right">
-                    <Input
-                      type="number" min="0" step="1"
-                      className="w-[120px] ml-auto text-right h-8 text-sm"
-                      defaultValue={t.base_price_aed}
-                      onBlur={(e) => saveRate("daycare", t.id, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      disabled={saving === t.id}
-                    />
+              {daycare12DayTypes.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-sm text-muted-foreground py-6 text-center">
+                    No active 12-day package type found.
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                daycare12DayTypes.map((t) => (
+                  <TableRow key={t.id}>
+                    <TableCell className="text-sm">{t.name}</TableCell>
+                    <TableCell className="text-center text-sm text-muted-foreground">{t.total_days}</TableCell>
+                    <TableCell className="text-right">
+                      <Input
+                        type="number" min="0" step="1"
+                        className="w-[120px] ml-auto text-right h-8 text-sm"
+                        defaultValue={t.base_price_aed}
+                        onBlur={(e) => saveRate("daycare", t.id, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        disabled={saving === t.id}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
@@ -1145,9 +1315,9 @@ function PricingTab() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Add-ons — Transport &amp; boarding</CardTitle>
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Add-ons — Boarding</CardTitle>
           <p className="text-xs text-muted-foreground font-normal pt-1">
-            Transport charges in live invoices are resolved from Rate Card transport keys above.
+            Boarding-only add-ons from `addon_rates`. Transport add-ons are hidden here to avoid stale values; live transport charges always come from Rate Card transport keys above.
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -1161,12 +1331,12 @@ function PricingTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {transportAddOnRates.length === 0 ? (
+              {boardingAddOnRates.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-sm text-muted-foreground py-6 text-center">No transport or boarding add-on rows.</TableCell>
+                  <TableCell colSpan={4} className="text-sm text-muted-foreground py-6 text-center">No boarding add-on rows.</TableCell>
                 </TableRow>
               ) : (
-                transportAddOnRates.map((r) => (
+                boardingAddOnRates.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="text-sm">{r.label}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{r.unit}</TableCell>
@@ -1188,6 +1358,12 @@ function PricingTab() {
           </Table>
         </CardContent>
       </Card>
+
+      {transportAddOnRates.length > 0 ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Hidden {transportAddOnRates.length} legacy transport add-on row{transportAddOnRates.length === 1 ? "" : "s"} from `addon_rates` to prevent pricing confusion. Use Rate Card keys (`transport_dubai_shared`, `transport_dubai`, `transport_abudhabi`) for live transport pricing.
+        </div>
+      ) : null}
 
       {otherAddOnRates.length > 0 ? (
         <Card>

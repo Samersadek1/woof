@@ -118,6 +118,7 @@ const MEMBER_BADGE_CLASSES: Record<MemberType, string> = {
   standard: "bg-slate-100 text-slate-700 border-slate-200",
   silver: "bg-blue-50 text-blue-700 border-blue-200",
   gold: "bg-amber-50 text-amber-700 border-amber-200",
+  platinum: "bg-violet-50 text-violet-700 border-violet-200",
 };
 
 const STATUS_DOT: Record<string, string> = {
@@ -184,7 +185,6 @@ function parkLaneLabel(lane: ParkSize): string {
 
 function groomerLine(g: GroomingAppointmentWithJoins): string {
   if (g.grooming_notes?.trim()) return g.grooming_notes.trim();
-  if (g.staff) return ownerDisplayName(g.staff.first_name, g.staff.last_name);
   return "—";
 }
 
@@ -1637,6 +1637,7 @@ const OwnerProfilePage = () => {
                       <SelectItem value="standard">Standard</SelectItem>
                       <SelectItem value="silver">Silver</SelectItem>
                       <SelectItem value="gold">Gold</SelectItem>
+                      <SelectItem value="platinum">Platinum</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
