@@ -25,6 +25,7 @@ const ParkPage = lazy(() => import("@/pages/Park"));
 const GroomingPage = lazy(() => import("@/pages/Grooming"));
 const StaffPage = lazy(() => import("@/pages/Staff"));
 const ProfilePage = lazy(() => import("@/pages/Profile"));
+const SetupPasswordPage = lazy(() => import("@/pages/SetupPasswordPage"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
 function AuthLoadingScreen() {
@@ -60,6 +61,7 @@ const App = () => (
           <Suspense fallback={<AuthLoadingScreen />}>
             <Routes>
               <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+              <Route path="/auth/setup-password" element={<SetupPasswordPage />} />
               {/* path="/" layout + relative child paths so <Outlet /> resolves (pathless parent + path="/" child breaks RR6 matching) */}
               <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
                 <Route index element={<DashboardPage />} />

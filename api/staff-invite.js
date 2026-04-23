@@ -31,6 +31,23 @@ function hasPrivilegedRoleFromMetadata(user) {
   return role === "admin" || role === "management";
 }
 
+function resolveBaseUrl(req) {
+  const envBase =
+    process.env.APP_BASE_URL ||
+    process.env.SITE_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.VERCEL_URL;
+  if (envBase) {
+    const withProtocol = envBase.startsWith("http")
+      ? envBase
+      : `https://${envBase}`;
+    return withProtocol.replace(/\/+$/, "");
+  }
+  const host = req.headers.host;
+  if (!host) return "https://admin-essentials.vercel.app";
+  return `${host.includes("localhost") ? "http" : "https"}://${host}`;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return json(res, 405, { error: "Method not allowed" });
@@ -78,7 +95,9 @@ export default async function handler(req, res) {
   }
 
   // 1) Send Supabase Auth invite email so the user can set password.
+  const baseUrl = resolveBaseUrl(req);
   const invite = await service.auth.admin.inviteUserByEmail(String(email).trim(), {
+    redirectTo: `${baseUrl}/auth/setup-password`,
     data: {
       first_name: String(firstName).trim(),
       last_name: String(lastName).trim(),
