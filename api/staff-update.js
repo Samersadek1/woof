@@ -5,6 +5,32 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+async function resolveActor(serviceClient, user) {
+  if (!user) return null;
+  if (user.email) {
+    const { data } = await serviceClient
+      .from("staff")
+      .select("id, role, active, email")
+      .ilike("email", user.email)
+      .maybeSingle();
+    if (data) return data;
+  }
+  if (user.id) {
+    const { data } = await serviceClient
+      .from("staff")
+      .select("id, role, active, email")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (data) return data;
+  }
+  return null;
+}
+
+function hasPrivilegedRoleFromMetadata(user) {
+  const role = user?.app_metadata?.role;
+  return role === "admin" || role === "management";
+}
+
 async function findAuthUserByEmail(adminClient, email) {
   let page = 1;
   const perPage = 200;
@@ -48,12 +74,11 @@ export default async function handler(req, res) {
   } = await client.auth.getUser(token);
   if (userErr || !user?.email) return json(res, 401, { error: "Invalid session" });
 
-  const { data: actor } = await admin
-    .from("staff")
-    .select("role, active, email")
-    .ilike("email", user.email)
-    .maybeSingle();
-  if (!actor || !actor.active || !["admin", "management"].includes(actor.role)) {
+  const actor = await resolveActor(admin, user);
+  const metadataPrivileged = hasPrivilegedRoleFromMetadata(user);
+  const actorPrivileged =
+    !!actor && actor.active && ["admin", "management"].includes(actor.role);
+  if (!actorPrivileged && !metadataPrivileged) {
     return json(res, 403, { error: "Insufficient permissions" });
   }
 
