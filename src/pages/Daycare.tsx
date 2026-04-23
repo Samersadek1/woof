@@ -4,6 +4,15 @@ import { addDays, format, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { buildDaycareTags, tagToneClass } from "@/lib/operationsTags";
+import {
+  TRANSPORT_PRICING_KEYS,
+  TRANSPORT_ZONE_OPTIONS,
+  type TransportZone,
+  privateDubaiOverCapacity,
+  transportPricingKey,
+  transportQuantityForPets,
+  transportZoneLabel,
+} from "@/lib/transportPricing";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery } from "@tanstack/react-query";
@@ -570,7 +579,7 @@ function PlannerTab() {
     session_date: TODAY,
     pickup_used: false,
     dropoff_used: false,
-    transport_zone: "dubai" as "dubai" | "abudhabi",
+    transport_zone: "dubai_shared" as TransportZone,
     logged_by: "",
     remark: "",
   });
@@ -612,7 +621,7 @@ function PlannerTab() {
       const { data, error } = await supabase
         .from("pricing")
         .select("key, amount_aed")
-        .in("key", ["transport_dubai", "transport_abudhabi"]);
+        .in("key", TRANSPORT_PRICING_KEYS as readonly string[] as string[]);
       if (error) throw error;
       return data ?? [];
     },
@@ -625,7 +634,7 @@ function PlannerTab() {
   const dropoffsUsed = sessions?.filter((s) => s.dropoff_used).length ?? 0;
   const daycareSinglePrice = pricingRows.find((r) => r.key === "daycare_single_day")?.amount_aed ?? 0;
   const transportRate = useMemo(() => {
-    const key = checkInDraft.transport_zone === "abudhabi" ? "transport_abudhabi" : "transport_dubai";
+    const key = transportPricingKey(checkInDraft.transport_zone);
     return transportPricingRows.find((r) => r.key === key)?.amount_aed ?? 0;
   }, [transportPricingRows, checkInDraft.transport_zone]);
 
@@ -705,9 +714,24 @@ function PlannerTab() {
       return;
     }
 
+    if (
+      (checkInDraft.pickup_used || checkInDraft.dropoff_used) &&
+      privateDubaiOverCapacity(checkInDraft.transport_zone, selectedPetIds.length)
+    ) {
+      toast.error(
+        "Private Dubai transport is capped at 3 dogs. Split the group or choose Dubai — Shared.",
+      );
+      return;
+    }
+
     setIsSubmittingCheckIn(true);
     const failures: string[] = [];
     let successCount = 0;
+    // Private Dubai is a single flat trip for the whole family — charge it only
+    // on the first pet's invoice in the batch, not per-dog.
+    const privateFlat = checkInDraft.transport_zone === "dubai_private";
+    let privatePickupCharged = false;
+    let privateDropoffCharged = false;
 
     for (const petId of selectedPetIds) {
       const pet = pets?.find((p) => p.id === petId);
@@ -728,7 +752,8 @@ function PlannerTab() {
         });
 
         if (!chosenPackageId) {
-          const zoneLabel = checkInDraft.transport_zone === "abudhabi" ? "Abu Dhabi" : "Dubai";
+          const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
+          const transportKey = transportPricingKey(checkInDraft.transport_zone);
           const lineItems: {
             description: string;
             quantity: number;
@@ -743,23 +768,32 @@ function PlannerTab() {
             serviceType: "daycare",
           }];
 
-          if (checkInDraft.pickup_used) {
+          const includePickup = checkInDraft.pickup_used && (!privateFlat || !privatePickupCharged);
+          const includeDropoff = checkInDraft.dropoff_used && (!privateFlat || !privateDropoffCharged);
+
+          if (includePickup) {
             lineItems.push({
-              description: `${petName} — Pickup transport (${zoneLabel})`,
+              description: privateFlat
+                ? `Pickup transport (${zoneLabel}) — family flat rate`
+                : `${petName} — Pickup transport (${zoneLabel})`,
               quantity: 1,
               unitPrice: transportRate,
-              pricingKey: `transport_${checkInDraft.transport_zone}`,
-              serviceType: "addon",
+              pricingKey: transportKey,
+              serviceType: "transport",
             });
+            if (privateFlat) privatePickupCharged = true;
           }
-          if (checkInDraft.dropoff_used) {
+          if (includeDropoff) {
             lineItems.push({
-              description: `${petName} — Drop-off transport (${zoneLabel})`,
+              description: privateFlat
+                ? `Drop-off transport (${zoneLabel}) — family flat rate`
+                : `${petName} — Drop-off transport (${zoneLabel})`,
               quantity: 1,
               unitPrice: transportRate,
-              pricingKey: `transport_${checkInDraft.transport_zone}`,
-              serviceType: "addon",
+              pricingKey: transportKey,
+              serviceType: "transport",
             });
+            if (privateFlat) privateDropoffCharged = true;
           }
 
           await createServiceInvoice({
@@ -928,23 +962,51 @@ function PlannerTab() {
                 </div>
                 {(checkInDraft.pickup_used || checkInDraft.dropoff_used) && (
                   <div className="max-w-xs space-y-1.5">
-                    <Label>Transport zone</Label>
+                    <Label>Transport option</Label>
                     <Select
                       value={checkInDraft.transport_zone}
                       onValueChange={(value) => setCheckInDraft((prev) => ({
                         ...prev,
-                        transport_zone: value as "dubai" | "abudhabi",
+                        transport_zone: value as TransportZone,
                       }))}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="dubai">Dubai</SelectItem>
-                        <SelectItem value="abudhabi">Abu Dhabi</SelectItem>
+                        {TRANSPORT_ZONE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">Transport rate: AED {transportRate.toFixed(2)} / trip</p>
+                    {(() => {
+                      const zone = checkInDraft.transport_zone;
+                      const pets = Math.max(1, selectedPetIds.length);
+                      const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === zone);
+                      const over = privateDubaiOverCapacity(zone, pets);
+                      const trips = [checkInDraft.pickup_used, checkInDraft.dropoff_used].filter(Boolean).length;
+                      const qty = transportQuantityForPets(zone, pets);
+                      const total = transportRate * qty * Math.max(1, trips);
+                      return (
+                        <>
+                          <p className="text-xs text-muted-foreground">
+                            AED {transportRate.toFixed(2)} × {qty}
+                            {zone === "dubai_private" ? " (flat per trip)" : " per dog"}
+                            {opt ? ` — ${opt.helper}` : ""}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Estimated total: AED {total.toFixed(2)} ({trips || 1} trip{trips === 1 ? "" : "s"})
+                          </p>
+                          {over && (
+                            <p className="text-xs text-destructive">
+                              Private is capped at 3 dogs. Switch to Shared or split the group.
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -1259,7 +1321,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
     expiry_date:    "",
     pickup:         false,
     dropoff:        false,
-    transport_zone: "dubai" as "dubai" | "abudhabi",
+    transport_zone: "dubai_shared" as TransportZone,
     price_override: "",
     notes:          "",
   });
@@ -1285,7 +1347,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
       const { data, error } = await supabase
         .from("pricing")
         .select("key, amount_aed")
-        .in("key", ["transport_dubai", "transport_abudhabi"]);
+        .in("key", TRANSPORT_PRICING_KEYS as readonly string[] as string[]);
       if (error) throw error;
       return data ?? [];
     },
@@ -1294,7 +1356,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
   const selectedType = packageTypes.find(t => t.id === form.package_type_id) ?? null;
 
   const transportRate = useMemo(() => {
-    const key = form.transport_zone === "abudhabi" ? "transport_abudhabi" : "transport_dubai";
+    const key = transportPricingKey(form.transport_zone);
     return packageTransportPricing.find((r) => r.key === key)?.amount_aed ?? 0;
   }, [packageTransportPricing, form.transport_zone]);
 
@@ -1311,7 +1373,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
   const resetAndClose = () => {
     setOwnerId(null);
     setOwnerLabel(null);
-    setForm({ pet_id: "", package_type_id: "", purchase_date: TODAY, expiry_date: "", pickup: false, dropoff: false, transport_zone: "dubai", price_override: "", notes: "" });
+    setForm({ pet_id: "", package_type_id: "", purchase_date: TODAY, expiry_date: "", pickup: false, dropoff: false, transport_zone: "dubai_shared", price_override: "", notes: "" });
     onClose();
   };
 
@@ -1353,14 +1415,15 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
           pricingKey: `daycare:${selectedType.name.toLowerCase().replace(/\s+/g, "_")}`,
           serviceType: "daycare",
         }];
-        const zoneLabel = form.transport_zone === "abudhabi" ? "Abu Dhabi" : "Dubai";
+        const zoneLabel = transportZoneLabel(form.transport_zone);
+        const transportKey = transportPricingKey(form.transport_zone);
         if (form.pickup) {
           lineItems.push({
             description: `Pickup transport (${zoneLabel}) × ${totalDays} days`,
             quantity: totalDays,
             unitPrice: transportRate,
-            pricingKey: `transport_${form.transport_zone}`,
-            serviceType: "addon",
+            pricingKey: transportKey,
+            serviceType: "transport",
           });
         }
         if (form.dropoff) {
@@ -1368,8 +1431,8 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
             description: `Drop-off transport (${zoneLabel}) × ${totalDays} days`,
             quantity: totalDays,
             unitPrice: transportRate,
-            pricingKey: `transport_${form.transport_zone}`,
-            serviceType: "addon",
+            pricingKey: transportKey,
+            serviceType: "transport",
           });
         }
 
@@ -1469,23 +1532,32 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
                 </div>
                 {(form.pickup || form.dropoff) && (
                   <div className="space-y-1.5">
-                    <Label>Transport zone</Label>
+                    <Label>Transport option</Label>
                     <Select
                       value={form.transport_zone}
-                      onValueChange={(v) => setField("transport_zone", v)}
+                      onValueChange={(v) => setField("transport_zone", v as TransportZone)}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="dubai">Dubai</SelectItem>
-                        <SelectItem value="abudhabi">Abu Dhabi</SelectItem>
+                        {TRANSPORT_ZONE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">
-                      AED {transportRate}/trip × {totalDays} days
-                      {form.pickup && form.dropoff ? " × 2 (pickup + drop-off)" : ""}
-                    </p>
+                    {(() => {
+                      const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === form.transport_zone);
+                      return (
+                        <p className="text-xs text-muted-foreground">
+                          AED {transportRate.toFixed(2)}/trip × {totalDays} days
+                          {form.pickup && form.dropoff ? " × 2 (pickup + drop-off)" : ""}
+                          {opt ? ` — ${opt.helper}` : ""}
+                        </p>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

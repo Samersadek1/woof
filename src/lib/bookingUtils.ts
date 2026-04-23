@@ -208,7 +208,7 @@ interface AutoInvoiceParams {
   petCount: number;
   checkInDate: string;
   checkOutDate: string;
-  addons?: { key: string; label: string }[];
+  addons?: { key: string; label: string; quantity?: number }[];
 }
 
 export async function createBookingInvoice(params: AutoInvoiceParams): Promise<void> {
@@ -241,9 +241,10 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
 
   for (const addon of addons) {
     const rate = addonPriceMap.get(addon.key) ?? 0;
+    const qty = Math.max(1, addon.quantity ?? 1);
     lineItems.push({
       description: addon.label,
-      quantity: 1,
+      quantity: qty,
       unitPrice: rate,
       pricingKey: addon.key,
       serviceType: serviceTypeForBoardingAddonKey(addon.key),

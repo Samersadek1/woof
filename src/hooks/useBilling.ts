@@ -5,6 +5,12 @@ import { toast } from "sonner";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { getPricingAmountByKey, groomingServiceToPricingKey, resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import {
+  type TransportZone,
+  normalizeStoredTransportZone,
+  transportPricingKey,
+  transportZoneLabel,
+} from "@/lib/transportPricing";
+import {
   useRefundWallet,
   type WalletMutationPayload,
 } from "@/hooks/useWallet";
@@ -316,7 +322,7 @@ type ServiceParams =
     }
   | { type: "grooming"; service: string }
   | { type: "park"; slots?: number }
-  | { type: "daycare_package"; packageTypeId: string; pickup?: boolean; dropoff?: boolean; transportZone?: string }
+  | { type: "daycare_package"; packageTypeId: string; pickup?: boolean; dropoff?: boolean; transportZone?: TransportZone | string | null }
   | { type: "membership"; pricingKey: string };
 
 export function useBillingCalculator(
@@ -380,11 +386,14 @@ export function useBillingCalculator(
           if (pkgType) {
             lineItems.push({ pricingKey: `daycare:${pkgType.name}`, label: pkgType.name, quantity: 1, unitPrice: pkgType.base_price_aed, total: pkgType.base_price_aed });
             if (params.pickup || params.dropoff) {
-              const tKey = params.transportZone === "abudhabi" ? "transport_abudhabi" : "transport_dubai";
+              const zone: TransportZone =
+                normalizeStoredTransportZone(params.transportZone ?? null) ?? "dubai_shared";
+              const tKey = transportPricingKey(zone);
               const tMap = await resolveAddonPricesForKeys([tKey]);
               const tp = tMap.get(tKey) ?? 0;
-              if (params.pickup) lineItems.push({ pricingKey: tKey, label: `Pickup × ${pkgType.total_days}`, quantity: pkgType.total_days, unitPrice: tp, total: tp * pkgType.total_days });
-              if (params.dropoff) lineItems.push({ pricingKey: tKey, label: `Drop-off × ${pkgType.total_days}`, quantity: pkgType.total_days, unitPrice: tp, total: tp * pkgType.total_days });
+              const zoneLabel = transportZoneLabel(zone);
+              if (params.pickup) lineItems.push({ pricingKey: tKey, label: `Pickup (${zoneLabel}) × ${pkgType.total_days}`, quantity: pkgType.total_days, unitPrice: tp, total: tp * pkgType.total_days });
+              if (params.dropoff) lineItems.push({ pricingKey: tKey, label: `Drop-off (${zoneLabel}) × ${pkgType.total_days}`, quantity: pkgType.total_days, unitPrice: tp, total: tp * pkgType.total_days });
             }
           }
           break;

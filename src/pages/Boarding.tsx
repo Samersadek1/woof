@@ -47,6 +47,15 @@ import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
 import { boardCheckoutGroomingAddon } from "@/lib/groomingCatalog";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
+import {
+  TRANSPORT_PRICING_KEYS,
+  TRANSPORT_ZONE_OPTIONS,
+  type TransportZone,
+  privateDubaiOverCapacity,
+  transportPricingKey,
+  transportQuantityForPets,
+  transportZoneLabel,
+} from "@/lib/transportPricing";
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
 import { ChevronLeft, ChevronRight, Plus, Loader2, ExternalLink, Eye, Luggage, Printer } from "lucide-react";
 import { toast } from "sonner";
@@ -271,7 +280,7 @@ type NewBookingForm = {
   do_not_move: boolean;
   pickup_required: boolean;
   dropoff_required: boolean;
-  transport_zone: "dubai" | "abudhabi";
+  transport_zone: TransportZone;
   addon_groom: boolean;
   addon_bath: boolean;
   pet_care_by_pet_id: Record<
@@ -295,7 +304,7 @@ const BLANK_FORM: NewBookingForm = {
   do_not_move: false,
   pickup_required: false,
   dropoff_required: false,
-  transport_zone: "dubai",
+  transport_zone: "dubai_shared",
   addon_groom: false,
   addon_bath: false,
   pet_care_by_pet_id: {},
@@ -357,14 +366,14 @@ export function DogBoardingCalendar({
       const { data, error } = await supabase
         .from("pricing")
         .select("key, amount_aed")
-        .in("key", ["transport_dubai", "transport_abudhabi"]);
+        .in("key", TRANSPORT_PRICING_KEYS as readonly string[] as string[]);
       if (error) throw error;
       return data ?? [];
     },
   });
 
   const activeTransportRate = transportRates.find(
-    (r) => r.key === `transport_${form.transport_zone}`,
+    (r) => r.key === transportPricingKey(form.transport_zone),
   );
   const dogRatePetCount = Math.max(1, form.pet_ids.length);
   const dogRatePreview = useQuery({
@@ -474,7 +483,7 @@ export function DogBoardingCalendar({
       return;
     }
 
-    const transportLabel = form.transport_zone === "abudhabi" ? "Abu Dhabi" : "Dubai";
+    const transportLabel = transportZoneLabel(form.transport_zone);
     const addons = [
       form.pickup_required && `Pickup (${transportLabel})`,
       form.dropoff_required && `Drop-off (${transportLabel})`,
@@ -483,6 +492,16 @@ export function DogBoardingCalendar({
     ]
       .filter(Boolean)
       .join(", ");
+
+    if (
+      (form.pickup_required || form.dropoff_required) &&
+      privateDubaiOverCapacity(form.transport_zone, form.pet_ids.length)
+    ) {
+      toast.error(
+        "Private Dubai transport is capped at 3 dogs. Split the group or choose Dubai — Shared.",
+      );
+      return;
+    }
 
     const payload: CreateBookingPayload = {
       owner_id: form.owner_id,
@@ -506,11 +525,13 @@ export function DogBoardingCalendar({
         toast.success("Booking created");
         setNewBookingOpen(false);
 
-        const addonItems: { key: string; label: string }[] = [];
-        const tKey = `transport_${form.transport_zone}`;
-        const tLabel = form.transport_zone === "abudhabi" ? "Transport Abu Dhabi" : "Transport Dubai";
-        if (form.pickup_required) addonItems.push({ key: tKey, label: `Pickup — ${tLabel}` });
-        if (form.dropoff_required) addonItems.push({ key: tKey, label: `Drop-off — ${tLabel}` });
+        const addonItems: { key: string; label: string; quantity?: number }[] = [];
+        const tKey = transportPricingKey(form.transport_zone);
+        const tZone = transportZoneLabel(form.transport_zone);
+        const tQty = transportQuantityForPets(form.transport_zone, form.pet_ids.length);
+        const tSuffix = tQty > 1 ? ` × ${tQty} dogs` : "";
+        if (form.pickup_required) addonItems.push({ key: tKey, label: `Pickup — ${tZone}${tSuffix}`, quantity: tQty });
+        if (form.dropoff_required) addonItems.push({ key: tKey, label: `Drop-off — ${tZone}${tSuffix}`, quantity: tQty });
         if (form.addon_groom) {
           const line = boardCheckoutGroomingAddon("full_groom");
           if (line) addonItems.push(line);
@@ -995,24 +1016,41 @@ export function DogBoardingCalendar({
               </div>
               {(form.pickup_required || form.dropoff_required) && (
                 <div className="space-y-1 pt-1">
-                  <Label className="text-xs text-muted-foreground font-normal">Transport zone</Label>
+                  <Label className="text-xs text-muted-foreground font-normal">Transport option</Label>
                   <Select
                     value={form.transport_zone}
-                    onValueChange={(v) => setForm((f) => ({ ...f, transport_zone: v as "dubai" | "abudhabi" }))}
+                    onValueChange={(v) => setForm((f) => ({ ...f, transport_zone: v as TransportZone }))}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="dubai">Dubai</SelectItem>
-                      <SelectItem value="abudhabi">Abu Dhabi</SelectItem>
+                      {TRANSPORT_ZONE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                  {activeTransportRate && (
-                    <p className="text-xs text-muted-foreground">
-                      AED {activeTransportRate.amount_aed}/trip
-                    </p>
-                  )}
+                  {activeTransportRate && (() => {
+                    const qty = transportQuantityForPets(form.transport_zone, form.pet_ids.length);
+                    const over = privateDubaiOverCapacity(form.transport_zone, form.pet_ids.length);
+                    const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === form.transport_zone);
+                    return (
+                      <>
+                        <p className="text-xs text-muted-foreground">
+                          AED {activeTransportRate.amount_aed.toFixed(2)} × {qty}
+                          {form.transport_zone === "dubai_private" ? " (flat per trip)" : " per dog"}
+                          {opt ? ` — ${opt.helper}` : ""}
+                        </p>
+                        {over && (
+                          <p className="text-xs text-destructive">
+                            Private is capped at 3 dogs. Switch to Shared or split the group.
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -1377,7 +1415,7 @@ type CatBookingForm = {
   do_not_move: boolean;
   pickup_required: boolean;
   dropoff_required: boolean;
-  transport_zone: "dubai" | "abudhabi";
+  transport_zone: TransportZone;
   addon_groom: boolean;
   addon_bath: boolean;
   cat_litter_type: string;
@@ -1405,7 +1443,7 @@ const CAT_BLANK_FORM: CatBookingForm = {
   do_not_move: false,
   pickup_required: false,
   dropoff_required: false,
-  transport_zone: "dubai",
+  transport_zone: "dubai_shared",
   addon_groom: false,
   addon_bath: false,
   cat_litter_type: "",
@@ -1494,14 +1532,14 @@ function CatBoardingCalendar({
       const { data, error } = await supabase
         .from("pricing")
         .select("key, amount_aed")
-        .in("key", ["transport_dubai", "transport_abudhabi"]);
+        .in("key", TRANSPORT_PRICING_KEYS as readonly string[] as string[]);
       if (error) throw error;
       return data ?? [];
     },
   });
 
   const catActiveTransportRate = catTransportRates.find(
-    (r) => r.key === `transport_${form.transport_zone}`,
+    (r) => r.key === transportPricingKey(form.transport_zone),
   );
   const catRatePetCount = Math.max(1, form.pet_ids.length);
   const catRatePreview = useQuery({
@@ -1596,7 +1634,7 @@ function CatBoardingCalendar({
       return;
     }
 
-    const catTransportLabel = form.transport_zone === "abudhabi" ? "Abu Dhabi" : "Dubai";
+    const catTransportLabel = transportZoneLabel(form.transport_zone);
     const addons = [
       form.pickup_required && `Pickup (${catTransportLabel})`,
       form.dropoff_required && `Drop-off (${catTransportLabel})`,
@@ -1605,6 +1643,16 @@ function CatBoardingCalendar({
     ]
       .filter(Boolean)
       .join(", ");
+
+    if (
+      (form.pickup_required || form.dropoff_required) &&
+      privateDubaiOverCapacity(form.transport_zone, form.pet_ids.length)
+    ) {
+      toast.error(
+        "Private Dubai transport is capped at 3 pets. Split the group or choose Dubai — Shared.",
+      );
+      return;
+    }
 
     const catBlock = buildCatPreferencesNote(form);
 
@@ -1630,11 +1678,13 @@ function CatBoardingCalendar({
         toast.success("Booking created");
         setNewBookingOpen(false);
 
-        const addonItems: { key: string; label: string }[] = [];
-        const catTKey = `transport_${form.transport_zone}`;
-        const catTLabel = form.transport_zone === "abudhabi" ? "Transport Abu Dhabi" : "Transport Dubai";
-        if (form.pickup_required) addonItems.push({ key: catTKey, label: `Pickup — ${catTLabel}` });
-        if (form.dropoff_required) addonItems.push({ key: catTKey, label: `Drop-off — ${catTLabel}` });
+        const addonItems: { key: string; label: string; quantity?: number }[] = [];
+        const catTKey = transportPricingKey(form.transport_zone);
+        const catTZone = transportZoneLabel(form.transport_zone);
+        const catTQty = transportQuantityForPets(form.transport_zone, form.pet_ids.length);
+        const catTSuffix = catTQty > 1 ? ` × ${catTQty} cats` : "";
+        if (form.pickup_required) addonItems.push({ key: catTKey, label: `Pickup — ${catTZone}${catTSuffix}`, quantity: catTQty });
+        if (form.dropoff_required) addonItems.push({ key: catTKey, label: `Drop-off — ${catTZone}${catTSuffix}`, quantity: catTQty });
         if (form.addon_groom) {
           const line = boardCheckoutGroomingAddon("full_groom");
           if (line) addonItems.push(line);
@@ -1981,24 +2031,41 @@ function CatBoardingCalendar({
               </div>
               {(form.pickup_required || form.dropoff_required) && (
                 <div className="space-y-1 pt-1">
-                  <Label className="text-xs text-muted-foreground font-normal">Transport zone</Label>
+                  <Label className="text-xs text-muted-foreground font-normal">Transport option</Label>
                   <Select
                     value={form.transport_zone}
-                    onValueChange={(v) => setForm((f) => ({ ...f, transport_zone: v as "dubai" | "abudhabi" }))}
+                    onValueChange={(v) => setForm((f) => ({ ...f, transport_zone: v as TransportZone }))}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="dubai">Dubai</SelectItem>
-                      <SelectItem value="abudhabi">Abu Dhabi</SelectItem>
+                      {TRANSPORT_ZONE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                  {catActiveTransportRate && (
-                    <p className="text-xs text-muted-foreground">
-                      AED {catActiveTransportRate.amount_aed}/trip
-                    </p>
-                  )}
+                  {catActiveTransportRate && (() => {
+                    const qty = transportQuantityForPets(form.transport_zone, form.pet_ids.length);
+                    const over = privateDubaiOverCapacity(form.transport_zone, form.pet_ids.length);
+                    const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === form.transport_zone);
+                    return (
+                      <>
+                        <p className="text-xs text-muted-foreground">
+                          AED {catActiveTransportRate.amount_aed.toFixed(2)} × {qty}
+                          {form.transport_zone === "dubai_private" ? " (flat per trip)" : " per cat"}
+                          {opt ? ` — ${opt.helper}` : ""}
+                        </p>
+                        {over && (
+                          <p className="text-xs text-destructive">
+                            Private is capped at 3 pets. Switch to Shared or split the group.
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
