@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,10 +7,25 @@ import { Label } from "@/components/ui/label";
 import { PawPrint } from "lucide-react";
 
 const LoginPage = () => {
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const hashParams = new URLSearchParams(
+      url.hash.startsWith("#") ? url.hash.slice(1) : url.hash,
+    );
+    const hasInvitePayload =
+      !!url.searchParams.get("code") ||
+      !!url.searchParams.get("token_hash") ||
+      !!hashParams.get("code") ||
+      !!hashParams.get("token_hash");
+    if (!hasInvitePayload) return;
+    navigate(`/auth/setup-password${url.search}${url.hash}`, { replace: true });
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
