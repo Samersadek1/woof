@@ -138,11 +138,11 @@ function formatAed(value: number): string {
 
 function escapeHtml(value: string): string {
   return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): string {
@@ -201,7 +201,6 @@ function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): s
       <div class="grid">
         <div><div class="label">Pickup</div><div class="value">${booking.pickup_required ? "Yes" : "No"}</div></div>
         <div><div class="label">Drop-off</div><div class="value">${booking.dropoff_required ? "Yes" : "No"}</div></div>
-        <div><div class="label">Transport zone</div><div class="value">${escapeHtml(booking.transport_zone ?? "—")}</div></div>
         <div><div class="label">Belongings</div><div class="value">${belongingsCount}</div></div>
       </div>
 

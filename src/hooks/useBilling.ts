@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { getPricingAmountByKey, groomingServiceToPricingKey, resolveAddonPricesForKeys } from "@/lib/addonPricing";
@@ -356,7 +357,10 @@ export function useBillingCalculator(
         }
         case "grooming": {
           const { data: rate } = await supabase
-            .from("grooming_service_rates").select("price_aed, label").eq("service", params.service).single();
+            .from("grooming_service_rates")
+            .select("price_aed, label")
+            .eq("service", params.service as Database["public"]["Enums"]["grooming_service"])
+            .single();
           let p = rate?.price_aed ?? 0;
           let label = rate?.label ?? params.service;
           if (p === 0) {
