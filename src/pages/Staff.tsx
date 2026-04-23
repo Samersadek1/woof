@@ -27,12 +27,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Search, Plus, Loader2 } from "lucide-react";
+import { Search, Plus, Loader2, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import {
-  useCreateStaff,
   useStaff,
-  useUpdateStaff,
   type StaffInsert,
   type StaffRole,
   type StaffRow,
@@ -88,20 +88,28 @@ function fullName(staff: StaffRow): string {
 }
 
 const StaffPage = () => {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState<StaffInsert>({ ...INITIAL_FORM });
+  const [editForm, setEditForm] = useState<StaffInsert>({ ...INITIAL_FORM });
+  const [editingRow, setEditingRow] = useState<StaffRow | null>(null);
 
   const { data: staff = [], isLoading } = useStaff(debouncedSearch || undefined);
-  const createStaff = useCreateStaff();
-  const updateStaff = useUpdateStaff();
+  const [isInviting, setIsInviting] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   const setField = (field: keyof StaffInsert, value: string | boolean) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
+  const setEditField = (field: keyof StaffInsert, value: string | boolean) => {
+    setEditForm((prev) => ({ ...prev, [field]: value }));
+  };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.first_name?.trim() || !form.last_name?.trim()) {
       toast.error("First name and last name are required.");
@@ -116,36 +124,123 @@ const StaffPage = () => {
       phone: form.phone?.trim() || null,
     };
 
-    createStaff.mutate(payload, {
-      onSuccess: () => {
-        toast.success("Staff member created.");
-        setDrawerOpen(false);
-        setForm({ ...INITIAL_FORM });
-      },
-      onError: (err) => {
-        toast.error(err.message || "Failed to create staff member.");
-      },
+    setIsInviting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Session expired. Please sign in again.");
+
+      const res = await fetch("/api/staff-invite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          firstName: payload.first_name,
+          lastName: payload.last_name,
+          email: payload.email,
+          phone: payload.phone,
+          role: payload.role,
+          active: payload.active,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Failed to invite user.");
+
+      toast.success(`Invite sent to ${data.invitedEmail}.`);
+      setCreateOpen(false);
+      setForm({ ...INITIAL_FORM });
+      queryClient.invalidateQueries({ queryKey: ["staff"] });
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to invite user.");
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const openEdit = (row: StaffRow) => {
+    setEditingRow(row);
+    setEditForm({
+      first_name: row.first_name ?? "",
+      last_name: row.last_name ?? "",
+      email: row.email ?? "",
+      phone: row.phone ?? "",
+      role: row.role,
+      active: row.active,
     });
+    setEditOpen(true);
   };
 
-  const handleRoleChange = (row: StaffRow, role: StaffRole) => {
-    updateStaff.mutate(
-      { id: row.id, patch: { role } },
-      {
-        onSuccess: () => toast.success(`${fullName(row)} role updated.`),
-        onError: (err) => toast.error(err.message || "Failed to update role."),
-      },
-    );
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRow) return;
+    if (!editForm.first_name?.trim() || !editForm.last_name?.trim() || !editForm.email?.trim()) {
+      toast.error("First name, last name, and email are required.");
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Session expired. Please sign in again.");
+
+      const res = await fetch("/api/staff-update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          id: editingRow.id,
+          firstName: editForm.first_name,
+          lastName: editForm.last_name,
+          email: editForm.email,
+          phone: editForm.phone,
+          role: editForm.role,
+          active: editForm.active,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Failed to update user.");
+
+      toast.success(`${fullName(editingRow)} updated.`);
+      setEditOpen(false);
+      setEditingRow(null);
+      queryClient.invalidateQueries({ queryKey: ["staff"] });
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update user.");
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
-  const handleActiveToggle = (row: StaffRow, active: boolean) => {
-    updateStaff.mutate(
-      { id: row.id, patch: { active } },
-      {
-        onSuccess: () => toast.success(`${fullName(row)} ${active ? "activated" : "deactivated"}.`),
-        onError: (err) => toast.error(err.message || "Failed to update status."),
-      },
-    );
+  const handleDelete = async (row: StaffRow) => {
+    const confirmed = window.confirm(`Delete ${fullName(row)}? This also removes their sign-in account.`);
+    if (!confirmed) return;
+
+    setIsDeleting(row.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Session expired. Please sign in again.");
+
+      const res = await fetch("/api/staff-delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ id: row.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Failed to delete user.");
+
+      toast.success(`${fullName(row)} deleted.`);
+      queryClient.invalidateQueries({ queryKey: ["staff"] });
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete user.");
+    } finally {
+      setIsDeleting(null);
+    }
   };
 
   return (
@@ -163,7 +258,7 @@ const StaffPage = () => {
               className="pl-9"
             />
           </div>
-          <Button onClick={() => setDrawerOpen(true)} className="shrink-0">
+          <Button onClick={() => setCreateOpen(true)} className="shrink-0">
             <Plus className="mr-2 h-4 w-4" />
             Add user
           </Button>
@@ -178,18 +273,19 @@ const StaffPage = () => {
                 <TableHead>Phone</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead className="text-center">Active</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center">
+                  <TableCell colSpan={6} className="h-32 text-center">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
                   </TableCell>
                 </TableRow>
               ) : staff.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                     No staff users found.
                   </TableCell>
                 </TableRow>
@@ -200,34 +296,29 @@ const StaffPage = () => {
                     <TableCell>{row.email || "—"}</TableCell>
                     <TableCell>{row.phone || "—"}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className={ROLE_BADGE[row.role]}>
-                          {ROLE_LABELS[row.role]}
-                        </Badge>
-                        <Select
-                          value={row.role}
-                          onValueChange={(value) => handleRoleChange(row, value as StaffRole)}
-                          disabled={updateStaff.isPending}
-                        >
-                          <SelectTrigger className="h-8 w-[180px] text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ROLE_OPTIONS.map((role) => (
-                              <SelectItem key={role} value={role}>
-                                {ROLE_LABELS[role]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      <Badge variant="outline" className={ROLE_BADGE[row.role]}>
+                        {ROLE_LABELS[row.role]}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-center">
-                      <Switch
-                        checked={row.active}
-                        onCheckedChange={(checked) => handleActiveToggle(row, checked)}
-                        disabled={updateStaff.isPending}
-                      />
+                      {row.active ? "Yes" : "No"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openEdit(row)}>
+                          <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDelete(row)}
+                          disabled={isDeleting === row.id}
+                        >
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                          {isDeleting === row.id ? "Deleting..." : "Delete"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -238,9 +329,9 @@ const StaffPage = () => {
       </main>
 
       <Sheet
-        open={drawerOpen}
+        open={createOpen}
         onOpenChange={(open) => {
-          setDrawerOpen(open);
+          setCreateOpen(open);
           if (!open) setForm({ ...INITIAL_FORM });
         }}
       >
@@ -320,8 +411,103 @@ const StaffPage = () => {
             </div>
 
             <div className="pt-2">
-              <Button type="submit" className="w-full" disabled={createStaff.isPending}>
-                {createStaff.isPending ? "Creating..." : "Create user"}
+              <Button type="submit" className="w-full" disabled={isInviting}>
+                {isInviting ? "Sending invite..." : "Invite user"}
+              </Button>
+            </div>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) {
+            setEditingRow(null);
+            setEditForm({ ...INITIAL_FORM });
+          }
+        }}
+      >
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>Edit user</SheetTitle>
+            <SheetDescription>Update staff details, role, or access status.</SheetDescription>
+          </SheetHeader>
+
+          <form onSubmit={handleEdit} className="mt-6 space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit_first_name">First name *</Label>
+                <Input
+                  id="edit_first_name"
+                  value={editForm.first_name}
+                  onChange={(e) => setEditField("first_name", e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit_last_name">Last name *</Label>
+                <Input
+                  id="edit_last_name"
+                  value={editForm.last_name}
+                  onChange={(e) => setEditField("last_name", e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit_email">Email *</Label>
+              <Input
+                id="edit_email"
+                type="email"
+                value={editForm.email ?? ""}
+                onChange={(e) => setEditField("email", e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit_phone">Phone</Label>
+              <Input
+                id="edit_phone"
+                value={editForm.phone ?? ""}
+                onChange={(e) => setEditField("phone", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Role</Label>
+              <Select
+                value={editForm.role}
+                onValueChange={(value) => setEditField("role", value as StaffRole)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {ROLE_LABELS[role]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <Label htmlFor="edit_active">Active</Label>
+              <Switch
+                id="edit_active"
+                checked={!!editForm.active}
+                onCheckedChange={(checked) => setEditField("active", checked)}
+              />
+            </div>
+
+            <div className="pt-2">
+              <Button type="submit" className="w-full" disabled={isSavingEdit}>
+                {isSavingEdit ? "Saving..." : "Save changes"}
               </Button>
             </div>
           </form>

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -34,6 +35,7 @@ const settingsItems = [
 
 const AppSidebar = () => {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
 
   return (
     <aside className="flex h-screen w-60 flex-col bg-sidebar text-sidebar-foreground shrink-0">
@@ -82,14 +84,19 @@ const AppSidebar = () => {
 
       {/* Footer */}
       <div className="border-t border-sidebar-border p-4 space-y-3">
-        <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => navigate("/profile")}
+          className="flex w-full items-center gap-3 rounded-md px-1 py-1 text-left transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground uppercase">
             {user?.email?.charAt(0) ?? "?"}
           </div>
-          <span className="text-xs text-sidebar-accent-foreground truncate">
-            {user?.email ?? "Staff"}
-          </span>
-        </div>
+          <div className="min-w-0">
+            <div className="truncate text-xs text-sidebar-accent-foreground">{user?.email ?? "Staff"}</div>
+            <div className="text-[10px] text-sidebar-foreground/60">View profile</div>
+          </div>
+        </button>
         <button
           onClick={signOut}
           className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"

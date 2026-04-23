@@ -19,6 +19,7 @@ import AgentPage from "@/pages/Agent";
 import ParkPage from "@/pages/Park";
 import GroomingPage from "@/pages/Grooming";
 import StaffPage from "@/pages/Staff";
+import ProfilePage from "@/pages/Profile";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -70,6 +71,7 @@ const App = () => (
               <Route path="grooming" element={<GroomingPage />} />
               <Route path="billing" element={<BillingPage />} />
               <Route path="staff" element={<StaffPage />} />
+              <Route path="profile" element={<ProfilePage />} />
               <Route path="settings/rooms" element={<RoomsAdminPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />

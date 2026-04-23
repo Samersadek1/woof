@@ -33,3 +33,4 @@ dist-ssr
 # Local tooling / Supabase temp
 .claude/
 supabase/.temp/
+.vercel

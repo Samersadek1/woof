@@ -65,3 +65,16 @@ export function useUpdateStaff() {
     },
   });
 }
+
+export function useDeleteStaff() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("staff").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: staffKeys.all });
+    },
+  });
+}
