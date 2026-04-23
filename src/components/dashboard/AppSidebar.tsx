@@ -24,7 +24,7 @@ const navItems = [
   { icon: TreePine, label: "Park Visitation", path: "/park" },
   { icon: Scissors, label: "Grooming", path: "/grooming" },
   { icon: Wallet, label: "Billing & Wallets", path: "/billing" },
-  { icon: ClipboardList, label: "Staff Portal", path: "/staff" },
+  { icon: ClipboardList, label: "User Management", path: "/staff" },
   { icon: Sparkles, label: "AI Assistant", path: "/agent" },
 ];
 

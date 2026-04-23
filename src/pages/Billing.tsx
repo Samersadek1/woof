@@ -116,6 +116,20 @@ const INVOICE_STATUS_BADGE: Record<string, { label: string; className: string }>
   cancelled: { label: "Cancelled", className: "bg-gray-100 text-gray-500 border-gray-200" },
 };
 
+const CANONICAL_PRICING_KEYS: Array<{ key: string; label: string; category: string }> = [
+  { key: "registration_member", label: "Registration fee", category: "membership" },
+  { key: "daycare_single_day", label: "Daycare 1 dog (single day)", category: "daycare" },
+  { key: "daycare_2_dogs", label: "Daycare 2 dogs (single day)", category: "daycare" },
+  { key: "daycare_3_dogs", label: "Daycare 3 dogs (single day)", category: "daycare" },
+  { key: "park_1_dog", label: "Park 1 dog", category: "park" },
+  { key: "park_2_dogs", label: "Park 2 dogs", category: "park" },
+  { key: "park_3_dogs", label: "Park 3 dogs", category: "park" },
+  { key: "park_extra_dog", label: "Park extra dog", category: "park" },
+  { key: "transport_dubai_shared", label: "Transport Dubai shared", category: "transport" },
+  { key: "transport_dubai", label: "Transport Dubai private", category: "transport" },
+  { key: "transport_abudhabi", label: "Transport Other Emirates", category: "transport" },
+];
+
 // ── WalletModal ──────────────────────────────────────────────────────────────
 
 type ModalMode = "topup" | "deduct";
@@ -588,9 +602,42 @@ function OwnerSearchBar({ onSelect, selectedLabel, selectedOwnerId, onClear }: O
 function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: string; last_name: string; phone: string; member_type: MemberType; wallet_balance: number; id: string } }) {
   const navigate = useNavigate();
   const { data: transactions, isLoading: txLoading } = useWalletTransactions(ownerId);
+  const createInvoice = useCreateInvoice();
+  const { getPrice } = usePricing();
   const [modalMode, setModalMode] = useState<ModalMode | null>(null);
   const balance = owner.wallet_balance;
   const isLowBalance = balance < LOW_BALANCE_THRESHOLD;
+  const registrationFee = getPrice("registration_member");
+
+  const chargeRegistrationFee = () => {
+    const amount = registrationFee;
+    if (!amount || amount <= 0) {
+      toast.error("Registration fee is not configured in pricing.");
+      return;
+    }
+    createInvoice.mutate({
+      ownerId,
+      serviceType: "membership",
+      breakdown: {
+        lineItems: [{
+          pricingKey: "registration_member",
+          label: "Member registration fee",
+          quantity: 1,
+          unitPrice: amount,
+          total: amount,
+        }],
+        subtotal: amount,
+        discountPct: 0,
+        discountAed: 0,
+        total: amount,
+        memberType: owner.member_type,
+      },
+      notes: "Registration fee",
+    }, {
+      onSuccess: () => toast.success("Registration fee draft invoice created."),
+      onError: (err) => toast.error(err.message || "Failed to create registration fee invoice."),
+    });
+  };
 
   return (
     <>
@@ -622,10 +669,25 @@ function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: s
               <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setModalMode("deduct")}>
                 <ArrowDownCircle className="mr-1.5 h-4 w-4" /> Deduct
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={chargeRegistrationFee}
+                disabled={createInvoice.isPending}
+                title="Create membership registration invoice"
+              >
+                {createInvoice.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                Charge registration
+              </Button>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        Legacy `boarding_*` pricing rows may still exist in the database for backwards compatibility.
+        Current boarding billing resolves by room `pricing_category` / `room_type` keys (for example `royal_single`, `family_family`).
+      </div>
 
       <Card>
         <CardHeader className="pb-3"><CardTitle className="text-base">Transaction History</CardTitle></CardHeader>
@@ -812,12 +874,17 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
 // ── PricingTab ───────────────────────────────────────────────────────────────
 
 function PricingTab() {
+  const { allRows, updatePrice } = usePricing();
   const {
     groomingRates, parkRates, daycarePackageTypes, addonRates,
     updateGroomingRate, updateParkRate, updateDaycareType, updateAddonRate,
     isLoading,
   } = useServiceRates();
   const [saving, setSaving] = useState<string | null>(null);
+  const canonicalByKey = useMemo(
+    () => new Map((allRows ?? []).map((r) => [r.key, r])),
+    [allRows],
+  );
 
   const { groomingAddOnRates, transportAddOnRates, otherAddOnRates } = useMemo(() => {
     const grooming: AddonRateRow[] = [];
@@ -849,6 +916,20 @@ function PricingTab() {
     }
   };
 
+  const saveCanonicalKey = async (key: string, value: string) => {
+    const num = parseFloat(value);
+    if (Number.isNaN(num) || num < 0) return;
+    setSaving(`key:${key}`);
+    try {
+      await updatePrice(key, num);
+      toast.success("Rate card key saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="space-y-3 p-4">{[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>;
   }
@@ -856,6 +937,51 @@ function PricingTab() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">Service rates are used to auto-price bookings. Press Enter or blur to save.</p>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Live Rate Card (pricing table)</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            These keys drive live billing for transport, daycare day-pass, park visits, and registration. Update these first.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="min-w-[220px]">Item</TableHead>
+                <TableHead className="min-w-[120px]">Key</TableHead>
+                <TableHead className="w-[100px]">Category</TableHead>
+                <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {CANONICAL_PRICING_KEYS.map((row) => {
+                const live = canonicalByKey.get(row.key);
+                return (
+                  <TableRow key={row.key}>
+                    <TableCell className="text-sm">{row.label}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{row.key}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{row.category}</TableCell>
+                    <TableCell className="text-right">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="w-[140px] ml-auto text-right h-8 text-sm"
+                        defaultValue={live?.amount_aed ?? 0}
+                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                        disabled={saving === `key:${row.key}`}
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* Grooming Rates */}
       <Card>
@@ -898,6 +1024,9 @@ function PricingTab() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Park</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            Legacy service table. Live park visit billing uses the Rate Card keys above (`park_1_dog`, `park_2_dogs`, ...).
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -932,6 +1061,9 @@ function PricingTab() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Daycare Packages</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            Package base prices for prepaid bundles. Single-day daycare billing uses the Rate Card keys above (`daycare_*`).
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -1014,6 +1146,9 @@ function PricingTab() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Add-ons — Transport &amp; boarding</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            Transport charges in live invoices are resolved from Rate Card transport keys above.
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           <Table>

@@ -11,7 +11,6 @@ import CustomersPage from "@/pages/Customers";
 import OwnerProfilePage from "@/pages/OwnerProfile";
 import BoardingPage from "@/pages/Boarding";
 import PetProfilePage from "@/pages/PetProfile";
-import PlaceholderPage from "@/pages/PlaceholderPage";
 import RoomsAdminPage from "@/pages/RoomsAdmin";
 import BillingPage from "@/pages/Billing";
 import DaycarePage from "@/pages/Daycare";
@@ -19,6 +18,7 @@ import ServiceCheckinsPage from "@/pages/ServiceCheckins";
 import AgentPage from "@/pages/Agent";
 import ParkPage from "@/pages/Park";
 import GroomingPage from "@/pages/Grooming";
+import StaffPage from "@/pages/Staff";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -69,7 +69,7 @@ const App = () => (
               <Route path="park" element={<ParkPage />} />
               <Route path="grooming" element={<GroomingPage />} />
               <Route path="billing" element={<BillingPage />} />
-              <Route path="staff" element={<PlaceholderPage title="Staff Portal" />} />
+              <Route path="staff" element={<StaffPage />} />
               <Route path="settings/rooms" element={<RoomsAdminPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />

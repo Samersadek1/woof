@@ -376,9 +376,13 @@ export function DogBoardingCalendar({
   );
   const dogRatePetCount = Math.max(1, form.pet_ids.length);
   const dogRatePreview = useQuery({
-    queryKey: ["boarding_rate_preview", "dog", form.room_id, dogRatePetCount],
+    queryKey: ["boarding_rate_preview", "dog", form.room_id, dogRatePetCount, form.check_in_date, form.check_out_date],
     enabled: !!form.room_id,
-    queryFn: async () => resolveBoardingRate(form.room_id, dogRatePetCount),
+    queryFn: async () =>
+      resolveBoardingRate(form.room_id, dogRatePetCount, {
+        checkInDate: form.check_in_date || null,
+        checkOutDate: form.check_out_date || null,
+      }),
   });
 
   const handleBelongingsFlowFinished = () => {
@@ -1542,9 +1546,13 @@ function CatBoardingCalendar({
   );
   const catRatePetCount = Math.max(1, form.pet_ids.length);
   const catRatePreview = useQuery({
-    queryKey: ["boarding_rate_preview", "cat", form.room_id, catRatePetCount],
+    queryKey: ["boarding_rate_preview", "cat", form.room_id, catRatePetCount, form.check_in_date, form.check_out_date],
     enabled: !!form.room_id,
-    queryFn: async () => resolveBoardingRate(form.room_id, catRatePetCount),
+    queryFn: async () =>
+      resolveBoardingRate(form.room_id, catRatePetCount, {
+        checkInDate: form.check_in_date || null,
+        checkOutDate: form.check_out_date || null,
+      }),
   });
 
   const handleBelongingsFlowFinished = () => {

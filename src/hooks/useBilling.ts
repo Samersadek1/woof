@@ -462,6 +462,51 @@ export function useCreateInvoice() {
 
   return useMutation({
     mutationFn: async (input: CreateInvoiceInput) => {
+      const normalizedItems: LineItem[] = [];
+      for (const li of input.breakdown.lineItems) {
+        const qty = Math.max(1, li.quantity);
+        let unitPrice = li.unitPrice;
+        if (li.pricingKey) {
+          try {
+            const { data } = await supabase.rpc("resolve_line_price", {
+              p_pricing_key: li.pricingKey,
+              p_quantity: qty,
+            });
+            const row = (data as { unit_price: number; total: number }[])?.[0];
+            if (row && typeof row.unit_price === "number" && typeof row.total === "number") {
+              unitPrice = row.unit_price;
+            }
+          } catch {
+            // Keep client-provided prices when RPC isn't available for a key.
+          }
+        }
+        normalizedItems.push({
+          ...li,
+          quantity: qty,
+          unitPrice,
+          total: unitPrice * qty,
+        });
+      }
+
+      const normalizedSubtotal = normalizedItems.reduce((sum, li) => sum + li.total, 0);
+      let normalizedDiscountAed = 0;
+      let normalizedDiscountPct = 0;
+      let normalizedTotal = normalizedSubtotal;
+      try {
+        const { data: discData } = await supabase.rpc("apply_member_discount", {
+          p_owner_id: input.ownerId,
+          p_subtotal: normalizedSubtotal,
+        });
+        const row = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
+        if (row) {
+          normalizedDiscountPct = row.discount_pct;
+          normalizedDiscountAed = row.discount_aed;
+          normalizedTotal = row.final_aed;
+        }
+      } catch {
+        // Leave raw totals if discount RPC unavailable.
+      }
+
       const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         .toISOString()
         .split("T")[0];
@@ -473,13 +518,13 @@ export function useCreateInvoice() {
           booking_id: input.serviceId ?? null,
           service_type: input.serviceType,
           status: "draft" as const,
-          subtotal: input.breakdown.subtotal,
-          subtotal_aed: input.breakdown.subtotal,
-          discount_pct: input.breakdown.discountPct,
-          discount_aed: input.breakdown.discountAed,
-          discount_amount: input.breakdown.discountAed,
-          total: input.breakdown.total,
-          total_aed: input.breakdown.total,
+          subtotal: normalizedSubtotal,
+          subtotal_aed: normalizedSubtotal,
+          discount_pct: normalizedDiscountPct,
+          discount_aed: normalizedDiscountAed,
+          discount_amount: normalizedDiscountAed,
+          total: normalizedTotal,
+          total_aed: normalizedTotal,
           due_date: dueDate,
           notes: input.notes ?? null,
         })
@@ -488,7 +533,7 @@ export function useCreateInvoice() {
 
       if (invErr) throw invErr;
 
-      const lineRows = input.breakdown.lineItems.map((li, i) => ({
+      const lineRows = normalizedItems.map((li, i) => ({
         invoice_id: inv.id,
         description: li.label,
         quantity: li.quantity,
@@ -509,7 +554,7 @@ export function useCreateInvoice() {
       return {
         invoiceId: inv.id as string,
         invoiceNumber: inv.invoice_number as string | null,
-        total: input.breakdown.total,
+        total: normalizedTotal,
       };
     },
     onSuccess: (_data, variables) => {

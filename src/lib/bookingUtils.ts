@@ -122,7 +122,40 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
     invoiceStatus = "draft",
   } = params;
 
-  const subtotal = lineItems.reduce((s, li) => s + li.unitPrice * li.quantity, 0);
+  const normalizedLines: ServiceInvoiceLineItem[] = [];
+  for (const li of lineItems) {
+    const qty = Math.max(1, li.quantity);
+    let unitPrice = li.unitPrice;
+
+    // Prefer DB-side pricing math when we have a canonical key (VAT/rule support).
+    if (li.pricingKey) {
+      try {
+        const { data } = await supabase.rpc("resolve_line_price", {
+          p_pricing_key: li.pricingKey,
+          p_quantity: qty,
+        });
+        const row = (data as {
+          unit_price: number;
+          subtotal: number;
+          total: number;
+        }[])?.[0];
+        if (row && typeof row.unit_price === "number" && typeof row.total === "number") {
+          unitPrice = row.unit_price;
+        }
+      } catch {
+        // Keep caller-provided values when RPC is unavailable for a key.
+      }
+    }
+
+    normalizedLines.push({
+      ...li,
+      quantity: qty,
+      unitPrice,
+      // keep total derivation deterministic for inserts below
+    });
+  }
+
+  const subtotal = normalizedLines.reduce((s, li) => s + li.unitPrice * li.quantity, 0);
 
   let discountPct = 0;
   let discountAed = 0;
@@ -171,7 +204,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
 
   if (invErr) throw invErr;
 
-  const lineRows = lineItems.map((li, i) => ({
+  const lineRows = normalizedLines.map((li, i) => ({
     invoice_id: inv.id,
     description: li.description,
     quantity: li.quantity,
@@ -219,7 +252,10 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
 
   const [addonPriceMap, rateResolved] = await Promise.all([
     resolveAddonPricesForKeys(addons.map((a) => a.key)),
-    resolveBoardingRate(roomId, petCount),
+    resolveBoardingRate(roomId, petCount, {
+      checkInDate,
+      checkOutDate,
+    }),
   ]);
 
   const occ = occupancyTag(petCount);

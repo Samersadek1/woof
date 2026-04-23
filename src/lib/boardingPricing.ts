@@ -13,6 +13,11 @@ type BoardingRate = {
   pricingKey: string;
 };
 
+type ResolveBoardingRateOptions = {
+  checkInDate?: string | null;
+  checkOutDate?: string | null;
+};
+
 const LEGACY_OCC_MULTIPLIER: Record<string, number> = {
   single: 1,
   twin: 1.5,
@@ -51,7 +56,11 @@ function buildPricingKeyCandidates(room: BoardingRoomRow, petCount: number): str
   return Array.from(new Set(out));
 }
 
-export async function resolveBoardingRate(roomId: string, petCount: number): Promise<BoardingRate> {
+export async function resolveBoardingRate(
+  roomId: string,
+  petCount: number,
+  opts?: ResolveBoardingRateOptions,
+): Promise<BoardingRate> {
   const { data: room, error: roomErr } = await supabase
     .from("rooms")
     // pricing_* columns are runtime columns that may be added by SQL migrations.
@@ -63,14 +72,34 @@ export async function resolveBoardingRate(roomId: string, petCount: number): Pro
   const roomRow = room as unknown as BoardingRoomRow;
 
   const candidates = buildPricingKeyCandidates(roomRow, petCount);
-  if (candidates.length > 0) {
+  const resolvedCandidates: string[] = [];
+  const hasDates = Boolean(opts?.checkInDate && opts?.checkOutDate);
+  if (hasDates) {
+    for (const key of candidates) {
+      try {
+        const { data: resolved } = await supabase.rpc("resolve_boarding_pricing_key", {
+          p_base_key: key,
+          p_check_in_date: opts!.checkInDate!,
+          p_check_out_date: opts!.checkOutDate!,
+        });
+        if (typeof resolved === "string" && resolved.trim()) {
+          resolvedCandidates.push(resolved);
+        }
+      } catch {
+        // If RPC isn't available yet, fall back to base key candidates.
+      }
+    }
+  }
+
+  const mergedCandidates = Array.from(new Set([...resolvedCandidates, ...candidates]));
+  if (mergedCandidates.length > 0) {
     const { data: pricingRows } = await supabase
       .from("pricing")
       .select("key, amount_aed")
-      .in("key", candidates);
+      .in("key", mergedCandidates);
 
     const priceMap = new Map((pricingRows ?? []).map((r) => [r.key, r.amount_aed]));
-    for (const key of candidates) {
+    for (const key of mergedCandidates) {
       const amount = priceMap.get(key);
       if (typeof amount === "number") {
         return { unitPrice: amount, pricingKey: key };

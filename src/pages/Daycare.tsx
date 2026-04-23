@@ -13,6 +13,7 @@ import {
   transportQuantityForPets,
   transportZoneLabel,
 } from "@/lib/transportPricing";
+import { buildPriceMap, daycareGroupPricing } from "@/lib/servicePricing";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery } from "@tanstack/react-query";
@@ -610,7 +611,7 @@ function PlannerTab() {
       const { data, error } = await supabase
         .from("pricing")
         .select("key, amount_aed")
-        .in("key", ["daycare_single_day"]);
+        .in("key", ["daycare_single_day", "daycare_2_dogs", "daycare_3_dogs"]);
       if (error) throw error;
       return data ?? [];
     },
@@ -632,7 +633,7 @@ function PlannerTab() {
 
   const pickupsUsed = sessions?.filter((s) => s.pickup_used).length ?? 0;
   const dropoffsUsed = sessions?.filter((s) => s.dropoff_used).length ?? 0;
-  const daycareSinglePrice = pricingRows.find((r) => r.key === "daycare_single_day")?.amount_aed ?? 0;
+  const daycarePriceMap = useMemo(() => buildPriceMap(pricingRows), [pricingRows]);
   const transportRate = useMemo(() => {
     const key = transportPricingKey(checkInDraft.transport_zone);
     return transportPricingRows.find((r) => r.key === key)?.amount_aed ?? 0;
@@ -727,6 +728,12 @@ function PlannerTab() {
     setIsSubmittingCheckIn(true);
     const failures: string[] = [];
     let successCount = 0;
+    const singleDayPetIds = selectedPetIds.filter((id) => (billingChoiceByPet[id] ?? "single") === "single");
+    const singleDayCount = singleDayPetIds.length;
+    const singleDayPetIdSet = new Set(singleDayPetIds);
+    const singleDayRate = daycareGroupPricing(singleDayCount, daycarePriceMap);
+    const singleDayUnitPrice = singleDayCount > 0 ? singleDayRate.total / singleDayCount : 0;
+    let singleDayInvoiceCreated = false;
     // Private Dubai is a single flat trip for the whole family — charge it only
     // on the first pet's invoice in the batch, not per-dog.
     const privateFlat = checkInDraft.transport_zone === "dubai_private";
@@ -751,7 +758,7 @@ function PlannerTab() {
           remark: checkInDraft.remark || null,
         });
 
-        if (!chosenPackageId) {
+        if (!chosenPackageId && singleDayPetIdSet.has(petId) && !singleDayInvoiceCreated) {
           const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
           const transportKey = transportPricingKey(checkInDraft.transport_zone);
           const lineItems: {
@@ -761,22 +768,26 @@ function PlannerTab() {
             pricingKey?: string;
             serviceType?: string;
           }[] = [{
-            description: `${petName} — Daycare single day`,
-            quantity: 1,
-            unitPrice: daycareSinglePrice,
-            pricingKey: "daycare_single_day",
+            description: `${singleDayRate.label} (${singleDayCount} dog${singleDayCount === 1 ? "" : "s"})`,
+            quantity: singleDayCount,
+            unitPrice: singleDayUnitPrice,
+            pricingKey: singleDayRate.pricingKey,
             serviceType: "daycare",
           }];
 
           const includePickup = checkInDraft.pickup_used && (!privateFlat || !privatePickupCharged);
           const includeDropoff = checkInDraft.dropoff_used && (!privateFlat || !privateDropoffCharged);
+          const transportQty = transportQuantityForPets(
+            checkInDraft.transport_zone,
+            singleDayCount,
+          );
 
           if (includePickup) {
             lineItems.push({
               description: privateFlat
                 ? `Pickup transport (${zoneLabel}) — family flat rate`
-                : `${petName} — Pickup transport (${zoneLabel})`,
-              quantity: 1,
+                : `Pickup transport (${zoneLabel})`,
+              quantity: transportQty,
               unitPrice: transportRate,
               pricingKey: transportKey,
               serviceType: "transport",
@@ -787,8 +798,8 @@ function PlannerTab() {
             lineItems.push({
               description: privateFlat
                 ? `Drop-off transport (${zoneLabel}) — family flat rate`
-                : `${petName} — Drop-off transport (${zoneLabel})`,
-              quantity: 1,
+                : `Drop-off transport (${zoneLabel})`,
+              quantity: transportQty,
               unitPrice: transportRate,
               pricingKey: transportKey,
               serviceType: "transport",
@@ -804,6 +815,7 @@ function PlannerTab() {
             notes: checkInDraft.remark || null,
             invoiceStatus: "finalised",
           });
+          singleDayInvoiceCreated = true;
         }
 
         successCount += 1;

@@ -9,6 +9,7 @@ import {
 } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
+import { buildPriceMap, parkGroupPricing } from "@/lib/servicePricing";
 import { useOwners } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery } from "@tanstack/react-query";
@@ -244,12 +245,15 @@ const ParkPage = () => {
   const deleteBooking = useDeleteParkBooking();
   const setDayFlag = useSetParkDayFlag();
 
-  const { data: parkSlotFromPricing } = useQuery({
-    queryKey: ["pricing", "park_slot"],
+  const { data: parkPricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
+    queryKey: ["pricing", "park_keys"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("pricing").select("amount_aed").eq("key", "park_slot").maybeSingle();
+      const { data, error } = await supabase
+        .from("pricing")
+        .select("key, amount_aed")
+        .in("key", ["park_1_dog", "park_2_dogs", "park_3_dogs", "park_extra_dog", "park_slot"]);
       if (error) throw error;
-      return data?.amount_aed ?? null;
+      return data ?? [];
     },
   });
   const { data: parkRates = [] } = useQuery({
@@ -264,10 +268,11 @@ const ParkPage = () => {
       return data ?? [];
     },
   });
+  const parkPriceMap = useMemo(() => buildPriceMap(parkPricingRows), [parkPricingRows]);
   const slotPrice =
-    typeof parkSlotFromPricing === "number" && parkSlotFromPricing > 0
-      ? parkSlotFromPricing
-      : (parkRates[0]?.price_per_slot_aed ?? 0);
+    (parkPriceMap.get("park_1_dog") && parkPriceMap.get("park_1_dog")! > 0
+      ? parkPriceMap.get("park_1_dog")
+      : parkPriceMap.get("park_slot")) ?? (parkRates[0]?.price_per_slot_aed ?? 0);
 
   const effectiveStatus: ParkDayStatus = dayFlag?.status ?? "open";
 
@@ -342,6 +347,8 @@ const ParkPage = () => {
 
     try {
       const createdIds: string[] = [];
+      const groupedRate = parkGroupPricing(selectedPetIds.size, parkPriceMap);
+      const perBookingPrice = selectedPetIds.size > 0 ? groupedRate.total / selectedPetIds.size : slotPrice;
       for (const petId of selectedPetIds) {
         const booking = await createBooking.mutateAsync({
           visit_date: dateStr,
@@ -352,7 +359,7 @@ const ParkPage = () => {
           pet_id: petId,
           is_assessment: isAssessment,
           notes: bookingNotes.trim() || null,
-          price: slotPrice,
+          price: perBookingPrice,
         });
         createdIds.push(booking.id);
       }
@@ -363,21 +370,19 @@ const ParkPage = () => {
       );
       closeSheet();
 
-      if (slotPrice > 0 && ownerId) {
-        for (const id of createdIds) {
-          createServiceInvoice({
-            ownerId,
+      if (groupedRate.total > 0 && ownerId && createdIds.length > 0) {
+        createServiceInvoice({
+          ownerId,
+          serviceType: "park",
+          referenceId: createdIds[0],
+          lineItems: [{
+            description: `${groupedRate.label} — ${format(parseISO(dateStr), "d MMM yyyy")} ${sheetSlot.slot_start}–${sheetSlot.slot_end}`,
+            quantity: 1,
+            unitPrice: groupedRate.total,
+            pricingKey: groupedRate.pricingKey,
             serviceType: "park",
-            referenceId: id,
-            lineItems: [{
-              description: `Park slot — ${format(parseISO(dateStr), "d MMM yyyy")} ${sheetSlot.slot_start}–${sheetSlot.slot_end}`,
-              quantity: 1,
-              unitPrice: slotPrice,
-              pricingKey: "park:standard_slot",
-              serviceType: "park",
-            }],
-          }).catch((err) => console.error("Park auto-invoice failed:", err));
-        }
+          }],
+        }).catch((err) => console.error("Park auto-invoice failed:", err));
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Could not save booking.";
