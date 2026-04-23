@@ -46,6 +46,17 @@ const SetupPasswordPage = () => {
           if (codeError) throw codeError;
           if (!cancelled) setInviteSession(data.session ?? null);
         } else {
+          const accessToken = searchParams.get("access_token") || hashParams.get("access_token");
+          const refreshToken = searchParams.get("refresh_token") || hashParams.get("refresh_token");
+          if (accessToken && refreshToken) {
+            const { data, error: sessionError } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+            if (sessionError) throw sessionError;
+            if (!cancelled) setInviteSession(data.session ?? null);
+            return;
+          }
           const tokenHash = searchParams.get("token_hash") || hashParams.get("token_hash");
           const type = (searchParams.get("type") || hashParams.get("type")) as EmailOtpType | null;
           if (tokenHash && type) {

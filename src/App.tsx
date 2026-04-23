@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -37,16 +37,42 @@ function AuthLoadingScreen() {
   );
 }
 
+function hasInvitePayload(search: string, hash: string): boolean {
+  const searchParams = new URLSearchParams(search);
+  const hashParams = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+  return (
+    !!searchParams.get("code") ||
+    !!searchParams.get("token_hash") ||
+    !!searchParams.get("access_token") ||
+    !!hashParams.get("code") ||
+    !!hashParams.get("token_hash") ||
+    !!hashParams.get("access_token")
+  );
+}
+
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const location = useLocation();
   const { session, loading } = useAuth();
   if (loading) return <AuthLoadingScreen />;
-  if (!session) return <Navigate to="/login" replace />;
+  if (!session) {
+    if (hasInvitePayload(location.search, location.hash)) {
+      return (
+        <Navigate
+          to={`/auth/setup-password${location.search}${location.hash}`}
+          replace
+        />
+      );
+    }
+    return <Navigate to="/login" replace />;
+  }
   return <>{children}</>;
 };
 
 const PublicRoute = ({ children }: { children: React.ReactNode }) => {
+  const location = useLocation();
   const { session, loading } = useAuth();
   if (loading) return <AuthLoadingScreen />;
+  if (hasInvitePayload(location.search, location.hash)) return <>{children}</>;
   if (session) return <Navigate to="/" replace />;
   return <>{children}</>;
 };

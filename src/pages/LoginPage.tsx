@@ -21,8 +21,10 @@ const LoginPage = () => {
     const hasInvitePayload =
       !!url.searchParams.get("code") ||
       !!url.searchParams.get("token_hash") ||
+      !!url.searchParams.get("access_token") ||
       !!hashParams.get("code") ||
-      !!hashParams.get("token_hash");
+      !!hashParams.get("token_hash") ||
+      !!hashParams.get("access_token");
     if (!hasInvitePayload) return;
     navigate(`/auth/setup-password${url.search}${url.hash}`, { replace: true });
   }, [navigate]);
