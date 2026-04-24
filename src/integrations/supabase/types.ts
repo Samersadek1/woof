@@ -1901,6 +1901,10 @@ export type Database = {
           total_aed: number
         }[]
       }
+      get_dashboard_metrics: {
+        Args: { p_as_of?: string }
+        Returns: Json
+      }
       is_off_peak: {
         Args: { check_in_date: string; check_out_date: string }
         Returns: boolean

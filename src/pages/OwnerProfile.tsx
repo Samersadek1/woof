@@ -19,6 +19,7 @@ import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { usePets, useCreatePet, getVaccinationStatus } from "@/hooks/usePets";
 import { useDaycarePackages } from "@/hooks/useDaycare";
+import { useTopUpWallet } from "@/hooks/useWallet";
 import type { PetWithVaccinations } from "@/hooks/usePets";
 import { VaccinationEditor } from "@/components/VaccinationEditor";
 import type { VaccinationRow } from "@/components/VaccinationEditor";
@@ -263,6 +264,10 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const [payMethod, setPayMethod] = useState<"wallet" | "card" | "cash">("wallet");
   const [payStaff, setPayStaff] = useState("");
   const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
+  const [topUpOpen, setTopUpOpen] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState("");
+  const topUp = useTopUpWallet();
+  const overdueCount = invoices.filter((inv) => inv.status === "overdue").length;
 
   const handleFinalise = (inv: InvoiceWithItems) => {
     finalise.mutate(inv.id, {
@@ -300,15 +305,26 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
         <h3 className="text-lg font-semibold flex items-center gap-2">
           <Receipt className="h-5 w-5" />
           Billing & Invoices
+          {overdueCount > 0 && (
+            <Badge variant="destructive" className="ml-2">
+              {overdueCount} overdue
+            </Badge>
+          )}
         </h3>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => navigate("/billing")}
-        >
-          <FileText className="mr-1.5 h-4 w-4" />
-          Full Billing
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setTopUpOpen(true)}>
+            <Wallet className="mr-1.5 h-4 w-4" />
+            Top up
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => navigate(`/billing/statements/${ownerId}`)}>
+            <FileText className="mr-1.5 h-4 w-4" />
+            Statement
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => navigate("/billing")}>
+            <FileText className="mr-1.5 h-4 w-4" />
+            Full Billing
+          </Button>
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -618,6 +634,41 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog open={topUpOpen} onOpenChange={setTopUpOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Top up wallet</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label>Amount (AED)</Label>
+            <Input type="number" min="0.01" step="0.01" value={topUpAmount} onChange={(e) => setTopUpAmount(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTopUpOpen(false)} disabled={topUp.isPending}>Cancel</Button>
+            <Button
+              onClick={() => {
+                const amount = parseFloat(topUpAmount);
+                if (!amount || amount <= 0) return toast.error("Enter a valid amount.");
+                topUp.mutate(
+                  { owner_id: ownerId, amount, payment_method: "cash", notes: "Top-up from owner profile" },
+                  {
+                    onSuccess: () => {
+                      toast.success("Wallet topped up.");
+                      setTopUpAmount("");
+                      setTopUpOpen(false);
+                    },
+                    onError: (err) => toast.error(err.message || "Top up failed."),
+                  },
+                );
+              }}
+              disabled={topUp.isPending}
+            >
+              {topUp.isPending ? "Processing..." : "Confirm top up"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

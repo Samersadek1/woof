@@ -2302,7 +2302,17 @@ function CatBoardingCalendar({
                 {detailBooking.notes && <div className="space-y-1"><p className="text-xs uppercase text-muted-foreground font-medium">Notes</p><p className="text-sm whitespace-pre-line">{detailBooking.notes}</p></div>}
                 <Separator />
                 <div className="space-y-3">
-                  <Button variant="outline" className="w-full" onClick={() => void printKennelCard(detailBooking)}>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() =>
+                      window.open(
+                        `/print/kennel-card/${detailBooking.id}`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      )
+                    }
+                  >
                     <Printer className="mr-2 h-4 w-4" />
                     Print Kennel Card
                   </Button>
@@ -2422,7 +2432,17 @@ function BoardingOperationsList({ species }: { species: Species }) {
                       ))}
                     </div>
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => void printKennelCard(booking)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      window.open(
+                        `/print/kennel-card/${booking.id}`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      )
+                    }
+                  >
                     <Printer className="mr-1.5 h-4 w-4" />
                     Kennel card
                   </Button>

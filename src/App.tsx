@@ -19,6 +19,10 @@ const BoardingPage = lazy(() => import("@/pages/Boarding"));
 const PetProfilePage = lazy(() => import("@/pages/PetProfile"));
 const RoomsAdminPage = lazy(() => import("@/pages/RoomsAdmin"));
 const BillingPage = lazy(() => import("@/pages/Billing"));
+const InvoiceListPage = lazy(() => import("@/pages/billing/InvoiceList"));
+const InvoiceDetailPage = lazy(() => import("@/pages/billing/InvoiceDetail"));
+const CreateInvoicePage = lazy(() => import("@/pages/billing/CreateInvoice"));
+const OwnerStatementPage = lazy(() => import("@/pages/billing/OwnerStatement"));
 const DaycarePage = lazy(() => import("@/pages/Daycare"));
 const ServiceCheckinsPage = lazy(() => import("@/pages/ServiceCheckins"));
 const AgentPage = lazy(() => import("@/pages/Agent"));
@@ -26,6 +30,11 @@ const ParkPage = lazy(() => import("@/pages/Park"));
 const GroomingPage = lazy(() => import("@/pages/Grooming"));
 const StaffPage = lazy(() => import("@/pages/Staff"));
 const ProfilePage = lazy(() => import("@/pages/Profile"));
+const KennelCardPrintPage = lazy(() => import("@/pages/print/KennelCardPrintPage"));
+const KennelCardsPrintPage = lazy(() => import("@/pages/print/KennelCardsPrintPage"));
+const GroomingCardPrintPage = lazy(() => import("@/pages/print/GroomingCardPrintPage"));
+const GroomingCardsPrintPage = lazy(() => import("@/pages/print/GroomingCardsPrintPage"));
+const InvoicePrintPage = lazy(() => import("@/pages/print/InvoicePrintPage"));
 const SetupPasswordPage = lazy(() => import("@/pages/SetupPasswordPage"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
@@ -100,6 +109,11 @@ const App = () => (
             <Routes>
               <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
               <Route path="/auth/setup-password" element={<SetupPasswordPage />} />
+              <Route path="/print/kennel-card/:bookingId" element={<ProtectedRoute><KennelCardPrintPage /></ProtectedRoute>} />
+              <Route path="/print/kennel-cards" element={<ProtectedRoute><KennelCardsPrintPage /></ProtectedRoute>} />
+              <Route path="/print/grooming-card/:bookingId" element={<ProtectedRoute><GroomingCardPrintPage /></ProtectedRoute>} />
+              <Route path="/print/grooming-cards" element={<ProtectedRoute><GroomingCardsPrintPage /></ProtectedRoute>} />
+              <Route path="/print/invoice/:invoiceId" element={<ProtectedRoute><InvoicePrintPage /></ProtectedRoute>} />
               {/* path="/" layout + relative child paths so <Outlet /> resolves (pathless parent + path="/" child breaks RR6 matching) */}
               <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
                 <Route index element={<DashboardPage />} />
@@ -113,6 +127,10 @@ const App = () => (
                 <Route path="park" element={<ParkPage />} />
                 <Route path="grooming" element={<GroomingPage />} />
                 <Route path="billing" element={<BillingPage />} />
+                <Route path="billing/invoices" element={<InvoiceListPage />} />
+                <Route path="billing/invoices/new" element={<CreateInvoicePage />} />
+                <Route path="billing/invoices/:id" element={<InvoiceDetailPage />} />
+                <Route path="billing/statements/:ownerId" element={<OwnerStatementPage />} />
                 <Route path="staff" element={<StaffPage />} />
                 <Route path="profile" element={<ProfilePage />} />
                 <Route path="settings/rooms" element={<RoomsAdminPage />} />

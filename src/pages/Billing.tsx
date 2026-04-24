@@ -381,28 +381,13 @@ function InvoiceDetailDialog({
   ownerName: string;
   onClose: () => void;
 }) {
-  const printRef = useRef<HTMLDivElement>(null);
-
   const handlePrint = useCallback(() => {
-    if (!printRef.current) return;
-    const content = printRef.current.innerHTML;
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-    const dateStr = format(new Date(), "d MMM yyyy, HH:mm");
-    printWindow.document.write(`<!DOCTYPE html>
-<html><head><title>Invoice ${invoice?.invoice_number ?? ""}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; color: #111; font-size: 14px; }
-  table { width: 100%; border-collapse: collapse; }
-  .footer { margin-top: 40px; color: #999; font-size: 12px; text-align: center; }
-  @media print { body { padding: 20px; } }
-</style></head><body>${content}
-<div class="footer">Generated ${dateStr}</div>
-</body></html>`);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
+    if (!invoice) return;
+    window.open(
+      `/print/invoice/${invoice.id}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
   }, [invoice]);
 
   if (!invoice) return null;
@@ -423,7 +408,7 @@ function InvoiceDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div ref={printRef}>
+        <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
             <div>
               <div style={{ fontSize: 20, fontWeight: 700 }}>INVOICE</div>
@@ -510,7 +495,7 @@ function InvoiceDetailDialog({
         <DialogFooter className="gap-2 pt-4">
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button onClick={handlePrint}>
-            <Printer className="mr-2 h-4 w-4" /> Print
+            <Printer className="mr-2 h-4 w-4" /> Print receipt
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1453,10 +1438,15 @@ const BillingPage = () => {
 
         {!selectedOwnerId && (
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList>
-              <TabsTrigger value="wallet"><Wallet className="mr-1.5 h-4 w-4" /> Wallet</TabsTrigger>
-              <TabsTrigger value="pricing"><Receipt className="mr-1.5 h-4 w-4" /> Pricing</TabsTrigger>
-            </TabsList>
+            <div className="flex flex-wrap items-center gap-2">
+              <TabsList>
+                <TabsTrigger value="wallet"><Wallet className="mr-1.5 h-4 w-4" /> Wallet</TabsTrigger>
+                <TabsTrigger value="pricing"><Receipt className="mr-1.5 h-4 w-4" /> Pricing</TabsTrigger>
+              </TabsList>
+              <Button size="sm" variant="outline" onClick={() => navigate("/billing/invoices")}>
+                <FileText className="mr-1.5 h-4 w-4" /> Invoices list
+              </Button>
+            </div>
             <TabsContent value="wallet" className="mt-6">
               <div className="flex flex-col items-center justify-center py-24 text-center">
                 <Wallet className="h-12 w-12 text-muted-foreground/40 mb-4" />
@@ -1476,11 +1466,16 @@ const BillingPage = () => {
               <Skeleton className="h-40 w-full rounded-xl" />
             ) : owner ? (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList>
-                  <TabsTrigger value="wallet"><Wallet className="mr-1.5 h-4 w-4" /> Wallet</TabsTrigger>
-                  <TabsTrigger value="invoices"><FileText className="mr-1.5 h-4 w-4" /> Invoices</TabsTrigger>
-                  <TabsTrigger value="pricing"><Receipt className="mr-1.5 h-4 w-4" /> Pricing</TabsTrigger>
-                </TabsList>
+                <div className="flex flex-wrap items-center gap-2">
+                  <TabsList>
+                    <TabsTrigger value="wallet"><Wallet className="mr-1.5 h-4 w-4" /> Wallet</TabsTrigger>
+                    <TabsTrigger value="invoices"><FileText className="mr-1.5 h-4 w-4" /> Invoices</TabsTrigger>
+                    <TabsTrigger value="pricing"><Receipt className="mr-1.5 h-4 w-4" /> Pricing</TabsTrigger>
+                  </TabsList>
+                  <Button size="sm" variant="outline" onClick={() => navigate("/billing/invoices")}>
+                    Open invoices list
+                  </Button>
+                </div>
                 <TabsContent value="wallet" className="mt-6 space-y-6">
                   <WalletTab ownerId={selectedOwnerId} owner={owner} />
                 </TabsContent>

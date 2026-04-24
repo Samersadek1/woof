@@ -74,6 +74,7 @@ import {
   Loader2,
   Package,
   Plus,
+  Printer,
   Search,
   X,
   CalendarIcon,
@@ -276,8 +277,10 @@ function GroomingOwnerSearch({
 
 function AppointmentCard({
   a,
+  onPrint,
 }: {
   a: GroomingAppointmentWithJoins;
+  onPrint: (appointmentId: string) => void;
 }) {
   const markStart = useMarkInProgress();
   const markDone = useMarkComplete();
@@ -380,6 +383,15 @@ function AppointmentCard({
             </p>
 
             <div className="flex flex-col gap-2 lg:items-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full lg:w-auto"
+                onClick={() => onPrint(a.id)}
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                Print card
+              </Button>
               {status === "scheduled" && (
                 <Button
                   size="sm"
@@ -751,6 +763,16 @@ const GroomingPage = () => {
             <Plus className="mr-2 h-4 w-4" />
             New Appointment
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              window.open(`/print/grooming-cards?date=${dateStr}`, "_blank", "noopener,noreferrer")
+            }
+          >
+            <Printer className="mr-2 h-4 w-4" />
+            Print today's cards
+          </Button>
         </div>
 
         <Tabs defaultValue="day" className="space-y-4">
@@ -772,7 +794,17 @@ const GroomingPage = () => {
             ) : (
               <div className="space-y-3">
                 {dayAppointments.map((a) => (
-                  <AppointmentCard key={a.id} a={a} />
+                  <AppointmentCard
+                    key={a.id}
+                    a={a}
+                    onPrint={(appointmentId) =>
+                      window.open(
+                        `/print/grooming-card/${appointmentId}`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      )
+                    }
+                  />
                 ))}
               </div>
             )}

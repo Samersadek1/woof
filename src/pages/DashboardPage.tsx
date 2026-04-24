@@ -1,700 +1,513 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { format, differenceInCalendarDays, parseISO } from "date-fns";
+import { useMemo, useState } from "react";
+import { format, parseISO } from "date-fns";
+import { Link } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
-import { supabase } from "@/integrations/supabase/client";
-import { useTopUpWallet } from "@/hooks/useWallet";
+import { useDashboardMetrics } from "@/hooks/useDashboardMetrics";
+import { useTodaySchedule } from "@/hooks/useTodaySchedule";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CheckCircle2 } from "lucide-react";
-import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  AlertCircle,
+  AlertTriangle,
+  CalendarClock,
+  ClipboardCheck,
+  LogIn,
+  LogOut,
+  RefreshCw,
+  Scissors,
+  Sun,
+  TreePine,
+  Printer,
+  Wallet,
+} from "lucide-react";
 
-// ── types ────────────────────────────────────────────────────────────────────
-
-interface VaxAlert {
-  petName: string;
-  ownerId: string;
-  ownerLastName: string;
-  vaccineName: string;
-  daysLeft: number;
+function formatAed(amount: number) {
+  return new Intl.NumberFormat("en-AE", {
+    style: "currency",
+    currency: "AED",
+    maximumFractionDigits: 0,
+  }).format(amount ?? 0);
 }
 
-interface PaymentRow {
-  id: string;
-  invoiceNumber: string | null;
-  serviceType: string | null;
-  total: number;
-  ownerLastName: string;
-  ownerId: string;
-  daysOverdue?: number;
+function percent(occupied: number, total: number) {
+  if (!total) return 0;
+  return Math.round((occupied / total) * 100);
 }
 
-interface TopupRow {
-  ownerId: string;
-  ownerName: string;
-  walletBalance: number;
-  requestId: string | null;
-  amountRequested: number | null;
-  daysPending: number | null;
-  requestStatus: string | null;
+function occupancyTone(value: number) {
+  if (value > 90) return "bg-red-500";
+  if (value >= 70) return "bg-amber-500";
+  return "bg-emerald-500";
 }
 
-interface DashboardData {
-  overdueCheckins: number;
-  expiringVax: number;
-  pendingTopups: number;
-  overdueInvoiceTotal: number;
-  dogsBoarding: number;
-  catsBoarding: number;
-  daycareToday: number;
-  parkToday: number;
-  groomingToday: number;
-  vaxAlerts: VaxAlert[];
-  paymentsDue: PaymentRow[];
-  paymentsOverdue: PaymentRow[];
-  topupRequests: TopupRow[];
-  lowBalanceCount: number;
-  lowBalanceThreshold: number;
+function rowHref(ownerId: string, petId: string | null) {
+  if (!petId) return `/customers/${ownerId}`;
+  return `/customers/${ownerId}/pets/${petId}`;
 }
 
-const DOG_ROOM_CAPACITY = 57;
-const CAT_ROOM_CAPACITY = 25;
-
-function formatAed(n: number): string {
-  return `AED ${n.toLocaleString("en-AE", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-}
-
-// ── data loader ──────────────────────────────────────────────────────────────
-
-async function fetchDashboardData(): Promise<DashboardData> {
-  const today = new Date().toISOString().split("T")[0];
-  const pastNoon = new Date().getHours() >= 12;
-
-  const weekFromNow = new Date();
-  weekFromNow.setDate(weekFromNow.getDate() + 7);
-  const weekEnd = weekFromNow.toISOString().split("T")[0];
-
-  const monthFromNow = new Date();
-  monthFromNow.setDate(monthFromNow.getDate() + 30);
-  const monthEnd = monthFromNow.toISOString().split("T")[0];
-
-  const [
-    dogsRes,
-    catsRes,
-    daycareRes,
-    parkRes,
-    groomingRes,
-    overdueTodayRes,
-    vaxWeekRes,
-    vaxMonthRes,
-    paymentsDueRes,
-    paymentsOverdueRes,
-    pendingTopupsRes,
-    overdueInvoiceTotalRes,
-    thresholdRes,
-    lowBalanceRes,
-    topupRequestsRes,
-  ] = await Promise.all([
-    // Dogs boarding
-    supabase
-      .from("bookings")
-      .select("id, rooms!inner(wing)")
-      .eq("status", "checked_in")
-      .neq("rooms.wing", "cattery"),
-    // Cats boarding
-    supabase
-      .from("bookings")
-      .select("id, rooms!inner(wing)")
-      .eq("status", "checked_in")
-      .eq("rooms.wing", "cattery"),
-    // Daycare today
-    supabase
-      .from("daycare_sessions")
-      .select("id")
-      .eq("session_date", today)
-      .eq("checked_in", true),
-    // Park bookings today
-    supabase
-      .from("park_bookings")
-      .select("id")
-      .eq("visit_date", today),
-    // Grooming today
-    supabase
-      .from("grooming_appointments")
-      .select("id")
-      .eq("appointment_date", today)
-      .neq("status", "cancelled"),
-    // Today's check-ins (minimal) — only for overdue pill (confirmed + past noon)
-    supabase
-      .from("bookings")
-      .select("id, status")
-      .eq("check_in_date", today)
-      .in("status", ["confirmed", "checked_in"]),
-    // Vax expiring this week (for pill count)
-    supabase
-      .from("vaccinations")
-      .select("id")
-      .gte("expiry_date", today)
-      .lte("expiry_date", weekEnd),
-    // Vax expiring within 30 days (for detail list)
-    supabase
-      .from("vaccinations")
-      .select("vaccine_name, expiry_date, pets!inner(name, owner_id, owners!inner(id, first_name, last_name))")
-      .gte("expiry_date", today)
-      .lte("expiry_date", monthEnd)
-      .order("expiry_date", { ascending: true })
-      .limit(8),
-    // Payments due today
-    supabase
-      .from("invoices")
-      .select("id, invoice_number, service_type, total, owners!inner(id, last_name)")
-      .eq("due_date", today)
-      .in("status", ["finalised", "issued", "outstanding"])
-      .order("total", { ascending: false }),
-    // Payments overdue
-    supabase
-      .from("invoices")
-      .select("id, invoice_number, service_type, total, due_date, owners!inner(id, last_name)")
-      .lt("due_date", today)
-      .in("status", ["outstanding", "overdue", "finalised", "issued"])
-      .order("due_date", { ascending: true })
-      .limit(8),
-    // Pending topup count
-    supabase
-      .from("wallet_topup_requests")
-      .select("id")
-      .eq("status", "pending"),
-    // Overdue invoice total
-    supabase
-      .from("invoices")
-      .select("total")
-      .lt("due_date", today)
-      .in("status", ["outstanding", "overdue", "finalised", "issued"]),
-    // Low balance threshold from pricing
-    supabase
-      .from("pricing")
-      .select("amount_aed")
-      .eq("key", "rule_low_balance_alert_aed")
-      .maybeSingle(),
-    // Low balance owners count (use a generous threshold to count, refine client-side)
-    supabase
-      .from("owners")
-      .select("id, first_name, last_name, wallet_balance, low_balance_threshold_override")
-      .lt("wallet_balance", 50000)
-      .order("wallet_balance", { ascending: true }),
-    // Pending topup requests with owner info
-    supabase
-      .from("wallet_topup_requests")
-      .select("id, owner_id, amount_requested, status, requested_at, owners!inner(first_name, last_name, wallet_balance)")
-      .eq("status", "pending")
-      .order("requested_at", { ascending: true }),
-  ]);
-
-  const threshold = thresholdRes.data?.amount_aed ?? 5000;
-
-  const overdueCheckins = (overdueTodayRes.data ?? []).filter(
-    (b: { status: string }) => b.status === "confirmed" && pastNoon,
-  ).length;
-
-  // Vax alerts
-  const vaxAlerts: VaxAlert[] = (vaxMonthRes.data ?? []).map((v: any) => ({
-    petName: v.pets?.name ?? "—",
-    ownerId: v.pets?.owners?.id ?? "",
-    ownerLastName: v.pets?.owners?.last_name ?? "—",
-    vaccineName: v.vaccine_name,
-    daysLeft: differenceInCalendarDays(parseISO(v.expiry_date), new Date()),
-  }));
-
-  // Payments due
-  const paymentsDue: PaymentRow[] = (paymentsDueRes.data ?? []).map((i: any) => ({
-    id: i.id,
-    invoiceNumber: i.invoice_number,
-    serviceType: i.service_type,
-    total: i.total,
-    ownerLastName: i.owners?.last_name ?? "—",
-    ownerId: i.owners?.id ?? "",
-  }));
-
-  // Payments overdue
-  const paymentsOverdue: PaymentRow[] = (paymentsOverdueRes.data ?? []).map((i: any) => ({
-    id: i.id,
-    invoiceNumber: i.invoice_number,
-    serviceType: i.service_type,
-    total: i.total,
-    ownerLastName: i.owners?.last_name ?? "—",
-    ownerId: i.owners?.id ?? "",
-    daysOverdue: differenceInCalendarDays(new Date(), parseISO(i.due_date)),
-  }));
-
-  // Overdue invoice total
-  const overdueInvoiceTotal = (overdueInvoiceTotalRes.data ?? []).reduce(
-    (sum: number, i: any) => sum + (i.total ?? 0), 0,
-  );
-
-  // Low balance owners & topup requests
-  const lowBalanceOwners = (lowBalanceRes.data ?? []).filter(
-    (o: any) => o.wallet_balance < (o.low_balance_threshold_override ?? threshold),
-  );
-
-  const pendingRequests = topupRequestsRes.data ?? [];
-  const pendingOwnerIds = new Set(pendingRequests.map((r: any) => r.owner_id));
-
-  const topupRequests: TopupRow[] = [];
-
-  for (const r of pendingRequests) {
-    const daysPending = differenceInCalendarDays(new Date(), parseISO(r.requested_at));
-    topupRequests.push({
-      ownerId: r.owner_id,
-      ownerName: `${(r as any).owners?.first_name ?? ""} ${(r as any).owners?.last_name ?? ""}`.trim() || r.owner_id.slice(0, 8),
-      walletBalance: (r as any).owners?.wallet_balance ?? 0,
-      requestId: r.id,
-      amountRequested: r.amount_requested,
-      daysPending,
-      requestStatus: "pending",
-    });
-  }
-
-  for (const o of lowBalanceOwners) {
-    if (!pendingOwnerIds.has(o.id)) {
-      topupRequests.push({
-        ownerId: o.id,
-        ownerName: `${o.first_name ?? ""} ${o.last_name ?? ""}`.trim(),
-        walletBalance: o.wallet_balance ?? 0,
-        requestId: null,
-        amountRequested: null,
-        daysPending: null,
-        requestStatus: null,
-      });
-    }
-  }
-
-  return {
-    overdueCheckins,
-    expiringVax: vaxWeekRes.data?.length ?? 0,
-    pendingTopups: pendingTopupsRes.data?.length ?? 0,
-    overdueInvoiceTotal,
-    dogsBoarding: dogsRes.data?.length ?? 0,
-    catsBoarding: catsRes.data?.length ?? 0,
-    daycareToday: daycareRes.data?.length ?? 0,
-    parkToday: parkRes.data?.length ?? 0,
-    groomingToday: groomingRes.data?.length ?? 0,
-    vaxAlerts,
-    paymentsDue,
-    paymentsOverdue,
-    topupRequests,
-    lowBalanceCount: lowBalanceOwners.length,
-    lowBalanceThreshold: threshold,
-  };
-}
-
-// ── sub-components ───────────────────────────────────────────────────────────
-
-function OccupancyCard({
-  label,
-  value,
-  total,
-  showBar,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  total?: number;
-  showBar?: boolean;
-  subtitle?: string;
-  onClick?: () => void;
-}) {
-  const pct = total ? Math.round((value / total) * 100) : 0;
-  const interactive = !!onClick;
-  return (
-    <div
-      role={interactive ? "button" : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (!interactive) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick?.();
-        }
-      }}
-      className={`bg-muted/50 rounded-lg p-3 ${interactive ? "cursor-pointer hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""}`}
-    >
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-2xl font-medium mt-1">{value}</div>
-      {showBar && total ? (
-        <>
-          <div className="h-1.5 bg-border rounded-full mt-1.5 overflow-hidden">
-            <div className="h-full rounded-full bg-[#639922]" style={{ width: `${pct}%` }} />
-          </div>
-          <div className="text-[11px] text-muted-foreground/70 mt-1">{value} / {total} · {pct}%</div>
-        </>
-      ) : (
-        <div className="text-[11px] text-muted-foreground/70 mt-1">
-          {total ? `of ${total} today` : "checked in"}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Pill({
-  children,
-  variant,
-  onClick,
-}: {
-  children: React.ReactNode;
-  variant: "red" | "amber" | "purple" | "blue";
-  onClick?: () => void;
-}) {
-  const cls: Record<string, string> = {
-    red: "bg-red-50 text-red-700",
-    amber: "bg-amber-50 text-amber-700",
-    purple: "bg-[#EEEDFE] text-[#3C3489]",
-    blue: "bg-blue-50 text-blue-700",
-  };
-  const shared = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cls[variant]}`;
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        className={`${shared} cursor-pointer border-0 hover:brightness-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
-        onClick={onClick}
-      >
-        {children}
-      </button>
-    );
-  }
-  return <span className={shared}>{children}</span>;
-}
-
-function Dot({ color }: { color: "green" | "amber" | "red" | "purple" | "gray" }) {
-  const cls: Record<string, string> = {
-    green: "bg-[#639922]",
-    amber: "bg-[#BA7517]",
-    red: "bg-[#E24B4A]",
-    purple: "bg-[#7F77DD]",
-    gray: "bg-border",
-  };
-  return <div className={`w-[7px] h-[7px] rounded-full shrink-0 ${cls[color]}`} />;
-}
-
-function Chip({ children, variant }: { children: React.ReactNode; variant: "green" | "amber" | "red" | "purple" }) {
-  const cls: Record<string, string> = {
-    green: "bg-[#EAF3DE] text-[#27500A]",
-    amber: "bg-[#FAEEDA] text-[#633806]",
-    red: "bg-[#FCEBEB] text-[#791F1F]",
-    purple: "bg-[#EEEDFE] text-[#3C3489]",
-  };
-  return <span className={`text-[11px] px-[7px] py-[2px] rounded font-medium whitespace-nowrap ${cls[variant]}`}>{children}</span>;
-}
-
-function CardSection({ title, count, children, empty }: { title: string; count?: number; children: React.ReactNode; empty?: string }) {
-  return (
-    <div className="bg-card border border-border rounded-lg p-3.5">
-      <div className="text-[13px] font-medium mb-2.5">
-        {title}
-        {count !== undefined && <span className="font-normal text-muted-foreground text-xs ml-1">({count})</span>}
-      </div>
-      {children}
-      {empty && (
-        <div className="py-6 text-center text-xs text-muted-foreground">{empty}</div>
-      )}
-    </div>
-  );
-}
-
-function Row({ children, className, onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
-  return (
-    <div
-      className={`flex items-center gap-1.5 py-[7px] border-b border-border last:border-b-0 text-[13px] ${onClick ? "cursor-pointer hover:bg-muted/30 -mx-1 px-1 rounded" : ""} ${className ?? ""}`}
-      onClick={onClick}
-    >
-      {children}
-    </div>
-  );
-}
-
-// ── main page ────────────────────────────────────────────────────────────────
+const SLOT_TIMES = [
+  "08:00",
+  "09:00",
+  "10:00",
+  "11:00",
+  "12:00",
+  "13:00",
+  "14:00",
+  "15:00",
+  "16:00",
+  "17:00",
+];
 
 const DashboardPage = () => {
-  const navigate = useNavigate();
-  const topUp = useTopUpWallet();
+  const queryClient = useQueryClient();
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const [asOf, setAsOf] = useState(todayStr);
 
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const {
+    data: metrics,
+    isLoading: metricsLoading,
+    isFetching: metricsFetching,
+    dataUpdatedAt,
+  } = useDashboardMetrics(asOf);
+  const { data: schedule, isLoading: scheduleLoading } = useTodaySchedule(asOf);
 
-  const load = useCallback(async () => {
-    try {
-      const d = await fetchDashboardData();
-      setData(d);
-      setLastRefresh(new Date());
-    } catch (err) {
-      console.error("Dashboard load error:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const boardPct = percent(
+    metrics?.occupancy.boarding_occupied ?? 0,
+    metrics?.occupancy.boarding_total_rooms ?? 0,
+  );
+  const catPct = percent(
+    metrics?.occupancy.cattery_occupied ?? 0,
+    metrics?.occupancy.cattery_total_rooms ?? 0,
+  );
 
-  useEffect(() => {
-    load();
-    const interval = setInterval(load, 60_000);
-    return () => clearInterval(interval);
-  }, [load]);
+  const allParkRows = useMemo(
+    () => [...(schedule?.park ?? []), ...(schedule?.assessments ?? [])],
+    [schedule?.assessments, schedule?.park],
+  );
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  const todayFormatted = format(new Date(), "EEEE, d MMMM yyyy — HH:mm");
+  const parkCell = (hour: string, lane: "small" | "big") =>
+    allParkRows.find((slot) => slot.slotStart.startsWith(hour) && slot.sizeLane === lane);
 
-  const handleRequestTopup = async (ownerId: string, suggestedAmount: number) => {
-    const { error } = await supabase.from("wallet_topup_requests").insert({
-      owner_id: ownerId,
-      amount_requested: suggestedAmount,
-      requested_by: "Staff",
-      status: "pending",
-    });
-    if (error) {
-      toast.error("Failed to create request: " + error.message);
-    } else {
-      toast.success("Top-up request created");
-      load();
-    }
-  };
+  const alerts = [
+    {
+      key: "overdue",
+      count: metrics?.alerts.overdue_invoices_count ?? 0,
+      icon: <AlertCircle className="h-4 w-4 text-red-500" />,
+      text: `${metrics?.alerts.overdue_invoices_count ?? 0} overdue invoices`,
+      detail: `Total ${formatAed(metrics?.alerts.overdue_invoices_aed ?? 0)}`,
+      href: "/billing/invoices?status=overdue",
+    },
+    {
+      key: "outstanding",
+      count: metrics?.alerts.outstanding_invoices_count ?? 0,
+      icon: <AlertTriangle className="h-4 w-4 text-amber-500" />,
+      text: `${metrics?.alerts.outstanding_invoices_count ?? 0} outstanding invoices`,
+      detail: `Total ${formatAed(metrics?.alerts.outstanding_invoices_aed ?? 0)}`,
+      href: "/billing/invoices?status=outstanding,overdue",
+    },
+    {
+      key: "wallet",
+      count: metrics?.alerts.low_wallet_members ?? 0,
+      icon: <Wallet className="h-4 w-4 text-amber-500" />,
+      text: `${metrics?.alerts.low_wallet_members ?? 0} members with low wallet balance`,
+      detail: "Review members requiring top-up",
+      href: "/customers?filter=low-wallet",
+    },
+    {
+      key: "assessment",
+      count: metrics?.alerts.pets_unassessed ?? 0,
+      icon: <ClipboardCheck className="h-4 w-4 text-blue-500" />,
+      text: `${metrics?.alerts.pets_unassessed ?? 0} pets awaiting assessment`,
+      detail: "Assessment still pending",
+      href: "/customers?filter=unassessed",
+    },
+    {
+      key: "vax-expired",
+      count: metrics?.alerts.vaccinations_expired ?? 0,
+      icon: <AlertCircle className="h-4 w-4 text-red-500" />,
+      text: `${metrics?.alerts.vaccinations_expired ?? 0} expired vaccinations`,
+      detail: "Needs immediate follow-up",
+      href: "/customers?filter=vax-expired",
+    },
+    {
+      key: "vax-expiring",
+      count: metrics?.alerts.vaccinations_expiring_30d ?? 0,
+      icon: <CalendarClock className="h-4 w-4 text-amber-500" />,
+      text: `${metrics?.alerts.vaccinations_expiring_30d ?? 0} vaccinations expiring in 30 days`,
+      detail: "Contact owners proactively",
+      href: "/customers?filter=vax-expiring",
+    },
+  ].filter((row) => row.count > 0);
 
-  const handleMarkReceived = async (requestId: string, ownerId: string, amount: number) => {
-    try {
-      await topUp.mutateAsync({
-        owner_id: ownerId,
-        amount,
-        notes: `Top-up request fulfilled`,
-        payment_method: "cash",
-      });
-      await supabase
-        .from("wallet_topup_requests")
-        .update({ status: "received", received_at: new Date().toISOString() })
-        .eq("id", requestId);
-      toast.success("Top-up received and wallet credited");
-      load();
-    } catch (err: any) {
-      toast.error(err.message ?? "Failed to process top-up");
-    }
-  };
+  const activityTiles = [
+    {
+      label: "Check-ins",
+      value: metrics?.today.check_ins ?? 0,
+      icon: LogIn,
+      href: "/boarding?date=today&view=check-ins",
+    },
+    {
+      label: "Check-outs",
+      value: metrics?.today.check_outs ?? 0,
+      icon: LogOut,
+      href: "/boarding?date=today&view=check-outs",
+    },
+    {
+      label: "Daycare today",
+      value: metrics?.today.daycare_attending ?? 0,
+      icon: Sun,
+      href: "/daycare?date=today",
+    },
+    {
+      label: "Park bookings",
+      value: metrics?.today.park_bookings ?? 0,
+      icon: TreePine,
+      href: "/park?date=today",
+    },
+    {
+      label: "Grooming",
+      value: metrics?.today.grooming_appointments ?? 0,
+      icon: Scissors,
+      href: "/grooming?date=today",
+    },
+    {
+      label: "Assessments",
+      value: metrics?.today.assessments_scheduled ?? 0,
+      icon: ClipboardCheck,
+      href: "/park?date=today&type=assessment",
+    },
+  ];
 
-  const handleRemind = async (requestId: string) => {
-    await supabase
-      .from("wallet_topup_requests")
-      .update({ reminder_sent_at: new Date().toISOString() })
-      .eq("id", requestId);
-    toast.success("Reminder logged — WhatsApp integration coming soon.");
-    load();
-  };
+  const lastRefreshed = dataUpdatedAt ? format(new Date(dataUpdatedAt), "d MMM, h:mm:ss a") : "—";
+  const isLoading = metricsLoading || scheduleLoading;
 
   return (
     <>
       <TopBar title="Dashboard" />
-      <main className="flex-1 overflow-auto p-6">
-        {/* Header */}
-        <div className="flex items-baseline justify-between mb-4">
+      <main className="flex-1 overflow-auto p-4 md:p-6">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="text-lg font-medium">{greeting}, MSH</div>
-            <div className="text-[13px] text-muted-foreground mt-0.5">{todayFormatted}</div>
+            <h2 className="text-base font-medium">Staff Operations Dashboard</h2>
+            <p className="text-sm text-muted-foreground">
+              {metrics?.as_of ? `As of ${format(parseISO(metrics.as_of), "EEEE, d MMM yyyy")}` : "Operations snapshot"}
+            </p>
           </div>
-          <div className="text-xs text-muted-foreground/60">Refreshes every 60s</div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                window.open(
+                  `/print/kennel-cards?date=${asOf}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                )
+              }
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print kennel cards
+            </Button>
+            <Button
+              type="button"
+              variant={asOf === todayStr ? "default" : "outline"}
+              onClick={() => setAsOf(todayStr)}
+            >
+              Today
+            </Button>
+            <Input
+              type="date"
+              value={asOf}
+              onChange={(e) => setAsOf(e.target.value)}
+              className="w-[170px]"
+            />
+          </div>
         </div>
 
-        {loading ? (
-          <div className="space-y-4">
-            <div className="flex gap-2">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-7 w-40 rounded-full" />)}</div>
-            <div className="grid grid-cols-5 gap-2.5">{[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-24 rounded-lg" />)}</div>
-            <div className="grid grid-cols-2 gap-3.5">{[1, 2].map((i) => <Skeleton key={i} className="h-52 rounded-lg" />)}</div>
-            <div className="grid grid-cols-4 gap-3">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-60 rounded-lg" />)}</div>
+        {isLoading ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+            <Card className="md:col-span-12"><CardContent className="p-4"><Skeleton className="h-28 w-full" /></CardContent></Card>
+            <Card className="md:col-span-6"><CardContent className="p-4"><Skeleton className="h-44 w-full" /></CardContent></Card>
+            <Card className="md:col-span-6"><CardContent className="p-4"><Skeleton className="h-44 w-full" /></CardContent></Card>
+            <Card className="md:col-span-4"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
+            <Card className="md:col-span-4"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
+            <Card className="md:col-span-4"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
+            <Card className="md:col-span-6"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
+            <Card className="md:col-span-6"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
           </div>
-        ) : data ? (
-          <>
-            {/* Alert strip */}
-            <div className="flex gap-2 flex-wrap mb-5">
-              {data.overdueCheckins > 0 && (
-                <Pill variant="red" onClick={() => navigate("/dashboard/checkins?service=boarding")}>
-                  {data.overdueCheckins} check-in{data.overdueCheckins !== 1 ? "s" : ""} overdue
-                </Pill>
-              )}
-              {data.expiringVax > 0 && (
-                <Pill variant="amber" onClick={() => navigate("/customers")}>
-                  {data.expiringVax} vaccination{data.expiringVax !== 1 ? "s" : ""} expiring this week
-                </Pill>
-              )}
-              {data.pendingTopups > 0 && (
-                <Pill variant="purple" onClick={() => navigate("/billing")}>
-                  {data.pendingTopups} top-up request{data.pendingTopups !== 1 ? "s" : ""} pending
-                </Pill>
-              )}
-              {data.overdueInvoiceTotal > 0 && (
-                <Pill variant="blue" onClick={() => navigate("/billing")}>
-                  {formatAed(data.overdueInvoiceTotal)} overdue invoices
-                </Pill>
-              )}
-            </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+            <Card className="md:col-span-12">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Today&apos;s activity</CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                {activityTiles.map((tile) => {
+                  const Icon = tile.icon;
+                  return (
+                    <Link
+                      key={tile.label}
+                      to={tile.href}
+                      className="rounded-md border p-3 transition-colors hover:bg-muted/40"
+                    >
+                      <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+                        <Icon className="h-4 w-4" />
+                        <span className="text-xs">{tile.label}</span>
+                      </div>
+                      <p className="text-2xl font-medium tabular-nums">{tile.value}</p>
+                    </Link>
+                  );
+                })}
+              </CardContent>
+            </Card>
 
-            {/* Occupancy */}
-            <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-2">Live occupancy</div>
-            <div className="grid grid-cols-5 gap-2.5 mb-5">
-              <OccupancyCard
-                label="Dogs boarding"
-                value={data.dogsBoarding}
-                total={DOG_ROOM_CAPACITY}
-                showBar
-                onClick={() => navigate("/dashboard/checkins?service=boarding")}
-              />
-              <OccupancyCard
-                label="Cats boarding"
-                value={data.catsBoarding}
-                total={CAT_ROOM_CAPACITY}
-                showBar
-                onClick={() => navigate("/boarding")}
-              />
-              <OccupancyCard
-                label="Daycare today"
-                value={data.daycareToday}
-                onClick={() => navigate("/dashboard/checkins?service=daycare")}
-              />
-              <OccupancyCard label="Park visits today" value={data.parkToday} onClick={() => navigate("/park")} />
-              <OccupancyCard label="Grooming today" value={data.groomingToday} onClick={() => navigate("/grooming")} />
-            </div>
-
-            {/* Bottom 4 columns */}
-            <div className="grid grid-cols-4 gap-3">
-              {/* Vaccination alerts */}
-              <CardSection title="Vaccination alerts" count={data.vaxAlerts.length}>
-                {data.vaxAlerts.length === 0 ? (
-                  <div className="py-6 flex flex-col items-center text-center text-xs text-muted-foreground">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-500 mb-1.5" />
-                    All vaccinations current
+            <Card className="md:col-span-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Occupancy</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>Boarding</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {metrics?.occupancy.boarding_occupied}/{metrics?.occupancy.boarding_total_rooms} ({boardPct}%)
+                    </span>
                   </div>
+                  <Progress
+                    value={boardPct}
+                    className="h-2"
+                    indicatorClassName={occupancyTone(boardPct)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>Cattery</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {metrics?.occupancy.cattery_occupied}/{metrics?.occupancy.cattery_total_rooms} ({catPct}%)
+                    </span>
+                  </div>
+                  <Progress
+                    value={catPct}
+                    className="h-2"
+                    indicatorClassName={occupancyTone(catPct)}
+                  />
+                </div>
+                <div>
+                  <p className="mb-2 text-xs text-muted-foreground">Rooms checking out today</p>
+                  {(schedule?.check_outs.length ?? 0) === 0 ? (
+                    <p className="text-sm text-muted-foreground">No check-outs today</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {schedule?.check_outs.slice(0, 3).map((row) => (
+                        <p key={row.bookingId} className="text-sm">
+                          {row.roomNumber ?? "Room —"} · {row.petName}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="md:col-span-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Alerts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {alerts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No active alerts for this date.</p>
                 ) : (
-                  data.vaxAlerts.map((v, i) => (
-                    <Row key={i} onClick={() => navigate(`/customers/${v.ownerId}`)}>
-                      <div className="flex-1">
-                        <span className="font-medium">{v.petName}</span>
-                        <span className="text-[11px] text-muted-foreground/70 ml-1">· {v.vaccineName}</span>
+                  <div className="space-y-2">
+                    {alerts.map((row) => (
+                      <div key={row.key} className="flex items-start justify-between gap-3 rounded-md border p-2.5">
+                        <div className="flex items-start gap-2">
+                          {row.icon}
+                          <div>
+                            <p className="text-sm">{row.text}</p>
+                            <p className="text-xs text-muted-foreground">{row.detail}</p>
+                          </div>
+                        </div>
+                        <Link className="text-xs text-primary hover:underline" to={row.href}>
+                          View
+                        </Link>
                       </div>
-                      <Chip variant={v.daysLeft <= 7 ? "red" : "amber"}>{v.daysLeft}d</Chip>
-                    </Row>
-                  ))
-                )}
-              </CardSection>
-
-              {/* Payments due today */}
-              <CardSection title="Payments due today" empty={data.paymentsDue.length === 0 ? "No payments due today" : undefined}>
-                {data.paymentsDue.map((p) => (
-                  <Row key={p.id} onClick={() => navigate(p.ownerId ? `/customers/${p.ownerId}` : "/billing")}>
-                    <div className="flex-1">
-                      <div className="font-medium text-[13px]">{p.ownerLastName}</div>
-                      <div className="text-[11px] text-muted-foreground/70">{p.serviceType?.replace(/_/g, " ") ?? "—"} · {p.invoiceNumber ?? "—"}</div>
-                    </div>
-                    <div className="text-[13px] font-medium text-right whitespace-nowrap text-amber-600">{formatAed(p.total)}</div>
-                  </Row>
-                ))}
-                {data.paymentsDue.length > 0 && (
-                  <div className="flex justify-between pt-2 border-t border-border mt-1.5 text-xs text-muted-foreground">
-                    <span>{data.paymentsDue.length} invoice{data.paymentsDue.length !== 1 ? "s" : ""}</span>
-                    <span className="font-medium text-foreground">{formatAed(data.paymentsDue.reduce((s, p) => s + p.total, 0))}</span>
+                    ))}
                   </div>
                 )}
-              </CardSection>
+              </CardContent>
+            </Card>
 
-              {/* Payments overdue */}
-              <CardSection title="Payments overdue" empty={data.paymentsOverdue.length === 0 ? "No overdue invoices" : undefined}>
-                {data.paymentsOverdue.map((p) => (
-                  <Row key={p.id} onClick={() => navigate(p.ownerId ? `/customers/${p.ownerId}` : "/billing")}>
-                    <div className="flex-1">
-                      <div className="font-medium text-[13px]">{p.ownerLastName}</div>
-                      <div className="text-[11px] text-muted-foreground/70">{p.serviceType?.replace(/_/g, " ") ?? "—"} · {p.daysOverdue} day{p.daysOverdue !== 1 ? "s" : ""} late</div>
-                    </div>
-                    <div className="text-[13px] font-medium text-right whitespace-nowrap text-red-600">{formatAed(p.total)}</div>
-                  </Row>
-                ))}
-                {data.paymentsOverdue.length > 0 && (
-                  <div className="flex justify-between pt-2 border-t border-border mt-1.5 text-xs text-muted-foreground">
-                    <span>{data.paymentsOverdue.length} overdue</span>
-                    <span className="font-medium text-red-600">{formatAed(data.paymentsOverdue.reduce((s, p) => s + p.total, 0))}</span>
-                  </div>
-                )}
-              </CardSection>
-
-              {/* Top-up requests */}
-              <CardSection title="Top-up requests" empty={data.topupRequests.length === 0 ? "All wallet balances healthy" : undefined}>
-                {data.topupRequests.map((tr) => (
-                  <div key={tr.ownerId} className="py-2 border-b border-border last:border-b-0">
-                    {tr.requestId ? (
-                      <>
-                        <button
-                          type="button"
-                          className="flex w-full items-center rounded-md px-1 py-0.5 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => navigate(`/customers/${tr.ownerId}`)}
-                        >
-                          <Dot color="purple" />
-                          <div className="flex-1 font-medium text-[13px] ml-1.5">{tr.ownerName}</div>
-                          <Chip variant="purple">pending {tr.daysPending}d</Chip>
-                        </button>
-                        <div className="pl-[13px] text-[11px] text-muted-foreground/70 mt-1">
-                          Balance {formatAed(tr.walletBalance)} · requested {formatAed(tr.amountRequested ?? 0)}
-                        </div>
-                        <div className="pl-[13px] flex gap-1.5 mt-1.5">
-                          <button
-                            type="button"
-                            className="text-[11px] px-2 py-0.5 rounded border border-border bg-card text-muted-foreground hover:bg-muted"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemind(tr.requestId!);
-                            }}
-                          >
-                            Remind
-                          </button>
-                          <button
-                            type="button"
-                            className="text-[11px] px-2 py-0.5 rounded border border-[#AFA9EC] bg-[#EEEDFE] text-[#3C3489] hover:bg-[#DDD9FC]"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMarkReceived(tr.requestId!, tr.ownerId, tr.amountRequested ?? 0);
-                            }}
-                          >
-                            Mark received
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => navigate(`/customers/${tr.ownerId}`)}
-                        >
-                          <Dot color="gray" />
-                          <span className="text-muted-foreground text-xs truncate">{tr.ownerName} — no request sent</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="text-[11px] px-2 py-0.5 rounded border border-border bg-card text-muted-foreground hover:bg-muted whitespace-nowrap"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const suggested = Math.ceil((data.lowBalanceThreshold - tr.walletBalance) / 1000) * 1000;
-                            handleRequestTopup(tr.ownerId, Math.max(suggested, 1000));
-                          }}
-                        >
-                          Request {formatAed(Math.max(Math.ceil((data.lowBalanceThreshold - tr.walletBalance) / 1000) * 1000, 1000))}
-                        </button>
-                      </div>
+            <Card className="md:col-span-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Today&apos;s check-ins</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(schedule?.check_ins.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground">No check-ins today.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {schedule?.check_ins.slice(0, 8).map((row) => (
+                      <Link
+                        key={row.bookingId}
+                        to={rowHref(row.ownerId, row.petId)}
+                        className="block rounded-md px-2 py-1.5 hover:bg-muted/40"
+                      >
+                        <p className="text-sm">{row.petName}</p>
+                        <p className="text-xs text-muted-foreground">{row.ownerName} · {row.roomNumber ?? "No room"}</p>
+                      </Link>
+                    ))}
+                    {(schedule?.check_ins.length ?? 0) > 8 && (
+                      <Link className="text-xs text-primary hover:underline" to="/boarding?date=today&view=check-ins">
+                        + {(schedule?.check_ins.length ?? 0) - 8} more
+                      </Link>
                     )}
                   </div>
-                ))}
-                {data.lowBalanceCount > 0 && (
-                  <div className="mt-2 pt-2 border-t border-border text-[11px] text-muted-foreground/70">
-                    {data.lowBalanceCount} wallet{data.lowBalanceCount !== 1 ? "s" : ""} below {formatAed(data.lowBalanceThreshold)} threshold
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="md:col-span-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Today&apos;s check-outs</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(schedule?.check_outs.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground">No check-outs today.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {schedule?.check_outs.slice(0, 8).map((row) => (
+                      <Link
+                        key={row.bookingId}
+                        to={rowHref(row.ownerId, row.petId)}
+                        className="block rounded-md px-2 py-1.5 hover:bg-muted/40"
+                      >
+                        <p className="text-sm">{row.petName}</p>
+                        <p className="text-xs text-muted-foreground">{row.ownerName} · {row.roomNumber ?? "No room"}</p>
+                      </Link>
+                    ))}
+                    {(schedule?.check_outs.length ?? 0) > 8 && (
+                      <Link className="text-xs text-primary hover:underline" to="/boarding?date=today&view=check-outs">
+                        + {(schedule?.check_outs.length ?? 0) - 8} more
+                      </Link>
+                    )}
                   </div>
                 )}
-              </CardSection>
-            </div>
-          </>
-        ) : null}
+              </CardContent>
+            </Card>
+
+            <Card className="md:col-span-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Today&apos;s grooming</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(schedule?.grooming.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground">No grooming appointments today.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {schedule?.grooming.slice(0, 8).map((row) => (
+                      <Link
+                        key={row.bookingId}
+                        to={rowHref(row.ownerId, row.petId)}
+                        className="block rounded-md px-2 py-1.5 hover:bg-muted/40"
+                      >
+                        <p className="text-sm">{row.petName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {row.ownerName} · {row.time?.slice(0, 5) ?? "Time —"}
+                        </p>
+                      </Link>
+                    ))}
+                    {(schedule?.grooming.length ?? 0) > 8 && (
+                      <Link className="text-xs text-primary hover:underline" to="/grooming?date=today">
+                        + {(schedule?.grooming.length ?? 0) - 8} more
+                      </Link>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="md:col-span-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Today&apos;s park & assessments</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-[72px_1fr_1fr] items-center gap-1 text-xs text-muted-foreground">
+                  <span />
+                  <span className="text-center">Small</span>
+                  <span className="text-center">Big</span>
+                </div>
+                <div className="mt-1 space-y-1">
+                  {SLOT_TIMES.map((hour) => {
+                    const small = parkCell(hour, "small");
+                    const big = parkCell(hour, "big");
+                    return (
+                      <div key={hour} className="grid grid-cols-[72px_1fr_1fr] items-center gap-1">
+                        <span className="text-xs text-muted-foreground">{hour}</span>
+                        {[small, big].map((cell, idx) => (
+                          <div
+                            key={`${hour}-${idx}`}
+                            className={[
+                              "min-h-9 rounded-md border px-2 py-1 text-xs",
+                              cell ? "bg-muted/20" : "text-muted-foreground",
+                              cell?.isAssessment ? "border-amber-400" : "",
+                            ].join(" ")}
+                          >
+                            {cell ? `${cell.petName} · ${cell.ownerInitials}` : "—"}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="md:col-span-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Financial 7d</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Invoiced</span>
+                  <span className="tabular-nums">{formatAed(metrics?.financial_7d.invoiced ?? 0)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Collected</span>
+                  <span className="tabular-nums">{formatAed(metrics?.financial_7d.collected ?? 0)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Net revenue</span>
+                  <span className="tabular-nums">
+                    {formatAed((metrics?.financial_7d.collected ?? 0) - (metrics?.financial_7d.refunded ?? 0))}
+                  </span>
+                </div>
+                <p className="pt-2 text-xs text-muted-foreground">
+                  Last 7 days including today. For detailed reporting, use Billing → Invoices.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-end gap-3 text-xs text-muted-foreground">
+          <span>Last refreshed: {lastRefreshed}</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              void queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
+              void queryClient.invalidateQueries({ queryKey: ["today-schedule"] });
+            }}
+            disabled={metricsFetching}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${metricsFetching ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </main>
     </>
   );
