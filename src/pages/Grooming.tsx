@@ -477,7 +477,12 @@ const GroomingPage = () => {
 
   useEffect(() => {
     const d = searchParams.get("date");
-    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    if (!d) return;
+    if (d === "today") {
+      setDay(new Date());
+      return;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
       setDay(parseISO(d));
     }
   }, [searchParams]);

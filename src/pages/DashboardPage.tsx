@@ -148,37 +148,37 @@ const DashboardPage = () => {
       label: "Check-ins",
       value: metrics?.today.check_ins ?? 0,
       icon: LogIn,
-      href: "/boarding?date=today&view=check-ins",
+      href: `/boarding?date=${asOf}&view=check-ins`,
     },
     {
       label: "Check-outs",
       value: metrics?.today.check_outs ?? 0,
       icon: LogOut,
-      href: "/boarding?date=today&view=check-outs",
+      href: `/boarding?date=${asOf}&view=check-outs`,
     },
     {
       label: "Daycare today",
       value: metrics?.today.daycare_attending ?? 0,
       icon: Sun,
-      href: "/daycare?date=today",
+      href: "/daycare?tab=operations",
     },
     {
       label: "Park bookings",
       value: metrics?.today.park_bookings ?? 0,
       icon: TreePine,
-      href: "/park?date=today",
+      href: `/park?date=${asOf}`,
     },
     {
       label: "Grooming",
       value: metrics?.today.grooming_appointments ?? 0,
       icon: Scissors,
-      href: "/grooming?date=today",
+      href: `/grooming?date=${asOf}`,
     },
     {
       label: "Assessments",
       value: metrics?.today.assessments_scheduled ?? 0,
       icon: ClipboardCheck,
-      href: "/park?date=today&type=assessment",
+      href: `/park?date=${asOf}&type=assessment`,
     },
   ];
 
@@ -360,7 +360,7 @@ const DashboardPage = () => {
                       </Link>
                     ))}
                     {(schedule?.check_ins.length ?? 0) > 8 && (
-                      <Link className="text-xs text-primary hover:underline" to="/boarding?date=today&view=check-ins">
+                      <Link className="text-xs text-primary hover:underline" to={`/boarding?date=${asOf}&view=check-ins`}>
                         + {(schedule?.check_ins.length ?? 0) - 8} more
                       </Link>
                     )}
@@ -389,7 +389,7 @@ const DashboardPage = () => {
                       </Link>
                     ))}
                     {(schedule?.check_outs.length ?? 0) > 8 && (
-                      <Link className="text-xs text-primary hover:underline" to="/boarding?date=today&view=check-outs">
+                      <Link className="text-xs text-primary hover:underline" to={`/boarding?date=${asOf}&view=check-outs`}>
                         + {(schedule?.check_outs.length ?? 0) - 8} more
                       </Link>
                     )}
@@ -420,7 +420,7 @@ const DashboardPage = () => {
                       </Link>
                     ))}
                     {(schedule?.grooming.length ?? 0) > 8 && (
-                      <Link className="text-xs text-primary hover:underline" to="/grooming?date=today">
+                      <Link className="text-xs text-primary hover:underline" to={`/grooming?date=${asOf}`}>
                         + {(schedule?.grooming.length ?? 0) - 8} more
                       </Link>
                     )}

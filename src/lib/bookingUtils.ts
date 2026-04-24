@@ -95,6 +95,12 @@ export interface ServiceInvoiceLineItem {
   unitPrice: number;
   pricingKey?: string;
   serviceType?: string;
+  /**
+   * Use caller-provided unitPrice as authoritative even when pricingKey exists.
+   * This is required for composite/bundle math where pricingKey is retained for
+   * traceability but per-unit values are intentionally pre-derived.
+   */
+  preserveUnitPrice?: boolean;
 }
 
 export interface CreateServiceInvoiceParams {
@@ -132,7 +138,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
     let unitPrice = li.unitPrice;
 
     // Prefer DB-side pricing math when we have a canonical key (VAT/rule support).
-    if (li.pricingKey) {
+    if (li.pricingKey && !li.preserveUnitPrice) {
       try {
         const { data } = await supabase.rpc("resolve_line_price", {
           p_pricing_key: li.pricingKey,

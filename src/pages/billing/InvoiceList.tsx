@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { useInvoices, useInvoiceKpis } from "@/hooks/useInvoices";
@@ -50,6 +50,7 @@ function formatAed(v: number) {
 
 export default function InvoiceListPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [status, setStatus] = useState<InvoiceStatus[]>([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -79,6 +80,19 @@ export default function InvoiceListPage() {
   const toggleStatus = (s: InvoiceStatus) => {
     setStatus((prev) => (prev.includes(s) ? prev.filter((v) => v !== s) : [...prev, s]));
   };
+
+  useEffect(() => {
+    const raw = (searchParams.get("status") ?? "").trim();
+    if (!raw) {
+      setStatus([]);
+      return;
+    }
+    const next = raw
+      .split(",")
+      .map((s) => s.trim() as InvoiceStatus)
+      .filter((s): s is InvoiceStatus => STATUSES.includes(s));
+    setStatus(Array.from(new Set(next)));
+  }, [searchParams]);
 
   return (
     <>

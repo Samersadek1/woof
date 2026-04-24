@@ -768,12 +768,14 @@ function PlannerTab() {
             unitPrice: number;
             pricingKey?: string;
             serviceType?: string;
+            preserveUnitPrice?: boolean;
           }[] = [{
             description: `${singleDayRate.label} (${singleDayCount} dog${singleDayCount === 1 ? "" : "s"})`,
             quantity: singleDayCount,
             unitPrice: singleDayUnitPrice,
             pricingKey: singleDayRate.pricingKey,
             serviceType: "daycare",
+            preserveUnitPrice: true,
           }];
 
           const includePickup = checkInDraft.pickup_used && (!privateFlat || !privatePickupCharged);
@@ -1428,7 +1430,14 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
         toast.success("Package created");
         resetAndClose();
 
-        const lineItems: { description: string; quantity: number; unitPrice: number; pricingKey?: string; serviceType?: string }[] = [{
+        const lineItems: {
+          description: string;
+          quantity: number;
+          unitPrice: number;
+          pricingKey?: string;
+          serviceType?: string;
+          preserveUnitPrice?: boolean;
+        }[] = [{
           description: `${selectedType.name} — ${selectedType.total_days} days`,
           quantity: 1,
           unitPrice: basePrice,

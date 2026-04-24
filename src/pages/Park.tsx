@@ -257,12 +257,22 @@ function ParkOwnerSearch({
 const ParkPage = () => {
   const [searchParams] = useSearchParams();
   const [day, setDay] = useState(() => new Date());
+  const [queryType, setQueryType] = useState<"all" | "assessment">("all");
 
   useEffect(() => {
     const d = searchParams.get("date");
-    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    if (!d) return;
+    if (d === "today") {
+      setDay(new Date());
+      return;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
       setDay(parseISO(d));
     }
+  }, [searchParams]);
+
+  useEffect(() => {
+    setQueryType(searchParams.get("type") === "assessment" ? "assessment" : "all");
   }, [searchParams]);
 
   const dateStr = format(day, "yyyy-MM-dd");
@@ -354,7 +364,11 @@ const ParkPage = () => {
     setOwnerId(null);
     setOwnerLabel(null);
     setSelectedPetIds(new Set());
-    setBookingType(effectiveStatus === "assessment_only" ? "assessment" : "park");
+    setBookingType(
+      effectiveStatus === "assessment_only" || queryType === "assessment"
+        ? "assessment"
+        : "park",
+    );
     setBookingNotes("");
     setSheetOpen(true);
   };
@@ -442,6 +456,7 @@ const ParkPage = () => {
             unitPrice: groupedRate.total,
             pricingKey: groupedRate.pricingKey,
             serviceType: "park",
+            preserveUnitPrice: true,
           }],
         }).catch((err) => console.error("Park auto-invoice failed:", err));
       }
@@ -488,14 +503,18 @@ const ParkPage = () => {
         ),
       )
     : "";
+  const visibleBookings = useMemo(
+    () => (queryType === "assessment" ? bookings.filter((b) => b.is_assessment) : bookings),
+    [bookings, queryType],
+  );
   const bookingsBySlot = useMemo(() => {
     const map = new Map<string, ParkBookingWithJoins[]>();
     for (const slot of PARK_SLOTS) {
       const key = normalizeSlotTime(slot.slot_start);
-      map.set(key, bookingsForSlot(bookings, slot.slot_start));
+      map.set(key, bookingsForSlot(visibleBookings, slot.slot_start));
     }
     return map;
-  }, [bookings]);
+  }, [visibleBookings]);
 
   return (
     <>
@@ -586,6 +605,14 @@ const ParkPage = () => {
             role="status"
           >
             ASSESSMENT ONLY
+          </div>
+        )}
+        {queryType === "assessment" && effectiveStatus !== "assessment_only" && (
+          <div
+            className="w-full rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold uppercase tracking-wide text-amber-900"
+            role="status"
+          >
+            ASSESSMENT VIEW FILTER
           </div>
         )}
 

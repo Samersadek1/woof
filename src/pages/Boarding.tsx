@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, addDays, startOfWeek, differenceInCalendarDays, isToday, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
@@ -2349,10 +2349,29 @@ function CatBoardingCalendar({
 
 type Species = "dog" | "cat";
 type BoardingListPreset = "today" | "tomorrow" | "next7";
+type BoardingListFocus = "all" | "check-ins" | "check-outs";
 
-function BoardingOperationsList({ species }: { species: Species }) {
-  const [datePreset, setDatePreset] = useState<BoardingListPreset>("today");
-  const [anchorDate, setAnchorDate] = useState(toDateStr(new Date()));
+function BoardingOperationsList({
+  species,
+  initialDatePreset = "today",
+  initialAnchorDate,
+  focus = "all",
+}: {
+  species: Species;
+  initialDatePreset?: BoardingListPreset;
+  initialAnchorDate?: string;
+  focus?: BoardingListFocus;
+}) {
+  const [datePreset, setDatePreset] = useState<BoardingListPreset>(initialDatePreset);
+  const [anchorDate, setAnchorDate] = useState(initialAnchorDate ?? toDateStr(new Date()));
+
+  useEffect(() => {
+    setDatePreset(initialDatePreset);
+  }, [initialDatePreset]);
+
+  useEffect(() => {
+    if (initialAnchorDate) setAnchorDate(initialAnchorDate);
+  }, [initialAnchorDate]);
 
   const rangeStart = useMemo(
     () => (datePreset === "tomorrow" ? toDateStr(addDays(parseISO(anchorDate), 1)) : anchorDate),
@@ -2372,8 +2391,14 @@ function BoardingOperationsList({ species }: { species: Species }) {
       return !isCatRoom;
     });
 
-    return rows.sort((a, b) => a.check_in_date.localeCompare(b.check_in_date));
-  }, [bookings, species]);
+    const focusRows = rows.filter((b) => {
+      if (focus === "check-ins") return b.check_in_date === rangeStart;
+      if (focus === "check-outs") return b.check_out_date === rangeStart;
+      return true;
+    });
+
+    return focusRows.sort((a, b) => a.check_in_date.localeCompare(b.check_in_date));
+  }, [bookings, species, focus, rangeStart]);
 
   return (
     <div className="p-6 space-y-4">
@@ -2460,6 +2485,8 @@ function BoardingHubPage() {
   const navigate = useNavigate();
   const today = useMemo(() => new Date(), []);
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const todayStr = toDateStr(today);
 
   const initialSpecies: Species =
     location.hash === `#${CAT_BOARDING_SECTION_ID}` ? "cat" : "dog";
@@ -2470,6 +2497,32 @@ function BoardingHubPage() {
     startOfWeek(today, { weekStartsOn: 1 }),
   );
   const windowEnd = addDays(windowStart, DAYS - 1);
+  const requestedView = searchParams.get("view");
+  const requestedDate = searchParams.get("date");
+
+  const normalizedDate = useMemo(() => {
+    if (!requestedDate) return null;
+    if (requestedDate === "today") return todayStr;
+    return /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : null;
+  }, [requestedDate, todayStr]);
+
+  const listFocus: BoardingListFocus = useMemo(() => {
+    if (requestedView === "check-ins") return "check-ins";
+    if (requestedView === "check-outs") return "check-outs";
+    return "all";
+  }, [requestedView]);
+
+  useEffect(() => {
+    if (listFocus !== "all") {
+      setViewMode("list");
+    }
+  }, [listFocus]);
+
+  useEffect(() => {
+    if (normalizedDate) {
+      setWindowStart(startOfWeek(parseISO(normalizedDate), { weekStartsOn: 1 }));
+    }
+  }, [normalizedDate]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
@@ -2559,7 +2612,12 @@ function BoardingHubPage() {
             />
           )
         ) : (
-          <BoardingOperationsList species={species} />
+          <BoardingOperationsList
+            species={species}
+            focus={listFocus}
+            initialAnchorDate={normalizedDate ?? undefined}
+            initialDatePreset="today"
+          />
         )}
       </div>
     </div>

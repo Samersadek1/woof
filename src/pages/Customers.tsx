@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { useOwners, useCreateOwner } from "@/hooks/useOwners";
 import { useCreatePet } from "@/hooks/usePets";
@@ -7,7 +7,7 @@ import { useCreateParkBooking } from "@/hooks/usePark";
 import { useUpdateAssessment } from "@/hooks/useAssessment";
 import type { OwnerWithPetCount } from "@/hooks/useOwners";
 import { supabase } from "@/integrations/supabase/client";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +61,11 @@ import type { Database } from "@/integrations/supabase/types";
 type MemberType = Database["public"]["Enums"]["member_type"];
 type OwnerInsert = Database["public"]["Tables"]["owners"]["Insert"];
 type PetInsert = Database["public"]["Tables"]["pets"]["Insert"];
+type CustomerFilter =
+  | "low-wallet"
+  | "unassessed"
+  | "vax-expired"
+  | "vax-expiring";
 
 type OnboardingPetDraft = {
   id: string;
@@ -92,6 +97,7 @@ const MEMBER_BADGE_CLASSES: Record<MemberType, string> = {
   gold: "bg-amber-50 text-amber-700 border-amber-200",
   platinum: "bg-violet-50 text-violet-700 border-violet-200",
 };
+const LOW_WALLET_THRESHOLD = 500;
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -131,6 +137,7 @@ function inferSizeCategory(weightKg: number | null): Database["public"]["Enums"]
 
 const CustomersPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -152,6 +159,76 @@ const CustomersPage = () => {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const { data: owners, isLoading } = useOwners(debouncedSearch || undefined);
+  const activeFilter = useMemo(() => {
+    const raw = searchParams.get("filter");
+    if (
+      raw === "low-wallet" ||
+      raw === "unassessed" ||
+      raw === "vax-expired" ||
+      raw === "vax-expiring"
+    ) {
+      return raw as CustomerFilter;
+    }
+    return null;
+  }, [searchParams]);
+  const { data: filteredOwnerIds = [], isLoading: filterLoading } = useQuery({
+    queryKey: ["customers", "filter-owner-ids", activeFilter],
+    enabled: !!activeFilter && activeFilter !== "low-wallet",
+    queryFn: async () => {
+      if (activeFilter === "unassessed") {
+        const { data, error } = await supabase
+          .from("pets")
+          .select("owner_id")
+          .eq("assessment_status", "not_assessed");
+        if (error) throw error;
+        return Array.from(
+          new Set((data ?? []).map((row) => row.owner_id).filter(Boolean)),
+        ) as string[];
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const horizon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      let vaccinationQuery = supabase
+        .from("vaccinations")
+        .select("pet_id, expiry_date")
+        .not("pet_id", "is", null)
+        .not("expiry_date", "is", null);
+      if (activeFilter === "vax-expired") {
+        vaccinationQuery = vaccinationQuery.lt("expiry_date", today);
+      } else {
+        vaccinationQuery = vaccinationQuery
+          .gte("expiry_date", today)
+          .lte("expiry_date", horizon);
+      }
+      const { data: vaxRows, error: vaxErr } = await vaccinationQuery;
+      if (vaxErr) throw vaxErr;
+
+      const petIds = Array.from(
+        new Set((vaxRows ?? []).map((r) => r.pet_id).filter(Boolean)),
+      );
+      if (petIds.length === 0) return [];
+
+      const { data: petRows, error: petErr } = await supabase
+        .from("pets")
+        .select("id, owner_id")
+        .in("id", petIds);
+      if (petErr) throw petErr;
+      return Array.from(
+        new Set((petRows ?? []).map((row) => row.owner_id).filter(Boolean)),
+      ) as string[];
+    },
+  });
+  const visibleOwners = useMemo(() => {
+    const rows = owners ?? [];
+    if (!activeFilter) return rows;
+    if (activeFilter === "low-wallet") {
+      return rows.filter((owner) => (owner.wallet_balance ?? 0) < LOW_WALLET_THRESHOLD);
+    }
+    const ownerIdSet = new Set(filteredOwnerIds);
+    return rows.filter((owner) => ownerIdSet.has(owner.id));
+  }, [owners, activeFilter, filteredOwnerIds]);
   const createOwner = useCreateOwner();
   const createPet = useCreatePet();
   const createParkBooking = useCreateParkBooking();
@@ -298,6 +375,11 @@ const CustomersPage = () => {
             />
           </div>
           <div className="ml-4 shrink-0 flex gap-2">
+            {activeFilter && (
+              <Badge variant="outline" className="capitalize">
+                Filter: {activeFilter.replace(/-/g, " ")}
+              </Badge>
+            )}
             <Button variant="outline" onClick={() => setWizardOpen(true)}>
               New Client Wizard
             </Button>
@@ -321,23 +403,23 @@ const CustomersPage = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
+              {isLoading || filterLoading ? (
                 <TableRow>
                   <TableCell colSpan={6} className="h-32 text-center">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
                   </TableCell>
                 </TableRow>
-              ) : owners?.length === 0 ? (
+              ) : visibleOwners.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={6}
                     className="h-32 text-center text-muted-foreground"
                   >
-                    No customers found.
+                    No customers found{activeFilter ? " for this filter" : ""}.
                   </TableCell>
                 </TableRow>
               ) : (
-                owners?.map((owner) => {
+                visibleOwners.map((owner) => {
                   const petsInfo = petSummary(owner);
                   const n = petCount(owner);
                   return (
