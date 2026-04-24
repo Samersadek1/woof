@@ -899,13 +899,16 @@ export function DogBoardingCalendar({
                   </div>
                 </PopoverTrigger>
                 {ownerResults.length > 0 && (
-                  <PopoverContent align="start" className="p-1 w-80">
+                  <PopoverContent align="start" className="p-1 w-80 z-[120] pointer-events-auto">
                     {ownerResults.map((o) => (
                       <button
                         key={o.id}
                         type="button"
                         className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent"
                         onClick={() => {
+                          // #region agent log
+                          fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'post-fix',hypothesisId:'H6',location:'src/pages/Boarding.tsx:newBookingOwnerSelect',message:'boarding owner selected from popover',data:{ownerId:o.id},timestamp:Date.now()})}).catch(()=>{});
+                          // #endregion
                           setForm((f) => ({ ...f, owner_id: o.id }));
                           setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`);
                           setOwnerPopOpen(false);
@@ -1983,9 +1986,9 @@ function CatBoardingCalendar({
                   </div>
                 </PopoverTrigger>
                 {ownerResults.length > 0 && (
-                  <PopoverContent align="start" className="p-1 w-80">
+                  <PopoverContent align="start" className="p-1 w-80 z-[120] pointer-events-auto">
                     {ownerResults.map((o) => (
-                      <button key={o.id} type="button" className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent" onClick={() => { setForm((f) => ({ ...f, owner_id: o.id })); setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`); setOwnerPopOpen(false); }}>
+                      <button key={o.id} type="button" className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent" onClick={() => { fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'post-fix',hypothesisId:'H6',location:'src/pages/Boarding.tsx:catBookingOwnerSelect',message:'cat boarding owner selected from popover',data:{ownerId:o.id},timestamp:Date.now()})}).catch(()=>{}); setForm((f) => ({ ...f, owner_id: o.id })); setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`); setOwnerPopOpen(false); }}>
                         <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
                         <span className="ml-2 text-muted-foreground">{o.phone}</span>
                       </button>

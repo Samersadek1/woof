@@ -113,6 +113,15 @@ function serviceLabel(s: GroomingService): string {
   return labelForGroomingService(s);
 }
 
+function normalizePetSizeCategory(
+  raw: unknown,
+): "S" | "M" | "L" | "XL" {
+  if (typeof raw !== "string") return "M";
+  const up = raw.toUpperCase();
+  if (up === "S" || up === "M" || up === "L" || up === "XL") return up;
+  return "M";
+}
+
 function formatApptTime(t: string | null): string {
   if (!t) return "—";
   const slice = t.length >= 8 ? t.slice(0, 8) : `${t}:00`.slice(0, 8);
@@ -554,7 +563,7 @@ const GroomingPage = () => {
       if (!pkg) return;
 
       const ownerTier = (selectedOwner?.member_type ?? "standard") as string;
-      const petSize = ((selectedPet as any)?.size_category as "S" | "M" | "L" | "XL" | undefined) ?? "M";
+      const petSize = normalizePetSizeCategory((selectedPet as any)?.size_category);
       try {
         const { data, error } = await supabase.rpc("resolve_grooming_price", {
           p_package: pkg,
@@ -603,15 +612,43 @@ const GroomingPage = () => {
   };
 
   const handleCreate = () => {
+    if (createAppt.isPending) return;
     if (!ownerId || !petId) {
       toast.error("Select an owner and a pet.");
       return;
     }
-    const priceNum = parseFloat(price);
-    if (Number.isNaN(priceNum) || priceNum < 0) {
-      toast.error("Enter a valid price.");
+    if (!pets.some((p) => p.id === petId)) {
+      toast.error("Selected pet is no longer available for this owner. Please reselect.");
       return;
     }
+    if (linkBoarding && !bookingId) {
+      toast.error("Select a boarding booking to link, or turn off the link.");
+      return;
+    }
+    if (!/^\d{2}:\d{2}$/.test(apptTime)) {
+      toast.error("Enter a valid appointment time.");
+      return;
+    }
+
+    const priceNum = parseFloat(price);
+    const serviceRate = rateMap[service]?.price_aed;
+    const finalPrice =
+      Number.isFinite(priceNum) && priceNum >= 0
+        ? priceNum
+        : typeof serviceRate === "number" && serviceRate >= 0
+          ? serviceRate
+          : NaN;
+    if (Number.isNaN(finalPrice) || finalPrice < 0) {
+      toast.error("Price is not loaded yet. Wait a moment or enter it manually.");
+      return;
+    }
+    if (String(finalPrice) !== price) {
+      setPrice(String(finalPrice));
+    }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:beforeMutate',message:'grooming create submitted',data:{service,hasOwnerId:!!ownerId,hasPetId:!!petId,appointmentDate:format(apptDate,'yyyy-MM-dd'),appointmentTime:apptTime,durationMin,linkBoarding,hasBookingId:!!bookingId,enteredPrice:price||null,finalPrice},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     createAppt.mutate(
       {
@@ -623,7 +660,7 @@ const GroomingPage = () => {
         pet_id: petId,
         groomer_id: null,
         grooming_notes: groomerName.trim() || null,
-        price: priceNum,
+        price: finalPrice,
         notes: visitNotes.trim() || null,
         booking_id: linkBoarding ? bookingId : null,
       },
@@ -640,7 +677,7 @@ const GroomingPage = () => {
             lineItems: [{
               description: `${svcLabel} — ${format(apptDate, "d MMM yyyy")}`,
               quantity: 1,
-              unitPrice: priceNum,
+              unitPrice: finalPrice,
               pricingKey: `grooming:${service}`,
               serviceType: "grooming",
             }],
@@ -657,6 +694,9 @@ const GroomingPage = () => {
               : typeof e === "object" && e !== null && "message" in e
                 ? String((e as { message: string }).message)
                 : "Could not create.";
+          // #region agent log
+          fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:onError',message:'grooming create failed',data:{service,appointmentDate:format(apptDate,'yyyy-MM-dd'),appointmentTime:apptTime,error:msg},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
           toast.error(msg);
         },
       },

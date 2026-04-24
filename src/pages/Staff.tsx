@@ -102,6 +102,63 @@ const StaffPage = () => {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
+  const getValidAccessToken = async (): Promise<string> => {
+    let {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const isExpired =
+      !session?.access_token ||
+      (typeof session.expires_at === "number" &&
+        session.expires_at * 1000 <= Date.now() + 30_000);
+
+    if (isExpired) {
+      const refreshed = await supabase.auth.refreshSession();
+      if (refreshed.error) {
+        throw new Error("Session expired. Please sign in again.");
+      }
+      session = refreshed.data.session;
+    }
+
+    if (!session?.access_token) {
+      throw new Error("Session expired. Please sign in again.");
+    }
+    return session.access_token;
+  };
+
+  const callStaffApi = async (
+    endpoint: "/api/staff-invite" | "/api/staff-update" | "/api/staff-delete",
+    payload: Record<string, unknown>,
+  ) => {
+    const doRequest = async (token: string) =>
+      fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+    let token = await getValidAccessToken();
+    let res = await doRequest(token);
+    let data = await res.json().catch(() => ({}));
+
+    // Retry once after a forced refresh for transient/stale JWT issues.
+    if (!res.ok && res.status === 401) {
+      const refreshed = await supabase.auth.refreshSession();
+      if (refreshed.error || !refreshed.data.session?.access_token) {
+        throw new Error("Session expired. Please sign in again.");
+      }
+      token = refreshed.data.session.access_token;
+      res = await doRequest(token);
+      data = await res.json().catch(() => ({}));
+    }
+
+    if (!res.ok) throw new Error(data?.error || "Request failed.");
+    return data;
+  };
+
   const setField = (field: keyof StaffInsert, value: string | boolean) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -126,26 +183,14 @@ const StaffPage = () => {
 
     setIsInviting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error("Session expired. Please sign in again.");
-
-      const res = await fetch("/api/staff-invite", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          firstName: payload.first_name,
-          lastName: payload.last_name,
-          email: payload.email,
-          phone: payload.phone,
-          role: payload.role,
-          active: payload.active,
-        }),
+      const data = await callStaffApi("/api/staff-invite", {
+        firstName: payload.first_name,
+        lastName: payload.last_name,
+        email: payload.email,
+        phone: payload.phone,
+        role: payload.role,
+        active: payload.active,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Failed to invite user.");
 
       toast.success(`Invite sent to ${data.invitedEmail}.`);
       setCreateOpen(false);
@@ -181,27 +226,15 @@ const StaffPage = () => {
 
     setIsSavingEdit(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error("Session expired. Please sign in again.");
-
-      const res = await fetch("/api/staff-update", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          id: editingRow.id,
-          firstName: editForm.first_name,
-          lastName: editForm.last_name,
-          email: editForm.email,
-          phone: editForm.phone,
-          role: editForm.role,
-          active: editForm.active,
-        }),
+      await callStaffApi("/api/staff-update", {
+        id: editingRow.id,
+        firstName: editForm.first_name,
+        lastName: editForm.last_name,
+        email: editForm.email,
+        phone: editForm.phone,
+        role: editForm.role,
+        active: editForm.active,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Failed to update user.");
 
       toast.success(`${fullName(editingRow)} updated.`);
       setEditOpen(false);
@@ -220,19 +253,7 @@ const StaffPage = () => {
 
     setIsDeleting(row.id);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error("Session expired. Please sign in again.");
-
-      const res = await fetch("/api/staff-delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ id: row.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Failed to delete user.");
+      await callStaffApi("/api/staff-delete", { id: row.id });
 
       toast.success(`${fullName(row)} deleted.`);
       queryClient.invalidateQueries({ queryKey: ["staff"] });

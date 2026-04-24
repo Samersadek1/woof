@@ -122,6 +122,10 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
     invoiceStatus = "draft",
   } = params;
 
+  // #region agent log
+  fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H2',location:'src/lib/bookingUtils.ts:createServiceInvoice:entry',message:'service invoice creation started',data:{serviceType,referenceId,lineCount:lineItems.length,invoiceStatus},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
   const normalizedLines: ServiceInvoiceLineItem[] = [];
   for (const li of lineItems) {
     const qty = Math.max(1, li.quantity);
@@ -202,7 +206,12 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
     .select("id")
     .single();
 
-  if (invErr) throw invErr;
+  if (invErr) {
+    // #region agent log
+    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H2',location:'src/lib/bookingUtils.ts:createServiceInvoice:invoiceInsertError',message:'invoice insert failed',data:{serviceType,referenceId,code:invErr.code??null,message:invErr.message??'unknown',details:invErr.details??null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw invErr;
+  }
 
   const lineRows = normalizedLines.map((li, i) => ({
     invoice_id: inv.id,
@@ -217,7 +226,12 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
 
   if (lineRows.length > 0) {
     const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);
-    if (liErr) throw liErr;
+    if (liErr) {
+      // #region agent log
+      fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H2',location:'src/lib/bookingUtils.ts:createServiceInvoice:lineItemsInsertError',message:'invoice line items insert failed',data:{invoiceId:inv.id,lineCount:lineRows.length,code:liErr.code??null,message:liErr.message??'unknown',details:liErr.details??null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      throw liErr;
+    }
   }
 
   return inv.id;
