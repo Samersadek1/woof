@@ -112,7 +112,7 @@ export function CheckOutSheet({
     setIssuesNotes("");
     setStaffName("");
     setActualCheckOutDate(checkOutDate);
-  }, [open, isLoading, bookingId, itemsSig, checkOutDate]);
+  }, [open, isLoading, bookingId, itemsSig, checkOutDate, checklistItems]);
 
   const nights = (() => {
     const ci = parseISO(checkInDate);

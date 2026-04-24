@@ -71,12 +71,12 @@ const SetupPasswordPage = () => {
             if (!cancelled) setInviteSession(data.session ?? null);
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         // #region agent log
-        fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H4',location:'src/pages/SetupPasswordPage.tsx:resolveInviteSession:catch',message:'invite resolution failed',data:{errorMessage:err?.message??'unknown'},timestamp:Date.now()})}).catch(()=>{});
+        fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H4',location:'src/pages/SetupPasswordPage.tsx:resolveInviteSession:catch',message:'invite resolution failed',data:{errorMessage:err instanceof Error ? err.message : 'unknown'},timestamp:Date.now()})}).catch(()=>{});
         // #endregion
         if (!cancelled) {
-          setError(err?.message || "Could not verify invite link.");
+          setError(err instanceof Error ? err.message : "Could not verify invite link.");
         }
       } finally {
         if (!cancelled) {

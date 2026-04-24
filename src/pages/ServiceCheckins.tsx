@@ -34,6 +34,27 @@ interface BoardingRow {
   roomName: string;
 }
 
+type DaycareSessionSelectRow = {
+  id: string;
+  session_date: string;
+  checked_in: boolean | null;
+  package_id: string | null;
+  checked_in_at: string | null;
+  notes: string | null;
+  pets: { name: string | null } | null;
+  owners: { first_name: string | null; last_name: string | null } | null;
+};
+
+type BoardingSelectRow = {
+  id: string;
+  status: string;
+  check_in_date: string;
+  check_out_date: string;
+  rooms: { display_name: string | null } | null;
+  owners: { first_name: string | null; last_name: string | null } | null;
+  booking_pets: Array<{ pets: { name: string | null } | null }> | null;
+};
+
 const TODAY = format(new Date(), "yyyy-MM-dd");
 
 function normalizeService(value: string | null): ServiceType {
@@ -65,7 +86,7 @@ export default function ServiceCheckinsPage() {
           .order("checked_in_at", { ascending: true });
 
         if (!error) {
-          const mapped = (data ?? []).map((row: any) => ({
+          const mapped = ((data ?? []) as DaycareSessionSelectRow[]).map((row) => ({
             id: row.id,
             petName: row.pets?.name ?? "—",
             ownerName: [row.owners?.first_name, row.owners?.last_name].filter(Boolean).join(" ") || "—",
@@ -89,7 +110,7 @@ export default function ServiceCheckinsPage() {
           .order("created_at", { ascending: true });
 
         if (!error) {
-          const mapped = (data ?? []).map((row: any) => ({
+          const mapped = ((data ?? []) as BoardingSelectRow[]).map((row) => ({
             id: row.id,
             status: row.status,
             checkInDate: row.check_in_date,
@@ -97,7 +118,7 @@ export default function ServiceCheckinsPage() {
             roomName: row.rooms?.display_name ?? "—",
             ownerName: [row.owners?.first_name, row.owners?.last_name].filter(Boolean).join(" ") || "—",
             petNames: (row.booking_pets ?? [])
-              .map((bp: any) => bp.pets?.name)
+              .map((bp) => bp.pets?.name)
               .filter(Boolean)
               .join(" & ") || "—",
           }));

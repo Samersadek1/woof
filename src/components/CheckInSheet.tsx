@@ -163,7 +163,19 @@ export function CheckInSheet({
           setCareLoading(false);
           return;
         }
-        const mapped = (data ?? []).map((row: any) => ({
+        type BookingCareRow = {
+          id: string;
+          feeding_notes: string | null;
+          medication_notes: string | null;
+          special_instructions: string | null;
+          pets: {
+            name: string | null;
+            feeding_instructions: string | null;
+            medications: string | null;
+            other_notes: string | null;
+          } | null;
+        };
+        const mapped = ((data ?? []) as BookingCareRow[]).map((row) => ({
           id: row.id,
           petName: row.pets?.name ?? "Pet",
           feeding_notes: row.feeding_notes ?? row.pets?.feeding_instructions ?? "",

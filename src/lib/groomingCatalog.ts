@@ -49,7 +49,7 @@ export function isGroomingPricedAddonKey(key: string): boolean {
 export function serviceTypeForBoardingAddonKey(key: string): ServiceType {
   if (isGroomingPricedAddonKey(key)) return "grooming";
   if (key.startsWith("transport_")) return "transport";
-  return "addon";
+  return "adjustment";
 }
 
 /**

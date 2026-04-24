@@ -13,7 +13,46 @@ function ownerInitials(firstName?: string | null, lastName?: string | null) {
   return (a + b || "?").toUpperCase();
 }
 
-function toScheduleItem(row: any): ScheduleItem {
+type BookingScheduleRow = {
+  id: string;
+  owner_id: string;
+  booking_type: string | null;
+  check_in_date: string;
+  check_out_date: string;
+  actual_check_in_at: string | null;
+  actual_check_out_at: string | null;
+  rooms: { room_number: string } | null;
+  owners: { first_name: string | null; last_name: string | null } | null;
+  booking_pets:
+    | Array<{
+        pet_id: string;
+        pets: { name: string | null } | null;
+      }>
+    | null;
+};
+
+type GroomingScheduleRow = {
+  id: string;
+  pet_id: string;
+  owner_id: string;
+  appointment_time: string | null;
+  pets: { name: string | null } | null;
+  owners: { first_name: string | null; last_name: string | null } | null;
+};
+
+type ParkScheduleRow = {
+  id: string;
+  slot_start: string;
+  slot_end: string;
+  size_lane: "small" | "big";
+  is_assessment: boolean | null;
+  pet_id: string | null;
+  owner_id: string | null;
+  pets: { name: string | null } | null;
+  owners: { first_name: string | null; last_name: string | null } | null;
+};
+
+function toScheduleItem(row: BookingScheduleRow): ScheduleItem {
   const firstPet = row.booking_pets?.[0];
   return {
     bookingId: row.id,
@@ -64,9 +103,9 @@ export function useTodaySchedule(asOf: string) {
       if (groomingRes.error) throw groomingRes.error;
       if (parkRes.error) throw parkRes.error;
 
-      const bookings = bookingsRes.data ?? [];
-      const grooming = groomingRes.data ?? [];
-      const park = (parkRes.data ?? []) as any[];
+      const bookings = (bookingsRes.data ?? []) as BookingScheduleRow[];
+      const grooming = (groomingRes.data ?? []) as GroomingScheduleRow[];
+      const park = (parkRes.data ?? []) as ParkScheduleRow[];
 
       const checkIns = bookings
         .filter((b) => b.booking_type === "boarding" && b.check_in_date === asOf)
@@ -83,7 +122,7 @@ export function useTodaySchedule(asOf: string) {
         .map(toScheduleItem)
         .sort(byTimeThenAlpha);
 
-      const groomingRows: ScheduleItem[] = grooming.map((g: any) => ({
+      const groomingRows: ScheduleItem[] = grooming.map((g) => ({
         bookingId: g.id,
         petId: g.pet_id,
         ownerId: g.owner_id,

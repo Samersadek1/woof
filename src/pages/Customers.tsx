@@ -579,8 +579,8 @@ const CustomersPage = () => {
                     onClick={async () => {
                       try {
                         await saveWizardOwner();
-                      } catch (err: any) {
-                        toast.error(err?.message || "Could not create owner.");
+                      } catch (err: unknown) {
+                        toast.error(err instanceof Error ? err.message : "Could not create owner.");
                       }
                     }}
                     disabled={createOwner.isPending}
@@ -671,8 +671,8 @@ const CustomersPage = () => {
                       onClick={async () => {
                         try {
                           await saveWizardPets();
-                        } catch (err: any) {
-                          toast.error(err?.message || "Could not save pets.");
+                        } catch (err: unknown) {
+                          toast.error(err instanceof Error ? err.message : "Could not save pets.");
                         }
                       }}
                       disabled={createPet.isPending}
@@ -725,8 +725,8 @@ const CustomersPage = () => {
                     onClick={async () => {
                       try {
                         await saveAssessmentBookings();
-                      } catch (err: any) {
-                        toast.error(err?.message || "Could not schedule assessments.");
+                      } catch (err: unknown) {
+                        toast.error(err instanceof Error ? err.message : "Could not schedule assessments.");
                       }
                     }}
                     disabled={createParkBooking.isPending || updateAssessment.isPending}

@@ -109,7 +109,7 @@ function slotDisplayLabel(slot_start: string, slot_end: string): string {
   return `${format(s, "h:mm")} – ${format(e, "h:mm a")}`;
 }
 
-function ownerLabel(o: { first_name: string; last_name: string }): string {
+function formatOwnerLabel(o: { first_name: string; last_name: string | null }): string {
   return ownerDisplayName(o.first_name, o.last_name);
 }
 
@@ -317,7 +317,7 @@ const ParkPage = () => {
       setFlagStatus("open");
       setFlagNotes("");
     }
-  }, [dayFlag?.id, dayFlag?.status, dayFlag?.notes, dateStr]);
+  }, [dayFlag, dateStr]);
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetSlot, setSheetSlot] = useState<{
@@ -661,7 +661,7 @@ const ParkPage = () => {
                               </p>
                               <p className="font-medium">
                                 {primary.owners
-                                  ? ownerLabel(primary.owners)
+                                  ? formatOwnerLabel(primary.owners)
                                   : primary.owner_name_raw ?? "—"}
                               </p>
                             </div>

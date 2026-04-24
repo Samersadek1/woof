@@ -1418,6 +1418,7 @@ function PricingTab() {
 // ── Main page ────────────────────────────────────────────────────────────────
 
 const BillingPage = () => {
+  const navigate = useNavigate();
   const [selectedOwnerId, setSelectedOwnerId] = useState<string | null>(null);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("wallet");

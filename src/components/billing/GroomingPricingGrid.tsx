@@ -57,8 +57,9 @@ export default function GroomingPricingGrid() {
   }, [rateByKey]);
 
   useEffect(() => {
+    const timers = timersRef.current;
     return () => {
-      Object.values(timersRef.current).forEach((timer) => clearTimeout(timer));
+      Object.values(timers).forEach((timer) => clearTimeout(timer));
     };
   }, []);
 
@@ -90,8 +91,8 @@ export default function GroomingPricingGrid() {
           amount_aed: amount,
         });
         toast.success("Grooming rate saved.");
-      } catch (error: any) {
-        toast.error(error?.message || "Failed to save grooming rate.");
+      } catch (error: unknown) {
+        toast.error(error instanceof Error ? error.message : "Failed to save grooming rate.");
       }
     }, 250);
   };

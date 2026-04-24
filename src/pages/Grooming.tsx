@@ -575,7 +575,7 @@ const GroomingPage = () => {
       if (!pkg) return;
 
       const ownerTier = (selectedOwner?.member_type ?? "standard") as string;
-      const petSize = normalizePetSizeCategory((selectedPet as any)?.size_category);
+      const petSize = normalizePetSizeCategory(selectedPet?.size_category);
       try {
         const { data, error } = await supabase.rpc("resolve_grooming_price", {
           p_package: pkg,

@@ -61,11 +61,24 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      return (data ?? []).map((row) => {
-        const owner = (row as any).owners as { first_name: string | null; last_name: string | null } | null;
+      type InvoiceListRow = {
+        id: string;
+        invoice_number: string | null;
+        owner_id: string;
+        service_type: string | null;
+        status: InvoiceStatus;
+        total: number;
+        total_aed: number | null;
+        due_date: string | null;
+        created_at: string;
+        owners: { first_name: string | null; last_name: string | null } | null;
+      };
+
+      return ((data ?? []) as InvoiceListRow[]).map((row) => {
+        const owner = row.owners;
         const dueDate = row.due_date ? new Date(`${row.due_date}T00:00:00`) : null;
         let daysOverdue = 0;
-        if (dueDate && UNPAID.includes(row.status as InvoiceStatus)) {
+        if (dueDate && UNPAID.includes(row.status)) {
           const diffMs = today.getTime() - dueDate.getTime();
           daysOverdue = Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
         }
@@ -76,7 +89,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
           owner_id: row.owner_id,
           owner_name: ownerDisplayName(owner?.first_name, owner?.last_name),
           service_type: row.service_type,
-          status: row.status as InvoiceStatus,
+          status: row.status,
           total_aed: row.total_aed ?? row.total ?? 0,
           due_date: row.due_date,
           created_at: row.created_at,

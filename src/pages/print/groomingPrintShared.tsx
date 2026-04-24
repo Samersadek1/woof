@@ -13,7 +13,7 @@ export type GroomingPrintRow = {
   pet_id: string;
   owner_id: string;
   price: number | null;
-  booking_ref: string | null;
+  booking_id: string | null;
   owners: {
     first_name: string;
     last_name: string | null;
@@ -25,6 +25,9 @@ export type GroomingPrintRow = {
     size_category: "S" | "M" | "L" | "XL" | null;
     grooming_notes: string | null;
     medical_conditions: string | null;
+  } | null;
+  bookings: {
+    booking_ref: string | null;
   } | null;
 };
 
@@ -61,9 +64,10 @@ export async function fetchGroomingRowsForDate(
     .from("grooming_appointments")
     .select(
       `
-      id, appointment_date, appointment_time, service, grooming_notes, notes, pet_id, owner_id, price, booking_ref,
+      id, appointment_date, appointment_time, service, grooming_notes, notes, pet_id, owner_id, price, booking_id,
       owners(first_name, last_name, phone),
-      pets(name, breed, size_category, grooming_notes, medical_conditions)
+      pets(name, breed, size_category, grooming_notes, medical_conditions),
+      bookings(booking_ref)
     `,
     )
     .eq("appointment_date", date)
@@ -86,9 +90,10 @@ export async function fetchGroomingRowById(
     .from("grooming_appointments")
     .select(
       `
-      id, appointment_date, appointment_time, service, grooming_notes, notes, pet_id, owner_id, price, booking_ref,
+      id, appointment_date, appointment_time, service, grooming_notes, notes, pet_id, owner_id, price, booking_id,
       owners(first_name, last_name, phone),
-      pets(name, breed, size_category, grooming_notes, medical_conditions)
+      pets(name, breed, size_category, grooming_notes, medical_conditions),
+      bookings(booking_ref)
     `,
     )
     .eq("id", bookingId)
@@ -230,7 +235,7 @@ export function GroomingCardBlock({
       </section>
 
       <footer className="mt-3 border-t border-black pt-2 print-sans text-xs">
-        <p>Booking ref: {appointment.booking_ref ?? appointment.id.slice(0, 8)}</p>
+        <p>Booking ref: {appointment.bookings?.booking_ref ?? appointment.booking_id ?? appointment.id.slice(0, 8)}</p>
         <p>Amount charged (pre-VAT): AED {(amountCharged ?? appointment.price ?? 0).toFixed(2)}</p>
       </footer>
     </article>

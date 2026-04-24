@@ -294,7 +294,7 @@ const PetProfilePage = () => {
     if (searchParams.get("schedule_assessment") === "1") {
       setAssessmentSheetOpen(true);
     }
-  }, [pet?.id, pet?.assessment_notes, searchParams]);
+  }, [pet, searchParams]);
 
   // photo upload
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -394,8 +394,8 @@ const PetProfilePage = () => {
       });
       toast.success("Assessment scheduled.");
       setAssessmentSheetOpen(false);
-    } catch (err: any) {
-      toast.error(err?.message || "Could not schedule assessment.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not schedule assessment.");
     }
   };
 
@@ -409,8 +409,8 @@ const PetProfilePage = () => {
         notes: assessmentNotesDraft || undefined,
       });
       toast.success("Assessment marked as passed.");
-    } catch (err: any) {
-      toast.error(err?.message || "Could not update status.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not update status.");
     }
   };
 
@@ -425,8 +425,8 @@ const PetProfilePage = () => {
       });
       toast.success("Assessment marked as failed.");
       setFailNotes("");
-    } catch (err: any) {
-      toast.error(err?.message || "Could not update status.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not update status.");
     }
   };
 
@@ -439,8 +439,8 @@ const PetProfilePage = () => {
       });
       toast.success("Assessment notes updated.");
       setAssessmentEditorOpen(false);
-    } catch (err: any) {
-      toast.error(err?.message || "Could not save notes.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not save notes.");
     }
   };
 

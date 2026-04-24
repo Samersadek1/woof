@@ -652,7 +652,7 @@ export function DogBoardingCalendar({
           navigate,
           ownerId: form.owner_id,
           petId: form.pet_ids[0],
-          petName: pets.find((p) => p.id === form.pet_ids[0])?.name,
+          petName: ownerPets.find((p) => p.id === form.pet_ids[0])?.name,
         }),
     });
   };
@@ -1825,7 +1825,7 @@ function CatBoardingCalendar({
           navigate,
           ownerId: form.owner_id,
           petId: form.pet_ids[0],
-          petName: pets.find((p) => p.id === form.pet_ids[0])?.name,
+          petName: ownerPets.find((p) => p.id === form.pet_ids[0])?.name,
         }),
     });
   };

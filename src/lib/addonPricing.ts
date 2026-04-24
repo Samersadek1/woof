@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 
 /**
  * Maps `grooming_service` enum / UI values → `pricing.key` (April 2026 rate card).
@@ -25,6 +26,22 @@ const ADDON_TYPE_FALLBACK: Record<string, string> = {
   grooming_full_groom: "grooming_full",
   grooming_full_bath: "grooming_bath",
 };
+
+type AddonType = Database["public"]["Enums"]["addon_type"];
+const VALID_ADDON_TYPES = new Set<AddonType>([
+  "transport_dubai",
+  "transport_abudhabi",
+  "grooming_full",
+  "grooming_bath",
+  "grooming_nail",
+  "grooming_deshedding",
+  "grooming_brushing",
+  "other",
+]);
+
+function isAddonType(value: string): value is AddonType {
+  return VALID_ADDON_TYPES.has(value as AddonType);
+}
 
 /**
  * Canonical amounts live in `pricing` (rate card / Billing → legacy pricing keys).
@@ -57,11 +74,14 @@ export async function resolveAddonPricesForKeys(keys: string[]): Promise<Map<str
   const missing = uniq.filter((k) => !out.has(k));
   if (missing.length === 0) return out;
 
-  const addonTypes = missing.flatMap((k) => [k, ADDON_TYPE_FALLBACK[k]].filter(Boolean));
+  const addonTypes = missing
+    .flatMap((k) => [k, ADDON_TYPE_FALLBACK[k]].filter(Boolean))
+    .filter(isAddonType);
+  if (addonTypes.length === 0) return out;
   const { data: addonRows, error: aErr } = await supabase
     .from("addon_rates")
     .select("addon_type, price_aed")
-    .in("addon_type", [...new Set(addonTypes)] as string[])
+    .in("addon_type", [...new Set(addonTypes)])
     .eq("is_active", true);
   if (aErr) throw aErr;
 

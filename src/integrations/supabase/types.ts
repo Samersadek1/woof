@@ -1346,6 +1346,12 @@ export type Database = {
           spayed_neutered: boolean | null
           species: Database["public"]["Enums"]["species"]
           updated_at: string
+          vaccicheck_distemper_tier: string | null
+          vaccicheck_hepatitis_tier: string | null
+          vaccicheck_immunity_rating: string | null
+          vaccicheck_parvovirus_tier: string | null
+          vaccicheck_report_url: string | null
+          vaccicheck_test_date: string | null
           vet_name: string | null
           vet_phone: string | null
           weight_kg: number | null
@@ -1380,6 +1386,12 @@ export type Database = {
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
+          vaccicheck_distemper_tier?: string | null
+          vaccicheck_hepatitis_tier?: string | null
+          vaccicheck_immunity_rating?: string | null
+          vaccicheck_parvovirus_tier?: string | null
+          vaccicheck_report_url?: string | null
+          vaccicheck_test_date?: string | null
           vet_name?: string | null
           vet_phone?: string | null
           weight_kg?: number | null
@@ -1414,6 +1426,12 @@ export type Database = {
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
+          vaccicheck_distemper_tier?: string | null
+          vaccicheck_hepatitis_tier?: string | null
+          vaccicheck_immunity_rating?: string | null
+          vaccicheck_parvovirus_tier?: string | null
+          vaccicheck_report_url?: string | null
+          vaccicheck_test_date?: string | null
           vet_name?: string | null
           vet_phone?: string | null
           weight_kg?: number | null

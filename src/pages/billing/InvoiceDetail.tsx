@@ -151,8 +151,8 @@ export default function InvoiceDetailPage() {
       setRefundNote("");
       setPerformedBy("");
       refetch();
-    } catch (e: any) {
-      toast.error(e?.message || "Could not record payment.");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Could not record payment.");
     }
   };
 
@@ -164,8 +164,8 @@ export default function InvoiceDetailPage() {
       setWalletOpen(false);
       setPerformedBy("");
       refetch();
-    } catch (e: any) {
-      toast.error(e?.message || "Wallet payment failed.");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Wallet payment failed.");
     }
   };
 

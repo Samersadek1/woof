@@ -196,8 +196,8 @@ const StaffPage = () => {
       setCreateOpen(false);
       setForm({ ...INITIAL_FORM });
       queryClient.invalidateQueries({ queryKey: ["staff"] });
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to invite user.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to invite user.");
     } finally {
       setIsInviting(false);
     }
@@ -240,8 +240,8 @@ const StaffPage = () => {
       setEditOpen(false);
       setEditingRow(null);
       queryClient.invalidateQueries({ queryKey: ["staff"] });
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to update user.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to update user.");
     } finally {
       setIsSavingEdit(false);
     }
@@ -257,8 +257,8 @@ const StaffPage = () => {
 
       toast.success(`${fullName(row)} deleted.`);
       queryClient.invalidateQueries({ queryKey: ["staff"] });
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to delete user.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete user.");
     } finally {
       setIsDeleting(null);
     }

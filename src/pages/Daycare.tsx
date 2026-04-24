@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { addDays, format, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
@@ -648,14 +648,14 @@ function PlannerTab() {
     }
   }, [packages, packageId, ownerId, setSearchParams]);
 
-  function getUsablePackagesForPet(petId: string) {
+  const getUsablePackagesForPet = useCallback((petId: string) => {
     return (packages ?? []).filter((pkg) => {
       if (pkg.pet_id !== petId) return false;
       if ((pkg.days_used ?? 0) >= (pkg.total_days ?? 0)) return false;
       if (pkg.expiry_date && pkg.expiry_date < TODAY) return false;
       return true;
     });
-  }
+  }, [packages]);
 
   useEffect(() => {
     setBillingChoiceByPet((prev) => {
@@ -673,7 +673,7 @@ function PlannerTab() {
       }
       return next;
     });
-  }, [selectedPetIds, packages]);
+  }, [selectedPetIds, getUsablePackagesForPet]);
 
   const handleOwnerSelect = (id: string, _label: string) => {
     setOwnerId(id);
@@ -1283,7 +1283,7 @@ function DaycareOperationsTab() {
             <p className="py-6 text-sm text-muted-foreground text-center">No daycare sessions found for this range.</p>
           ) : (
             <div className="space-y-2">
-              {sessions.map((s: any) => {
+              {sessions.map((s) => {
                 const owner = ownerDisplayName(s.owners?.first_name, s.owners?.last_name);
                 const tags = buildDaycareTags({
                   sessionDate: s.session_date,

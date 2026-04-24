@@ -202,8 +202,8 @@ export default function CreateInvoicePage() {
 
       toast.success("Invoice created.");
       navigate(`/billing/invoices/${inv.id}`);
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to create invoice.");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to create invoice.");
     } finally {
       setSaving(false);
     }
