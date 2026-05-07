@@ -556,6 +556,38 @@ async function resolveTargetJidForActivation(rawTarget) {
     console.error("Activation JID lookup failed:", err?.message ?? err);
   }
 
+  // If chat lookup misses (common with LID identities), reuse the most recently
+  // active conversation alias for the same owner before falling back.
+  try {
+    const owner = await findOwnerByFlexiblePhone(cleaned);
+    if (owner?.id) {
+      const { data: aliases } = await supabase
+        .from("agent_conversations")
+        .select("phone_number, updated_at")
+        .eq("owner_id", owner.id)
+        .order("updated_at", { ascending: false })
+        .limit(10);
+
+      for (const alias of aliases ?? []) {
+        const aliasJid = (alias.phone_number ?? "").toString();
+        if (!aliasJid.endsWith("@c.us") && !aliasJid.endsWith("@lid")) continue;
+        try {
+          await client.getChatById(aliasJid);
+          console.log("Activation JID resolved from owner alias:", {
+            rawTarget: cleaned,
+            resolvedJid: aliasJid,
+            source: "owner_alias",
+          });
+          return aliasJid;
+        } catch {
+          // Skip stale alias entries not currently available in WA session.
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Activation owner-alias lookup failed:", err?.message ?? err);
+  }
+
   const fallback = canonicalConversationPhone(cleaned);
   console.log("Activation JID fallback:", {
     rawTarget: cleaned,
@@ -879,9 +911,23 @@ async function activateAgentForTarget({
     facts,
   } = await prepareBotActivationContext(normalizedTargetJid, targetPhone);
 
+  let conversationKey = targetPhone;
+  if (ownerId) {
+    const { data: ownerConv } = await supabase
+      .from("agent_conversations")
+      .select("phone_number")
+      .eq("owner_id", ownerId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (ownerConv?.phone_number) {
+      conversationKey = ownerConv.phone_number;
+    }
+  }
+
   await supabase.from("agent_conversations").upsert(
     {
-      phone_number: targetPhone,
+      phone_number: conversationKey,
       owner_id: ownerId,
       mode: "agent",
       history: formattedHistory,
@@ -891,16 +937,23 @@ async function activateAgentForTarget({
     { onConflict: "phone_number" }
   );
 
+  if (ownerId) {
+    await supabase
+      .from("agent_conversations")
+      .update({ mode: "agent" })
+      .eq("owner_id", ownerId);
+  }
+
   const greeting = await runAgent(
-    targetPhone,
+    conversationKey,
     "[SYSTEM: You have just been connected to this conversation. Review the chat history and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]",
     { handoff }
   );
   await client.sendMessage(normalizedTargetJid, greeting);
   if (notifyTemplate) {
-    await notifyStaff(notifyTemplate(targetPhone));
+    await notifyStaff(notifyTemplate(conversationKey));
   }
-  return { targetPhone, targetJid: normalizedTargetJid };
+  return { targetPhone: conversationKey, targetJid: normalizedTargetJid };
 }
 
 // SECTION 5 - TOOL EXECUTOR
@@ -1206,11 +1259,20 @@ client.on("message", async (msg) => {
     }
 
     if (text.startsWith("!human ")) {
-      const targetPhone = text.slice(7).trim().replace(/\s/g, "") + "@c.us";
-      await supabase
-        .from("agent_conversations")
-        .update({ mode: "human" })
-        .eq("phone_number", targetPhone);
+      const rawTarget = text.slice(7).trim();
+      const targetPhone = canonicalConversationPhone(rawTarget);
+      const owner = await findOwnerByFlexiblePhone(targetPhone);
+      if (owner?.id) {
+        await supabase
+          .from("agent_conversations")
+          .update({ mode: "human" })
+          .eq("owner_id", owner.id);
+      } else {
+        await supabase
+          .from("agent_conversations")
+          .update({ mode: "human" })
+          .eq("phone_number", targetPhone);
+      }
       await notifyStaff(`✓ Human mode ON for ${targetPhone}`);
       return;
     }
@@ -1301,7 +1363,33 @@ client.on("message", async (msg) => {
   const lookupCandidates = [...new Set(routing.lookupCandidates ?? [routing.conversationPhone])];
   let mode = "human";
   let modeKey = routing.conversationPhone;
+  let resolvedOwnerId = null;
   let humanModeKey = null;
+
+  // Prefer owner_id as the source of truth when we can resolve owner.
+  const ownerFromReply = await findOwnerByFlexiblePhone(routing.replyTarget);
+  const ownerFromConversation = ownerFromReply ?? (await findOwnerByFlexiblePhone(routing.conversationPhone));
+  if (ownerFromConversation?.id) {
+    resolvedOwnerId = ownerFromConversation.id;
+    const { data: ownerConvs } = await supabase
+      .from("agent_conversations")
+      .select("phone_number, mode, updated_at")
+      .eq("owner_id", ownerFromConversation.id)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    for (const conv of ownerConvs ?? []) {
+      if (conv?.mode === "agent") {
+        mode = "agent";
+        modeKey = conv.phone_number;
+        break;
+      }
+      if (conv?.mode === "human" && !humanModeKey) {
+        humanModeKey = conv.phone_number;
+      }
+    }
+  }
+
+  if (mode !== "agent") {
   for (const candidate of lookupCandidates) {
     const { data: conv } = await supabase
       .from("agent_conversations")
@@ -1318,6 +1406,7 @@ client.on("message", async (msg) => {
       humanModeKey = candidate;
     }
   }
+  }
   if (mode !== "agent" && humanModeKey) {
     mode = "human";
     modeKey = humanModeKey;
@@ -1326,43 +1415,51 @@ client.on("message", async (msg) => {
     from: msg.from,
     conversationPhone: routing.conversationPhone,
     replyTarget: routing.replyTarget,
+    ownerId: resolvedOwnerId,
     modeKey,
     mode,
   });
   if (mode !== "agent") return;
+  const activeConversationKey = modeKey;
 
   try {
-    console.log("Agent reply pipeline start:", routing.conversationPhone);
+    console.log("Agent reply pipeline start:", activeConversationKey);
     const chat = await msg.getChat();
     await chat.sendStateTyping();
 
-    const reply = await runAgent(routing.conversationPhone, messageBody);
+    const reply = await runAgent(activeConversationKey, messageBody);
 
     await chat.clearState();
     await client.sendMessage(routing.replyTarget, reply);
-    console.log("Agent reply pipeline complete:", routing.conversationPhone);
-    agentErrorCounts.delete(routing.conversationPhone);
+    console.log("Agent reply pipeline complete:", activeConversationKey);
+    agentErrorCounts.delete(activeConversationKey);
   } catch (err) {
     console.error("Agent error:", err);
     await client.sendMessage(
       routing.replyTarget,
       "Sorry, something went wrong. Let me get someone to help you."
     );
-    const nextErrorCount = (agentErrorCounts.get(routing.conversationPhone) ?? 0) + 1;
-    agentErrorCounts.set(routing.conversationPhone, nextErrorCount);
+    const nextErrorCount = (agentErrorCounts.get(activeConversationKey) ?? 0) + 1;
+    agentErrorCounts.set(activeConversationKey, nextErrorCount);
 
     if (nextErrorCount >= MAX_CONSECUTIVE_AGENT_ERRORS) {
       await supabase
         .from("agent_conversations")
         .update({ mode: "human" })
         .eq("phone_number", modeKey);
-      agentErrorCounts.delete(routing.conversationPhone);
+      if (resolvedOwnerId) {
+        await supabase
+          .from("agent_conversations")
+          .update({ mode: "human" })
+          .eq("owner_id", resolvedOwnerId);
+      }
+      agentErrorCounts.delete(activeConversationKey);
       await notifyStaff(
-        `⚠️ Agent error for ${routing.conversationPhone}\n${err.message}\nReached ${MAX_CONSECUTIVE_AGENT_ERRORS} consecutive failures and switched to human mode`
+        `⚠️ Agent error for ${activeConversationKey}\n${err.message}\nReached ${MAX_CONSECUTIVE_AGENT_ERRORS} consecutive failures and switched to human mode`
       );
     } else {
       await notifyStaff(
-        `⚠️ Agent transient error for ${routing.conversationPhone} (${nextErrorCount}/${MAX_CONSECUTIVE_AGENT_ERRORS})\n${err.message}`
+        `⚠️ Agent transient error for ${activeConversationKey} (${nextErrorCount}/${MAX_CONSECUTIVE_AGENT_ERRORS})\n${err.message}`
       );
     }
   }
@@ -1388,10 +1485,18 @@ client.on("message_create", async (msg) => {
   if (text === "!human") {
     await msg.delete(true);
     const targetPhone = canonicalConversationPhone(msg.to);
-    await supabase
-      .from("agent_conversations")
-      .update({ mode: "human" })
-      .eq("phone_number", targetPhone);
+    const owner = await findOwnerByFlexiblePhone(targetPhone);
+    if (owner?.id) {
+      await supabase
+        .from("agent_conversations")
+        .update({ mode: "human" })
+        .eq("owner_id", owner.id);
+    } else {
+      await supabase
+        .from("agent_conversations")
+        .update({ mode: "human" })
+        .eq("phone_number", targetPhone);
+    }
     await notifyStaff(`👤 Human mode for ${targetPhone}`);
     return;
   }
