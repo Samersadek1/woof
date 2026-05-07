@@ -480,10 +480,12 @@ async function resolveInboundRouting(msg) {
   const replyTarget = msg.from;
   if (replyTarget.endsWith("@c.us")) {
     const conversationPhone = canonicalConversationPhone(replyTarget);
+    const owner = await findOwnerByFlexiblePhone(conversationPhone);
     return {
       replyTarget,
       conversationPhone,
       lookupCandidates: [conversationPhone, replyTarget],
+      ownerIdHint: owner?.id ?? null,
       source: "direct",
     };
   }
@@ -499,19 +501,25 @@ async function resolveInboundRouting(msg) {
 
   if (contactDigits) {
     const mappedPhone = canonicalConversationPhone(contactDigits);
-    return {
-      replyTarget,
-      conversationPhone: mappedPhone,
-      lookupCandidates: [mappedPhone, replyTarget],
-      source: "contact_match",
-    };
+    const owner = await findOwnerByFlexiblePhone(mappedPhone);
+    if (owner?.id) {
+      return {
+        replyTarget,
+        conversationPhone: mappedPhone,
+        lookupCandidates: [mappedPhone, replyTarget],
+        ownerIdHint: owner.id,
+        source: "contact_match",
+      };
+    }
   }
 
   const rawConversationPhone = canonicalConversationPhone(replyTarget);
+  const owner = await findOwnerByFlexiblePhone(rawConversationPhone);
   return {
     replyTarget,
     conversationPhone: rawConversationPhone,
     lookupCandidates: [rawConversationPhone, replyTarget],
+    ownerIdHint: owner?.id ?? null,
     source: "fallback",
   };
 }
@@ -568,20 +576,30 @@ async function resolveTargetJidForActivation(rawTarget) {
         .order("updated_at", { ascending: false })
         .limit(10);
 
+      let bestAlias = null;
+      let bestTs = -1;
       for (const alias of aliases ?? []) {
         const aliasJid = (alias.phone_number ?? "").toString();
         if (!aliasJid.endsWith("@c.us") && !aliasJid.endsWith("@lid")) continue;
         try {
-          await client.getChatById(aliasJid);
-          console.log("Activation JID resolved from owner alias:", {
-            rawTarget: cleaned,
-            resolvedJid: aliasJid,
-            source: "owner_alias",
-          });
-          return aliasJid;
+          const chat = await client.getChatById(aliasJid);
+          const recent = await chat.fetchMessages({ limit: 1 });
+          const ts = recent?.[0]?.timestamp ?? 0;
+          if (ts > bestTs) {
+            bestTs = ts;
+            bestAlias = aliasJid;
+          }
         } catch {
           // Skip stale alias entries not currently available in WA session.
         }
+      }
+      if (bestAlias) {
+        console.log("Activation JID resolved from owner alias:", {
+          rawTarget: cleaned,
+          resolvedJid: bestAlias,
+          source: "owner_alias_latest_activity",
+        });
+        return bestAlias;
       }
     }
   } catch (err) {
@@ -687,7 +705,7 @@ function extractName(text) {
   return match?.[1]?.trim() ?? null;
 }
 
-function extractConversationFacts(existingFacts, history, latestUserMessage, handoff) {
+function extractConversationFacts(existingFacts, history, latestUserMessage, handoff, metadata = {}) {
   const userMessages = (history ?? [])
     .filter((m) => m?.role === "user" && typeof m?.content === "string")
     .map((m) => m.content);
@@ -702,8 +720,9 @@ function extractConversationFacts(existingFacts, history, latestUserMessage, han
     ...(existingFacts ?? {}),
     possible_name: possibleName,
     pet_mentions: petMentions,
-    open_intent: handoff?.pending_request ?? userMessages.at(-1) ?? existingFacts?.open_intent ?? null,
+    open_intent: userMessages.at(-1) ?? handoff?.pending_request ?? existingFacts?.open_intent ?? null,
     last_user_message: latestUserMessage ?? existingFacts?.last_user_message ?? null,
+    last_seen_jid: metadata.lastSeenJid ?? existingFacts?.last_seen_jid ?? null,
     context_source: handoff ? "handoff" : existingFacts?.context_source ?? "ongoing_chat",
     last_updated_at: new Date().toISOString(),
   };
@@ -840,11 +859,8 @@ async function getOwnerContext(phone, conv) {
   return { ownerId, ownerProfile, ownerMatchSource };
 }
 
-async function fetchFormattedHistoryByChatId(chatId, limit = 20) {
-  const chat = await client.getChatById(chatId);
-  const recentMsgs = await chat.fetchMessages({ limit });
-  console.log("History fetched:", recentMsgs.length, "messages");
-  return recentMsgs
+function formatWhatsappMessagesForHistory(recentMsgs) {
+  return (recentMsgs ?? [])
     .filter((m) => {
       const body = m.body?.trim();
       if (!body) return false;
@@ -858,6 +874,17 @@ async function fetchFormattedHistoryByChatId(chatId, limit = 20) {
       role: m.fromMe ? "assistant" : "user",
       content: m.body,
     }));
+}
+
+async function fetchFormattedHistoryFromChat(chat, limit = 20) {
+  const recentMsgs = await chat.fetchMessages({ limit });
+  console.log("History fetched:", recentMsgs.length, "messages");
+  return formatWhatsappMessagesForHistory(recentMsgs);
+}
+
+async function fetchFormattedHistoryByChatId(chatId, limit = 20) {
+  const chat = await client.getChatById(chatId);
+  return fetchFormattedHistoryFromChat(chat, limit);
 }
 
 async function prepareBotActivationContext(targetJid, targetPhone) {
@@ -908,8 +935,12 @@ async function activateAgentForTarget({
     ownerProfile,
     formattedHistory,
     handoff,
-    facts,
+    facts: baseFacts,
   } = await prepareBotActivationContext(normalizedTargetJid, targetPhone);
+  const facts = {
+    ...baseFacts,
+    last_seen_jid: normalizedTargetJid,
+  };
 
   let conversationKey = targetPhone;
   if (ownerId) {
@@ -947,7 +978,7 @@ async function activateAgentForTarget({
   const greeting = await runAgent(
     conversationKey,
     "[SYSTEM: You have just been connected to this conversation. Review the chat history and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]",
-    { handoff }
+    { handoff, lastSeenJid: normalizedTargetJid }
   );
   await client.sendMessage(normalizedTargetJid, greeting);
   if (notifyTemplate) {
@@ -1134,9 +1165,15 @@ async function runAgent(phone, message, options = {}) {
     conv = newConv;
   }
 
-  const history = conv?.history ?? [];
+  const history = options.overrideHistory ?? conv?.history ?? [];
   const { ownerProfile, ownerMatchSource } = await getOwnerContext(phone, conv);
-  const updatedFacts = extractConversationFacts(conv?.facts, history, message, options.handoff);
+  const updatedFacts = extractConversationFacts(
+    conv?.facts,
+    history,
+    message,
+    options.handoff,
+    { lastSeenJid: options.lastSeenJid }
+  );
   if (options.handoff?.pending_request) {
     console.log("First-turn handoff source:", {
       phone,
@@ -1147,7 +1184,12 @@ async function runAgent(phone, message, options = {}) {
   }
 
   const incoming = { role: "user", content: message };
-  const claudeMessages = [...history, incoming];
+  const lastHistory = history.at(-1);
+  const incomingAlreadyPresent =
+    lastHistory?.role === "user" &&
+    typeof lastHistory?.content === "string" &&
+    lastHistory.content.trim() === message.trim();
+  const claudeMessages = incomingAlreadyPresent ? [...history] : [...history, incoming];
   const systemPrompt = await buildSystemPrompt(ownerProfile, {
     handoff: options.handoff,
     facts: updatedFacts,
@@ -1232,6 +1274,24 @@ async function runAgent(phone, message, options = {}) {
     .eq("phone_number", phone);
 
   return finalText;
+}
+
+async function resolveByLastSeenJid(replyTarget) {
+  try {
+    const { data: convs } = await supabase
+      .from("agent_conversations")
+      .select("phone_number, owner_id, mode, updated_at")
+      .eq("facts->>last_seen_jid", replyTarget)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+
+    if (!convs?.length) return null;
+    const agentConv = convs.find((c) => c?.mode === "agent");
+    if (agentConv) return agentConv;
+    return convs[0];
+  } catch {
+    return null;
+  }
 }
 
 // SECTION 8 - MESSAGE HANDLERS
@@ -1363,11 +1423,22 @@ client.on("message", async (msg) => {
   const lookupCandidates = [...new Set(routing.lookupCandidates ?? [routing.conversationPhone])];
   let mode = "human";
   let modeKey = routing.conversationPhone;
-  let resolvedOwnerId = null;
+  let resolvedOwnerId = routing.ownerIdHint ?? null;
   let humanModeKey = null;
+  const lastSeenMatch = await resolveByLastSeenJid(routing.replyTarget);
+  if (lastSeenMatch?.phone_number) {
+    mode = lastSeenMatch.mode ?? "human";
+    modeKey = lastSeenMatch.phone_number;
+    resolvedOwnerId = lastSeenMatch.owner_id ?? resolvedOwnerId;
+    if (mode === "human") {
+      humanModeKey = lastSeenMatch.phone_number;
+    }
+  }
 
   // Prefer owner_id as the source of truth when we can resolve owner.
-  const ownerFromReply = await findOwnerByFlexiblePhone(routing.replyTarget);
+  const ownerFromReply = resolvedOwnerId
+    ? { id: resolvedOwnerId }
+    : await findOwnerByFlexiblePhone(routing.replyTarget);
   const ownerFromConversation = ownerFromReply ?? (await findOwnerByFlexiblePhone(routing.conversationPhone));
   if (ownerFromConversation?.id) {
     resolvedOwnerId = ownerFromConversation.id;
@@ -1390,22 +1461,22 @@ client.on("message", async (msg) => {
   }
 
   if (mode !== "agent") {
-  for (const candidate of lookupCandidates) {
-    const { data: conv } = await supabase
-      .from("agent_conversations")
-      .select("mode")
-      .eq("phone_number", candidate)
-      .single();
-    if (!conv?.mode) continue;
-    if (conv.mode === "agent") {
-      mode = "agent";
-      modeKey = candidate;
-      break;
+    for (const candidate of lookupCandidates) {
+      const { data: conv } = await supabase
+        .from("agent_conversations")
+        .select("mode")
+        .eq("phone_number", candidate)
+        .single();
+      if (!conv?.mode) continue;
+      if (conv.mode === "agent") {
+        mode = "agent";
+        modeKey = candidate;
+        break;
+      }
+      if (conv.mode === "human" && !humanModeKey) {
+        humanModeKey = candidate;
+      }
     }
-    if (conv.mode === "human" && !humanModeKey) {
-      humanModeKey = candidate;
-    }
-  }
   }
   if (mode !== "agent" && humanModeKey) {
     mode = "human";
@@ -1426,8 +1497,12 @@ client.on("message", async (msg) => {
     console.log("Agent reply pipeline start:", activeConversationKey);
     const chat = await msg.getChat();
     await chat.sendStateTyping();
+    const liveHistory = await fetchFormattedHistoryFromChat(chat, 30);
 
-    const reply = await runAgent(activeConversationKey, messageBody);
+    const reply = await runAgent(activeConversationKey, messageBody, {
+      overrideHistory: liveHistory,
+      lastSeenJid: routing.replyTarget,
+    });
 
     await chat.clearState();
     await client.sendMessage(routing.replyTarget, reply);
