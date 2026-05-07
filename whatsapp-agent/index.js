@@ -26,20 +26,25 @@ const MAX_TOK = 512;
 void MessageMedia;
 
 // SECTION 3 - WHATSAPP CLIENT
+const puppeteerConfig = {
+  headless: true,
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--no-first-run",
+    "--no-zygote",
+  ],
+};
+
+if (process.env.CHROME_EXECUTABLE_PATH) {
+  puppeteerConfig.executablePath = process.env.CHROME_EXECUTABLE_PATH;
+}
+
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: ".wwebjs_auth" }),
-  puppeteer: {
-    headless: true,
-    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-first-run",
-      "--no-zygote",
-    ],
-  },
+  puppeteer: puppeteerConfig,
 });
 
 client.on("qr", (qr) => {
