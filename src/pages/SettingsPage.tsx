@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
 
 type SaveResult = "idle" | "success" | "error";
@@ -141,100 +142,105 @@ const SettingsPage = () => {
   }, [rulesUpdatedAt]);
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8 flex flex-col gap-8">
-      {loadError && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Could not load system context</AlertTitle>
-          <AlertDescription>{loadError}</AlertDescription>
-        </Alert>
-      )}
+    <>
+      <TopBar title="Settings" />
+      <main className="flex-1 overflow-auto">
+        <div className="mx-auto max-w-3xl px-6 py-8 flex flex-col gap-8">
+          {loadError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Could not load system context</AlertTitle>
+              <AlertDescription>{loadError}</AlertDescription>
+            </Alert>
+          )}
 
-      {loading ? (
-        <div className="flex flex-col gap-8">
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-6 w-40" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-72 w-full" />
-            <Skeleton className="h-9 w-28 self-end" />
-          </div>
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-6 w-36" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-56 w-full" />
-          </div>
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-6 w-36" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-56 w-full" />
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="flex flex-col gap-3">
-            <h2 className="text-lg font-semibold">Business rules</h2>
-            <p className="text-sm text-muted-foreground">
-              Controls how the AI understands MSH pricing, seasons, membership tiers, and service rules.
-              Changes take effect immediately on the next conversation.
-            </p>
-            {formattedUpdatedAt && (
-              <p className="text-xs text-muted-foreground">Last updated: {formattedUpdatedAt}</p>
-            )}
-            <Textarea
-              value={rulesContent}
-              onChange={(e) => {
-                setRulesContent(e.target.value);
-                setSaveResult("idle");
-              }}
-              rows={20}
-              className="font-mono text-sm w-full"
-              placeholder="Business rules content..."
-            />
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                {isDirty && (
-                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                    Unsaved changes
-                  </span>
+          {loading ? (
+            <div className="flex flex-col gap-8">
+              <div className="flex flex-col gap-3">
+                <Skeleton className="h-6 w-40" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-72 w-full" />
+                <Skeleton className="h-9 w-28 self-end" />
+              </div>
+              <div className="flex flex-col gap-3">
+                <Skeleton className="h-6 w-36" />
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-56 w-full" />
+              </div>
+              <div className="flex flex-col gap-3">
+                <Skeleton className="h-6 w-36" />
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-56 w-full" />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold">Business rules</h2>
+                <p className="text-sm text-muted-foreground">
+                  Controls how the AI understands MSH pricing, seasons, membership tiers, and service rules.
+                  Changes take effect immediately on the next conversation.
+                </p>
+                {formattedUpdatedAt && (
+                  <p className="text-xs text-muted-foreground">Last updated: {formattedUpdatedAt}</p>
+                )}
+                <Textarea
+                  value={rulesContent}
+                  onChange={(e) => {
+                    setRulesContent(e.target.value);
+                    setSaveResult("idle");
+                  }}
+                  rows={20}
+                  className="font-mono text-sm w-full overflow-y-auto"
+                  placeholder="Business rules content..."
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    {isDirty && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                        Unsaved changes
+                      </span>
+                    )}
+                  </div>
+                  <Button type="button" onClick={() => void handleSave()} disabled={!isDirty || saving}>
+                    {saving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+                {saveResult === "success" && (
+                  <p className="text-sm text-emerald-600">
+                    Saved. The AI will use the updated rules on the next conversation.
+                  </p>
+                )}
+                {saveResult === "error" && (
+                  <p className="text-sm text-destructive">Save failed. Please try again.</p>
                 )}
               </div>
-              <Button type="button" onClick={() => void handleSave()} disabled={!isDirty || saving}>
-                {saving ? "Saving..." : "Save"}
-              </Button>
-            </div>
-            {saveResult === "success" && (
-              <p className="text-sm text-emerald-600">
-                Saved. The AI will use the updated rules on the next conversation.
-              </p>
-            )}
-            {saveResult === "error" && (
-              <p className="text-sm text-destructive">Save failed. Please try again.</p>
-            )}
-          </div>
 
-          <div className="flex flex-col gap-3">
-            <h2 className="text-lg font-semibold">Query guidelines</h2>
-            <p className="text-sm text-muted-foreground">
-              Controls how the AI queries the database. Read-only — contact your developer to change these.
-            </p>
-            <pre className="max-h-64 overflow-auto rounded-md bg-muted p-4 font-mono text-sm">
-              {queryGuidelines === null ? "Loading..." : queryGuidelines}
-            </pre>
-          </div>
+              <div className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold">Query guidelines</h2>
+                <p className="text-sm text-muted-foreground">
+                  Controls how the AI queries the database. Read-only — contact your developer to change these.
+                </p>
+                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-4 font-mono text-sm">
+                  {queryGuidelines === null ? "Loading..." : queryGuidelines}
+                </pre>
+              </div>
 
-          <div className="flex flex-col gap-3">
-            <h2 className="text-lg font-semibold">Write guidelines</h2>
-            <p className="text-sm text-muted-foreground">
-              Safety rules the AI follows before taking any action. Read-only — contact your developer to
-              change these.
-            </p>
-            <pre className="max-h-64 overflow-auto rounded-md bg-muted p-4 font-mono text-sm">
-              {writeGuidelines === null ? "Loading..." : writeGuidelines}
-            </pre>
-          </div>
-        </>
-      )}
-    </div>
+              <div className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold">Write guidelines</h2>
+                <p className="text-sm text-muted-foreground">
+                  Safety rules the AI follows before taking any action. Read-only — contact your developer to
+                  change these.
+                </p>
+                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-4 font-mono text-sm">
+                  {writeGuidelines === null ? "Loading..." : writeGuidelines}
+                </pre>
+              </div>
+            </>
+          )}
+        </div>
+      </main>
+    </>
   );
 };
 
