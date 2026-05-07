@@ -45,9 +45,16 @@ const sessionObjectPath = (session) => `${session}.zip`;
 const localSessionZipPath = (session) => resolve(".wwebjs_auth", `${session}.zip`);
 const MAX_CONSECUTIVE_AGENT_ERRORS = 3;
 const MAX_TOOL_ROUNDS = 4;
+const INIT_GUARD_TIMEOUT_MS = Number(process.env.WA_INIT_GUARD_TIMEOUT_MS ?? 120000);
+const READY_STALL_TIMEOUT_MS = Number(process.env.WA_READY_STALL_TIMEOUT_MS ?? 180000);
+const MAX_AUTO_RECOVERY_RETRIES = Number(process.env.WA_MAX_AUTO_RECOVERY_RETRIES ?? 2);
 const agentErrorCounts = new Map();
 let isClientInitializing = false;
+let isClientReady = false;
 let isShuttingDown = false;
+let initGuardTimer = null;
+let readyStallTimer = null;
+let autoRecoveryAttempts = 0;
 let latestQR = null;
 
 // Keep import explicit per required structure.
@@ -157,7 +164,64 @@ client.on("qr", (qr) => {
   console.log("QR code ready -- open the Railway URL to scan");
 });
 
+function clearInitGuardTimer() {
+  if (initGuardTimer) {
+    clearTimeout(initGuardTimer);
+    initGuardTimer = null;
+  }
+}
+
+function clearReadyStallTimer() {
+  if (readyStallTimer) {
+    clearTimeout(readyStallTimer);
+    readyStallTimer = null;
+  }
+}
+
+async function scheduleAutoRecover(reason) {
+  if (isShuttingDown) return;
+  if (autoRecoveryAttempts >= MAX_AUTO_RECOVERY_RETRIES) {
+    console.error("Auto-recovery skipped (retry limit reached):", {
+      reason,
+      attempts: autoRecoveryAttempts,
+      max: MAX_AUTO_RECOVERY_RETRIES,
+    });
+    return;
+  }
+
+  autoRecoveryAttempts += 1;
+  console.error("Auto-recovery triggered:", {
+    reason,
+    attempt: autoRecoveryAttempts,
+    max: MAX_AUTO_RECOVERY_RETRIES,
+  });
+  clearInitGuardTimer();
+  clearReadyStallTimer();
+  isClientInitializing = false;
+  isClientReady = false;
+  try {
+    await client.destroy();
+    console.log("Client destroyed for auto-recovery");
+  } catch (err) {
+    console.error("Client destroy failed during auto-recovery:", err?.message ?? err);
+  }
+  setTimeout(() => queueClientInitialize(`auto-recover:${reason}`), 5000);
+}
+
+function armReadyStallTimer(trigger) {
+  clearReadyStallTimer();
+  readyStallTimer = setTimeout(() => {
+    if (!isClientReady) {
+      void scheduleAutoRecover(`ready-timeout:${trigger}`);
+    }
+  }, READY_STALL_TIMEOUT_MS);
+}
+
 client.on("ready", async () => {
+  isClientReady = true;
+  autoRecoveryAttempts = 0;
+  clearReadyStallTimer();
+  clearInitGuardTimer();
   latestQR = null;
   console.log("✓ MSH WhatsApp agent ready");
   console.log("RemoteAuth client ID:", WA_SESSION_CLIENT_ID);
@@ -174,7 +238,27 @@ client.on("ready", async () => {
   }
 });
 
+client.on("authenticated", () => {
+  console.log("WhatsApp authenticated");
+});
+
+client.on("auth_failure", (message) => {
+  console.error("WhatsApp auth failure:", message);
+  void scheduleAutoRecover("auth_failure");
+});
+
+client.on("change_state", (state) => {
+  console.log("WhatsApp state changed:", state);
+});
+
+client.on("loading_screen", (percent, message) => {
+  console.log("WhatsApp loading screen:", { percent, message });
+});
+
 client.on("disconnected", (reason) => {
+  isClientReady = false;
+  clearReadyStallTimer();
+  clearInitGuardTimer();
   console.error("WhatsApp disconnected:", reason);
   setTimeout(() => queueClientInitialize("disconnected"), 10_000);
 });
@@ -590,13 +674,24 @@ function queueClientInitialize(trigger) {
     return;
   }
   isClientInitializing = true;
+  isClientReady = false;
+  clearInitGuardTimer();
+  armReadyStallTimer(trigger);
   console.log("Client initialize requested:", trigger);
+  initGuardTimer = setTimeout(() => {
+    if (isClientInitializing) {
+      void scheduleAutoRecover(`initialize-guard-timeout:${trigger}`);
+    }
+  }, INIT_GUARD_TIMEOUT_MS);
+
   client
     .initialize()
     .catch((err) => {
       console.error("Client initialize failed:", err?.message ?? err);
+      void scheduleAutoRecover(`initialize-error:${trigger}`);
     })
     .finally(() => {
+      clearInitGuardTimer();
       isClientInitializing = false;
     });
 }
