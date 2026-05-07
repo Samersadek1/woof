@@ -484,7 +484,7 @@ async function resolveInboundRouting(msg) {
       replyTarget,
       conversationPhone,
       lookupCandidates: [conversationPhone, replyTarget],
-      source: "direct_c_us",
+      source: "direct",
     };
   }
 
@@ -503,7 +503,7 @@ async function resolveInboundRouting(msg) {
       replyTarget,
       conversationPhone: mappedPhone,
       lookupCandidates: [mappedPhone, replyTarget],
-      source: replyTarget.endsWith("@lid") ? "lid_contact_to_c_us" : "contact_to_c_us",
+      source: "contact_match",
     };
   }
 
@@ -512,8 +512,57 @@ async function resolveInboundRouting(msg) {
     replyTarget,
     conversationPhone: rawConversationPhone,
     lookupCandidates: [rawConversationPhone, replyTarget],
-    source: "raw_reply_target",
+    source: "fallback",
   };
+}
+
+async function resolveTargetJidForActivation(rawTarget) {
+  const cleaned = (rawTarget ?? "").toString().replace(/\s/g, "");
+  if (!cleaned) return cleaned;
+  if (cleaned.includes("@")) return cleaned;
+
+  const candidates = phoneDigitsCandidates(cleaned);
+  if (!candidates.size) return canonicalConversationPhone(cleaned);
+
+  try {
+    const chats = await client.getChats();
+    for (const chat of chats) {
+      if (chat.isGroup) continue;
+      const jid = chat?.id?._serialized ?? "";
+      if (!jid.endsWith("@c.us") && !jid.endsWith("@lid")) continue;
+
+      let chatDigits = "";
+      if (jid.endsWith("@c.us")) {
+        chatDigits = normalizeDigits(jid.replace(/@c\.us$/i, ""));
+      } else {
+        try {
+          const contact = await chat.getContact();
+          chatDigits = normalizeDigits(contact?.number ?? "");
+        } catch {
+          chatDigits = "";
+        }
+      }
+
+      if (phoneLikelyMatches(chatDigits, candidates)) {
+        console.log("Activation JID resolved from chats:", {
+          rawTarget: cleaned,
+          resolvedJid: jid,
+          source: "chat_lookup",
+        });
+        return jid;
+      }
+    }
+  } catch (err) {
+    console.error("Activation JID lookup failed:", err?.message ?? err);
+  }
+
+  const fallback = canonicalConversationPhone(cleaned);
+  console.log("Activation JID fallback:", {
+    rawTarget: cleaned,
+    resolvedJid: fallback,
+    source: "canonical_fallback",
+  });
+  return fallback;
 }
 
 function phoneLikelyMatches(ownerDigits, candidateDigitsSet) {
@@ -1147,9 +1196,7 @@ client.on("message", async (msg) => {
 
     if (text.startsWith("!bot ")) {
       const rawNumber = text.slice(5).trim();
-      const targetJid = rawNumber.includes("@")
-        ? rawNumber.replace(/\s/g, "")
-        : canonicalConversationPhone(rawNumber);
+      const targetJid = await resolveTargetJidForActivation(rawNumber);
       await activateAgentForTarget({
         triggerSource: "staff_group_command",
         targetJid,
@@ -1254,23 +1301,31 @@ client.on("message", async (msg) => {
   const lookupCandidates = [...new Set(routing.lookupCandidates ?? [routing.conversationPhone])];
   let mode = "human";
   let modeKey = routing.conversationPhone;
+  let humanModeKey = null;
   for (const candidate of lookupCandidates) {
     const { data: conv } = await supabase
       .from("agent_conversations")
       .select("mode")
       .eq("phone_number", candidate)
       .single();
-    if (conv?.mode) {
-      mode = conv.mode;
+    if (!conv?.mode) continue;
+    if (conv.mode === "agent") {
+      mode = "agent";
       modeKey = candidate;
       break;
     }
+    if (conv.mode === "human" && !humanModeKey) {
+      humanModeKey = candidate;
+    }
+  }
+  if (mode !== "agent" && humanModeKey) {
+    mode = "human";
+    modeKey = humanModeKey;
   }
   console.log("Inbound routing:", {
     from: msg.from,
     conversationPhone: routing.conversationPhone,
     replyTarget: routing.replyTarget,
-    source: routing.source,
     modeKey,
     mode,
   });
