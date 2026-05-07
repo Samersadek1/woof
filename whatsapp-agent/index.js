@@ -292,12 +292,26 @@ async function executeTool(name, input, phone) {
         .eq("phone_number", phone);
 
       await notifyStaff(
-        `📋 Draft booking from WhatsApp\n` +
-          `Ref: ${ref}\n` +
-          `Dates: ${booking.check_in_date} -> ${booking.check_out_date}\n` +
-          `Pets: ${input.pet_ids.length} pet(s)\n\n` +
-          `Reply !confirm ${ref} to confirm\n` +
-          `Reply !reject ${ref} [reason] to cancel`
+        "🐾 *Booking request from WhatsApp*\n\n" +
+          "*Ref:* " +
+          ref +
+          "\n" +
+          "*Check-in:* " +
+          input.check_in_date +
+          "\n" +
+          "*Check-out:* " +
+          input.check_out_date +
+          "\n" +
+          "*Pets:* " +
+          input.pet_ids.length +
+          " pet(s)\n\n" +
+          "Reply in this chat:\n" +
+          "✅ *!confirm " +
+          ref +
+          "* to approve\n" +
+          "❌ *!reject " +
+          ref +
+          " [reason]* to decline"
       );
 
       return {
@@ -468,18 +482,46 @@ client.on("message", async (msg) => {
         .eq("phone_number", targetPhone)
         .single();
 
+      let owner = null;
       if (conv?.owner_id) {
-        const { data: owner } = await supabase
+        const { data: ownerData } = await supabase
           .from("owners")
-          .select("first_name")
+          .select("id, first_name")
           .eq("id", conv.owner_id)
           .single();
-
-        if (owner) {
-          await delay(1000);
-          await client.sendMessage(targetPhone, `Hi ${owner.first_name}! How can I help you today?`);
-        }
+        owner = ownerData ?? null;
       }
+
+      const chat = await client.getChatById(targetPhone);
+      const recentMsgs = await chat.fetchMessages({ limit: 20 });
+      const formattedHistory = recentMsgs
+        .filter((m) => {
+          if (!m.body?.trim()) return false;
+          if (m.isStatus) return false;
+          if (m.type === "revoked" || m.type === "revoked_ack") return false;
+          return true;
+        })
+        .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
+        .map((m) => ({
+          role: m.fromMe ? "assistant" : "user",
+          content: m.body,
+        }));
+
+      await supabase.from("agent_conversations").upsert(
+        {
+          phone_number: targetPhone,
+          owner_id: owner?.id ?? null,
+          mode: "agent",
+          history: formattedHistory,
+        },
+        { onConflict: "phone_number" }
+      );
+
+      const greeting = await runAgent(
+        targetPhone,
+        "[SYSTEM: You have just been connected to this conversation. Review the chat history above and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]"
+      );
+      await client.sendMessage(targetPhone, greeting);
       return;
     }
 
