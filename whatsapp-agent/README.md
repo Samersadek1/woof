@@ -9,6 +9,17 @@ npm install
 cp .env.example .env
 # Fill in .env values
 
+## Required environment variables
+
+- `ANTHROPIC_API_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`)
+
+## Optional environment variables
+
+- `STAFF_GROUP_ID` (required for staff command notifications)
+- `CHROME_EXECUTABLE_PATH` (only if you need a custom browser binary path)
+
 ## First run (get QR code + group IDs)
 
 npm start
@@ -28,8 +39,13 @@ npm start
 1. Push this repo to GitHub
 2. New project in Railway -> Deploy from GitHub repo
 3. Set root directory to /whatsapp-agent
-4. Add environment variables from .env
-5. Deploy
+4. Ensure a private Supabase storage bucket named `whatsapp-sessions` exists
+5. Add environment variables from .env
+6. Deploy
+
+Notes:
+- This service is a worker process and does not expose an HTTP port.
+- If `STAFF_GROUP_ID` is missing, startup prints available WhatsApp group IDs.
 
 ## How it works
 

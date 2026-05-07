@@ -6,17 +6,23 @@ import qrcode from "qrcode-terminal";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import ws from "ws";
+import express from "express";
+import QRCode from "qrcode";
 import { readFile, writeFile } from "node:fs/promises";
 
 // SECTION 2 - CLIENTS
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY =
   process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   throw new Error(
     "Missing Supabase config. Set SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)."
   );
+}
+if (!ANTHROPIC_API_KEY) {
+  throw new Error("Missing Anthropic config. Set ANTHROPIC_API_KEY.");
 }
 
 const supabase = createClient(
@@ -26,7 +32,7 @@ const supabase = createClient(
 );
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: ANTHROPIC_API_KEY,
 });
 
 const STAFF_GROUP = process.env.STAFF_GROUP_ID;
@@ -34,6 +40,7 @@ const MODEL = "claude-sonnet-4-6";
 const MAX_TOK = 512;
 const SESSION_BUCKET = "whatsapp-sessions";
 const sessionObjectPath = (session) => `${session}.zip`;
+let latestQR = null;
 
 // Keep import explicit per required structure.
 void MessageMedia;
@@ -44,36 +51,58 @@ const store = {
     const { data, error } = await supabase.storage
       .from(SESSION_BUCKET)
       .list("", { search: sessionObjectPath(session) });
-    if (error) return false;
+    if (error) {
+      console.error("RemoteAuth sessionExists failed:", {
+        session,
+        error: error.message,
+      });
+      throw new Error(`Session check failed: ${error.message}`);
+    }
     return Array.isArray(data) && data.length > 0;
   },
 
   async save({ session, path }) {
-    const filePath = path ?? `${session}.zip`;
-    const payload = await readFile(filePath);
-    const { error } = await supabase.storage
-      .from(SESSION_BUCKET)
-      .upload(sessionObjectPath(session), payload, {
-        upsert: true,
-        contentType: "application/zip",
-      });
-    if (error) throw new Error(`Session save failed: ${error.message}`);
+    try {
+      const filePath = path ?? `${session}.zip`;
+      const payload = await readFile(filePath);
+      const { error } = await supabase.storage
+        .from(SESSION_BUCKET)
+        .upload(sessionObjectPath(session), payload, {
+          upsert: true,
+          contentType: "application/zip",
+        });
+      if (error) throw new Error(error.message);
+    } catch (e) {
+      console.error("RemoteAuth save failed:", { session, error: e.message });
+      throw new Error(`Session save failed: ${e.message}`);
+    }
   },
 
   async extract({ session, path }) {
-    const targetPath = path ?? `${session}.zip`;
-    const { data, error } = await supabase.storage
-      .from(SESSION_BUCKET)
-      .download(sessionObjectPath(session));
-    if (error) throw new Error(`Session extract failed: ${error.message}`);
-    const bytes = Buffer.from(await data.arrayBuffer());
-    await writeFile(targetPath, bytes);
+    try {
+      const targetPath = path ?? `${session}.zip`;
+      const { data, error } = await supabase.storage
+        .from(SESSION_BUCKET)
+        .download(sessionObjectPath(session));
+      if (error) throw new Error(error.message);
+      const bytes = Buffer.from(await data.arrayBuffer());
+      await writeFile(targetPath, bytes);
+    } catch (e) {
+      console.error("RemoteAuth extract failed:", { session, error: e.message });
+      throw new Error(`Session extract failed: ${e.message}`);
+    }
   },
 
   async delete({ session }) {
-    await supabase.storage
-      .from(SESSION_BUCKET)
-      .remove([sessionObjectPath(session)]);
+    try {
+      const { error } = await supabase.storage
+        .from(SESSION_BUCKET)
+        .remove([sessionObjectPath(session)]);
+      if (error) throw new Error(error.message);
+    } catch (e) {
+      console.error("RemoteAuth delete failed:", { session, error: e.message });
+      throw new Error(`Session delete failed: ${e.message}`);
+    }
   },
 };
 
@@ -102,12 +131,13 @@ const client = new Client({
 });
 
 client.on("qr", (qr) => {
-  console.log("\n=== SCAN THIS QR CODE IN WHATSAPP ===\n");
-  qrcode.generate(qr, { small: true });
+  latestQR = qr;
+  console.log("QR code ready -- open the Railway URL to scan");
 });
 
 client.on("ready", async () => {
-  console.log("\n\u2713 MSH WhatsApp agent ready\n");
+  latestQR = null;
+  console.log("✓ MSH WhatsApp agent ready");
 
   if (!STAFF_GROUP) {
     console.log("STAFF_GROUP_ID not set -- printing groups to find it:");
@@ -305,6 +335,15 @@ async function ensureOwnerProfileColumn() {
     });
   } catch {
     // Ignore startup migration errors (including column already existing).
+  }
+}
+
+async function ensureSessionBucketAccess() {
+  const { error } = await supabase.storage.from(SESSION_BUCKET).list("", { limit: 1 });
+  if (error) {
+    throw new Error(
+      `Cannot access Supabase storage bucket '${SESSION_BUCKET}': ${error.message}`
+    );
   }
 }
 
@@ -821,6 +860,32 @@ client.on("message_create", async (msg) => {
 });
 
 // SECTION 9 - START
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", async (_req, res) => {
+  if (!latestQR) {
+    return res.send(
+      "<h2>No QR code yet -- agent may already be connected. Refresh in a few seconds.</h2>"
+    );
+  }
+  const imgData = await QRCode.toDataURL(latestQR);
+  res.send(`
+    <html>
+      <body style="display:flex;justify-content:center;align-items:center;height:100vh;background:#fff;flex-direction:column">
+        <h2>Scan with WhatsApp</h2>
+        <img src="${imgData}" style="width:300px;height:300px"/>
+        <p>WhatsApp → Settings → Linked Devices → Link a Device</p>
+      </body>
+    </html>
+  `);
+});
+
+app.listen(PORT, () => {
+  console.log("QR server running on port", PORT);
+});
+
 console.log("Starting MSH WhatsApp agent...");
+await ensureSessionBucketAccess();
 await ensureOwnerProfileColumn();
 client.initialize();
