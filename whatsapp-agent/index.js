@@ -44,6 +44,7 @@ const WA_SESSION_CLIENT_ID = process.env.WA_SESSION_CLIENT_ID || "msh-whatsapp-m
 const sessionObjectPath = (session) => `${session}.zip`;
 const localSessionZipPath = (session) => resolve(".wwebjs_auth", `${session}.zip`);
 const MAX_CONSECUTIVE_AGENT_ERRORS = 3;
+const MAX_TOOL_ROUNDS = 4;
 const agentErrorCounts = new Map();
 let isClientInitializing = false;
 let isShuttingDown = false;
@@ -360,7 +361,7 @@ function normalizeDigits(value) {
 }
 
 function phoneDigitsCandidates(phone) {
-  const digits = normalizeDigits(phone.replace(/@c\.us$/i, ""));
+  const digits = normalizeDigits(phone.replace(/@(c\.us|lid)$/i, ""));
   const out = new Set();
   if (!digits) return out;
 
@@ -377,6 +378,49 @@ function phoneDigitsCandidates(phone) {
   }
 
   return out;
+}
+
+function canonicalConversationPhone(value) {
+  const raw = (value ?? "").toString().trim();
+  const digits = normalizeDigits(raw.replace(/@(c\.us|lid)$/i, ""));
+  if (digits) return `${digits}@c.us`;
+  if (/@(c\.us|lid)$/i.test(raw)) return raw;
+  return `${raw.replace(/\s/g, "")}@c.us`;
+}
+
+async function resolveInboundRouting(msg) {
+  const replyTarget = msg.from;
+  if (replyTarget.endsWith("@c.us")) {
+    return {
+      replyTarget,
+      conversationPhone: canonicalConversationPhone(replyTarget),
+      source: "direct_c_us",
+    };
+  }
+
+  let contactDigits = "";
+  try {
+    const contact = await msg.getContact();
+    contactDigits = normalizeDigits(contact?.number ?? contact?.id?.user ?? "");
+  } catch {
+    // Ignore contact lookup failures and use raw ID fallback.
+  }
+
+  const fallbackDigits = normalizeDigits(replyTarget.replace(/@(c\.us|lid)$/i, ""));
+  const digits = contactDigits || fallbackDigits;
+  if (digits) {
+    return {
+      replyTarget,
+      conversationPhone: `${digits}@c.us`,
+      source: replyTarget.endsWith("@lid") ? "lid_to_c_us" : "digits_to_c_us",
+    };
+  }
+
+  return {
+    replyTarget,
+    conversationPhone: replyTarget,
+    source: "raw_reply_target",
+  };
 }
 
 function phoneLikelyMatches(ownerDigits, candidateDigitsSet) {
@@ -611,6 +655,101 @@ async function getOwnerContext(phone, conv) {
   return { ownerId, ownerProfile, ownerMatchSource };
 }
 
+async function fetchFormattedHistoryByChatId(chatId, limit = 20) {
+  const chat = await client.getChatById(chatId);
+  const recentMsgs = await chat.fetchMessages({ limit });
+  console.log("History fetched:", recentMsgs.length, "messages");
+  return recentMsgs
+    .filter((m) => {
+      const body = m.body?.trim();
+      if (!body) return false;
+      if (m.isStatus) return false;
+      if (m.type === "revoked" || m.type === "revoked_ack") return false;
+      if (/^!(bot|human)\b/i.test(body)) return false;
+      return true;
+    })
+    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
+    .map((m) => ({
+      role: m.fromMe ? "assistant" : "user",
+      content: m.body,
+    }));
+}
+
+async function prepareBotActivationContext(targetJid, targetPhone) {
+  let formattedHistory = [];
+  try {
+    formattedHistory = await fetchFormattedHistoryByChatId(targetJid, 20);
+    console.log(
+      "Formatted history:",
+      formattedHistory.map((m) => m.role + ": " + m.content.slice(0, 40))
+    );
+  } catch (e) {
+    console.error("History fetch failed:", e.message);
+  }
+
+  const owner = await findOwnerByFlexiblePhone(targetPhone);
+  const ownerProfile = await buildOwnerProfile(owner?.id ?? null, targetPhone);
+  const handoff = buildHandoffPayload(formattedHistory);
+  const facts = extractConversationFacts({}, formattedHistory, handoff.pending_request, handoff);
+
+  return {
+    ownerId: owner?.id ?? null,
+    ownerProfile,
+    formattedHistory,
+    handoff,
+    facts,
+  };
+}
+
+async function activateAgentForTarget({
+  triggerSource,
+  targetJid,
+  notifyTemplate,
+}) {
+  const normalizedTargetJid = (targetJid ?? "").replace(/\s/g, "");
+  const targetPhone = canonicalConversationPhone(normalizedTargetJid);
+  console.log("Activating agent for:", {
+    triggerSource,
+    targetJid: normalizedTargetJid,
+    targetPhone,
+  });
+
+  await supabase
+    .from("agent_conversations")
+    .upsert({ phone_number: targetPhone, mode: "agent" });
+
+  const {
+    ownerId,
+    ownerProfile,
+    formattedHistory,
+    handoff,
+    facts,
+  } = await prepareBotActivationContext(normalizedTargetJid, targetPhone);
+
+  await supabase.from("agent_conversations").upsert(
+    {
+      phone_number: targetPhone,
+      owner_id: ownerId,
+      mode: "agent",
+      history: formattedHistory,
+      owner_profile: ownerProfile,
+      facts,
+    },
+    { onConflict: "phone_number" }
+  );
+
+  const greeting = await runAgent(
+    targetPhone,
+    "[SYSTEM: You have just been connected to this conversation. Review the chat history and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]",
+    { handoff }
+  );
+  await client.sendMessage(normalizedTargetJid, greeting);
+  if (notifyTemplate) {
+    await notifyStaff(notifyTemplate(targetPhone));
+  }
+  return { targetPhone, targetJid: normalizedTargetJid };
+}
+
 // SECTION 5 - TOOL EXECUTOR
 async function executeTool(name, input, phone) {
   try {
@@ -811,6 +950,7 @@ async function runAgent(phone, message, options = {}) {
   let currentMessages = [...claudeMessages];
   let finalText = "";
   const toolTrace = [];
+  let toolRounds = 0;
 
   while (true) {
     const response = await anthropic.messages.create({
@@ -831,6 +971,13 @@ async function runAgent(phone, message, options = {}) {
     }
 
     if (response.stop_reason === "tool_use") {
+      if (toolRounds >= MAX_TOOL_ROUNDS) {
+        finalText =
+          "I have enough context to help, but I need a teammate to complete this request. Let me hand this to our team.";
+        toolTrace.push("tool_round_limit_reached");
+        break;
+      }
+      toolRounds += 1;
       const toolBlocks = response.content.filter((b) => b.type === "tool_use");
 
       const toolResults = await Promise.all(
@@ -885,89 +1032,25 @@ async function runAgent(phone, message, options = {}) {
 client.on("message", async (msg) => {
   if (msg.isStatus) return;
   if (msg.from.endsWith("@newsletter")) return;
-  if (msg.from.endsWith("@lid")) return;
   if (msg.from.endsWith("@broadcast")) return;
-  console.log("Message received:", msg.from, "|", msg.body.slice(0, 50));
+  const messageBody = typeof msg.body === "string" ? msg.body : "";
+  console.log("Message received:", msg.from, "|", messageBody.slice(0, 50));
 
   const isFromStaffGroup = STAFF_GROUP && msg.from === STAFF_GROUP;
 
   if (isFromStaffGroup) {
-    const text = msg.body.trim();
+    const text = messageBody.trim();
 
     if (text.startsWith("!bot ")) {
       const rawNumber = text.slice(5).trim();
-      const targetPhone = rawNumber.includes("@c.us")
-        ? rawNumber
-        : rawNumber.replace(/\s/g, "") + "@c.us";
-      console.log("Activating agent for:", targetPhone);
-      await supabase
-        .from("agent_conversations")
-        .upsert({ phone_number: targetPhone, mode: "agent" });
-      await notifyStaff(`✓ Agent mode ON for ${targetPhone}`);
-
-      const { data: conv } = await supabase
-        .from("agent_conversations")
-        .select("owner_id")
-        .eq("phone_number", targetPhone)
-        .single();
-
-      let owner = null;
-      if (conv?.owner_id) {
-        const { data: ownerData } = await supabase
-          .from("owners")
-          .select("id, first_name")
-          .eq("id", conv.owner_id)
-          .single();
-        owner = ownerData ?? null;
-      }
-
-      let formattedHistory = [];
-      try {
-        const chat = await client.getChatById(targetPhone);
-        const recentMsgs = await chat.fetchMessages({ limit: 20 });
-        console.log("History fetched:", recentMsgs.length, "messages");
-        formattedHistory = recentMsgs
-          .filter((m) => {
-            if (!m.body?.trim()) return false;
-            if (m.isStatus) return false;
-            if (m.type === "revoked" || m.type === "revoked_ack") return false;
-            return true;
-          })
-          .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
-          .map((m) => ({
-            role: m.fromMe ? "assistant" : "user",
-            content: m.body,
-          }));
-        console.log(
-          "Formatted history:",
-          formattedHistory.map((m) => m.role + ": " + m.content.slice(0, 40))
-        );
-      } catch (e) {
-        console.error("History fetch failed:", e.message);
-      }
-
-      const ownerProfile = await buildOwnerProfile(owner?.id ?? null, targetPhone);
-      const handoff = buildHandoffPayload(formattedHistory);
-      const facts = extractConversationFacts({}, formattedHistory, handoff.pending_request, handoff);
-
-      await supabase.from("agent_conversations").upsert(
-        {
-          phone_number: targetPhone,
-          owner_id: owner?.id ?? null,
-          mode: "agent",
-          history: formattedHistory,
-          owner_profile: ownerProfile,
-          facts,
-        },
-        { onConflict: "phone_number" }
-      );
-
-      const greeting = await runAgent(
-        targetPhone,
-        "[SYSTEM: You have just been connected to this conversation. Review the chat history above and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]",
-        { handoff }
-      );
-      await client.sendMessage(targetPhone, greeting);
+      const targetJid = rawNumber.includes("@")
+        ? rawNumber.replace(/\s/g, "")
+        : canonicalConversationPhone(rawNumber);
+      await activateAgentForTarget({
+        triggerSource: "staff_group_command",
+        targetJid,
+        notifyTemplate: (targetPhone) => `✓ Agent mode ON for ${targetPhone}`,
+      });
       return;
     }
 
@@ -1061,50 +1144,66 @@ client.on("message", async (msg) => {
     return;
   }
 
-  if (!msg.from.endsWith("@c.us")) return;
+  if (!msg.from.endsWith("@c.us") && !msg.from.endsWith("@lid")) return;
 
-  const phone = msg.from;
-  const { data: conv } = await supabase
-    .from("agent_conversations")
-    .select("mode")
-    .eq("phone_number", phone)
-    .single();
-
-  const mode = conv?.mode ?? "human";
+  const routing = await resolveInboundRouting(msg);
+  const lookupCandidates = [...new Set([routing.conversationPhone, routing.replyTarget])];
+  let mode = "human";
+  let modeKey = routing.conversationPhone;
+  for (const candidate of lookupCandidates) {
+    const { data: conv } = await supabase
+      .from("agent_conversations")
+      .select("mode")
+      .eq("phone_number", candidate)
+      .single();
+    if (conv?.mode) {
+      mode = conv.mode;
+      modeKey = candidate;
+      break;
+    }
+  }
+  console.log("Inbound routing:", {
+    from: msg.from,
+    conversationPhone: routing.conversationPhone,
+    replyTarget: routing.replyTarget,
+    source: routing.source,
+    modeKey,
+    mode,
+  });
   if (mode !== "agent") return;
 
   try {
-    console.log("Agent reply pipeline start:", phone);
+    console.log("Agent reply pipeline start:", routing.conversationPhone);
     const chat = await msg.getChat();
     await chat.sendStateTyping();
 
-    const reply = await runAgent(phone, msg.body);
+    const reply = await runAgent(routing.conversationPhone, messageBody);
 
     await chat.clearState();
-    await client.sendMessage(phone, reply);
-    console.log("Agent reply pipeline complete:", phone);
-    agentErrorCounts.delete(phone);
+    await client.sendMessage(routing.replyTarget, reply);
+    console.log("Agent reply pipeline complete:", routing.conversationPhone);
+    agentErrorCounts.delete(routing.conversationPhone);
   } catch (err) {
     console.error("Agent error:", err);
     await client.sendMessage(
-      phone,
+      routing.replyTarget,
       "Sorry, something went wrong. Let me get someone to help you."
     );
-    const nextErrorCount = (agentErrorCounts.get(phone) ?? 0) + 1;
-    agentErrorCounts.set(phone, nextErrorCount);
+    const nextErrorCount = (agentErrorCounts.get(routing.conversationPhone) ?? 0) + 1;
+    agentErrorCounts.set(routing.conversationPhone, nextErrorCount);
 
     if (nextErrorCount >= MAX_CONSECUTIVE_AGENT_ERRORS) {
       await supabase
         .from("agent_conversations")
         .update({ mode: "human" })
-        .eq("phone_number", phone);
-      agentErrorCounts.delete(phone);
+        .eq("phone_number", modeKey);
+      agentErrorCounts.delete(routing.conversationPhone);
       await notifyStaff(
-        `⚠️ Agent error for ${phone}\n${err.message}\nReached ${MAX_CONSECUTIVE_AGENT_ERRORS} consecutive failures and switched to human mode`
+        `⚠️ Agent error for ${routing.conversationPhone}\n${err.message}\nReached ${MAX_CONSECUTIVE_AGENT_ERRORS} consecutive failures and switched to human mode`
       );
     } else {
       await notifyStaff(
-        `⚠️ Agent transient error for ${phone} (${nextErrorCount}/${MAX_CONSECUTIVE_AGENT_ERRORS})\n${err.message}`
+        `⚠️ Agent transient error for ${routing.conversationPhone} (${nextErrorCount}/${MAX_CONSECUTIVE_AGENT_ERRORS})\n${err.message}`
       );
     }
   }
@@ -1119,46 +1218,22 @@ client.on("message_create", async (msg) => {
 
   if (text === "!bot") {
     await msg.delete(true);
-    const targetPhone = msg.to;
-
-    const chat = await client.getChatById(targetPhone);
-    const recentMsgs = await chat.fetchMessages({ limit: 20 });
-    const history = recentMsgs
-      .filter((m) => m.body && m.type !== "revoked")
-      .map((m) => ({
-        role: m.fromMe ? "assistant" : "user",
-        content: m.body,
-      }));
-    const handoff = buildHandoffPayload(history);
-    const facts = extractConversationFacts({}, history, handoff.pending_request, handoff);
-
-    await supabase.from("agent_conversations").upsert(
-      {
-        phone_number: targetPhone,
-        mode: "agent",
-        history,
-        facts,
-      },
-      { onConflict: "phone_number" }
-    );
-
-    const greeting = await runAgent(
-      targetPhone,
-      "[SYSTEM: You have just been connected to this conversation. Review the chat history and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]",
-      { handoff }
-    );
-    await client.sendMessage(targetPhone, greeting);
-    await notifyStaff(`🤖 Agent activated for ${targetPhone}`);
+    await activateAgentForTarget({
+      triggerSource: "direct_chat_command",
+      targetJid: msg.to,
+      notifyTemplate: (targetPhone) => `🤖 Agent activated for ${targetPhone}`,
+    });
     return;
   }
 
   if (text === "!human") {
     await msg.delete(true);
+    const targetPhone = canonicalConversationPhone(msg.to);
     await supabase
       .from("agent_conversations")
       .update({ mode: "human" })
-      .eq("phone_number", msg.to);
-    await notifyStaff(`👤 Human mode for ${msg.to}`);
+      .eq("phone_number", targetPhone);
+    await notifyStaff(`👤 Human mode for ${targetPhone}`);
     return;
   }
 });
