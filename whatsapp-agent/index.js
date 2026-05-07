@@ -466,6 +466,10 @@ function phoneDigitsCandidates(phone) {
 
 function canonicalConversationPhone(value) {
   const raw = (value ?? "").toString().trim();
+  if (raw.endsWith("@lid")) {
+    // Keep LID IDs as-is to avoid generating fake c.us keys from non-phone IDs.
+    return raw;
+  }
   const digits = normalizeDigits(raw.replace(/@(c\.us|lid)$/i, ""));
   if (digits) return `${digits}@c.us`;
   if (/@(c\.us|lid)$/i.test(raw)) return raw;
@@ -475,9 +479,11 @@ function canonicalConversationPhone(value) {
 async function resolveInboundRouting(msg) {
   const replyTarget = msg.from;
   if (replyTarget.endsWith("@c.us")) {
+    const conversationPhone = canonicalConversationPhone(replyTarget);
     return {
       replyTarget,
-      conversationPhone: canonicalConversationPhone(replyTarget),
+      conversationPhone,
+      lookupCandidates: [conversationPhone, replyTarget],
       source: "direct_c_us",
     };
   }
@@ -485,24 +491,27 @@ async function resolveInboundRouting(msg) {
   let contactDigits = "";
   try {
     const contact = await msg.getContact();
-    contactDigits = normalizeDigits(contact?.number ?? contact?.id?.user ?? "");
+    // Prefer the contact phone number; do not use LID user IDs as phone numbers.
+    contactDigits = normalizeDigits(contact?.number ?? "");
   } catch {
     // Ignore contact lookup failures and use raw ID fallback.
   }
 
-  const fallbackDigits = normalizeDigits(replyTarget.replace(/@(c\.us|lid)$/i, ""));
-  const digits = contactDigits || fallbackDigits;
-  if (digits) {
+  if (contactDigits) {
+    const mappedPhone = canonicalConversationPhone(contactDigits);
     return {
       replyTarget,
-      conversationPhone: `${digits}@c.us`,
-      source: replyTarget.endsWith("@lid") ? "lid_to_c_us" : "digits_to_c_us",
+      conversationPhone: mappedPhone,
+      lookupCandidates: [mappedPhone, replyTarget],
+      source: replyTarget.endsWith("@lid") ? "lid_contact_to_c_us" : "contact_to_c_us",
     };
   }
 
+  const rawConversationPhone = canonicalConversationPhone(replyTarget);
   return {
     replyTarget,
-    conversationPhone: replyTarget,
+    conversationPhone: rawConversationPhone,
+    lookupCandidates: [rawConversationPhone, replyTarget],
     source: "raw_reply_target",
   };
 }
@@ -1242,7 +1251,7 @@ client.on("message", async (msg) => {
   if (!msg.from.endsWith("@c.us") && !msg.from.endsWith("@lid")) return;
 
   const routing = await resolveInboundRouting(msg);
-  const lookupCandidates = [...new Set([routing.conversationPhone, routing.replyTarget])];
+  const lookupCandidates = [...new Set(routing.lookupCandidates ?? [routing.conversationPhone])];
   let mode = "human";
   let modeKey = routing.conversationPhone;
   for (const candidate of lookupCandidates) {
