@@ -1837,8 +1837,8 @@ const OwnerProfilePage = () => {
                   <Input id="pet_colour" value={(petForm.colour as string) ?? ""} onChange={(e) => handlePetField("colour", e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="pet_dob">Date of birth</Label>
-                  <Input id="pet_dob" type="date" value={(petForm.date_of_birth as string) ?? ""} onChange={(e) => handlePetField("date_of_birth", e.target.value)} />
+                  <Label htmlFor="pet_dob">Date of birth <span className="text-destructive">*</span></Label>
+                  <Input id="pet_dob" type="date" required value={(petForm.date_of_birth as string) ?? ""} onChange={(e) => handlePetField("date_of_birth", e.target.value)} />
                 </div>
               </div>
 
