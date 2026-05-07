@@ -30,6 +30,7 @@ const ParkPage = lazy(() => import("@/pages/Park"));
 const GroomingPage = lazy(() => import("@/pages/Grooming"));
 const StaffPage = lazy(() => import("@/pages/Staff"));
 const ProfilePage = lazy(() => import("@/pages/Profile"));
+const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const KennelCardPrintPage = lazy(() => import("@/pages/print/KennelCardPrintPage"));
 const KennelCardsPrintPage = lazy(() => import("@/pages/print/KennelCardsPrintPage"));
 const GroomingCardPrintPage = lazy(() => import("@/pages/print/GroomingCardPrintPage"));
@@ -133,6 +134,7 @@ const App = () => (
                 <Route path="billing/statements/:ownerId" element={<OwnerStatementPage />} />
                 <Route path="staff" element={<StaffPage />} />
                 <Route path="profile" element={<ProfilePage />} />
+                <Route path="settings" element={<SettingsPage />} />
                 <Route path="settings/rooms" element={<RoomsAdminPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />

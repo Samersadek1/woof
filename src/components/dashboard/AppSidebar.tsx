@@ -27,6 +27,7 @@ const navItems = [
   { icon: Wallet, label: "Billing & Wallets", path: "/billing" },
   { icon: ClipboardList, label: "User Management", path: "/staff" },
   { icon: Sparkles, label: "AI Assistant", path: "/agent" },
+  { icon: Settings, label: "Settings", path: "/settings" },
 ];
 
 const settingsItems = [
