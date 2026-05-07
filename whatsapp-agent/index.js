@@ -50,11 +50,16 @@ client.on("qr", (qr) => {
 client.on("ready", async () => {
   console.log("\n\u2713 MSH WhatsApp agent ready\n");
 
-  const chats = await client.getChats();
-  const groups = chats.filter((c) => c.isGroup);
-  console.log("=== GROUP IDs (find your staff group) ===");
-  groups.forEach((g) => console.log(`${g.name}: ${g.id._serialized}`));
-  console.log("=========================================\n");
+  if (!STAFF_GROUP) {
+    console.log("STAFF_GROUP_ID not set -- printing groups to find it:");
+    const chats = await client.getChats();
+    const groups = chats.filter((c) => c.isGroup);
+    console.log("=== GROUP IDs ===");
+    groups.forEach((g) => console.log(`${g.name}: ${g.id._serialized}`));
+    console.log("=================\n");
+  } else {
+    console.log("Staff group:", STAFF_GROUP);
+  }
 });
 
 client.on("disconnected", (reason) => {
