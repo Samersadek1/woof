@@ -19,7 +19,7 @@ const anthropic = new Anthropic({
 });
 
 const STAFF_GROUP = process.env.STAFF_GROUP_ID;
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-sonnet-4-6";
 const MAX_TOK = 512;
 
 // Keep import explicit per required structure.
@@ -490,8 +490,11 @@ async function runAgent(phone, message) {
 
 // SECTION 8 - MESSAGE HANDLERS
 client.on("message", async (msg) => {
-  console.log("Message received:", msg.from, "|", msg.body.slice(0, 50));
   if (msg.isStatus) return;
+  if (msg.from.endsWith("@newsletter")) return;
+  if (msg.from.endsWith("@lid")) return;
+  if (msg.from.endsWith("@broadcast")) return;
+  console.log("Message received:", msg.from, "|", msg.body.slice(0, 50));
 
   const isFromStaffGroup = STAFF_GROUP && msg.from === STAFF_GROUP;
 
@@ -503,6 +506,7 @@ client.on("message", async (msg) => {
       const targetPhone = rawNumber.includes("@c.us")
         ? rawNumber
         : rawNumber.replace(/\s/g, "") + "@c.us";
+      console.log("Activating agent for:", targetPhone);
       await supabase
         .from("agent_conversations")
         .upsert({ phone_number: targetPhone, mode: "agent" });
@@ -524,24 +528,30 @@ client.on("message", async (msg) => {
         owner = ownerData ?? null;
       }
 
-      const chat = await client.getChatById(targetPhone);
-      const recentMsgs = await chat.fetchMessages({ limit: 20 });
-      console.log("Chat history fetched:", recentMsgs.length, "messages");
-      recentMsgs.forEach((m) =>
-        console.log(m.fromMe ? "[MSH]" : "[Owner]", m.body?.slice(0, 60))
-      );
-      const formattedHistory = recentMsgs
-        .filter((m) => {
-          if (!m.body?.trim()) return false;
-          if (m.isStatus) return false;
-          if (m.type === "revoked" || m.type === "revoked_ack") return false;
-          return true;
-        })
-        .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
-        .map((m) => ({
-          role: m.fromMe ? "assistant" : "user",
-          content: m.body,
-        }));
+      let formattedHistory = [];
+      try {
+        const chat = await client.getChatById(targetPhone);
+        const recentMsgs = await chat.fetchMessages({ limit: 20 });
+        console.log("History fetched:", recentMsgs.length, "messages");
+        formattedHistory = recentMsgs
+          .filter((m) => {
+            if (!m.body?.trim()) return false;
+            if (m.isStatus) return false;
+            if (m.type === "revoked" || m.type === "revoked_ack") return false;
+            return true;
+          })
+          .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
+          .map((m) => ({
+            role: m.fromMe ? "assistant" : "user",
+            content: m.body,
+          }));
+        console.log(
+          "Formatted history:",
+          formattedHistory.map((m) => m.role + ": " + m.content.slice(0, 40))
+        );
+      } catch (e) {
+        console.error("History fetch failed:", e.message);
+      }
 
       const ownerProfile = await buildOwnerProfile(owner?.id ?? null, targetPhone);
 
