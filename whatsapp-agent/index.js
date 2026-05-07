@@ -8,7 +8,8 @@ import { createClient } from "@supabase/supabase-js";
 import ws from "ws";
 import express from "express";
 import QRCode from "qrcode";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 // SECTION 2 - CLIENTS
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -40,6 +41,7 @@ const MODEL = "claude-sonnet-4-6";
 const MAX_TOK = 512;
 const SESSION_BUCKET = "whatsapp-sessions";
 const sessionObjectPath = (session) => `${session}.zip`;
+const localSessionZipPath = (session) => resolve(".wwebjs_auth", `${session}.zip`);
 let latestQR = null;
 
 // Keep import explicit per required structure.
@@ -63,7 +65,7 @@ const store = {
 
   async save({ session, path }) {
     try {
-      const filePath = path ?? `${session}.zip`;
+      const filePath = path ?? localSessionZipPath(session);
       const payload = await readFile(filePath);
       const { error } = await supabase.storage
         .from(SESSION_BUCKET)
@@ -80,12 +82,13 @@ const store = {
 
   async extract({ session, path }) {
     try {
-      const targetPath = path ?? `${session}.zip`;
+      const targetPath = path ?? localSessionZipPath(session);
       const { data, error } = await supabase.storage
         .from(SESSION_BUCKET)
         .download(sessionObjectPath(session));
       if (error) throw new Error(error.message);
       const bytes = Buffer.from(await data.arrayBuffer());
+      await mkdir(dirname(targetPath), { recursive: true });
       await writeFile(targetPath, bytes);
     } catch (e) {
       console.error("RemoteAuth extract failed:", { session, error: e.message });
