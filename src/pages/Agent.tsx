@@ -28,7 +28,16 @@ type AgentReply = {
   text?: string;
   session_id?: string | null;
   title?: string;
+  meta?: {
+    progress_stage?: "analyzing" | "querying_data" | "finalizing";
+    total_ms?: number;
+    claude_rounds?: number;
+    tool_rounds?: number;
+    used_snapshot?: boolean;
+  };
 };
+
+type LoadingStage = "analyzing" | "querying_data" | "finalizing";
 
 const AgentPage = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -40,10 +49,23 @@ const AgentPage = () => {
   const [sessionTitle, setSessionTitle] = useState("New conversation");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [loadingStage, setLoadingStage] = useState<LoadingStage>("analyzing");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (!loading) return;
+    setLoadingStage("analyzing");
+    const stages: LoadingStage[] = ["analyzing", "querying_data", "finalizing"];
+    let index = 0;
+    const timer = window.setInterval(() => {
+      index = Math.min(index + 1, stages.length - 1);
+      setLoadingStage(stages[index]);
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   const loadSessionList = useCallback(async () => {
     // staff_sessions is managed in DB; cast until generated types include it.
@@ -112,6 +134,9 @@ const AgentPage = () => {
       if (invokeError) throw new Error(invokeError.message);
 
       const payload = (data ?? {}) as AgentReply;
+      if (payload.meta?.progress_stage) {
+        setLoadingStage(payload.meta.progress_stage);
+      }
       const assistantMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
@@ -283,7 +308,9 @@ const AgentPage = () => {
               </div>
               <div className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Thinking…
+                {loadingStage === "analyzing" && "Analyzing…"}
+                {loadingStage === "querying_data" && "Querying data…"}
+                {loadingStage === "finalizing" && "Finalizing answer…"}
               </div>
             </div>
           )}

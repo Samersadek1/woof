@@ -490,6 +490,7 @@ async function runAgent(phone, message) {
 
 // SECTION 8 - MESSAGE HANDLERS
 client.on("message", async (msg) => {
+  console.log("Message received:", msg.from, "|", msg.body.slice(0, 50));
   if (msg.isStatus) return;
 
   const isFromStaffGroup = STAFF_GROUP && msg.from === STAFF_GROUP;
@@ -498,7 +499,10 @@ client.on("message", async (msg) => {
     const text = msg.body.trim();
 
     if (text.startsWith("!bot ")) {
-      const targetPhone = text.slice(5).trim().replace(/\s/g, "") + "@c.us";
+      const rawNumber = text.slice(5).trim();
+      const targetPhone = rawNumber.includes("@c.us")
+        ? rawNumber
+        : rawNumber.replace(/\s/g, "") + "@c.us";
       await supabase
         .from("agent_conversations")
         .upsert({ phone_number: targetPhone, mode: "agent" });
@@ -522,6 +526,10 @@ client.on("message", async (msg) => {
 
       const chat = await client.getChatById(targetPhone);
       const recentMsgs = await chat.fetchMessages({ limit: 20 });
+      console.log("Chat history fetched:", recentMsgs.length, "messages");
+      recentMsgs.forEach((m) =>
+        console.log(m.fromMe ? "[MSH]" : "[Owner]", m.body?.slice(0, 60))
+      );
       const formattedHistory = recentMsgs
         .filter((m) => {
           if (!m.body?.trim()) return false;
