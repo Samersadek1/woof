@@ -29,7 +29,16 @@ void MessageMedia;
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: ".wwebjs_auth" }),
   puppeteer: {
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    headless: true,
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-first-run",
+      "--no-zygote",
+    ],
   },
 });
 
