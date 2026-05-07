@@ -20,7 +20,7 @@ const anthropic = new Anthropic({
 
 const STAFF_GROUP = process.env.STAFF_GROUP_ID;
 const MODEL = "claude-sonnet-4-20250514";
-const MAX_TOK = 1024;
+const MAX_TOK = 512;
 
 // Keep import explicit per required structure.
 void MessageMedia;
@@ -188,6 +188,51 @@ YOUR RULES:
 - Do not mention you are an AI unless directly asked
 
 Today: ${today}`;
+}
+
+async function buildOwnerProfile(ownerId, phone) {
+  let ownerProfile = "Unknown owner (phone: " + phone + ")";
+  if (!ownerId) return ownerProfile;
+
+  const { data: owner } = await supabase
+    .from("owners")
+    .select(`
+      first_name, last_name, phone, member_type, wallet_balance,
+      pets(id, name, species, breed, assessment_status)
+    `)
+    .eq("id", ownerId)
+    .single();
+
+  if (!owner) return ownerProfile;
+
+  const petList = (owner.pets ?? [])
+    .map(
+      (p) =>
+        `${p.name} (${p.species}, ${p.breed ?? "breed unknown"}, assessment: ${p.assessment_status})`
+    )
+    .join("\n  ");
+
+  ownerProfile = `Name: ${owner.first_name} ${owner.last_name ?? ""}
+Phone: ${owner.phone}
+Membership: ${owner.member_type}
+Wallet: AED ${owner.wallet_balance ?? 0}
+Pets:
+  ${petList || "No pets on file"}`;
+
+  return ownerProfile;
+}
+
+async function ensureOwnerProfileColumn() {
+  try {
+    await supabase.rpc("execute_sql", {
+      query: `
+        ALTER TABLE agent_conversations
+          ADD COLUMN IF NOT EXISTS owner_profile TEXT;
+      `,
+    });
+  } catch {
+    // Ignore startup migration errors (including column already existing).
+  }
 }
 
 // SECTION 5 - TOOL EXECUTOR
@@ -374,31 +419,14 @@ async function runAgent(phone, message) {
   }
 
   let ownerProfile = "Unknown owner (phone: " + phone + ")";
-  if (conv?.owner_id) {
-    const { data: owner } = await supabase
-      .from("owners")
-      .select(`
-        first_name, last_name, phone, member_type, wallet_balance,
-        pets(id, name, species, breed, assessment_status)
-      `)
-      .eq("id", conv.owner_id)
-      .single();
-
-    if (owner) {
-      const petList = (owner.pets ?? [])
-        .map(
-          (p) =>
-            `${p.name} (${p.species}, ${p.breed ?? "breed unknown"}, assessment: ${p.assessment_status})`
-        )
-        .join("\n  ");
-
-      ownerProfile = `Name: ${owner.first_name} ${owner.last_name ?? ""}
-Phone: ${owner.phone}
-Membership: ${owner.member_type}
-Wallet: AED ${owner.wallet_balance ?? 0}
-Pets:
-  ${petList || "No pets on file"}`;
-    }
+  if (conv?.owner_profile) {
+    ownerProfile = conv.owner_profile;
+  } else {
+    ownerProfile = await buildOwnerProfile(conv?.owner_id, phone);
+    await supabase
+      .from("agent_conversations")
+      .update({ owner_profile: ownerProfile })
+      .eq("phone_number", phone);
   }
 
   const history = conv?.history ?? [];
@@ -507,12 +535,15 @@ client.on("message", async (msg) => {
           content: m.body,
         }));
 
+      const ownerProfile = await buildOwnerProfile(owner?.id ?? null, targetPhone);
+
       await supabase.from("agent_conversations").upsert(
         {
           phone_number: targetPhone,
           owner_id: owner?.id ?? null,
           mode: "agent",
           history: formattedHistory,
+          owner_profile: ownerProfile,
         },
         { onConflict: "phone_number" }
       );
@@ -627,8 +658,6 @@ client.on("message", async (msg) => {
   const mode = conv?.mode ?? "human";
   if (mode !== "agent") return;
 
-  await delay(1000 + Math.random() * 2000);
-
   try {
     const chat = await msg.getChat();
     await chat.sendStateTyping();
@@ -702,4 +731,5 @@ client.on("message_create", async (msg) => {
 
 // SECTION 9 - START
 console.log("Starting MSH WhatsApp agent...");
+await ensureOwnerProfileColumn();
 client.initialize();
