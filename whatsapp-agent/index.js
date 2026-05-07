@@ -42,6 +42,8 @@ const MAX_TOK = 512;
 const SESSION_BUCKET = "whatsapp-sessions";
 const sessionObjectPath = (session) => `${session}.zip`;
 const localSessionZipPath = (session) => resolve(".wwebjs_auth", `${session}.zip`);
+const MAX_CONSECUTIVE_AGENT_ERRORS = 3;
+const agentErrorCounts = new Map();
 let latestQR = null;
 
 // Keep import explicit per required structure.
@@ -328,6 +330,100 @@ Pets:
   return ownerProfile;
 }
 
+function normalizeDigits(value) {
+  return (value ?? "").toString().replace(/\D/g, "");
+}
+
+function phoneDigitsCandidates(phone) {
+  const digits = normalizeDigits(phone.replace(/@c\.us$/i, ""));
+  const out = new Set();
+  if (!digits) return out;
+
+  out.add(digits);
+
+  if (digits.startsWith("00") && digits.length > 2) {
+    out.add(digits.slice(2));
+  }
+  if (digits.startsWith("971") && digits.length > 3) {
+    out.add(`0${digits.slice(3)}`);
+  }
+  if (digits.startsWith("0") && digits.length > 1) {
+    out.add(`971${digits.slice(1)}`);
+  }
+
+  return out;
+}
+
+function phoneLikelyMatches(ownerDigits, candidateDigitsSet) {
+  if (!ownerDigits) return false;
+  for (const c of candidateDigitsSet) {
+    if (!c) continue;
+    if (ownerDigits === c) return true;
+    if (ownerDigits.endsWith(c) || c.endsWith(ownerDigits)) return true;
+    if (ownerDigits.slice(-9) === c.slice(-9) && ownerDigits.length >= 9 && c.length >= 9) {
+      return true;
+    }
+    if (ownerDigits.slice(-8) === c.slice(-8) && ownerDigits.length >= 8 && c.length >= 8) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function findOwnerByFlexiblePhone(phone) {
+  const candidates = phoneDigitsCandidates(phone);
+  if (!candidates.size) return null;
+
+  // Pull likely matches by searchable digit tails, then confirm with strict normalized checks.
+  const tails = [...candidates]
+    .map((c) => c.slice(-9))
+    .filter((t) => t.length >= 7);
+  const uniqueTails = [...new Set(tails)].slice(0, 6);
+
+  let query = supabase
+    .from("owners")
+    .select("id, first_name, last_name, member_type, wallet_balance, phone")
+    .limit(100);
+
+  if (uniqueTails.length) {
+    const orParts = uniqueTails.map((t) => `phone.ilike.%${t}%`);
+    query = query.or(orParts.join(","));
+  }
+
+  const { data: owners, error } = await query;
+  if (error || !owners?.length) return null;
+
+  const matched = owners.find((o) => phoneLikelyMatches(normalizeDigits(o.phone), candidates));
+  return matched ?? null;
+}
+
+function historyFallbackOwnerProfile(phone, history) {
+  const userLines = (history ?? [])
+    .filter((m) => m?.role === "user" && typeof m?.content === "string")
+    .map((m) => m.content)
+    .slice(-12);
+
+  const joined = userLines.join("\n");
+  const nameMatch = joined.match(
+    /\b(?:my name is|i am|i'm|this is)\s+([A-Za-z][A-Za-z' -]{1,40})/i
+  );
+  const petHints = userLines
+    .filter((line) => /\b(dog|cat|pet|pets|puppy|kitten)\b/i.test(line))
+    .slice(-4);
+
+  const lines = [`Unknown owner (phone: ${phone})`];
+  if (nameMatch?.[1]) {
+    lines.push(`Possible name from chat: ${nameMatch[1].trim()}`);
+  }
+  if (petHints.length) {
+    lines.push("Recent pet-related messages:");
+    for (const hint of petHints) {
+      lines.push(`- ${hint.slice(0, 120)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 async function ensureOwnerProfileColumn() {
   try {
     await supabase.rpc("execute_sql", {
@@ -513,11 +609,7 @@ async function runAgent(phone, message) {
     .single();
 
   if (!conv) {
-    const { data: owner } = await supabase
-      .from("owners")
-      .select("id, first_name, last_name, member_type, wallet_balance")
-      .eq("phone", phone)
-      .single();
+    const owner = await findOwnerByFlexiblePhone(phone);
 
     const { data: newConv } = await supabase
       .from("agent_conversations")
@@ -531,20 +623,32 @@ async function runAgent(phone, message) {
       .single();
 
     conv = newConv;
+  } else if (!conv.owner_id) {
+    const owner = await findOwnerByFlexiblePhone(phone);
+    if (owner?.id) {
+      await supabase
+        .from("agent_conversations")
+        .update({ owner_id: owner.id })
+        .eq("phone_number", phone);
+      conv = { ...conv, owner_id: owner.id };
+    }
   }
 
+  const history = conv?.history ?? [];
   let ownerProfile = "Unknown owner (phone: " + phone + ")";
   if (conv?.owner_profile) {
     ownerProfile = conv.owner_profile;
   } else {
     ownerProfile = await buildOwnerProfile(conv?.owner_id, phone);
+    if (ownerProfile.startsWith("Unknown owner")) {
+      ownerProfile = historyFallbackOwnerProfile(phone, history);
+    }
     await supabase
       .from("agent_conversations")
       .update({ owner_profile: ownerProfile })
       .eq("phone_number", phone);
   }
 
-  const history = conv?.history ?? [];
   const incoming = { role: "user", content: message };
   const claudeMessages = [...history, incoming];
   const systemPrompt = await buildSystemPrompt(ownerProfile);
@@ -799,17 +903,30 @@ client.on("message", async (msg) => {
 
     await chat.clearState();
     await client.sendMessage(phone, reply);
+    agentErrorCounts.delete(phone);
   } catch (err) {
     console.error("Agent error:", err);
     await client.sendMessage(
       phone,
       "Sorry, something went wrong. Let me get someone to help you."
     );
-    await supabase
-      .from("agent_conversations")
-      .update({ mode: "human" })
-      .eq("phone_number", phone);
-    await notifyStaff(`⚠️ Agent error for ${phone}\n${err.message}\nSwitched to human mode`);
+    const nextErrorCount = (agentErrorCounts.get(phone) ?? 0) + 1;
+    agentErrorCounts.set(phone, nextErrorCount);
+
+    if (nextErrorCount >= MAX_CONSECUTIVE_AGENT_ERRORS) {
+      await supabase
+        .from("agent_conversations")
+        .update({ mode: "human" })
+        .eq("phone_number", phone);
+      agentErrorCounts.delete(phone);
+      await notifyStaff(
+        `⚠️ Agent error for ${phone}\n${err.message}\nReached ${MAX_CONSECUTIVE_AGENT_ERRORS} consecutive failures and switched to human mode`
+      );
+    } else {
+      await notifyStaff(
+        `⚠️ Agent transient error for ${phone} (${nextErrorCount}/${MAX_CONSECUTIVE_AGENT_ERRORS})\n${err.message}`
+      );
+    }
   }
 });
 
