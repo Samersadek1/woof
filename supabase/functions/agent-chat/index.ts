@@ -71,6 +71,94 @@ function selectModel(message: string): string {
   return DEFAULT_MODEL;
 }
 
+function normalizeDigits(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+function phoneDigitsCandidates(phone: string): Set<string> {
+  const digits = normalizeDigits(phone.replace(/@c\.us$/i, ""));
+  const out = new Set<string>();
+  if (!digits) return out;
+  out.add(digits);
+  if (digits.startsWith("00") && digits.length > 2) out.add(digits.slice(2));
+  if (digits.startsWith("971") && digits.length > 3) out.add(`0${digits.slice(3)}`);
+  if (digits.startsWith("0") && digits.length > 1) out.add(`971${digits.slice(1)}`);
+  return out;
+}
+
+function phoneLikelyMatches(ownerPhone: string, candidates: Set<string>): boolean {
+  const ownerDigits = normalizeDigits(ownerPhone);
+  if (!ownerDigits) return false;
+  for (const c of candidates) {
+    if (!c) continue;
+    if (ownerDigits === c) return true;
+    if (ownerDigits.endsWith(c) || c.endsWith(ownerDigits)) return true;
+    if (ownerDigits.slice(-9) === c.slice(-9) && ownerDigits.length >= 9 && c.length >= 9) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function getFocusedOwnerContext(
+  svc: SupabaseClient,
+  ownerId?: string | null,
+  ownerPhone?: string | null,
+): Promise<string> {
+  try {
+    if (!ownerId && !ownerPhone) return "";
+
+    if (ownerId) {
+      const { data: owner } = await svc
+        .from("owners")
+        .select(`
+          id, first_name, last_name, phone, member_type, wallet_balance,
+          pets(name, species, breed, assessment_status)
+        `)
+        .eq("id", ownerId)
+        .single();
+      if (!owner) return "";
+      const pets = (owner.pets ?? [])
+        .map((p) => `${p.name} (${p.species}, ${p.breed ?? "unknown"}, assessment: ${p.assessment_status})`)
+        .join("; ");
+      return `Focused owner context:
+- Name: ${owner.first_name ?? ""} ${owner.last_name ?? ""}
+- Phone: ${owner.phone ?? ""}
+- Membership: ${owner.member_type ?? "unknown"}
+- Wallet: AED ${owner.wallet_balance ?? 0}
+- Pets: ${pets || "none on file"}`;
+    }
+
+    const candidates = phoneDigitsCandidates(ownerPhone ?? "");
+    if (!candidates.size) return "";
+    const tails = [...candidates].map((c) => c.slice(-9)).filter((t) => t.length >= 7);
+    const orParts = [...new Set(tails)].slice(0, 6).map((t) => `phone.ilike.%${t}%`);
+    let q = svc
+      .from("owners")
+      .select(`
+        id, first_name, last_name, phone, member_type, wallet_balance,
+        pets(name, species, breed, assessment_status)
+      `)
+      .limit(100);
+    if (orParts.length) q = q.or(orParts.join(","));
+    const { data: owners } = await q;
+    if (!owners?.length) return "";
+    const matched = owners.find((o) => phoneLikelyMatches(String(o.phone ?? ""), candidates));
+    if (!matched) return "";
+    const pets = (matched.pets ?? [])
+      .map((p) => `${p.name} (${p.species}, ${p.breed ?? "unknown"}, assessment: ${p.assessment_status})`)
+      .join("; ");
+    return `Focused owner context:
+- Name: ${matched.first_name ?? ""} ${matched.last_name ?? ""}
+- Phone: ${matched.phone ?? ""}
+- Membership: ${matched.member_type ?? "unknown"}
+- Wallet: AED ${matched.wallet_balance ?? 0}
+- Pets: ${pets || "none on file"}`;
+  } catch {
+    return "";
+  }
+}
+
 function serializeToolResult(result: unknown): string {
   const safePreview = (value: unknown): unknown => {
     if (Array.isArray(value)) {
@@ -267,9 +355,10 @@ Grooming:           ${counts[5]}`;
 async function buildSystemPrompt(
   svc: SupabaseClient,
   today: string,
-  options?: { includeSnapshot?: boolean },
+  options?: { includeSnapshot?: boolean; focusedOwnerContext?: string },
 ): Promise<string> {
   const includeSnapshot = options?.includeSnapshot ?? true;
+  const focusedOwnerContext = options?.focusedOwnerContext ?? "";
   const [rules, queryGuide, writeGuide, schema, snapshot] =
     await Promise.all([
       getBusinessRules(svc),
@@ -319,6 +408,8 @@ ${safeQueryGuide}
 ${safeWriteGuide}
 
 ${safeSnapshot}
+
+${focusedOwnerContext ? `\n=== FOCUSED OWNER CONTEXT ===\n${focusedOwnerContext}\n` : ""}
 
 Today's date: ${today}`;
   return trimByChars("System prompt", prompt, CONTEXT_MAX_CHARS);
@@ -753,9 +844,11 @@ serve(async (req) => {
       return new Response("Unauthorized", { status: 401, headers: CORS });
     }
 
-    const { session_id, message } = await req.json() as {
+    const { session_id, message, owner_id, owner_phone } = await req.json() as {
       session_id: string | null;
       message: string;
+      owner_id?: string | null;
+      owner_phone?: string | null;
     };
 
     if (!message?.trim()) {
@@ -814,9 +907,13 @@ serve(async (req) => {
       timeSensitive ||
       priorUserTurns % Math.max(1, SNAPSHOT_EVERY_USER_TURNS) === 0;
     perf.used_snapshot = includeSnapshot;
+    const focusedOwnerContext = await getFocusedOwnerContext(svc, owner_id ?? null, owner_phone ?? null);
 
     const promptStarted = Date.now();
-    const systemPrompt = await buildSystemPrompt(svc, today, { includeSnapshot });
+    const systemPrompt = await buildSystemPrompt(svc, today, {
+      includeSnapshot,
+      focusedOwnerContext,
+    });
     perf.prompt_ms = Date.now() - promptStarted;
     perf.prompt_chars = systemPrompt.length;
 

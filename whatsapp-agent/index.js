@@ -40,10 +40,13 @@ const STAFF_GROUP = process.env.STAFF_GROUP_ID;
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOK = 512;
 const SESSION_BUCKET = "whatsapp-sessions";
+const WA_SESSION_CLIENT_ID = process.env.WA_SESSION_CLIENT_ID || "msh-whatsapp-main";
 const sessionObjectPath = (session) => `${session}.zip`;
 const localSessionZipPath = (session) => resolve(".wwebjs_auth", `${session}.zip`);
 const MAX_CONSECUTIVE_AGENT_ERRORS = 3;
 const agentErrorCounts = new Map();
+let isClientInitializing = false;
+let isShuttingDown = false;
 let latestQR = null;
 
 // Keep import explicit per required structure.
@@ -62,7 +65,9 @@ const store = {
       });
       throw new Error(`Session check failed: ${error.message}`);
     }
-    return Array.isArray(data) && data.length > 0;
+    const exists = Array.isArray(data) && data.length > 0;
+    console.log("RemoteAuth sessionExists:", { session, exists });
+    return exists;
   },
 
   async save({ session, path }) {
@@ -76,6 +81,11 @@ const store = {
           contentType: "application/zip",
         });
       if (error) throw new Error(error.message);
+      console.log("RemoteAuth save success:", {
+        session,
+        object: sessionObjectPath(session),
+        bytes: payload.length,
+      });
     } catch (e) {
       console.error("RemoteAuth save failed:", { session, error: e.message });
       throw new Error(`Session save failed: ${e.message}`);
@@ -92,6 +102,11 @@ const store = {
       const bytes = Buffer.from(await data.arrayBuffer());
       await mkdir(dirname(targetPath), { recursive: true });
       await writeFile(targetPath, bytes);
+      console.log("RemoteAuth extract success:", {
+        session,
+        object: sessionObjectPath(session),
+        bytes: bytes.length,
+      });
     } catch (e) {
       console.error("RemoteAuth extract failed:", { session, error: e.message });
       throw new Error(`Session extract failed: ${e.message}`);
@@ -130,6 +145,7 @@ if (process.env.CHROME_EXECUTABLE_PATH) {
 const client = new Client({
   authStrategy: new RemoteAuth({
     store,
+    clientId: WA_SESSION_CLIENT_ID,
     backupSyncIntervalMs: 300000,
   }),
   puppeteer: puppeteerConfig,
@@ -143,6 +159,7 @@ client.on("qr", (qr) => {
 client.on("ready", async () => {
   latestQR = null;
   console.log("✓ MSH WhatsApp agent ready");
+  console.log("RemoteAuth client ID:", WA_SESSION_CLIENT_ID);
 
   if (!STAFF_GROUP) {
     console.log("STAFF_GROUP_ID not set -- printing groups to find it:");
@@ -158,7 +175,7 @@ client.on("ready", async () => {
 
 client.on("disconnected", (reason) => {
   console.error("WhatsApp disconnected:", reason);
-  setTimeout(() => client.initialize(), 10_000);
+  setTimeout(() => queueClientInitialize("disconnected"), 10_000);
 });
 
 // SECTION 4 - TOOL DEFINITIONS
@@ -271,9 +288,15 @@ async function getBusinessRules() {
   }
 }
 
-async function buildSystemPrompt(ownerProfile) {
+async function buildSystemPrompt(ownerProfile, options = {}) {
   const rules = await getBusinessRules();
   const today = new Date().toISOString().split("T")[0];
+  const handoffSection = options.handoff?.pending_request
+    ? `\nHANDOFF CONTEXT:\nThe owner sent this request before bot activation:\n${options.handoff.pending_request}\nPrioritize answering this request first.\n`
+    : "";
+  const factsSection = options.facts && Object.keys(options.facts).length
+    ? `\nCONVERSATION FACTS:\n${JSON.stringify(options.facts, null, 2)}\n`
+    : "";
 
   return `You are the MSH booking assistant for MySecondHome,
 a premium pet boarding facility in Dubai.
@@ -284,6 +307,8 @@ ${ownerProfile}
 
 BUSINESS RULES:
 ${rules}
+${handoffSection}
+${factsSection}
 
 YOUR RULES:
 - Keep messages short -- this is WhatsApp, not email
@@ -424,12 +449,77 @@ function historyFallbackOwnerProfile(phone, history) {
   return lines.join("\n");
 }
 
+function buildHandoffPayload(history) {
+  const userMessages = (history ?? [])
+    .filter((m) => m?.role === "user" && typeof m?.content === "string")
+    .map((m) => m.content.trim())
+    .filter(Boolean);
+
+  return {
+    source: "whatsapp_recent_history",
+    pending_request: userMessages.at(-1) ?? "",
+    salient_user_points: userMessages.slice(-5),
+    captured_at: new Date().toISOString(),
+  };
+}
+
+function extractName(text) {
+  if (!text) return null;
+  const match = text.match(/\b(?:my name is|i am|i'm|this is)\s+([A-Za-z][A-Za-z' -]{1,40})/i);
+  return match?.[1]?.trim() ?? null;
+}
+
+function extractConversationFacts(existingFacts, history, latestUserMessage, handoff) {
+  const userMessages = (history ?? [])
+    .filter((m) => m?.role === "user" && typeof m?.content === "string")
+    .map((m) => m.content);
+  if (latestUserMessage) userMessages.push(latestUserMessage);
+
+  const possibleName = extractName(userMessages.join("\n")) ?? existingFacts?.possible_name ?? null;
+  const petMentions = userMessages
+    .filter((line) => /\b(dog|cat|pet|pets|puppy|kitten)\b/i.test(line))
+    .slice(-6);
+
+  return {
+    ...(existingFacts ?? {}),
+    possible_name: possibleName,
+    pet_mentions: petMentions,
+    open_intent: handoff?.pending_request ?? userMessages.at(-1) ?? existingFacts?.open_intent ?? null,
+    last_user_message: latestUserMessage ?? existingFacts?.last_user_message ?? null,
+    context_source: handoff ? "handoff" : existingFacts?.context_source ?? "ongoing_chat",
+    last_updated_at: new Date().toISOString(),
+  };
+}
+
+function summarizeToolResult(result) {
+  if (result?.error) return `error=${result.error}`;
+  if (Array.isArray(result)) return `rows=${result.length}`;
+  if (result && typeof result === "object") {
+    if (result.row_count !== undefined) return `rows=${result.row_count}`;
+    if (result.message) return String(result.message).slice(0, 120);
+  }
+  return String(result).slice(0, 120);
+}
+
 async function ensureOwnerProfileColumn() {
   try {
     await supabase.rpc("execute_sql", {
       query: `
         ALTER TABLE agent_conversations
           ADD COLUMN IF NOT EXISTS owner_profile TEXT;
+      `,
+    });
+  } catch {
+    // Ignore startup migration errors (including column already existing).
+  }
+}
+
+async function ensureConversationFactsColumn() {
+  try {
+    await supabase.rpc("execute_sql", {
+      query: `
+        ALTER TABLE agent_conversations
+          ADD COLUMN IF NOT EXISTS facts JSONB NOT NULL DEFAULT '{}'::jsonb;
       `,
     });
   } catch {
@@ -444,6 +534,81 @@ async function ensureSessionBucketAccess() {
       `Cannot access Supabase storage bucket '${SESSION_BUCKET}': ${error.message}`
     );
   }
+}
+
+function queueClientInitialize(trigger) {
+  if (isShuttingDown) {
+    console.log("Client initialize skipped (shutdown in progress):", trigger);
+    return;
+  }
+  if (isClientInitializing) {
+    console.log("Client initialize skipped (already running):", trigger);
+    return;
+  }
+  isClientInitializing = true;
+  console.log("Client initialize requested:", trigger);
+  client
+    .initialize()
+    .catch((err) => {
+      console.error("Client initialize failed:", err?.message ?? err);
+    })
+    .finally(() => {
+      isClientInitializing = false;
+    });
+}
+
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`Graceful shutdown start (${signal})`);
+  try {
+    await client.destroy();
+    console.log("WhatsApp client destroyed cleanly");
+  } catch (err) {
+    console.error("Error during WhatsApp client shutdown:", err?.message ?? err);
+  } finally {
+    process.exit(0);
+  }
+}
+
+async function getOwnerContext(phone, conv) {
+  let ownerId = conv?.owner_id ?? null;
+  let ownerMatchSource = "conversation_owner_id";
+
+  if (!ownerId) {
+    const owner = await findOwnerByFlexiblePhone(phone);
+    if (owner?.id) {
+      ownerId = owner.id;
+      ownerMatchSource = "flexible_phone_match";
+      await supabase
+        .from("agent_conversations")
+        .update({ owner_id: owner.id })
+        .eq("phone_number", phone);
+    } else {
+      ownerMatchSource = "no_owner_match";
+    }
+  }
+
+  let ownerProfile = "Unknown owner (phone: " + phone + ")";
+  if (conv?.owner_profile && ownerId) {
+    ownerProfile = conv.owner_profile;
+    ownerMatchSource = `${ownerMatchSource}+cached_profile`;
+  } else {
+    ownerProfile = await buildOwnerProfile(ownerId, phone);
+    if (ownerProfile.startsWith("Unknown owner")) {
+      ownerProfile = historyFallbackOwnerProfile(phone, conv?.history ?? []);
+      ownerMatchSource = `${ownerMatchSource}+history_fallback`;
+    } else {
+      ownerMatchSource = `${ownerMatchSource}+db_profile`;
+    }
+    await supabase
+      .from("agent_conversations")
+      .update({ owner_profile: ownerProfile, owner_id: ownerId })
+      .eq("phone_number", phone);
+  }
+
+  console.log("Owner context source:", { phone, owner_id: ownerId, source: ownerMatchSource });
+  return { ownerId, ownerProfile, ownerMatchSource };
 }
 
 // SECTION 5 - TOOL EXECUTOR
@@ -601,7 +766,7 @@ async function executeTool(name, input, phone) {
 }
 
 // SECTION 7 - AGENT RUNNER
-async function runAgent(phone, message) {
+async function runAgent(phone, message, options = {}) {
   let { data: conv } = await supabase
     .from("agent_conversations")
     .select("*")
@@ -609,52 +774,43 @@ async function runAgent(phone, message) {
     .single();
 
   if (!conv) {
-    const owner = await findOwnerByFlexiblePhone(phone);
-
     const { data: newConv } = await supabase
       .from("agent_conversations")
       .insert({
         phone_number: phone,
-        owner_id: owner?.id ?? null,
+        owner_id: null,
         mode: "agent",
         history: [],
+        facts: {},
       })
       .select()
       .single();
 
     conv = newConv;
-  } else if (!conv.owner_id) {
-    const owner = await findOwnerByFlexiblePhone(phone);
-    if (owner?.id) {
-      await supabase
-        .from("agent_conversations")
-        .update({ owner_id: owner.id })
-        .eq("phone_number", phone);
-      conv = { ...conv, owner_id: owner.id };
-    }
   }
 
   const history = conv?.history ?? [];
-  let ownerProfile = "Unknown owner (phone: " + phone + ")";
-  if (conv?.owner_profile) {
-    ownerProfile = conv.owner_profile;
-  } else {
-    ownerProfile = await buildOwnerProfile(conv?.owner_id, phone);
-    if (ownerProfile.startsWith("Unknown owner")) {
-      ownerProfile = historyFallbackOwnerProfile(phone, history);
-    }
-    await supabase
-      .from("agent_conversations")
-      .update({ owner_profile: ownerProfile })
-      .eq("phone_number", phone);
+  const { ownerProfile, ownerMatchSource } = await getOwnerContext(phone, conv);
+  const updatedFacts = extractConversationFacts(conv?.facts, history, message, options.handoff);
+  if (options.handoff?.pending_request) {
+    console.log("First-turn handoff source:", {
+      phone,
+      source: "handoff",
+      ownerMatchSource,
+      pending_request: options.handoff.pending_request.slice(0, 120),
+    });
   }
 
   const incoming = { role: "user", content: message };
   const claudeMessages = [...history, incoming];
-  const systemPrompt = await buildSystemPrompt(ownerProfile);
+  const systemPrompt = await buildSystemPrompt(ownerProfile, {
+    handoff: options.handoff,
+    facts: updatedFacts,
+  });
 
   let currentMessages = [...claudeMessages];
   let finalText = "";
+  const toolTrace = [];
 
   while (true) {
     const response = await anthropic.messages.create({
@@ -678,11 +834,15 @@ async function runAgent(phone, message) {
       const toolBlocks = response.content.filter((b) => b.type === "tool_use");
 
       const toolResults = await Promise.all(
-        toolBlocks.map(async (block) => ({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: JSON.stringify(await executeTool(block.name, block.input, phone)),
-        }))
+        toolBlocks.map(async (block) => {
+          const toolOutput = await executeTool(block.name, block.input, phone);
+          toolTrace.push(`${block.name}: ${summarizeToolResult(toolOutput)}`);
+          return {
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: JSON.stringify(toolOutput),
+          };
+        })
       );
 
       currentMessages = [
@@ -697,11 +857,25 @@ async function runAgent(phone, message) {
     break;
   }
 
-  const updatedHistory = [...claudeMessages, { role: "assistant", content: finalText }].slice(-30);
+  const memoryBlocks = [];
+  if (options.handoff?.pending_request) {
+    memoryBlocks.push(`handoff_pending_request=${options.handoff.pending_request.slice(0, 200)}`);
+  }
+  if (toolTrace.length) {
+    memoryBlocks.push(`tool_trace=${toolTrace.join(" | ").slice(0, 600)}`);
+  }
+
+  const updatedHistory = [
+    ...claudeMessages,
+    ...(memoryBlocks.length
+      ? [{ role: "assistant", content: `[MEMORY]\n${memoryBlocks.join("\n")}` }]
+      : []),
+    { role: "assistant", content: finalText },
+  ].slice(-30);
 
   await supabase
     .from("agent_conversations")
-    .update({ history: updatedHistory })
+    .update({ history: updatedHistory, facts: updatedFacts })
     .eq("phone_number", phone);
 
   return finalText;
@@ -773,6 +947,8 @@ client.on("message", async (msg) => {
       }
 
       const ownerProfile = await buildOwnerProfile(owner?.id ?? null, targetPhone);
+      const handoff = buildHandoffPayload(formattedHistory);
+      const facts = extractConversationFacts({}, formattedHistory, handoff.pending_request, handoff);
 
       await supabase.from("agent_conversations").upsert(
         {
@@ -781,13 +957,15 @@ client.on("message", async (msg) => {
           mode: "agent",
           history: formattedHistory,
           owner_profile: ownerProfile,
+          facts,
         },
         { onConflict: "phone_number" }
       );
 
       const greeting = await runAgent(
         targetPhone,
-        "[SYSTEM: You have just been connected to this conversation. Review the chat history above and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]"
+        "[SYSTEM: You have just been connected to this conversation. Review the chat history above and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]",
+        { handoff }
       );
       await client.sendMessage(targetPhone, greeting);
       return;
@@ -896,6 +1074,7 @@ client.on("message", async (msg) => {
   if (mode !== "agent") return;
 
   try {
+    console.log("Agent reply pipeline start:", phone);
     const chat = await msg.getChat();
     await chat.sendStateTyping();
 
@@ -903,6 +1082,7 @@ client.on("message", async (msg) => {
 
     await chat.clearState();
     await client.sendMessage(phone, reply);
+    console.log("Agent reply pipeline complete:", phone);
     agentErrorCounts.delete(phone);
   } catch (err) {
     console.error("Agent error:", err);
@@ -949,19 +1129,23 @@ client.on("message_create", async (msg) => {
         role: m.fromMe ? "assistant" : "user",
         content: m.body,
       }));
+    const handoff = buildHandoffPayload(history);
+    const facts = extractConversationFacts({}, history, handoff.pending_request, handoff);
 
     await supabase.from("agent_conversations").upsert(
       {
         phone_number: targetPhone,
         mode: "agent",
         history,
+        facts,
       },
       { onConflict: "phone_number" }
     );
 
     const greeting = await runAgent(
       targetPhone,
-      "[SYSTEM: You have just been connected to this conversation. Review the chat history and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]"
+      "[SYSTEM: You have just been connected to this conversation. Review the chat history and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]",
+      { handoff }
     );
     await client.sendMessage(targetPhone, greeting);
     await notifyStaff(`🤖 Agent activated for ${targetPhone}`);
@@ -1005,7 +1189,15 @@ app.listen(PORT, () => {
   console.log("QR server running on port", PORT);
 });
 
+process.on("SIGTERM", () => {
+  void gracefulShutdown("SIGTERM");
+});
+process.on("SIGINT", () => {
+  void gracefulShutdown("SIGINT");
+});
+
 console.log("Starting MSH WhatsApp agent...");
 await ensureSessionBucketAccess();
 await ensureOwnerProfileColumn();
-client.initialize();
+await ensureConversationFactsColumn();
+queueClientInitialize("startup");
