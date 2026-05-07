@@ -1,11 +1,12 @@
 // SECTION 1 - IMPORTS
 import pkg from "whatsapp-web.js";
-const { Client, LocalAuth, MessageMedia } = pkg;
+const { Client, RemoteAuth, MessageMedia } = pkg;
 
 import qrcode from "qrcode-terminal";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import ws from "ws";
+import { readFile, writeFile } from "node:fs/promises";
 
 // SECTION 2 - CLIENTS
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -31,11 +32,51 @@ const anthropic = new Anthropic({
 const STAFF_GROUP = process.env.STAFF_GROUP_ID;
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOK = 512;
+const SESSION_BUCKET = "whatsapp-sessions";
+const sessionObjectPath = (session) => `${session}.zip`;
 
 // Keep import explicit per required structure.
 void MessageMedia;
 
 // SECTION 3 - WHATSAPP CLIENT
+const store = {
+  async sessionExists({ session }) {
+    const { data, error } = await supabase.storage
+      .from(SESSION_BUCKET)
+      .list("", { search: sessionObjectPath(session) });
+    if (error) return false;
+    return Array.isArray(data) && data.length > 0;
+  },
+
+  async save({ session, path }) {
+    const filePath = path ?? `${session}.zip`;
+    const payload = await readFile(filePath);
+    const { error } = await supabase.storage
+      .from(SESSION_BUCKET)
+      .upload(sessionObjectPath(session), payload, {
+        upsert: true,
+        contentType: "application/zip",
+      });
+    if (error) throw new Error(`Session save failed: ${error.message}`);
+  },
+
+  async extract({ session, path }) {
+    const targetPath = path ?? `${session}.zip`;
+    const { data, error } = await supabase.storage
+      .from(SESSION_BUCKET)
+      .download(sessionObjectPath(session));
+    if (error) throw new Error(`Session extract failed: ${error.message}`);
+    const bytes = Buffer.from(await data.arrayBuffer());
+    await writeFile(targetPath, bytes);
+  },
+
+  async delete({ session }) {
+    await supabase.storage
+      .from(SESSION_BUCKET)
+      .remove([sessionObjectPath(session)]);
+  },
+};
+
 const puppeteerConfig = {
   headless: true,
   args: [
@@ -53,7 +94,10 @@ if (process.env.CHROME_EXECUTABLE_PATH) {
 }
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: ".wwebjs_auth" }),
+  authStrategy: new RemoteAuth({
+    store,
+    backupSyncIntervalMs: 300000,
+  }),
   puppeteer: puppeteerConfig,
 });
 
