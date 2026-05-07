@@ -651,6 +651,55 @@ client.on("message", async (msg) => {
   }
 });
 
+client.on("message_create", async (msg) => {
+  if (!msg.fromMe) return;
+  if (msg.from === msg.to) return;
+  if (msg.to.endsWith("@g.us")) return;
+
+  const text = msg.body.trim().toLowerCase();
+
+  if (text === "!bot") {
+    await msg.delete(true);
+    const targetPhone = msg.to;
+
+    const chat = await client.getChatById(targetPhone);
+    const recentMsgs = await chat.fetchMessages({ limit: 20 });
+    const history = recentMsgs
+      .filter((m) => m.body && m.type !== "revoked")
+      .map((m) => ({
+        role: m.fromMe ? "assistant" : "user",
+        content: m.body,
+      }));
+
+    await supabase.from("agent_conversations").upsert(
+      {
+        phone_number: targetPhone,
+        mode: "agent",
+        history,
+      },
+      { onConflict: "phone_number" }
+    );
+
+    const greeting = await runAgent(
+      targetPhone,
+      "[SYSTEM: You have just been connected to this conversation. Review the chat history and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]"
+    );
+    await client.sendMessage(targetPhone, greeting);
+    await notifyStaff(`🤖 Agent activated for ${targetPhone}`);
+    return;
+  }
+
+  if (text === "!human") {
+    await msg.delete(true);
+    await supabase
+      .from("agent_conversations")
+      .update({ mode: "human" })
+      .eq("phone_number", msg.to);
+    await notifyStaff(`👤 Human mode for ${msg.to}`);
+    return;
+  }
+});
+
 // SECTION 9 - START
 console.log("Starting MSH WhatsApp agent...");
 client.initialize();
