@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Anthropic from "@anthropic-ai/sdk";
 import { PawPrint, Send, Loader2, Bot, User, AlertCircle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,7 +6,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 
-const MODEL = "claude-sonnet-4-20250514";
 const MAX_HISTORY = 20;
 const QUERY_LIMIT = 100;
 const CHAT_STORAGE_KEY = "msh-agent-chat-v1";
@@ -31,6 +29,10 @@ type ChatMessage = {
 };
 
 type FilterScalar = string | number | boolean | null;
+type MessageParam = { role: "user" | "assistant"; content: string };
+type ClaudeResponse = {
+  content?: Array<{ type: string; text?: string }>;
+};
 
 /** Per-column comparisons (PostgREST / Supabase client). */
 type FilterCompare = {
@@ -106,11 +108,11 @@ If the payload has an "error" field, explain briefly what went wrong (e.g. bad f
 
 Never output JSON, code fences, or query syntax. Never ask for another query.`;
 
-function extractAssistantText(response: Anthropic.Message): string {
+function extractAssistantText(response: ClaudeResponse): string {
   const blocks = response.content;
   if (!blocks?.length) return "";
   return blocks
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof b.text === "string")
     .map((b) => b.text)
     .join("\n")
     .trim();
@@ -277,7 +279,6 @@ const AgentPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined;
 
   useEffect(() => {
     persistMessages(messages);
@@ -290,29 +291,16 @@ const AgentPage = () => {
   const callClaude = useCallback(
     async (
       systemPrompt: string,
-      msgs: Anthropic.MessageParam[]
+      msgs: MessageParam[]
     ): Promise<string> => {
-      if (!apiKey?.trim()) {
-        throw new Error(
-          "Missing VITE_ANTHROPIC_API_KEY. Add it to your .env file."
-        );
-      }
-
-      const client = new Anthropic({
-        apiKey,
-        dangerouslyAllowBrowser: true,
+      const { data, error } = await supabase.functions.invoke("agent-chat", {
+        body: { messages: msgs, systemPrompt },
       });
+      if (error) throw new Error(error.message);
 
-      const response = await client.messages.create({
-        model: MODEL,
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: msgs,
-      });
-
-      return extractAssistantText(response);
+      return extractAssistantText(data as ClaudeResponse);
     },
-    [apiKey]
+    []
   );
 
   const handleSend = async () => {
@@ -333,7 +321,7 @@ const AgentPage = () => {
     setLoading(true);
 
     try {
-      const anthropicMessages: Anthropic.MessageParam[] = nextHistory.map(
+      const anthropicMessages: MessageParam[] = nextHistory.map(
         (m) => ({
           role: m.role,
           content: m.content,
@@ -352,7 +340,7 @@ const AgentPage = () => {
 
       if (action) {
         const data = await runSupabaseQuery(action);
-        const secondMsgs: Anthropic.MessageParam[] = [
+        const secondMsgs: MessageParam[] = [
           ...anthropicMessages,
           { role: "assistant", content: firstText },
           {
@@ -420,21 +408,6 @@ const AgentPage = () => {
           </Button>
         )}
       </header>
-
-      {!apiKey?.trim() && (
-        <div className="shrink-0 px-6 pt-4">
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>API key not configured</AlertTitle>
-            <AlertDescription>
-              Set <code className="text-xs">VITE_ANTHROPIC_API_KEY</code> in{" "}
-              <code className="text-xs">.env</code> and restart the dev server.
-              Exposing this key in the browser is a security risk — use a
-              server-side proxy in production.
-            </AlertDescription>
-          </Alert>
-        </div>
-      )}
 
       {error && (
         <div className="shrink-0 px-6 pt-4">
@@ -515,7 +488,7 @@ const AgentPage = () => {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             rows={2}
-            disabled={loading || !apiKey?.trim()}
+            disabled={loading}
             className="min-h-[72px] resize-none"
           />
           <Button
@@ -523,7 +496,7 @@ const AgentPage = () => {
             size="icon"
             className="h-[72px] w-12 shrink-0"
             onClick={() => void handleSend()}
-            disabled={loading || !input.trim() || !apiKey?.trim()}
+            disabled={loading || !input.trim()}
             aria-label="Send"
           >
             {loading ? (

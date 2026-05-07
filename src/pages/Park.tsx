@@ -12,7 +12,7 @@ import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { buildPriceMap, parkGroupPricing } from "@/lib/servicePricing";
 import { useOwners } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   useParkBookings,
@@ -42,11 +42,6 @@ import {
   SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -284,6 +279,7 @@ const ParkPage = () => {
   const createBooking = useCreateParkBooking();
   const deleteBooking = useDeleteParkBooking();
   const setDayFlag = useSetParkDayFlag();
+  const queryClient = useQueryClient();
 
   const { data: parkPricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
     queryKey: ["pricing", "park_keys"],
@@ -340,7 +336,11 @@ const ParkPage = () => {
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
   const [selectedPetIds, setSelectedPetIds] = useState<Set<string>>(new Set());
   const [bookingType, setBookingType] = useState<"park" | "assessment">("park");
+  const [billingOption, setBillingOption] = useState<"none" | "invoice" | "charge_now">(
+    "invoice",
+  );
   const [bookingNotes, setBookingNotes] = useState("");
+  const [billingBookingId, setBillingBookingId] = useState<string | null>(null);
 
   const { data: pets = [] } = usePets(ownerId ?? "");
   const filteredPets = useMemo(() => {
@@ -350,7 +350,7 @@ const ParkPage = () => {
     );
   }, [pets, bookingType]);
 
-  const [popoverBooking, setPopoverBooking] = useState<ParkBookingWithJoins | null>(
+  const [bookingDetail, setBookingDetail] = useState<ParkBookingWithJoins | null>(
     null,
   );
 
@@ -369,6 +369,7 @@ const ParkPage = () => {
         ? "assessment"
         : "park",
     );
+    setBillingOption("invoice");
     setBookingNotes("");
     setSheetOpen(true);
   };
@@ -385,6 +386,83 @@ const ParkPage = () => {
       else next.add(petId);
       return next;
     });
+  };
+
+  const billingStatusForOption = (
+    option: "none" | "invoice" | "charge_now",
+  ): "draft" | "finalised" => (option === "charge_now" ? "finalised" : "draft");
+
+  const parkLineDescription = (
+    label: string,
+    visitDate: string,
+    slotStart: string,
+    slotEnd: string,
+  ) => `${label} — ${format(parseISO(visitDate), "d MMM yyyy")} ${slotStart}–${slotEnd}`;
+
+  const hasExistingParkInvoice = async (referenceId: string) => {
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("service_type", "park")
+      .eq("service_id", referenceId)
+      .limit(1);
+    if (error) throw error;
+    return (data?.length ?? 0) > 0;
+  };
+
+  const billSingleParkBooking = async (
+    booking: ParkBookingWithJoins,
+    mode: "invoice" | "charge_now",
+  ) => {
+    if (!booking.owner_id) {
+      toast.error("Booking has no owner; cannot bill.");
+      return;
+    }
+    if (booking.is_assessment) {
+      toast.error("Assessment bookings are not billable.");
+      return;
+    }
+    if (!booking.price || booking.price <= 0) {
+      toast.error("Booking has no charge amount.");
+      return;
+    }
+
+    setBillingBookingId(booking.id);
+    try {
+      const alreadyInvoiced = await hasExistingParkInvoice(booking.id);
+      if (alreadyInvoiced) {
+        toast.message("This park booking already has an invoice.");
+        return;
+      }
+      await createServiceInvoice({
+        ownerId: booking.owner_id,
+        serviceType: "park",
+        referenceId: booking.id,
+        lineItems: [
+          {
+            description: parkLineDescription(
+              "Park visit",
+              booking.visit_date,
+              booking.slot_start,
+              booking.slot_end,
+            ),
+            quantity: 1,
+            unitPrice: booking.price,
+            pricingKey: "park_slot",
+            serviceType: "park",
+            preserveUnitPrice: true,
+          },
+        ],
+        invoiceStatus: billingStatusForOption(mode),
+      });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      toast.success(mode === "charge_now" ? "Client charged." : "Invoice created.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not create invoice.";
+      toast.error(message);
+    } finally {
+      setBillingBookingId(null);
+    }
   };
 
   const handleSaveBookings = async () => {
@@ -445,20 +523,44 @@ const ParkPage = () => {
       );
       closeSheet();
 
-      if (!isAssessment && groupedRate.total > 0 && ownerId && createdIds.length > 0) {
+      if (
+        !isAssessment &&
+        groupedRate.total > 0 &&
+        ownerId &&
+        createdIds.length > 0 &&
+        billingOption !== "none"
+      ) {
         createServiceInvoice({
           ownerId,
           serviceType: "park",
           referenceId: createdIds[0],
           lineItems: [{
-            description: `${groupedRate.label} — ${format(parseISO(dateStr), "d MMM yyyy")} ${sheetSlot.slot_start}–${sheetSlot.slot_end}`,
+            description: parkLineDescription(
+              groupedRate.label,
+              dateStr,
+              sheetSlot.slot_start,
+              sheetSlot.slot_end,
+            ),
             quantity: 1,
             unitPrice: groupedRate.total,
             pricingKey: groupedRate.pricingKey,
             serviceType: "park",
             preserveUnitPrice: true,
           }],
-        }).catch((err) => console.error("Park auto-invoice failed:", err));
+          invoiceStatus: billingStatusForOption(billingOption),
+        })
+          .then(() => {
+            queryClient.invalidateQueries({ queryKey: ["invoices"] });
+            toast.success(
+              billingOption === "charge_now"
+                ? "Park booking saved and client charged."
+                : "Park booking saved and invoice created.",
+            );
+          })
+          .catch((err) => {
+            console.error("Park auto-invoice failed:", err);
+            toast.error("Booking saved but billing failed. Use booking actions to retry.");
+          });
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Could not save booking.";
@@ -487,7 +589,7 @@ const ParkPage = () => {
       {
         onSuccess: () => {
           toast.success("Booking cancelled.");
-          setPopoverBooking(null);
+          setBookingDetail(null);
         },
         onError: (e) =>
           toast.error(e instanceof Error ? e.message : "Could not cancel."),
@@ -635,104 +737,25 @@ const ParkPage = () => {
 
                   {isBooked && primary ? (
                     <div className="bg-background p-1 min-h-[3.5rem]">
-                      <Popover
-                        open={popoverBooking?.id === primary.id}
-                        onOpenChange={(o) => {
-                          if (o) setPopoverBooking(primary);
-                          else setPopoverBooking(null);
-                        }}
+                      <button
+                        type="button"
+                        onClick={() => setBookingDetail(primary)}
+                        className={`h-full min-h-[3.25rem] w-full rounded-md px-2 py-2 text-left text-xs font-semibold uppercase tracking-tight border transition-colors ${
+                          primary.is_assessment
+                            ? "bg-amber-100 text-amber-950 border-amber-300 hover:bg-amber-200/80"
+                            : "bg-sky-100 text-sky-900 border-sky-300 hover:bg-sky-200/80"
+                        }`}
                       >
-                        <PopoverTrigger asChild>
-                          <button
-                            type="button"
-                            className={`h-full min-h-[3.25rem] w-full rounded-md px-2 py-2 text-left text-xs font-semibold uppercase tracking-tight border transition-colors ${
-                              primary.is_assessment
-                                ? "bg-amber-100 text-amber-950 border-amber-300 hover:bg-amber-200/80"
-                                : "bg-sky-100 text-sky-900 border-sky-300 hover:bg-sky-200/80"
-                            }`}
-                          >
-                            <div className="mb-1 text-[10px] font-medium normal-case opacity-80">
-                              {bookingTimeRangeLabel(primary)}
-                            </div>
-                            <span className="line-clamp-2">
-                              {bookingDisplayLine(primary)}
-                              {cellBookings.length > 1
-                                ? ` +${cellBookings.length - 1}`
-                                : ""}
-                            </span>
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent align="center" className="w-80">
-                          <div className="space-y-3">
-                            <div>
-                              <p className="text-xs uppercase text-muted-foreground">
-                                Duration
-                              </p>
-                              <p className="font-medium">
-                                {bookingTimeRangeLabel(primary)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs uppercase text-muted-foreground">
-                                Pet
-                              </p>
-                              <p className="font-medium">
-                                {primary.pets?.name ??
-                                  primary.pet_name_raw ??
-                                  "—"}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs uppercase text-muted-foreground">
-                                Owner
-                              </p>
-                              <p className="font-medium">
-                                {primary.owners
-                                  ? formatOwnerLabel(primary.owners)
-                                  : primary.owner_name_raw ?? "—"}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs uppercase text-muted-foreground">
-                                Phone
-                              </p>
-                              <p className="font-medium">
-                                {primary.owners?.phone ?? "—"}
-                              </p>
-                            </div>
-                            <BookingProfileNotes
-                              compact
-                              ownerOtherNotes={primary.owners?.other_notes}
-                              pets={[
-                                {
-                                  name:
-                                    primary.pets?.name ??
-                                    primary.pet_name_raw ??
-                                    "Pet",
-                                  otherNotes: primary.pets?.other_notes,
-                                },
-                              ]}
-                            />
-                            {primary.is_assessment && (
-                              <Badge variant="outline" className="text-xs">
-                                Assessment
-                              </Badge>
-                            )}
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              className="w-full"
-                              disabled={deleteBooking.isPending}
-                              onClick={() => handleDeleteBooking(primary)}
-                            >
-                              {deleteBooking.isPending && (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              )}
-                              Cancel Booking
-                            </Button>
-                          </div>
-                        </PopoverContent>
-                      </Popover>
+                        <div className="mb-1 text-[10px] font-medium normal-case opacity-80">
+                          {bookingTimeRangeLabel(primary)}
+                        </div>
+                        <span className="line-clamp-2">
+                          {bookingDisplayLine(primary)}
+                          {cellBookings.length > 1
+                            ? ` +${cellBookings.length - 1}`
+                            : ""}
+                        </span>
+                      </button>
                     </div>
                   ) : (
                     <div className="bg-background p-1 min-h-[3.5rem]">
@@ -759,6 +782,107 @@ const ParkPage = () => {
           )}
         </div>
       </main>
+
+      <Sheet
+        open={!!bookingDetail}
+        onOpenChange={(open) => {
+          if (!open) setBookingDetail(null);
+        }}
+      >
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Park Booking Details</SheetTitle>
+            <SheetDescription>
+              Review booking info and billing actions.
+            </SheetDescription>
+          </SheetHeader>
+
+          {bookingDetail ? (
+            <div className="mt-6 space-y-4">
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Duration</p>
+                <p className="font-medium">{bookingTimeRangeLabel(bookingDetail)}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Pet</p>
+                <p className="font-medium">
+                  {bookingDetail.pets?.name ?? bookingDetail.pet_name_raw ?? "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Owner</p>
+                <p className="font-medium">
+                  {bookingDetail.owners
+                    ? formatOwnerLabel(bookingDetail.owners)
+                    : bookingDetail.owner_name_raw ?? "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Phone</p>
+                <p className="font-medium">{bookingDetail.owners?.phone ?? "—"}</p>
+              </div>
+              <BookingProfileNotes
+                compact
+                ownerOtherNotes={bookingDetail.owners?.other_notes}
+                pets={[
+                  {
+                    name: bookingDetail.pets?.name ?? bookingDetail.pet_name_raw ?? "Pet",
+                    otherNotes: bookingDetail.pets?.other_notes,
+                  },
+                ]}
+              />
+              {bookingDetail.is_assessment && (
+                <Badge variant="outline" className="text-xs">
+                  Assessment
+                </Badge>
+              )}
+              {!bookingDetail.is_assessment && (
+                <div className="grid gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled={billingBookingId === bookingDetail.id}
+                    onClick={() => {
+                      void billSingleParkBooking(bookingDetail, "invoice");
+                    }}
+                  >
+                    {billingBookingId === bookingDetail.id && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Generate Invoice
+                  </Button>
+                  <Button
+                    type="button"
+                    className="w-full"
+                    disabled={billingBookingId === bookingDetail.id}
+                    onClick={() => {
+                      void billSingleParkBooking(bookingDetail, "charge_now");
+                    }}
+                  >
+                    {billingBookingId === bookingDetail.id && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Charge Client
+                  </Button>
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="destructive"
+                className="w-full"
+                disabled={deleteBooking.isPending}
+                onClick={() => handleDeleteBooking(bookingDetail)}
+              >
+                {deleteBooking.isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Cancel Booking
+              </Button>
+            </div>
+          ) : null}
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={sheetOpen} onOpenChange={(o) => !o && closeSheet()}>
         <SheetContent className="w-full sm:max-w-md overflow-y-auto">
@@ -861,6 +985,32 @@ const ParkPage = () => {
                 </p>
               )}
             </div>
+
+            {bookingType === "park" && (
+              <div className="space-y-2 rounded-lg border px-3 py-3">
+                <Label>Billing option</Label>
+                <RadioGroup
+                  value={billingOption}
+                  onValueChange={(v) =>
+                    setBillingOption(v as "none" | "invoice" | "charge_now")
+                  }
+                  className="grid gap-2"
+                >
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <RadioGroupItem value="none" id="park-billing-none" />
+                    Save booking only (no billing now)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <RadioGroupItem value="invoice" id="park-billing-invoice" />
+                    Create invoice
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <RadioGroupItem value="charge_now" id="park-billing-charge" />
+                    Charge client now
+                  </label>
+                </RadioGroup>
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor="park-notes">Notes</Label>

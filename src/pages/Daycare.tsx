@@ -16,7 +16,7 @@ import {
 import { buildPriceMap, daycareGroupPricing } from "@/lib/servicePricing";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   useDaycarePackages,
@@ -612,7 +612,15 @@ function PlannerTab() {
       const { data, error } = await supabase
         .from("pricing")
         .select("key, amount_aed")
-        .in("key", ["daycare_single_day", "daycare_2_dogs", "daycare_3_dogs"]);
+        .in("key", [
+          "daycare_single_day",
+          "daycare_2_dogs",
+          "daycare_3_dogs",
+          "daycare_family_per_dog",
+          "daycare_4_dogs",
+          "daycare_5_dogs",
+          "daycare_6_dogs",
+        ]);
       if (error) throw error;
       return data ?? [];
     },
@@ -635,10 +643,54 @@ function PlannerTab() {
   const pickupsUsed = sessions?.filter((s) => s.pickup_used).length ?? 0;
   const dropoffsUsed = sessions?.filter((s) => s.dropoff_used).length ?? 0;
   const daycarePriceMap = useMemo(() => buildPriceMap(pricingRows), [pricingRows]);
+  const singleDayPetIds = useMemo(
+    () => selectedPetIds.filter((id) => (billingChoiceByPet[id] ?? "single") === "single"),
+    [selectedPetIds, billingChoiceByPet],
+  );
+  const singleDayCount = singleDayPetIds.length;
+  const singleDayRatePreview = useMemo(
+    () => daycareGroupPricing(singleDayCount, daycarePriceMap),
+    [singleDayCount, daycarePriceMap],
+  );
   const transportRate = useMemo(() => {
     const key = transportPricingKey(checkInDraft.transport_zone);
     return transportPricingRows.find((r) => r.key === key)?.amount_aed ?? 0;
   }, [transportPricingRows, checkInDraft.transport_zone]);
+  const transportTrips = [checkInDraft.pickup_used, checkInDraft.dropoff_used].filter(Boolean).length;
+  const previewTransportQty = singleDayCount
+    ? transportQuantityForPets(checkInDraft.transport_zone, singleDayCount)
+    : 0;
+  const previewTransportTotal = transportRate * previewTransportQty * transportTrips;
+  const singleDaySubtotalPreview = singleDayRatePreview.total + previewTransportTotal;
+  const { data: discountPreview, isLoading: discountPreviewLoading } = useQuery<{
+    discount_pct: number;
+    discount_aed: number;
+    final_aed: number;
+  }>({
+    queryKey: ["daycare", "single-day-preview-discount", ownerId, singleDaySubtotalPreview],
+    enabled: !!ownerId && singleDayCount > 0 && singleDaySubtotalPreview > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("apply_member_discount", {
+        p_owner_id: ownerId!,
+        p_subtotal: singleDaySubtotalPreview,
+      });
+      if (error) {
+        return {
+          discount_pct: 0,
+          discount_aed: 0,
+          final_aed: singleDaySubtotalPreview,
+        };
+      }
+      const first = (data as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
+      return (
+        first ?? {
+          discount_pct: 0,
+          discount_aed: 0,
+          final_aed: singleDaySubtotalPreview,
+        }
+      );
+    },
+  });
 
   useEffect(() => {
     if (!packageId || !packages?.length) return;
@@ -729,10 +781,8 @@ function PlannerTab() {
     setIsSubmittingCheckIn(true);
     const failures: string[] = [];
     let successCount = 0;
-    const singleDayPetIds = selectedPetIds.filter((id) => (billingChoiceByPet[id] ?? "single") === "single");
-    const singleDayCount = singleDayPetIds.length;
     const singleDayPetIdSet = new Set(singleDayPetIds);
-    const singleDayRate = daycareGroupPricing(singleDayCount, daycarePriceMap);
+    const singleDayRate = singleDayRatePreview;
     const singleDayUnitPrice = singleDayCount > 0 ? singleDayRate.total / singleDayCount : 0;
     let singleDayInvoiceCreated = false;
     // Private Dubai is a single flat trip for the whole family — charge it only
@@ -998,10 +1048,10 @@ function PlannerTab() {
                     </Select>
                     {(() => {
                       const zone = checkInDraft.transport_zone;
-                      const pets = Math.max(1, selectedPetIds.length);
+                      const pets = Math.max(1, singleDayCount || selectedPetIds.length);
                       const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === zone);
                       const over = privateDubaiOverCapacity(zone, pets);
-                      const trips = [checkInDraft.pickup_used, checkInDraft.dropoff_used].filter(Boolean).length;
+                      const trips = transportTrips;
                       const qty = transportQuantityForPets(zone, pets);
                       const total = transportRate * qty * Math.max(1, trips);
                       return (
@@ -1025,6 +1075,63 @@ function PlannerTab() {
                   </div>
                 )}
               </div>
+
+              {selectedPetIds.length > 0 && (
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Auto pricing preview
+                  </p>
+                  {singleDayCount === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No immediate invoice - all selected pets are using package credits.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between text-sm">
+                        <span>
+                          {singleDayRatePreview.label} ({singleDayCount} dog
+                          {singleDayCount === 1 ? "" : "s"})
+                        </span>
+                        <span>AED {singleDayRatePreview.total.toFixed(2)}</span>
+                      </div>
+                      {(checkInDraft.pickup_used || checkInDraft.dropoff_used) && (
+                        <div className="flex items-center justify-between text-sm text-muted-foreground">
+                          <span>
+                            Transport ({transportTrips} trip{transportTrips === 1 ? "" : "s"})
+                          </span>
+                          <span>AED {previewTransportTotal.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between text-sm">
+                        <span>Subtotal</span>
+                        <span>AED {singleDaySubtotalPreview.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-emerald-700">
+                        <span>
+                          Auto discount
+                          {discountPreview?.discount_pct
+                            ? ` (${discountPreview.discount_pct.toFixed(2)}%)`
+                            : ""}
+                        </span>
+                        <span>
+                          - AED {(discountPreview?.discount_aed ?? 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between font-semibold">
+                        <span>Total to invoice now</span>
+                        <span>
+                          AED{" "}
+                          {(
+                            discountPreviewLoading
+                              ? singleDaySubtotalPreview
+                              : (discountPreview?.final_aed ?? singleDaySubtotalPreview)
+                          ).toFixed(2)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <Label htmlFor="checkin_remark">Remark</Label>
@@ -1221,10 +1328,57 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
 interface PkgTypeRow { id: string; name: string; total_days: number; base_price_aed: number; sort_order: number }
 
 type DaycareListPreset = "today" | "tomorrow" | "next7";
+type CollectionStatus = "not_collected" | "owner" | "pet_taxi";
+
+const COLLECTION_META_PREFIX = "COLLECTION_BY:";
+
+function parseCollectionStatus(
+  notes: string | null | undefined,
+  checkedOutAt: string | null | undefined,
+): { status: CollectionStatus; visibleNotes: string } {
+  const raw = (notes ?? "").trim();
+  if (!raw) {
+    return {
+      status: checkedOutAt ? "owner" : "not_collected",
+      visibleNotes: "",
+    };
+  }
+  const lines = raw.split("\n").map((line) => line.trim());
+  const marker = lines.find((line) => line.startsWith(COLLECTION_META_PREFIX));
+  const cleaned = lines.filter((line) => !line.startsWith(COLLECTION_META_PREFIX)).join("\n").trim();
+  if (!marker) {
+    return {
+      status: checkedOutAt ? "owner" : "not_collected",
+      visibleNotes: cleaned,
+    };
+  }
+  const value = marker.replace(COLLECTION_META_PREFIX, "").trim();
+  if (value === "pet_taxi") return { status: "pet_taxi", visibleNotes: cleaned };
+  if (value === "owner") return { status: "owner", visibleNotes: cleaned };
+  return {
+    status: checkedOutAt ? "owner" : "not_collected",
+    visibleNotes: cleaned,
+  };
+}
+
+function composeNotesWithCollection(notes: string | null | undefined, status: CollectionStatus): string | null {
+  const raw = (notes ?? "").trim();
+  const cleaned = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith(COLLECTION_META_PREFIX))
+    .join("\n")
+    .trim();
+  if (status === "not_collected") return cleaned || null;
+  const meta = `${COLLECTION_META_PREFIX}${status}`;
+  return cleaned ? `${cleaned}\n${meta}` : meta;
+}
 
 function DaycareOperationsTab() {
   const [datePreset, setDatePreset] = useState<DaycareListPreset>("today");
   const [anchorDate, setAnchorDate] = useState(TODAY);
+  const [updatingSessionId, setUpdatingSessionId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const rangeStart = useMemo(
     () => (datePreset === "tomorrow" ? format(addDays(parseISO(anchorDate), 1), "yyyy-MM-dd") : anchorDate),
@@ -1240,7 +1394,7 @@ function DaycareOperationsTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daycare_sessions")
-        .select("id, session_date, checked_in, checked_in_at, notes, package_id, pickup_used, dropoff_used, pets(name), owners(first_name, last_name)")
+        .select("id, session_date, checked_in, checked_in_at, checked_out_at, notes, package_id, pickup_used, dropoff_used, pets(name), owners(first_name, last_name)")
         .gte("session_date", rangeStart)
         .lte("session_date", rangeEnd)
         .order("session_date", { ascending: true })
@@ -1249,6 +1403,40 @@ function DaycareOperationsTab() {
       return data ?? [];
     },
   });
+
+  const totalDogs = sessions.length;
+  const collectedDogs = sessions.filter((s) => Boolean(s.checked_out_at)).length;
+  const remainingDogs = totalDogs - collectedDogs;
+
+  const updateCollectionStatus = async (
+    session: {
+      id: string;
+      notes: string | null;
+      checked_out_at: string | null;
+    },
+    status: CollectionStatus,
+  ) => {
+    const updates = {
+      checked_out_at: status === "not_collected" ? null : new Date().toISOString(),
+      notes: composeNotesWithCollection(session.notes, status),
+    };
+    setUpdatingSessionId(session.id);
+    const { error } = await supabase
+      .from("daycare_sessions")
+      .update(updates)
+      .eq("id", session.id);
+    setUpdatingSessionId(null);
+    if (error) {
+      toast.error(error.message || "Could not update collection status");
+      return;
+    }
+    toast.success(
+      status === "not_collected"
+        ? "Marked as not collected"
+        : `Marked as collected by ${status === "pet_taxi" ? "pet taxi" : "owner"}`,
+    );
+    queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+  };
 
   return (
     <div className="space-y-4">
@@ -1277,6 +1465,15 @@ function DaycareOperationsTab() {
           <CardTitle className="text-base">Daycare Operations List</CardTitle>
         </CardHeader>
         <CardContent>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Badge variant="outline">Total: {totalDogs}</Badge>
+            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+              Collected: {collectedDogs}
+            </Badge>
+            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+              Remaining: {remainingDogs}
+            </Badge>
+          </div>
           {isLoading ? (
             <div className="space-y-2">
               {[1, 2, 3].map((i) => <Skeleton key={i} className="h-11 w-full" />)}
@@ -1287,6 +1484,7 @@ function DaycareOperationsTab() {
             <div className="space-y-2">
               {sessions.map((s) => {
                 const owner = ownerDisplayName(s.owners?.first_name, s.owners?.last_name);
+                const collection = parseCollectionStatus(s.notes, s.checked_out_at);
                 const tags = buildDaycareTags({
                   sessionDate: s.session_date,
                   todayDate: TODAY,
@@ -1298,7 +1496,8 @@ function DaycareOperationsTab() {
                     <div>
                       <p className="font-medium">{s.pets?.name ?? "—"} - {owner}</p>
                       <p className="text-xs text-muted-foreground">
-                        {format(parseISO(s.session_date), "d MMM yyyy")} · {s.notes || "No notes"}
+                        {format(parseISO(s.session_date), "d MMM yyyy")} ·{" "}
+                        {collection.visibleNotes || "No notes"}
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1">
                         {tags.map((tag) => (
@@ -1308,11 +1507,45 @@ function DaycareOperationsTab() {
                         ))}
                         {s.pickup_used && <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200">Pickup</Badge>}
                         {s.dropoff_used && <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200">Drop-off</Badge>}
+                        {collection.status === "not_collected" ? (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                            Not collected
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                            Collected by {collection.status === "pet_taxi" ? "Pet Taxi" : "Owner"}
+                          </Badge>
+                        )}
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {s.checked_in_at ? format(parseISO(s.checked_in_at), "HH:mm") : "—"}
-                    </p>
+                    <div className="min-w-[170px] space-y-1">
+                      <p className="text-right text-xs text-muted-foreground">
+                        In: {s.checked_in_at ? format(parseISO(s.checked_in_at), "HH:mm") : "—"}
+                      </p>
+                      <Select
+                        value={collection.status}
+                        disabled={updatingSessionId === s.id}
+                        onValueChange={(value) => {
+                          void updateCollectionStatus(
+                            {
+                              id: s.id,
+                              notes: s.notes,
+                              checked_out_at: s.checked_out_at,
+                            },
+                            value as CollectionStatus,
+                          );
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="not_collected">Not collected</SelectItem>
+                          <SelectItem value="owner">Collected by owner</SelectItem>
+                          <SelectItem value="pet_taxi">Collected by pet taxi</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 );
               })}

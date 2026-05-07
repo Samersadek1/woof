@@ -13,29 +13,37 @@ export function daycareGroupPricing(
   prices: PriceByKey,
 ): { pricingKey: string; total: number; label: string } {
   const n = Math.max(1, dogCount);
-  if (n === 1) {
-    return {
-      pricingKey: "daycare_single_day",
-      total: amountFor(prices, "daycare_single_day"),
-      label: "Daycare single day — 1 dog",
-    };
+  const familyPerDog = amountFor(prices, "daycare_family_per_dog");
+  const explicitKeyByCount: Record<number, string> = {
+    1: "daycare_single_day",
+    2: "daycare_2_dogs",
+    3: "daycare_3_dogs",
+    4: "daycare_4_dogs",
+    5: "daycare_5_dogs",
+    6: "daycare_6_dogs",
+  };
+  const explicitKey = explicitKeyByCount[n];
+  if (explicitKey) {
+    const explicitAmount = amountFor(prices, explicitKey);
+    if (explicitAmount > 0) {
+      return {
+        pricingKey: explicitKey,
+        total: explicitAmount,
+        label: `Daycare single day — ${n} dog${n === 1 ? "" : "s"}`,
+      };
+    }
   }
-  if (n === 2) {
+
+  // Dynamic family pricing for 4+ dogs (no upper limit).
+  if (n >= 4 && familyPerDog > 0) {
     return {
-      pricingKey: "daycare_2_dogs",
-      total: amountFor(prices, "daycare_2_dogs"),
-      label: "Daycare single day — 2 dogs",
-    };
-  }
-  if (n === 3) {
-    return {
-      pricingKey: "daycare_3_dogs",
-      total: amountFor(prices, "daycare_3_dogs"),
-      label: "Daycare single day — 3 dogs",
+      pricingKey: "daycare_family_per_dog",
+      total: n * familyPerDog,
+      label: `Daycare family rate — ${n} dogs`,
     };
   }
 
-  // No explicit "extra dog" key exists for daycare yet; keep pricing monotonic.
+  // Fallback keeps pricing monotonic if explicit higher-count keys are not configured.
   const base3 = amountFor(prices, "daycare_3_dogs");
   const single = amountFor(prices, "daycare_single_day");
   return {

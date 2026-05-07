@@ -261,11 +261,23 @@ interface AutoInvoiceParams {
   petCount: number;
   checkInDate: string;
   checkOutDate: string;
+  roomRateType?: "peak" | "off_peak";
   addons?: { key: string; label: string; quantity?: number }[];
 }
 
 export async function createBookingInvoice(params: AutoInvoiceParams): Promise<void> {
-  const { bookingId, ownerId, roomId, roomType, roomName, petCount, checkInDate, checkOutDate, addons = [] } = params;
+  const {
+    bookingId,
+    ownerId,
+    roomId,
+    roomType,
+    roomName,
+    petCount,
+    checkInDate,
+    checkOutDate,
+    roomRateType = "off_peak",
+    addons = [],
+  } = params;
 
   const nights = differenceInCalendarDays(parseISO(checkOutDate), parseISO(checkInDate));
   if (nights <= 0) return;
@@ -275,6 +287,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
     resolveBoardingRate(roomId, petCount, {
       checkInDate,
       checkOutDate,
+      rateType: roomRateType,
     }),
   ]);
 

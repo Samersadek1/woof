@@ -9,7 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import {
   AlertCircle,
   AlertTriangle,
@@ -74,6 +75,37 @@ const DashboardPage = () => {
     dataUpdatedAt,
   } = useDashboardMetrics(asOf);
   const { data: schedule, isLoading: scheduleLoading } = useTodaySchedule(asOf);
+  const { data: dueTodayOverdue = [], isLoading: dueTodayLoading } = useQuery({
+    queryKey: ["dashboard-due-today-overdue", asOf],
+    queryFn: async () => {
+      const UNPAID = ["draft", "issued", "finalised", "outstanding", "overdue", "partially_paid"];
+      const { data, error } = await supabase
+        .from("invoices")
+        .select("id, owner_id, total, total_aed, amount_paid, due_date, status, owners(first_name, last_name)")
+        .eq("due_date", asOf)
+        .in("status", UNPAID)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+
+      const grouped = new Map<string, { ownerId: string; ownerName: string; balance: number }>();
+      for (const inv of data ?? []) {
+        const total = inv.total_aed ?? inv.total ?? 0;
+        const paid = inv.amount_paid ?? 0;
+        const outstanding = Math.max(0, total - paid);
+        if (outstanding <= 0) continue;
+        const ownerId = inv.owner_id ?? "unknown";
+        const ownerName = ownerDisplayName(
+          inv.owners?.first_name ?? null,
+          inv.owners?.last_name ?? null,
+        );
+        const existing = grouped.get(ownerId);
+        if (existing) existing.balance += outstanding;
+        else grouped.set(ownerId, { ownerId, ownerName, balance: outstanding });
+      }
+
+      return Array.from(grouped.values()).sort((a, b) => b.balance - a.balance);
+    },
+  });
 
   const boardPct = percent(
     metrics?.occupancy.boarding_occupied ?? 0,
@@ -142,6 +174,8 @@ const DashboardPage = () => {
       href: "/customers?filter=vax-expiring",
     },
   ].filter((row) => row.count > 0);
+  const dueTodayCount = dueTodayOverdue.length;
+  const dueTodayTotal = dueTodayOverdue.reduce((sum, row) => sum + row.balance, 0);
 
   const activityTiles = [
     {
@@ -335,6 +369,46 @@ const DashboardPage = () => {
                         </Link>
                       </div>
                     ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="md:col-span-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Overdue Payments Due Today</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {dueTodayLoading ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-9 w-full" />
+                    ))}
+                  </div>
+                ) : dueTodayCount === 0 ? (
+                  <p className="text-sm text-muted-foreground">No due-today outstanding balances.</p>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                      {dueTodayCount} client{dueTodayCount === 1 ? "" : "s"} due today · Total {formatAed(dueTodayTotal)}
+                    </div>
+                    {dueTodayOverdue.slice(0, 8).map((row) => (
+                      <Link
+                        key={row.ownerId}
+                        to={`/billing/${row.ownerId}?tab=invoices`}
+                        className="flex items-center justify-between rounded-md border px-2.5 py-2 hover:bg-muted/40"
+                      >
+                        <span className="text-sm">{row.ownerName}</span>
+                        <span className="text-sm font-medium tabular-nums">
+                          {formatAed(row.balance)}
+                        </span>
+                      </Link>
+                    ))}
+                    {dueTodayCount > 8 && (
+                      <Link className="text-xs text-primary hover:underline" to="/billing/invoices?status=overdue">
+                        + {dueTodayCount - 8} more
+                      </Link>
+                    )}
                   </div>
                 )}
               </CardContent>

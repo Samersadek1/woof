@@ -44,10 +44,37 @@ type DraftRow = {
 type CareRow = {
   id: string;
   petName: string;
-  feeding_notes: string;
-  medication_notes: string;
+  feeding_am: string;
+  feeding_pm: string;
+  medication_am: string;
+  medication_pm: string;
   special_instructions: string;
 };
+
+function splitAmPmNotes(raw: string): { am: string; pm: string } {
+  const text = raw.trim();
+  if (!text) return { am: "", pm: "" };
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const amLine = lines.find((l) => /^am\s*:/i.test(l));
+  const pmLine = lines.find((l) => /^pm\s*:/i.test(l));
+  if (amLine || pmLine) {
+    return {
+      am: amLine ? amLine.replace(/^am\s*:/i, "").trim() : "",
+      pm: pmLine ? pmLine.replace(/^pm\s*:/i, "").trim() : "",
+    };
+  }
+  // Backward compatibility for existing single-value notes.
+  return { am: text, pm: "" };
+}
+
+function composeAmPmNotes(am: string, pm: string): string {
+  const a = am.trim();
+  const p = pm.trim();
+  const parts: string[] = [];
+  if (a) parts.push(`AM: ${a}`);
+  if (p) parts.push(`PM: ${p}`);
+  return parts.join("\n");
+}
 
 function newRow(category: "personal" | "food"): DraftRow {
   return {
@@ -178,8 +205,18 @@ export function CheckInSheet({
         const mapped = ((data ?? []) as BookingCareRow[]).map((row) => ({
           id: row.id,
           petName: row.pets?.name ?? "Pet",
-          feeding_notes: row.feeding_notes ?? row.pets?.feeding_instructions ?? "",
-          medication_notes: row.medication_notes ?? row.pets?.medications ?? "",
+          feeding_am: splitAmPmNotes(
+            row.feeding_notes ?? row.pets?.feeding_instructions ?? "",
+          ).am,
+          feeding_pm: splitAmPmNotes(
+            row.feeding_notes ?? row.pets?.feeding_instructions ?? "",
+          ).pm,
+          medication_am: splitAmPmNotes(
+            row.medication_notes ?? row.pets?.medications ?? "",
+          ).am,
+          medication_pm: splitAmPmNotes(
+            row.medication_notes ?? row.pets?.medications ?? "",
+          ).pm,
           special_instructions: row.special_instructions ?? row.pets?.other_notes ?? "",
         }));
         setCareRows(mapped);
@@ -290,8 +327,10 @@ export function CheckInSheet({
       const { error } = await supabase
         .from("booking_pets")
         .update({
-          feeding_notes: row.feeding_notes.trim() || null,
-          medication_notes: row.medication_notes.trim() || null,
+          feeding_notes:
+            composeAmPmNotes(row.feeding_am, row.feeding_pm) || null,
+          medication_notes:
+            composeAmPmNotes(row.medication_am, row.medication_pm) || null,
           special_instructions: row.special_instructions.trim() || null,
         })
         .eq("id", row.id);
@@ -546,8 +585,22 @@ export function CheckInSheet({
                     careRows.map((row) => (
                       <div key={row.id} className="rounded border p-2 text-sm space-y-1.5">
                         <p className="font-medium">{row.petName}</p>
-                        <p><span className="text-muted-foreground">Feeding:</span> {row.feeding_notes || "—"}</p>
-                        <p><span className="text-muted-foreground">Medication:</span> {row.medication_notes || "—"}</p>
+                        <p>
+                          <span className="text-muted-foreground">Feeding (AM):</span>{" "}
+                          {row.feeding_am || "—"}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Feeding (PM):</span>{" "}
+                          {row.feeding_pm || "—"}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Medication (AM):</span>{" "}
+                          {row.medication_am || "—"}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Medication (PM):</span>{" "}
+                          {row.medication_pm || "—"}
+                        </p>
                         <p><span className="text-muted-foreground">Special:</span> {row.special_instructions || "—"}</p>
                       </div>
                     ))
@@ -584,29 +637,73 @@ export function CheckInSheet({
                           <p className="text-sm font-semibold">{row.petName}</p>
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">Feeding notes</Label>
-                            <Input
-                              value={row.feeding_notes}
-                              onChange={(e) =>
-                                setCareRows((prev) =>
-                                  prev.map((r) =>
-                                    r.id === row.id ? { ...r, feeding_notes: e.target.value } : r,
-                                  ),
-                                )
-                              }
-                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-muted-foreground">AM</Label>
+                                <Input
+                                  value={row.feeding_am}
+                                  onChange={(e) =>
+                                    setCareRows((prev) =>
+                                      prev.map((r) =>
+                                        r.id === row.id
+                                          ? { ...r, feeding_am: e.target.value }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-muted-foreground">PM</Label>
+                                <Input
+                                  value={row.feeding_pm}
+                                  onChange={(e) =>
+                                    setCareRows((prev) =>
+                                      prev.map((r) =>
+                                        r.id === row.id
+                                          ? { ...r, feeding_pm: e.target.value }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </div>
+                            </div>
                           </div>
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">Medication notes</Label>
-                            <Input
-                              value={row.medication_notes}
-                              onChange={(e) =>
-                                setCareRows((prev) =>
-                                  prev.map((r) =>
-                                    r.id === row.id ? { ...r, medication_notes: e.target.value } : r,
-                                  ),
-                                )
-                              }
-                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-muted-foreground">AM</Label>
+                                <Input
+                                  value={row.medication_am}
+                                  onChange={(e) =>
+                                    setCareRows((prev) =>
+                                      prev.map((r) =>
+                                        r.id === row.id
+                                          ? { ...r, medication_am: e.target.value }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-muted-foreground">PM</Label>
+                                <Input
+                                  value={row.medication_pm}
+                                  onChange={(e) =>
+                                    setCareRows((prev) =>
+                                      prev.map((r) =>
+                                        r.id === row.id
+                                          ? { ...r, medication_pm: e.target.value }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </div>
+                            </div>
                           </div>
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">Special instructions</Label>

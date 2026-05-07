@@ -58,6 +58,7 @@ import {
   transportZoneLabel,
 } from "@/lib/transportPricing";
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
+import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErrors";
 import { ChevronLeft, ChevronRight, Plus, Loader2, ExternalLink, Eye, Luggage, Printer } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
@@ -72,20 +73,29 @@ type CatRoomType =
   | "cattery_presidential"
   | "cattery_deluxe";
 
-function showAssessmentRequiredToast(options: {
-  err: Error;
+function showCreateBookingErrorToast(options: {
+  err: unknown;
   navigate: ReturnType<typeof useNavigate>;
   ownerId: string;
   petId?: string;
   petName?: string;
 }) {
   const { err, navigate, ownerId, petId, petName } = options;
-  if (!isAssessmentRequiredError(err)) {
-    toast.error(err.message || "Failed to create booking");
+  const overlapMessage = getBookingRoomOverlapErrorMessage(err);
+  if (overlapMessage) {
+    toast.error(overlapMessage);
     return;
   }
+
+  if (!isAssessmentRequiredError(err)) {
+    const genericMessage = err instanceof Error ? err.message : "Failed to create booking";
+    toast.error(genericMessage);
+    return;
+  }
+
+  const detail = err instanceof Error ? err.message : "";
   toast.error(`${petName ?? "This pet"} hasn't completed a behavioural assessment yet.`, {
-    description: err.message,
+    description: detail,
     action: petId
       ? {
           label: "Schedule Assessment",
@@ -361,6 +371,7 @@ type NewBookingForm = {
   transport_zone: TransportZone;
   addon_groom: boolean;
   addon_bath: boolean;
+  room_rate_type: "peak" | "off_peak";
   pet_care_by_pet_id: Record<
     string,
     {
@@ -385,6 +396,7 @@ const BLANK_FORM: NewBookingForm = {
   transport_zone: "dubai_shared",
   addon_groom: false,
   addon_bath: false,
+  room_rate_type: "off_peak",
   pet_care_by_pet_id: {},
 };
 
@@ -454,13 +466,23 @@ export function DogBoardingCalendar({
     (r) => r.key === transportPricingKey(form.transport_zone),
   );
   const dogRatePetCount = Math.max(1, form.pet_ids.length);
+  const dogNights = nightsBetween(form.check_in_date, form.check_out_date);
   const dogRatePreview = useQuery({
-    queryKey: ["boarding_rate_preview", "dog", form.room_id, dogRatePetCount, form.check_in_date, form.check_out_date],
+    queryKey: [
+      "boarding_rate_preview",
+      "dog",
+      form.room_id,
+      dogRatePetCount,
+      form.check_in_date,
+      form.check_out_date,
+      form.room_rate_type,
+    ],
     enabled: !!form.room_id,
     queryFn: async () =>
       resolveBoardingRate(form.room_id, dogRatePetCount, {
         checkInDate: form.check_in_date || null,
         checkOutDate: form.check_out_date || null,
+        rateType: form.room_rate_type,
       }),
   });
 
@@ -595,6 +617,7 @@ export function DogBoardingCalendar({
       notes: [
         form.notes,
         form.staff_name.trim() ? `Created by: ${form.staff_name.trim()}` : "",
+        `Rate type: ${form.room_rate_type === "off_peak" ? "Off-peak" : "Peak"}`,
         addons ? `Add-ons: ${addons}` : "",
       ]
         .filter(Boolean)
@@ -638,6 +661,7 @@ export function DogBoardingCalendar({
           petCount: form.pet_ids.length,
           checkInDate: form.check_in_date,
           checkOutDate: form.check_out_date,
+          roomRateType: form.room_rate_type,
           addons: addonItems,
         }).then(() => {
           toast.success("Draft invoice created");
@@ -647,7 +671,7 @@ export function DogBoardingCalendar({
         });
       },
       onError: (err) =>
-        showAssessmentRequiredToast({
+        showCreateBookingErrorToast({
           err,
           navigate,
           ownerId: form.owner_id,
@@ -1049,17 +1073,43 @@ export function DogBoardingCalendar({
                   ) : dogRatePreview.data ? (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        Resolved nightly price ({dogRatePetCount} pet{dogRatePetCount !== 1 ? "s" : ""})
+                        Resolved {form.room_rate_type === "off_peak" ? "off-peak" : "peak"} nightly price ({dogRatePetCount} pet{dogRatePetCount !== 1 ? "s" : ""})
                       </p>
                       <p className="text-sm font-medium">
                         {formatAed(dogRatePreview.data.unitPrice)} <span className="text-xs text-muted-foreground">({dogRatePreview.data.pricingKey})</span>
                       </p>
+                      {dogNights > 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          {dogNights} night{dogNights !== 1 ? "s" : ""} total:{" "}
+                          <span className="font-medium text-foreground">
+                            {formatAed(dogRatePreview.data.unitPrice * dogNights)}
+                          </span>
+                        </p>
+                      ) : null}
                     </>
                   ) : (
                     <p className="text-xs text-muted-foreground">Could not resolve mapped price yet.</p>
                   )}
                 </div>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Room rate type</Label>
+              <Select
+                value={form.room_rate_type}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, room_rate_type: v as "peak" | "off_peak" }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="peak">Peak rate</SelectItem>
+                  <SelectItem value="off_peak">Off peak rate</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Dates */}
@@ -1515,6 +1565,7 @@ type CatBookingForm = {
   transport_zone: TransportZone;
   addon_groom: boolean;
   addon_bath: boolean;
+  room_rate_type: "peak" | "off_peak";
   cat_litter_type: string;
   cat_indoor_only: boolean;
   cat_ok_share_family: boolean;
@@ -1543,6 +1594,7 @@ const CAT_BLANK_FORM: CatBookingForm = {
   transport_zone: "dubai_shared",
   addon_groom: false,
   addon_bath: false,
+  room_rate_type: "off_peak",
   cat_litter_type: "",
   cat_indoor_only: false,
   cat_ok_share_family: true,
@@ -1639,13 +1691,23 @@ function CatBoardingCalendar({
     (r) => r.key === transportPricingKey(form.transport_zone),
   );
   const catRatePetCount = Math.max(1, form.pet_ids.length);
+  const catNights = nightsBetween(form.check_in_date, form.check_out_date);
   const catRatePreview = useQuery({
-    queryKey: ["boarding_rate_preview", "cat", form.room_id, catRatePetCount, form.check_in_date, form.check_out_date],
+    queryKey: [
+      "boarding_rate_preview",
+      "cat",
+      form.room_id,
+      catRatePetCount,
+      form.check_in_date,
+      form.check_out_date,
+      form.room_rate_type,
+    ],
     enabled: !!form.room_id,
     queryFn: async () =>
       resolveBoardingRate(form.room_id, catRatePetCount, {
         checkInDate: form.check_in_date || null,
         checkOutDate: form.check_out_date || null,
+        rateType: form.room_rate_type,
       }),
   });
 
@@ -1767,6 +1829,7 @@ function CatBoardingCalendar({
       notes: [
         form.notes,
         form.staff_name.trim() ? `Created by: ${form.staff_name.trim()}` : "",
+        `Rate type: ${form.room_rate_type === "off_peak" ? "Off-peak" : "Peak"}`,
         catBlock,
         addons ? `Add-ons: ${addons}` : "",
       ]
@@ -1811,6 +1874,7 @@ function CatBoardingCalendar({
           petCount: form.pet_ids.length,
           checkInDate: form.check_in_date,
           checkOutDate: form.check_out_date,
+          roomRateType: form.room_rate_type,
           addons: addonItems,
         }).then(() => {
           toast.success("Draft invoice created");
@@ -1820,7 +1884,7 @@ function CatBoardingCalendar({
         });
       },
       onError: (err) =>
-        showAssessmentRequiredToast({
+        showCreateBookingErrorToast({
           err,
           navigate,
           ownerId: form.owner_id,
@@ -2109,17 +2173,43 @@ function CatBoardingCalendar({
                   ) : catRatePreview.data ? (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        Resolved nightly price ({catRatePetCount} pet{catRatePetCount !== 1 ? "s" : ""})
+                        Resolved {form.room_rate_type === "off_peak" ? "off-peak" : "peak"} nightly price ({catRatePetCount} pet{catRatePetCount !== 1 ? "s" : ""})
                       </p>
                       <p className="text-sm font-medium">
                         {formatAed(catRatePreview.data.unitPrice)} <span className="text-xs text-muted-foreground">({catRatePreview.data.pricingKey})</span>
                       </p>
+                      {catNights > 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          {catNights} night{catNights !== 1 ? "s" : ""} total:{" "}
+                          <span className="font-medium text-foreground">
+                            {formatAed(catRatePreview.data.unitPrice * catNights)}
+                          </span>
+                        </p>
+                      ) : null}
                     </>
                   ) : (
                     <p className="text-xs text-muted-foreground">Could not resolve mapped price yet.</p>
                   )}
                 </div>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Room rate type</Label>
+              <Select
+                value={form.room_rate_type}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, room_rate_type: v as "peak" | "off_peak" }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="peak">Peak rate</SelectItem>
+                  <SelectItem value="off_peak">Off peak rate</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

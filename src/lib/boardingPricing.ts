@@ -16,6 +16,7 @@ type BoardingRate = {
 type ResolveBoardingRateOptions = {
   checkInDate?: string | null;
   checkOutDate?: string | null;
+  rateType?: "peak" | "off_peak";
 };
 
 const LEGACY_OCC_MULTIPLIER: Record<string, number> = {
@@ -95,7 +96,8 @@ export async function resolveBoardingRate(
   const candidates = buildPricingKeyCandidates(roomRow, petCount);
   const resolvedCandidates: string[] = [];
   const hasDates = Boolean(opts?.checkInDate && opts?.checkOutDate);
-  if (hasDates) {
+  const rateType = opts?.rateType ?? "off_peak";
+  if (hasDates && rateType === "off_peak") {
     for (const key of candidates) {
       try {
         const { data: resolved } = await supabase.rpc("resolve_boarding_pricing_key", {
@@ -112,7 +114,16 @@ export async function resolveBoardingRate(
     }
   }
 
-  const mergedCandidates = Array.from(new Set([...resolvedCandidates, ...candidates]));
+  const offPeakCandidates = candidates.map((k) =>
+    k.endsWith("_off_peak") ? k : `${k}_off_peak`,
+  );
+  const mergedCandidates = Array.from(
+    new Set(
+      rateType === "peak"
+        ? candidates
+        : [...resolvedCandidates, ...offPeakCandidates, ...candidates],
+    ),
+  );
   if (mergedCandidates.length > 0) {
     const { data: pricingRows } = await supabase
       .from("pricing")

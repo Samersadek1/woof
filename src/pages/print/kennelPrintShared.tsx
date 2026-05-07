@@ -48,7 +48,15 @@ export type KennelCardBooking = {
       vet_phone: string | null;
     } | null;
   }>;
+  booking_items: Array<{
+    description: string;
+    quantity: number;
+    category: string | null;
+    condition_notes: string | null;
+  }>;
 };
+
+const OVERVIEW_ITEM_DESCRIPTION = "Overview — belongings (group photo)";
 
 function parseFlags(input: string | null | undefined): string[] {
   if (!input) return [];
@@ -70,6 +78,22 @@ function ageFromDob(dob: string | null): string {
 function displayMedications(raw: string | null): string {
   if (!raw?.trim()) return "None listed";
   return raw.trim();
+}
+
+function stayDates(checkInDate: string, checkOutDate: string): string[] {
+  const out: string[] = [];
+  try {
+    const start = parseISO(checkInDate);
+    const end = parseISO(checkOutDate);
+    let cursor = new Date(start);
+    while (cursor < end && out.length < 14) {
+      out.push(format(cursor, "dd MMM"));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  } catch {
+    // Ignore invalid date parsing and fall back to a single row.
+  }
+  return out.length > 0 ? out : [checkInDate];
 }
 
 function flagTone(flag: string): string {
@@ -116,6 +140,12 @@ export function KennelCardBlock({
     displayMedications(primaryPet?.medications ?? null);
   const notesText = booking.notes?.trim() || primaryCare?.special_instructions?.trim() || "—";
   const createdAt = format(new Date(booking.created_at), "d MMM yyyy, h:mm a");
+  const checklistDates = stayDates(booking.check_in_date, booking.check_out_date).map((day) =>
+    compact ? day.replace(" ", "/") : day,
+  );
+  const ownerItems = (booking.booking_items ?? []).filter(
+    (item) => item.description !== OVERVIEW_ITEM_DESCRIPTION,
+  );
 
   return (
     <article
@@ -204,6 +234,87 @@ export function KennelCardBlock({
         </section>
       </div>
 
+      <section className={`mt-3 border border-black ${compact ? "p-1.5" : "p-2"}`}>
+        <p className={`print-label font-semibold uppercase ${compact ? "mb-1 text-[10px]" : "mb-2 text-[11px]"}`}>
+          Daily Score Card
+        </p>
+        <div
+          className={`grid gap-[1px] border border-black bg-black ${
+            compact
+              ? "grid-cols-[60px_repeat(4,1fr)_74px] text-[9px]"
+              : "grid-cols-[78px_repeat(4,1fr)_95px] text-[10px]"
+          }`}
+        >
+          <div className={`${compact ? "p-1" : "p-1.5"} bg-white font-semibold`}>Date</div>
+          <div className={`${compact ? "p-1" : "p-1.5"} bg-white font-semibold text-center`}>
+            {compact ? "AM M" : "AM Meal"}
+          </div>
+          <div className={`${compact ? "p-1" : "p-1.5"} bg-white font-semibold text-center`}>
+            {compact ? "PM M" : "PM Meal"}
+          </div>
+          <div className={`${compact ? "p-1" : "p-1.5"} bg-white font-semibold text-center`}>
+            {compact ? "AM Rx" : "AM Med"}
+          </div>
+          <div className={`${compact ? "p-1" : "p-1.5"} bg-white font-semibold text-center`}>
+            {compact ? "PM Rx" : "PM Med"}
+          </div>
+          <div className={`${compact ? "p-1" : "p-1.5"} bg-white font-semibold text-center`}>Staff</div>
+          {checklistDates.map((day) => (
+            <div key={day} className="contents">
+              <div className={`bg-white ${compact ? "p-1" : "p-1.5"}`}>{day}</div>
+              <div className={`bg-white ${compact ? "p-1" : "p-1.5"} text-center`}>
+                <span
+                  className={`inline-block border border-black ${compact ? "h-2.5 w-2.5" : "h-3 w-3"}`}
+                />
+              </div>
+              <div className={`bg-white ${compact ? "p-1" : "p-1.5"} text-center`}>
+                <span
+                  className={`inline-block border border-black ${compact ? "h-2.5 w-2.5" : "h-3 w-3"}`}
+                />
+              </div>
+              <div className={`bg-white ${compact ? "p-1" : "p-1.5"} text-center`}>
+                <span
+                  className={`inline-block border border-black ${compact ? "h-2.5 w-2.5" : "h-3 w-3"}`}
+                />
+              </div>
+              <div className={`bg-white ${compact ? "p-1" : "p-1.5"} text-center`}>
+                <span
+                  className={`inline-block border border-black ${compact ? "h-2.5 w-2.5" : "h-3 w-3"}`}
+                />
+              </div>
+              <div className={`bg-white ${compact ? "p-1" : "p-1.5"}`} />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={`mt-3 border border-black ${compact ? "p-1.5" : "p-2"}`}>
+        <p className={`print-label font-semibold uppercase ${compact ? "mb-0.5 text-[10px]" : "mb-1 text-[11px]"}`}>
+          Items Brought by Owner
+        </p>
+        {ownerItems.length === 0 ? (
+          <p className={compact ? "text-[10px]" : "text-[11px]"}>None listed</p>
+        ) : (
+          <ul className={`${compact ? "space-y-0.5 text-[10px]" : "space-y-1 text-[11px]"}`}>
+            {ownerItems.map((item, idx) => (
+              <li
+                key={`${item.description}-${idx}`}
+                className={`flex justify-between gap-3 border-b border-dashed border-slate-300 ${compact ? "pb-0.5" : "pb-1"}`}
+              >
+                <span>
+                  {item.quantity > 1 ? `${item.quantity} x ` : ""}
+                  {item.description}
+                  {item.condition_notes ? ` (${item.condition_notes})` : ""}
+                </span>
+                <span className={`print-sans text-slate-600 ${compact ? "text-[9px]" : "text-[10px]"}`}>
+                  {item.category ?? "item"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <footer className="mt-3 border-t border-black pt-2 print-sans text-[11px]">
         <div className="flex flex-wrap justify-between gap-2">
           <p>Ref: {booking.booking_ref ?? booking.id.slice(0, 8)}</p>
@@ -223,6 +334,7 @@ export async function fetchKennelCardData(bookingId: string) {
       id, booking_ref, booking_type, check_in_date, check_out_date, created_at, notes, do_not_move, staff_id,
       rooms(display_name, room_number, cam_id),
       owners(first_name, last_name, phone, phone2, emergency_contact_phone, is_vip, vet_name, vet_phone),
+      booking_items(description, quantity, category, condition_notes),
       booking_pets(
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
@@ -247,6 +359,7 @@ export async function fetchKennelCardsAsOf(asOfDate: string) {
       id, booking_ref, booking_type, check_in_date, check_out_date, created_at, notes, do_not_move, staff_id,
       rooms(display_name, room_number, cam_id),
       owners(first_name, last_name, phone, phone2, emergency_contact_phone, is_vip, vet_name, vet_phone),
+      booking_items(description, quantity, category, condition_notes),
       booking_pets(
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(

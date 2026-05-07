@@ -9,7 +9,7 @@ import {
 } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
-import { useOwner, useOwners } from "@/hooks/useOwners";
+import { useOwners } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -83,7 +83,6 @@ import { toast } from "sonner";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { cn } from "@/lib/utils";
 import {
-  GROOMING_SERVICE_OPTIONS,
   labelForGroomingService,
   type GroomingService,
 } from "@/lib/groomingCatalog";
@@ -97,30 +96,70 @@ const SERVICE_BADGE: Record<GroomingService, string> = {
   pawdicure: "bg-pink-100 text-pink-800 border-pink-200",
 };
 
-type GroomingPackageV2 =
-  | "grande"
-  | "bijoux"
-  | "deshedding_long"
-  | "deshedding_smooth"
-  | "bath_blow";
+type GroomingServiceCheckbox =
+  | "full_groom"
+  | "deshedding"
+  | "bath_only"
+  | "fur_brushing"
+  | "teeth_brushing"
+  | "nail_clip"
+  | "blow_dry"
+  | "ear_cleaning"
+  | "pawdicure"
+  | "paw_wash"
+  | "malaseb_bath";
 
-const GROOMING_PACKAGE_BY_SERVICE: Partial<Record<GroomingService, GroomingPackageV2>> = {
-  full_groom: "grande",
-  full_bath: "bath_blow",
-  deshedding: "deshedding_smooth",
-};
+const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
+  value: GroomingServiceCheckbox;
+  label: string;
+  mapsTo: GroomingService;
+}> = [
+  { value: "full_groom", label: "Full groom", mapsTo: "full_groom" },
+  { value: "deshedding", label: "Deshedding", mapsTo: "deshedding" },
+  { value: "bath_only", label: "Bath only", mapsTo: "full_bath" },
+  { value: "fur_brushing", label: "Fur brushing", mapsTo: "brushing" },
+  { value: "teeth_brushing", label: "Teeth brushing", mapsTo: "brushing" },
+  { value: "nail_clip", label: "Nail clip", mapsTo: "nail_clip" },
+  { value: "blow_dry", label: "Blow dry", mapsTo: "full_bath" },
+  { value: "ear_cleaning", label: "Ear cleaning", mapsTo: "brushing" },
+  { value: "pawdicure", label: "Pawdicure", mapsTo: "pawdicure" },
+  { value: "paw_wash", label: "Paw wash", mapsTo: "pawdicure" },
+  { value: "malaseb_bath", label: "Malaseb bath", mapsTo: "full_bath" },
+];
+
+function parseGroomingMeta(
+  notes: string | null | undefined,
+): { services: string[]; groomingDate: string | null } {
+  if (!notes) return { services: [], groomingDate: null };
+  const lines = notes
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const servicesLine = lines.find((l) => l.toLowerCase().startsWith("services:"));
+  const groomingDateLine = lines.find((l) =>
+    l.toLowerCase().startsWith("grooming date:"),
+  );
+  const services = servicesLine
+    ? servicesLine
+        .slice("services:".length)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  const groomingDate = groomingDateLine
+    ? groomingDateLine.slice("grooming date:".length).trim() || null
+    : null;
+  return { services, groomingDate };
+}
+
+function appointmentServiceLabels(a: GroomingAppointmentWithJoins): string[] {
+  const primary = serviceLabel(a.service);
+  const extra = parseGroomingMeta(a.notes).services;
+  return Array.from(new Set([primary, ...extra]));
+}
 
 function serviceLabel(s: GroomingService): string {
   return labelForGroomingService(s);
-}
-
-function normalizePetSizeCategory(
-  raw: unknown,
-): "S" | "M" | "L" | "XL" {
-  if (typeof raw !== "string") return "M";
-  const up = raw.toUpperCase();
-  if (up === "S" || up === "M" || up === "L" || up === "XL") return up;
-  return "M";
 }
 
 function formatApptTime(t: string | null): string {
@@ -300,6 +339,11 @@ function AppointmentCard({
     .join(" · ");
 
   const duration = a.duration_minutes ?? 60;
+  const { services: selectedServiceLabels, groomingDate } = parseGroomingMeta(a.notes);
+  const primaryLabel = serviceLabel(a.service);
+  const extraServiceLabels = selectedServiceLabels.filter(
+    (s) => s.toLowerCase() !== primaryLabel.toLowerCase(),
+  );
 
   return (
     <Card>
@@ -360,8 +404,17 @@ function AppointmentCard({
                 variant="outline"
                 className={cn("font-medium", SERVICE_BADGE[a.service])}
               >
-                {serviceLabel(a.service)}
+                {primaryLabel}
               </Badge>
+              {extraServiceLabels.map((label) => (
+                <Badge
+                  key={`${a.id}-${label}`}
+                  variant="outline"
+                  className="bg-muted/40 text-foreground border-border"
+                >
+                  {label}
+                </Badge>
+              ))}
               {a.booking_id ? (
                 <Badge
                   variant="outline"
@@ -381,6 +434,11 @@ function AppointmentCard({
                 {groomerDisplay(a)}
               </span>
             </p>
+            {groomingDate ? (
+              <p className="text-xs text-muted-foreground">
+                Grooming date: <span className="text-foreground">{groomingDate}</span>
+              </p>
+            ) : null}
 
             <div className="flex flex-col gap-2 lg:items-end">
               <Button
@@ -501,19 +559,25 @@ const GroomingPage = () => {
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
   const [petId, setPetId] = useState<string>("");
-  const [service, setService] = useState<GroomingService>("full_groom");
+  const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
+    "full_groom",
+  ]);
   const [apptDate, setApptDate] = useState<Date>(new Date());
+  const [groomingDate, setGroomingDate] = useState<Date>(new Date());
   const [apptTime, setApptTime] = useState("10:00");
   const [durationMin, setDurationMin] = useState(60);
   const [groomerName, setGroomerName] = useState("");
   const [price, setPrice] = useState("");
+  const [discountEnabled, setDiscountEnabled] = useState(false);
+  const [discountPct, setDiscountPct] = useState("0");
   const [visitNotes, setVisitNotes] = useState("");
   const [linkBoarding, setLinkBoarding] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
   const [bookingId, setBookingId] = useState<string | null>(null);
+  const [serviceFilter, setServiceFilter] = useState<string>("all");
+  const [serviceSearch, setServiceSearch] = useState("");
 
   const { data: pets = [] } = usePets(ownerId ?? "");
-  const { data: selectedOwner } = useOwner(ownerId ?? "");
   const { data: bookingHits = [] } = useBookingsForGroomingLink(
     linkBoarding ? bookingSearch : "",
   );
@@ -567,50 +631,40 @@ const GroomingPage = () => {
     [pets, petId],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadPrice = async () => {
-      const rate = rateMap[service];
-      if (rate && !cancelled) {
-        setPrice(String(rate.price_aed));
-        if (rate.duration_minutes) setDurationMin(rate.duration_minutes);
-      }
-
-      const pkg = GROOMING_PACKAGE_BY_SERVICE[service];
-      if (!pkg) return;
-
-      const ownerTier = (selectedOwner?.member_type ?? "standard") as string;
-      const petSize = normalizePetSizeCategory(selectedPet?.size_category);
-      try {
-        const { data, error } = await supabase.rpc("resolve_grooming_price", {
-          p_package: pkg,
-          p_size: petSize,
-          p_quantity: 1,
-          p_tier: ownerTier,
-        });
-        if (error) throw error;
-        const row = (data as { unit_price: number }[] | null)?.[0];
-        if (!cancelled && row && typeof row.unit_price === "number") {
-          setPrice(String(row.unit_price));
-        }
-      } catch {
-        // Keep legacy fallback when resolver or size mapping is unavailable.
-      }
-    };
-
-    loadPrice();
-    return () => {
-      cancelled = true;
-    };
-  }, [service, rateMap, selectedOwner?.member_type, selectedPet]);
+  const mappedServices = useMemo(
+    () =>
+      selectedServices.map(
+        (svc) =>
+          GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.mapsTo ??
+          "full_groom",
+      ),
+    [selectedServices],
+  );
+  const defaultOriginalPrice = useMemo(
+    () =>
+      mappedServices.reduce(
+        (sum, svc) =>
+          sum + (typeof rateMap[svc]?.price_aed === "number" ? rateMap[svc].price_aed : 0),
+        0,
+      ),
+    [mappedServices, rateMap],
+  );
+  const normalizedDiscountPct = useMemo(() => {
+    const parsed = Number.parseFloat(discountPct);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.min(100, Math.max(0, parsed));
+  }, [discountPct]);
 
   const openNewSheet = () => {
     setApptDate(day);
+    setGroomingDate(day);
     setApptTime("10:00");
     setDurationMin(60);
-    setService("full_groom");
+    setSelectedServices(["full_groom"]);
     setGroomerName("");
     setPrice("");
+    setDiscountEnabled(false);
+    setDiscountPct("0");
     setVisitNotes("");
     setOwnerId(null);
     setOwnerLabel(null);
@@ -620,6 +674,11 @@ const GroomingPage = () => {
     setBookingId(null);
     setSheetOpen(true);
   };
+
+  useEffect(() => {
+    if (!sheetOpen) return;
+    setPrice(String(defaultOriginalPrice));
+  }, [defaultOriginalPrice, sheetOpen]);
 
   const timeToDb = (t: string) => {
     const parts = t.split(":");
@@ -646,14 +705,27 @@ const GroomingPage = () => {
       toast.error("Enter a valid appointment time.");
       return;
     }
+    if (selectedServices.length === 0) {
+      toast.error("Select at least one service.");
+      return;
+    }
+
+    const primaryService = mappedServices[0];
+    if (!primaryService) {
+      toast.error("Could not resolve a valid service. Please reselect services.");
+      return;
+    }
 
     const priceNum = parseFloat(price);
-    const serviceRate = rateMap[service]?.price_aed;
+    const serviceRate = defaultOriginalPrice;
+    const discountedPrice = discountEnabled
+      ? priceNum * (1 - normalizedDiscountPct / 100)
+      : priceNum;
     const finalPrice =
-      Number.isFinite(priceNum) && priceNum >= 0
-        ? priceNum
+      Number.isFinite(discountedPrice) && discountedPrice >= 0
+        ? Number(discountedPrice.toFixed(2))
         : typeof serviceRate === "number" && serviceRate >= 0
-          ? serviceRate
+          ? Number(serviceRate.toFixed(2))
           : NaN;
     if (Number.isNaN(finalPrice) || finalPrice < 0) {
       toast.error("Price is not loaded yet. Wait a moment or enter it manually.");
@@ -664,21 +736,37 @@ const GroomingPage = () => {
     }
 
     // #region agent log
-    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:beforeMutate',message:'grooming create submitted',data:{service,hasOwnerId:!!ownerId,hasPetId:!!petId,appointmentDate:format(apptDate,'yyyy-MM-dd'),appointmentTime:apptTime,durationMin,linkBoarding,hasBookingId:!!bookingId,enteredPrice:price||null,finalPrice},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:beforeMutate',message:'grooming create submitted',data:{primaryService,selectedServices,hasOwnerId:!!ownerId,hasPetId:!!petId,appointmentDate:format(apptDate,'yyyy-MM-dd'),groomingDate:format(groomingDate,'yyyy-MM-dd'),appointmentTime:apptTime,durationMin,linkBoarding,hasBookingId:!!bookingId,enteredPrice:price||null,discountEnabled,discountPct:normalizedDiscountPct,finalPrice},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
+
+    const selectedServiceLabels = selectedServices
+      .map((svc) =>
+        GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.label ?? svc,
+      )
+      .join(", ");
+    const metaNotes = [
+      selectedServiceLabels ? `Services: ${selectedServiceLabels}` : null,
+      `Grooming date: ${format(groomingDate, "yyyy-MM-dd")}`,
+      discountEnabled
+        ? `Discount: ${normalizedDiscountPct}% (original AED ${price || "0"})`
+        : null,
+    ].filter(Boolean);
+    const composedNotes = [visitNotes.trim(), ...metaNotes]
+      .filter(Boolean)
+      .join("\n");
 
     createAppt.mutate(
       {
         appointment_date: format(apptDate, "yyyy-MM-dd"),
         appointment_time: timeToDb(apptTime),
         duration_minutes: durationMin,
-        service,
+        service: primaryService,
         owner_id: ownerId,
         pet_id: petId,
         groomer_id: null,
         grooming_notes: groomerName.trim() || null,
         price: finalPrice,
-        notes: visitNotes.trim() || null,
+        notes: composedNotes || null,
         booking_id: linkBoarding ? bookingId : null,
       },
       {
@@ -686,7 +774,7 @@ const GroomingPage = () => {
           toast.success("Appointment created.");
           setSheetOpen(false);
 
-          const svcLabel = labelForGroomingService(service);
+          const svcLabel = selectedServiceLabels || labelForGroomingService(primaryService);
           createServiceInvoice({
             ownerId: ownerId!,
             serviceType: "grooming",
@@ -695,8 +783,8 @@ const GroomingPage = () => {
               description: `${svcLabel} — ${format(apptDate, "d MMM yyyy")}`,
               quantity: 1,
               unitPrice: finalPrice,
-              pricingKey: `grooming:${service}`,
               serviceType: "grooming",
+              preserveUnitPrice: true,
             }],
           }).then(() => {
             toast.success("Draft invoice created");
@@ -712,7 +800,7 @@ const GroomingPage = () => {
                 ? String((e as { message: string }).message)
                 : "Could not create.";
           // #region agent log
-          fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:onError',message:'grooming create failed',data:{service,appointmentDate:format(apptDate,'yyyy-MM-dd'),appointmentTime:apptTime,error:msg},timestamp:Date.now()})}).catch(()=>{});
+          fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:onError',message:'grooming create failed',data:{primaryService,selectedServices,appointmentDate:format(apptDate,'yyyy-MM-dd'),appointmentTime:apptTime,error:msg},timestamp:Date.now()})}).catch(()=>{});
           // #endregion
           toast.error(msg);
         },
@@ -728,6 +816,33 @@ const GroomingPage = () => {
       return d;
     });
   }, [searchResults]);
+  const serviceMatches = (
+    a: GroomingAppointmentWithJoins,
+    exactFilter: string,
+    textFilter: string,
+  ) => {
+    const labels = appointmentServiceLabels(a);
+    const byChip =
+      exactFilter === "all" ||
+      labels.some((label) => label.toLowerCase() === exactFilter.toLowerCase());
+    const q = textFilter.trim().toLowerCase();
+    const byText = !q || labels.some((label) => label.toLowerCase().includes(q));
+    return byChip && byText;
+  };
+  const filteredDayAppointments = useMemo(
+    () =>
+      dayAppointments.filter((a) =>
+        serviceMatches(a, serviceFilter, serviceSearch),
+      ),
+    [dayAppointments, serviceFilter, serviceSearch],
+  );
+  const filteredHistory = useMemo(
+    () =>
+      sortedHistory.filter((a) =>
+        serviceMatches(a, serviceFilter, serviceSearch),
+      ),
+    [sortedHistory, serviceFilter, serviceSearch],
+  );
 
   return (
     <>
@@ -786,19 +901,51 @@ const GroomingPage = () => {
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Service filters</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={serviceFilter === "all" ? "default" : "outline"}
+                onClick={() => setServiceFilter("all")}
+              >
+                All services
+              </Button>
+              {GROOMING_SERVICE_CHECKBOX_OPTIONS.map((o) => (
+                <Button
+                  key={`service-filter-${o.value}`}
+                  type="button"
+                  size="sm"
+                  variant={serviceFilter === o.label ? "default" : "outline"}
+                  onClick={() => setServiceFilter(o.label)}
+                >
+                  {o.label}
+                </Button>
+              ))}
+            </div>
+            <Input
+              className="max-w-md"
+              placeholder="Search service name..."
+              value={serviceSearch}
+              onChange={(e) => setServiceSearch(e.target.value)}
+            />
+          </div>
+
           <TabsContent value="day" className="space-y-4">
             {dayLoading ? (
               <div className="space-y-3">
                 <Skeleton className="h-32 w-full" />
                 <Skeleton className="h-32 w-full" />
               </div>
-            ) : dayAppointments.length === 0 ? (
+            ) : filteredDayAppointments.length === 0 ? (
               <p className="text-center text-muted-foreground py-16">
-                No grooming appointments for {format(day, "EEEE, d MMMM yyyy")}.
+                No grooming appointments match the selected service filters for{" "}
+                {format(day, "EEEE, d MMMM yyyy")}.
               </p>
             ) : (
               <div className="space-y-3">
-                {dayAppointments.map((a) => (
+                {filteredDayAppointments.map((a) => (
                   <AppointmentCard
                     key={a.id}
                     a={a}
@@ -850,14 +997,14 @@ const GroomingPage = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedHistory.length === 0 ? (
+                    {filteredHistory.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center text-muted-foreground">
-                          No matches.
+                          No matches for this search/filter combination.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedHistory.map((r) => (
+                      filteredHistory.map((r) => (
                         <TableRow key={r.id}>
                           <TableCell className="whitespace-nowrap">
                             {format(parseISO(r.appointment_date), "d MMM yyyy")}
@@ -868,7 +1015,26 @@ const GroomingPage = () => {
                               ? ownerDisplayName(r.owners.first_name, r.owners.last_name)
                               : "—"}
                           </TableCell>
-                          <TableCell>{serviceLabel(r.service)}</TableCell>
+                          <TableCell>
+                            <div className="space-y-0.5">
+                              <p>{serviceLabel(r.service)}</p>
+                              {parseGroomingMeta(r.notes).services
+                                .filter(
+                                  (s) =>
+                                    s.toLowerCase() !==
+                                    serviceLabel(r.service).toLowerCase(),
+                                )
+                                .slice(0, 3)
+                                .map((s) => (
+                                  <p
+                                    key={`${r.id}-${s}`}
+                                    className="text-xs text-muted-foreground"
+                                  >
+                                    + {s}
+                                  </p>
+                                ))}
+                            </div>
+                          </TableCell>
                           <TableCell>{groomerDisplay(r)}</TableCell>
                           <TableCell className="capitalize">
                             {r.status.replace("_", " ")}
@@ -968,25 +1134,37 @@ const GroomingPage = () => {
               </h3>
               <div className="space-y-2">
                 <Label>Service</Label>
-                <Select
-                  value={service}
-                  onValueChange={(v) => setService(v as GroomingService)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {GROOMING_SERVICE_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="grid grid-cols-2 gap-2 rounded-lg border p-3">
+                  {GROOMING_SERVICE_CHECKBOX_OPTIONS.map((o) => {
+                    const checked = selectedServices.includes(o.value);
+                    return (
+                      <label
+                        key={o.value}
+                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const shouldCheck = e.target.checked;
+                            setSelectedServices((prev) => {
+                              if (shouldCheck) {
+                                if (prev.includes(o.value)) return prev;
+                                return [...prev, o.value];
+                              }
+                              return prev.filter((v) => v !== o.value);
+                            });
+                          }}
+                        />
+                        <span>{o.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-2">
-                  <Label>Date</Label>
+                  <Label>Appointment Date</Label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
@@ -1005,6 +1183,31 @@ const GroomingPage = () => {
                         mode="single"
                         selected={apptDate}
                         onSelect={(d) => d && setApptDate(d)}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="space-y-2">
+                  <Label>Grooming Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !groomingDate && "text-muted-foreground",
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {format(groomingDate, "d MMM yyyy")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={groomingDate}
+                        onSelect={(d) => d && setGroomingDate(d)}
                         initialFocus
                       />
                     </PopoverContent>
@@ -1033,7 +1236,7 @@ const GroomingPage = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Price (AED)</Label>
+                  <Label>Price (AED) - Original</Label>
                   <Input
                     type="number"
                     min={0}
@@ -1043,6 +1246,48 @@ const GroomingPage = () => {
                     placeholder="0"
                   />
                 </div>
+              </div>
+              <div className="space-y-3 rounded-lg border p-3">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="enable-discount" className="cursor-pointer">
+                    Apply discount
+                  </Label>
+                  <Switch
+                    id="enable-discount"
+                    checked={discountEnabled}
+                    onCheckedChange={setDiscountEnabled}
+                  />
+                </div>
+                {discountEnabled ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Discount (%)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={discountPct}
+                        onChange={(e) => setDiscountPct(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Final Price (AED)</Label>
+                      <Input
+                        readOnly
+                        value={
+                          Number.isFinite(Number.parseFloat(price))
+                            ? (Number.parseFloat(price) * (1 - normalizedDiscountPct / 100)).toFixed(2)
+                            : "0.00"
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Final price matches the original editable price.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Groomer</Label>
@@ -1059,7 +1304,7 @@ const GroomingPage = () => {
                 Notes
               </h3>
               <div className="space-y-2">
-                <Label>Visit notes</Label>
+                <Label>Notes</Label>
                 <Textarea
                   value={visitNotes}
                   onChange={(e) => setVisitNotes(e.target.value)}
