@@ -15,6 +15,11 @@ type SystemContextRow = {
   updated_at: string | null;
 };
 
+type SystemContextRowWithoutUpdatedAt = {
+  key: ContextKey;
+  content: string | null;
+};
+
 const SettingsPage = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -34,18 +39,43 @@ const SettingsPage = () => {
       setLoading(true);
       setLoadError(null);
 
+      let contextRows: SystemContextRow[] = [];
+
       const { data, error } = await supabase
         .from("system_context")
         .select("key, content, updated_at")
         .in("key", ["business_rules", "query_guidelines", "write_guidelines"]);
 
       if (error) {
-        setLoadError(error.message);
-        setLoading(false);
-        return;
+        const isMissingUpdatedAtColumn =
+          error.code === "42703" || error.message.toLowerCase().includes("updated_at");
+
+        if (!isMissingUpdatedAtColumn) {
+          setLoadError(error.message);
+          setLoading(false);
+          return;
+        }
+
+        const fallback = await supabase
+          .from("system_context")
+          .select("key, content")
+          .in("key", ["business_rules", "query_guidelines", "write_guidelines"]);
+
+        if (fallback.error) {
+          setLoadError(fallback.error.message);
+          setLoading(false);
+          return;
+        }
+
+        contextRows = ((fallback.data ?? []) as SystemContextRowWithoutUpdatedAt[]).map((row) => ({
+          ...row,
+          updated_at: null,
+        }));
+      } else {
+        contextRows = (data ?? []) as SystemContextRow[];
       }
 
-      const rows = ((data ?? []) as SystemContextRow[]).reduce<Record<ContextKey, SystemContextRow | null>>(
+      const rows = contextRows.reduce<Record<ContextKey, SystemContextRow | null>>(
         (acc, row) => {
           acc[row.key] = row;
           return acc;
