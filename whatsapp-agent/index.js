@@ -357,7 +357,9 @@ const WA_TOOLS = [
       Always fetch owner and pet details in the same nested select as
       bookings -- never make separate follow-up queries.
       Correct pattern: bookings with rooms(display_name),
-      owners(first_name,last_name), booking_pets(pets(name,species))`,
+      owners(first_name,last_name), booking_pets(pets(name,species)).
+      IMPORTANT: For table "rooms", use conservative selects like "id,display_name"
+      and avoid non-existent columns like rooms.category / rooms.type / rooms.capacity.`,
     input_schema: {
       type: "object",
       properties: {
@@ -497,8 +499,12 @@ YOUR RULES:
   explicitly approves confirmation for this request
 - You may also confirm directly when the owner has clearly double-confirmed
   all booking details in chat
+- Keep service intent aligned with the conversation facts and latest request.
+  If intent is daycare/park, do not switch to boarding flow unless the owner
+  explicitly asks for boarding.
 - Check availability before suggesting dates or rooms
 - Calculate price including membership discount before quoting
+- For rooms lookups, avoid unknown columns; use minimal fields such as id/display_name
 - If uncertain about anything, call escalate_to_human
 - Do not mention you are an AI unless directly asked
 
@@ -811,6 +817,19 @@ function extractName(text) {
   return match?.[1]?.trim() ?? null;
 }
 
+function isAffirmationOnlyMessage(text) {
+  const normalized = (text ?? "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ");
+  if (!normalized) return true;
+  return /^(yes|yep|yeah|ok|okay|sure|go ahead|please proceed|do it|book it|confirmed?)$/.test(
+    normalized
+  );
+}
+
 function extractConversationFacts(existingFacts, history, latestUserMessage, handoff, metadata = {}) {
   const userMessages = (history ?? [])
     .filter((m) => m?.role === "user" && typeof m?.content === "string")
@@ -821,12 +840,17 @@ function extractConversationFacts(existingFacts, history, latestUserMessage, han
   const petMentions = userMessages
     .filter((line) => /\b(dog|cat|pet|pets|puppy|kitten)\b/i.test(line))
     .slice(-6);
+  const substantiveIntent =
+    [...userMessages].reverse().find((line) => !isAffirmationOnlyMessage(line)) ??
+    handoff?.pending_request ??
+    existingFacts?.open_intent ??
+    null;
 
   return {
     ...(existingFacts ?? {}),
     possible_name: possibleName,
     pet_mentions: petMentions,
-    open_intent: userMessages.at(-1) ?? handoff?.pending_request ?? existingFacts?.open_intent ?? null,
+    open_intent: substantiveIntent,
     last_user_message: latestUserMessage ?? existingFacts?.last_user_message ?? null,
     last_seen_jid: metadata.lastSeenJid ?? existingFacts?.last_seen_jid ?? null,
     context_source: handoff ? "handoff" : existingFacts?.context_source ?? "ongoing_chat",
@@ -1687,7 +1711,20 @@ async function executeTool(name, input, phone) {
       }
 
       const { data, error } = await q;
-      if (error) return { error: error.message };
+      if (error) {
+        const message = String(error.message ?? "");
+        if (
+          input.table === "rooms" &&
+          /column rooms\.(category|type|capacity) does not exist/i.test(message)
+        ) {
+          return {
+            recoverable: true,
+            message:
+              "rooms schema hint: use select with existing fields only (e.g. id, display_name). Do not query rooms.category, rooms.type, or rooms.capacity.",
+          };
+        }
+        return { error: message };
+      }
       return data;
     }
 
