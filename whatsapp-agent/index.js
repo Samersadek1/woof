@@ -60,6 +60,7 @@ let authReadyTimer = null;
 let autoRecoveryAttempts = 0;
 let hasHardResetSession = false;
 let latestQR = null;
+let awaitingQrScan = false;
 
 // Keep import explicit per required structure.
 void MessageMedia;
@@ -99,8 +100,13 @@ const store = {
         bytes: payload.length,
       });
     } catch (e) {
-      console.error("RemoteAuth save failed:", { session, error: e.message });
-      throw new Error(`Session save failed: ${e.message}`);
+      // Keep the bot online even if remote session backup fails.
+      // We preserve the last successful remote backup and continue running.
+      console.error("RemoteAuth save failed (non-fatal):", {
+        session,
+        error: e.message,
+      });
+      return;
     }
   },
 
@@ -165,6 +171,9 @@ const client = new Client({
 
 client.on("qr", (qr) => {
   latestQR = qr;
+  awaitingQrScan = true;
+  clearReadyStallTimer();
+  clearAuthReadyTimer();
   console.log("QR code ready -- open the Railway URL to scan");
 });
 
@@ -264,6 +273,10 @@ function armReadyStallTimer(trigger) {
     timeout_ms: READY_STALL_TIMEOUT_MS,
   });
   readyStallTimer = setTimeout(() => {
+    if (awaitingQrScan) {
+      console.log("Ready-stall timeout ignored while awaiting QR scan");
+      return;
+    }
     if (!isClientReady && !isShuttingDown) {
       void scheduleAutoRecover(`ready-timeout:${trigger}`);
     }
@@ -287,6 +300,7 @@ client.on("ready", async () => {
   isClientReady = true;
   autoRecoveryAttempts = 0;
   hasHardResetSession = false;
+  awaitingQrScan = false;
   clearReadyStallTimer();
   clearInitGuardTimer();
   clearAuthReadyTimer();
@@ -308,6 +322,7 @@ client.on("ready", async () => {
 
 client.on("authenticated", () => {
   console.log("WhatsApp authenticated");
+  awaitingQrScan = false;
   armAuthReadyTimer("authenticated_event");
 });
 
@@ -326,6 +341,7 @@ client.on("loading_screen", (percent, message) => {
 
 client.on("disconnected", (reason) => {
   isClientReady = false;
+  awaitingQrScan = false;
   clearReadyStallTimer();
   clearInitGuardTimer();
   clearAuthReadyTimer();
@@ -1790,6 +1806,10 @@ async function executeTool(name, input, phone) {
     }
 
     if (name === "escalate_to_human") {
+      console.warn("Escalation requested by agent:", {
+        phone,
+        reason: input.reason,
+      });
       await setAwaitingStaffDirection(phone, input.reason, input.summary);
 
       await notifyStaff(
@@ -1946,6 +1966,11 @@ async function runAgent(phone, message, options = {}) {
   }
 
   if (blockedReason) {
+    console.warn("Agent blocked; escalating to staff:", {
+      phone,
+      reason: blockedReason,
+      toolTrace: toolTrace.slice(-4),
+    });
     await executeTool(
       "escalate_to_human",
       {

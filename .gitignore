@@ -40,3 +40,4 @@ whatsapp-agent/node_modules/
 whatsapp-agent/.wwebjs_auth/
 whatsapp-agent/.wwebjs_cache/
 whatsapp-agent/.env
+whatsapp-agent/.railway-log-state*.json
