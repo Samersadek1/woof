@@ -479,6 +479,8 @@ YOUR RULES:
 - Default to creating a draft booking and saying the team will confirm shortly
 - You may confirm a booking directly only when PRIORITY STAFF DIRECTION
   explicitly approves confirmation for this request
+- You may also confirm directly when the owner has clearly double-confirmed
+  all booking details in chat
 - Check availability before suggesting dates or rooms
 - Calculate price including membership discount before quoting
 - If uncertain about anything, call escalate_to_human
@@ -834,6 +836,44 @@ function staffDirectionAllowsDirectConfirmation(instruction) {
   );
 }
 
+function clientDoubleConfirmationAllowsDirectBooking(history, bookingInput) {
+  const recentUserMessages = (history ?? [])
+    .filter((m) => m?.role === "user" && typeof m?.content === "string")
+    .map((m) => m.content.toLowerCase())
+    .slice(-12);
+
+  if (!recentUserMessages.length) return false;
+  const confirmations = recentUserMessages.filter((text) =>
+    /\b(yes|confirmed?|go ahead|please proceed|book it|do it|sounds good|ok|okay)\b/i.test(text)
+  );
+  if (confirmations.length < 2) return false;
+
+  const hasDates = Boolean(bookingInput?.check_in_date && bookingInput?.check_out_date);
+  const hasPets = Array.isArray(bookingInput?.pet_ids) && bookingInput.pet_ids.length > 0;
+  const hasRoom = Boolean(bookingInput?.room_id);
+  return hasDates && hasPets && hasRoom;
+}
+
+async function setOwnerAgentAssignment(ownerId, assigned) {
+  if (!ownerId) return;
+  const { data: convs } = await supabase
+    .from("agent_conversations")
+    .select("phone_number, facts")
+    .eq("owner_id", ownerId);
+
+  for (const conv of convs ?? []) {
+    const facts = {
+      ...(conv?.facts ?? {}),
+      agent_assigned: assigned,
+      agent_assignment_updated_at: new Date().toISOString(),
+    };
+    await supabase
+      .from("agent_conversations")
+      .update({ facts })
+      .eq("phone_number", conv.phone_number);
+  }
+}
+
 function extractStaffRoutePhone(text) {
   const match = (text ?? "").match(STAFF_ROUTE_MARKER_RE);
   return match?.[1]?.trim() ?? null;
@@ -1108,6 +1148,27 @@ async function resolveOwnerConversationForInbound(routing) {
     }
   }
 
+  if (inboundJid.endsWith("@lid") && typeof client.getContactLidAndPhone === "function") {
+    try {
+      const bridge = await client.getContactLidAndPhone([inboundJid]);
+      const bridgedPnRaw = Array.isArray(bridge) ? bridge[0]?.pn : bridge?.pn;
+      const bridgedPhone = bridgedPnRaw ? canonicalConversationPhone(bridgedPnRaw) : null;
+      if (bridgedPhone) {
+        const bridgedOwner = await findOwnerByFlexiblePhone(bridgedPhone);
+        if (bridgedOwner?.id) {
+          const ownerConv = await getOwnerConversation(bridgedOwner.id);
+          return {
+            ownerId: bridgedOwner.id,
+            ownerConv: ownerConv ?? null,
+            source: ownerConv ? "inbound_lid_bridge_owner_row" : "inbound_lid_bridge_no_row",
+          };
+        }
+      }
+    } catch {
+      // Ignore bridge lookup failure and continue.
+    }
+  }
+
   const ownerFromReply = await findOwnerByFlexiblePhone(routing.replyTarget);
   const ownerFromContactMapped = routing.contactMappedPhone
     ? await findOwnerByFlexiblePhone(routing.contactMappedPhone)
@@ -1248,6 +1309,52 @@ async function resolveBestKnownJidForOwner(ownerId) {
     }
   }
 
+  // If known aliases are stale/incomplete, also scan all chats by owner phone digits
+  // and prefer the most recently active match.
+  try {
+    const { data: ownerRow } = await supabase
+      .from("owners")
+      .select("phone")
+      .eq("id", ownerId)
+      .maybeSingle();
+    const ownerCandidates = phoneDigitsCandidates(ownerRow?.phone ?? "");
+    if (ownerCandidates.size) {
+      const chats = await client.getChats();
+      for (const chat of chats ?? []) {
+        if (chat.isGroup) continue;
+        const jid = chat?.id?._serialized ?? "";
+        if (!jid.endsWith("@c.us") && !jid.endsWith("@lid")) continue;
+
+        let chatDigits = "";
+        if (jid.endsWith("@c.us")) {
+          chatDigits = normalizeDigits(jid.replace(/@c\.us$/i, ""));
+        } else {
+          try {
+            const contact = await chat.getContact();
+            chatDigits = normalizeDigits(contact?.number ?? "");
+          } catch {
+            chatDigits = "";
+          }
+        }
+        if (!phoneLikelyMatches(chatDigits, ownerCandidates)) continue;
+
+        let ts = 0;
+        try {
+          const recent = await chat.fetchMessages({ limit: 1 });
+          ts = Number(recent?.[0]?.timestamp ?? 0);
+        } catch {
+          ts = 0;
+        }
+        if (ts > bestTs) {
+          bestTs = ts;
+          bestJid = jid;
+        }
+      }
+    }
+  } catch {
+    // Ignore owner scan failures and keep best known alias.
+  }
+
   return bestJid;
 }
 
@@ -1319,10 +1426,11 @@ async function getOwnerContext(phone, conv) {
   let ownerMatchSource = "conversation_owner_id";
 
   if (!ownerId) {
-    const owner = await findOwnerByFlexiblePhone(phone);
+    const known = await findOwnerByKnownJid(phone);
+    const owner = known?.id ? { id: known.id } : await findOwnerByFlexiblePhone(phone);
     if (owner?.id) {
       ownerId = owner.id;
-      ownerMatchSource = "flexible_phone_match";
+      ownerMatchSource = known?.id ? "known_jid_match" : "flexible_phone_match";
       await supabase
         .from("agent_conversations")
         .update({ owner_id: owner.id })
@@ -1444,6 +1552,8 @@ async function activateAgentForTarget({
     aliases: Array.from(
       new Set([normalizedTargetJid, targetPhone, conversationKey, ...Array.from(aliasSet)])
     ).slice(-20),
+    agent_assigned: true,
+    agent_assignment_updated_at: new Date().toISOString(),
     last_seen_jid: normalizedTargetJid,
   };
 
@@ -1464,6 +1574,7 @@ async function activateAgentForTarget({
       .from("agent_conversations")
       .update({ mode: "agent" })
       .eq("owner_id", ownerId);
+    await setOwnerAgentAssignment(ownerId, true);
   }
 
   const greeting = await runAgent(
@@ -1543,13 +1654,18 @@ async function executeTool(name, input, phone) {
     if (name === "create_draft_booking") {
       const { data: convState } = await supabase
         .from("agent_conversations")
-        .select("facts")
+        .select("facts, history")
         .eq("phone_number", phone)
         .maybeSingle();
       const staffInstruction = convState?.facts?.staff_instruction ?? "";
       const awaitingStaffDirection = Boolean(convState?.facts?.awaiting_staff_direction);
+      const clientDoubleConfirmed = clientDoubleConfirmationAllowsDirectBooking(
+        convState?.history ?? [],
+        input
+      );
       const directConfirmationAllowed =
-        !awaitingStaffDirection && staffDirectionAllowsDirectConfirmation(staffInstruction);
+        !awaitingStaffDirection &&
+        (staffDirectionAllowsDirectConfirmation(staffInstruction) || clientDoubleConfirmed);
       const bookingStatus = directConfirmationAllowed ? "confirmed" : "draft";
 
       const { data: ref } = await supabase.rpc("generate_booking_ref");
@@ -1842,10 +1958,23 @@ client.on("message", async (msg) => {
           .from("agent_conversations")
           .update({ mode: "human" })
           .eq("owner_id", owner.id);
+        await setOwnerAgentAssignment(owner.id, false);
       } else {
+        const { data: conv } = await supabase
+          .from("agent_conversations")
+          .select("facts")
+          .eq("phone_number", targetPhone)
+          .maybeSingle();
         await supabase
           .from("agent_conversations")
-          .update({ mode: "human" })
+          .update({
+            mode: "human",
+            facts: {
+              ...(conv?.facts ?? {}),
+              agent_assigned: false,
+              agent_assignment_updated_at: new Date().toISOString(),
+            },
+          })
           .eq("phone_number", targetPhone);
       }
       await notifyStaff(`✓ Human mode ON for ${targetPhone}`);
@@ -1891,6 +2020,7 @@ client.on("message", async (msg) => {
         .from("agent_conversations")
         .update({ mode: "agent" })
         .eq("owner_id", booking.owner_id);
+      await setOwnerAgentAssignment(booking.owner_id, true);
 
       await notifyStaff(`✓ ${ref} confirmed and owner notified`);
       return;
@@ -1935,6 +2065,7 @@ client.on("message", async (msg) => {
           .from("agent_conversations")
           .update({ mode: "agent" })
           .eq("owner_id", booking.owner_id);
+        await setOwnerAgentAssignment(booking.owner_id, true);
       }
       return;
     }
@@ -1988,6 +2119,10 @@ client.on("message", async (msg) => {
   if (ownerConv?.phone_number) {
     mode = ownerConv?.mode ?? "human";
     modeKey = ownerConv.phone_number;
+    if (ownerConv?.facts?.agent_assigned === true && mode !== "agent") {
+      mode = "agent";
+      resolutionSource = `${resolutionSource}+agent_assigned_override`;
+    }
   } else {
     // Unknown owner fallback: only explicit per-JID mode row can activate.
     const { data: unknownConv } = await supabase
@@ -2081,10 +2216,23 @@ client.on("message_create", async (msg) => {
         .from("agent_conversations")
         .update({ mode: "human" })
         .eq("owner_id", owner.id);
+      await setOwnerAgentAssignment(owner.id, false);
     } else {
+      const { data: conv } = await supabase
+        .from("agent_conversations")
+        .select("facts")
+        .eq("phone_number", targetPhone)
+        .maybeSingle();
       await supabase
         .from("agent_conversations")
-        .update({ mode: "human" })
+        .update({
+          mode: "human",
+          facts: {
+            ...(conv?.facts ?? {}),
+            agent_assigned: false,
+            agent_assignment_updated_at: new Date().toISOString(),
+          },
+        })
         .eq("phone_number", targetPhone);
     }
     await notifyStaff(`👤 Human mode for ${targetPhone}`);
