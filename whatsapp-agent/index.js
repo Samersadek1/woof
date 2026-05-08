@@ -372,9 +372,9 @@ const WA_TOOLS = [
   },
   {
     name: "create_draft_booking",
-    description: `Create a draft booking. Always confirm all details
-      with the owner first and show a summary before calling this.
-      Never create status=confirmed directly.`,
+    description: `Create a booking record. Default behavior is draft booking
+      after confirming details with the owner. If explicit staff direction
+      clearly approves confirmation, you may finalize directly.`,
     input_schema: {
       type: "object",
       properties: {
@@ -476,8 +476,9 @@ ${escalationHoldSection}
 YOUR RULES:
 - Keep messages short -- this is WhatsApp, not email
 - Use the owner's first name
-- Never confirm a booking yourself -- always create a draft
-  and say "Let me check with the team and confirm shortly"
+- Default to creating a draft booking and saying the team will confirm shortly
+- You may confirm a booking directly only when PRIORITY STAFF DIRECTION
+  explicitly approves confirmation for this request
 - Check availability before suggesting dates or rooms
 - Calculate price including membership discount before quoting
 - If uncertain about anything, call escalate_to_human
@@ -820,6 +821,14 @@ function summarizeToolResult(result) {
     if (result.message) return String(result.message).slice(0, 120);
   }
   return String(result).slice(0, 120);
+}
+
+function staffDirectionAllowsDirectConfirmation(instruction) {
+  const text = (instruction ?? "").toString();
+  if (!text.trim()) return false;
+  return /\b(confirm(?:ed|ation)?|approved?|go ahead|proceed|book(?:\s+it)?\s+confirmed)\b/i.test(
+    text
+  );
 }
 
 function extractStaffRoutePhone(text) {
@@ -1402,6 +1411,17 @@ async function executeTool(name, input, phone) {
     }
 
     if (name === "create_draft_booking") {
+      const { data: convState } = await supabase
+        .from("agent_conversations")
+        .select("facts")
+        .eq("phone_number", phone)
+        .maybeSingle();
+      const staffInstruction = convState?.facts?.staff_instruction ?? "";
+      const awaitingStaffDirection = Boolean(convState?.facts?.awaiting_staff_direction);
+      const directConfirmationAllowed =
+        !awaitingStaffDirection && staffDirectionAllowsDirectConfirmation(staffInstruction);
+      const bookingStatus = directConfirmationAllowed ? "confirmed" : "draft";
+
       const { data: ref } = await supabase.rpc("generate_booking_ref");
       if (!ref) return { error: "Could not generate booking ref" };
 
@@ -1413,7 +1433,7 @@ async function executeTool(name, input, phone) {
           room_id: input.room_id,
           check_in_date: input.check_in_date,
           check_out_date: input.check_out_date,
-          status: "draft",
+          status: bookingStatus,
           notes: input.notes ?? null,
           created_by: "WhatsApp agent",
           add_ons: input.add_ons ?? [],
@@ -1440,34 +1460,47 @@ async function executeTool(name, input, phone) {
         .update({ draft_booking: booking })
         .eq("phone_number", phone);
 
+      if (bookingStatus === "draft") {
+        await notifyStaff(
+          "🐾 *Booking request from WhatsApp*\n\n" +
+            "*Ref:* " +
+            ref +
+            "\n" +
+            "*Check-in:* " +
+            input.check_in_date +
+            "\n" +
+            "*Check-out:* " +
+            input.check_out_date +
+            "\n" +
+            "*Pets:* " +
+            input.pet_ids.length +
+            " pet(s)\n\n" +
+            "Reply in this chat:\n" +
+            "✅ *!confirm " +
+            ref +
+            "* to approve\n" +
+            "❌ *!reject " +
+            ref +
+            " [reason]* to decline"
+        );
+
+        return {
+          success: true,
+          booking_ref: ref,
+          booking_id: booking.id,
+          message: `Draft ${ref} created and sent to team for approval.`,
+        };
+      }
+
       await notifyStaff(
-        "🐾 *Booking request from WhatsApp*\n\n" +
-          "*Ref:* " +
-          ref +
-          "\n" +
-          "*Check-in:* " +
-          input.check_in_date +
-          "\n" +
-          "*Check-out:* " +
-          input.check_out_date +
-          "\n" +
-          "*Pets:* " +
-          input.pet_ids.length +
-          " pet(s)\n\n" +
-          "Reply in this chat:\n" +
-          "✅ *!confirm " +
-          ref +
-          "* to approve\n" +
-          "❌ *!reject " +
-          ref +
-          " [reason]* to decline"
+        `✅ Booking auto-confirmed from staff direction\nRef: ${ref}\nCheck-in: ${input.check_in_date}\nCheck-out: ${input.check_out_date}\nPets: ${input.pet_ids.length}`
       );
 
       return {
         success: true,
         booking_ref: ref,
         booking_id: booking.id,
-        message: `Draft ${ref} created and sent to team for approval.`,
+        message: `Booking ${ref} confirmed successfully.`,
       };
     }
 
@@ -1724,6 +1757,10 @@ client.on("message", async (msg) => {
         .from("agent_conversations")
         .update({ draft_booking: null })
         .eq("owner_id", booking.owner_id);
+      await supabase
+        .from("agent_conversations")
+        .update({ mode: "agent" })
+        .eq("owner_id", booking.owner_id);
 
       await notifyStaff(`✓ ${ref} confirmed and owner notified`);
       return;
@@ -1763,6 +1800,12 @@ client.on("message", async (msg) => {
       }
 
       await notifyStaff(`✓ ${ref} cancelled and owner notified`);
+      if (booking?.owner_id) {
+        await supabase
+          .from("agent_conversations")
+          .update({ mode: "agent" })
+          .eq("owner_id", booking.owner_id);
+      }
       return;
     }
 
