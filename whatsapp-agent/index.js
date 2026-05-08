@@ -951,6 +951,28 @@ async function ensureConversationFactsColumn() {
   }
 }
 
+async function assertAgentConversationColumns() {
+  const { error: factsErr } = await supabase
+    .from("agent_conversations")
+    .select("facts")
+    .limit(1);
+  if (factsErr) {
+    throw new Error(
+      `agent_conversations.facts is required for alias routing but is not available: ${factsErr.message}`
+    );
+  }
+
+  const { error: ownerProfileErr } = await supabase
+    .from("agent_conversations")
+    .select("owner_profile")
+    .limit(1);
+  if (ownerProfileErr) {
+    throw new Error(
+      `agent_conversations.owner_profile is required for stable owner context: ${ownerProfileErr.message}`
+    );
+  }
+}
+
 async function ensureSessionBucketAccess() {
   const { error } = await supabase.storage.from(SESSION_BUCKET).list("", { limit: 1 });
   if (error) {
@@ -1253,7 +1275,7 @@ async function recordActiveJidForOwner({ ownerId, ownerConv, inboundJid, inbound
     ...existingFacts,
     active_jid: nextActiveJid,
     active_jid_ts: nextActiveTs,
-    aliases: Array.from(aliasSet).slice(-10),
+    aliases: Array.from(aliasSet).slice(-20),
     last_seen_jid: inboundJid,
   };
 
@@ -2107,4 +2129,5 @@ console.log("Starting MSH WhatsApp agent...");
 await ensureSessionBucketAccess();
 await ensureOwnerProfileColumn();
 await ensureConversationFactsColumn();
+await assertAgentConversationColumns();
 queueClientInitialize("startup");
