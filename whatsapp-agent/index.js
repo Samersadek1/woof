@@ -1358,6 +1358,40 @@ async function resolveBestKnownJidForOwner(ownerId) {
   return bestJid;
 }
 
+async function resolveOwnerForTargetJid(targetJid) {
+  const known = await findOwnerByKnownJid(targetJid);
+  if (known?.id) {
+    return { ownerId: known.id, source: `known_jid:${known.source}` };
+  }
+
+  if (targetJid.endsWith("@lid") && typeof client.getContactLidAndPhone === "function") {
+    try {
+      const bridge = await client.getContactLidAndPhone([targetJid]);
+      const bridgedPnRaw = Array.isArray(bridge) ? bridge[0]?.pn : bridge?.pn;
+      const bridgedPhone = bridgedPnRaw ? canonicalConversationPhone(bridgedPnRaw) : null;
+      if (bridgedPhone) {
+        const bridgedOwner = await findOwnerByFlexiblePhone(bridgedPhone);
+        if (bridgedOwner?.id) {
+          return {
+            ownerId: bridgedOwner.id,
+            source: "lid_bridge_phone_match",
+            bridgedPhone,
+          };
+        }
+      }
+    } catch {
+      // Ignore bridge lookup failures and continue.
+    }
+  }
+
+  const fallbackOwner = await findOwnerByFlexiblePhone(targetJid);
+  if (fallbackOwner?.id) {
+    return { ownerId: fallbackOwner.id, source: "flexible_phone_match" };
+  }
+
+  return { ownerId: null, source: "no_owner_match" };
+}
+
 async function recordActiveJidForOwner({ ownerId, ownerConv, inboundJid, inboundTs, aliases = [] }) {
   if (!ownerId || !inboundJid) return ownerConv ?? null;
 
@@ -1426,15 +1460,20 @@ async function getOwnerContext(phone, conv) {
   let ownerMatchSource = "conversation_owner_id";
 
   if (!ownerId) {
-    const known = await findOwnerByKnownJid(phone);
-    const owner = known?.id ? { id: known.id } : await findOwnerByFlexiblePhone(phone);
-    if (owner?.id) {
-      ownerId = owner.id;
-      ownerMatchSource = known?.id ? "known_jid_match" : "flexible_phone_match";
+    const ownerResolution = await resolveOwnerForTargetJid(phone);
+    if (ownerResolution?.ownerId) {
+      ownerId = ownerResolution.ownerId;
+      ownerMatchSource = ownerResolution.source;
       await supabase
         .from("agent_conversations")
-        .update({ owner_id: owner.id })
+        .update({ owner_id: ownerId })
         .eq("phone_number", phone);
+      if (ownerResolution.bridgedPhone) {
+        await supabase
+          .from("agent_conversations")
+          .update({ owner_id: ownerId })
+          .eq("phone_number", ownerResolution.bridgedPhone);
+      }
     } else {
       ownerMatchSource = "no_owner_match";
     }
@@ -1503,8 +1542,8 @@ async function activateAgentForTarget({
     targetPhone,
   });
 
-  const owner = await findOwnerByFlexiblePhone(targetPhone);
-  const ownerId = owner?.id ?? null;
+  const ownerResolution = await resolveOwnerForTargetJid(normalizedTargetJid);
+  const ownerId = ownerResolution?.ownerId ?? null;
 
   // Single canonical row: prefer existing owner row; otherwise use targetPhone.
   let conversationKey = targetPhone;
@@ -1853,7 +1892,7 @@ async function runAgent(phone, message, options = {}) {
     if (response.stop_reason === "tool_use") {
       if (toolRounds >= MAX_TOOL_ROUNDS) {
         finalText =
-          "I have enough context to help, but I need a teammate to complete this request. Let me hand this to our team.";
+          "Thanks - I have your details and I am still processing this request. I will confirm the next step shortly.";
         toolTrace.push("tool_round_limit_reached");
         break;
       }
@@ -1890,6 +1929,16 @@ async function runAgent(phone, message, options = {}) {
   }
   if (toolTrace.length) {
     memoryBlocks.push(`tool_trace=${toolTrace.join(" | ").slice(0, 600)}`);
+  }
+
+  const lastAssistantMessage = [...claudeMessages]
+    .reverse()
+    .find((m) => m?.role === "assistant" && typeof m?.content === "string")?.content;
+  if (
+    typeof lastAssistantMessage === "string" &&
+    lastAssistantMessage.trim() === finalText.trim()
+  ) {
+    finalText = "Thanks - I am still on this and will update you shortly.";
   }
 
   const updatedHistory = [
