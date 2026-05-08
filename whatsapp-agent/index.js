@@ -583,23 +583,25 @@ async function resolveInboundRouting(msg) {
   }
 
   let contactDigits = "";
+  let contactMappedPhone = null;
   try {
     const contact = await msg.getContact();
     // Prefer the contact phone number; do not use LID user IDs as phone numbers.
     contactDigits = normalizeDigits(contact?.number ?? "");
+    contactMappedPhone = contactDigits ? canonicalConversationPhone(contactDigits) : null;
   } catch {
     // Ignore contact lookup failures and use raw ID fallback.
   }
 
-  if (contactDigits) {
-    const mappedPhone = canonicalConversationPhone(contactDigits);
-    const owner = await findOwnerByFlexiblePhone(mappedPhone);
+  if (contactMappedPhone) {
+    const owner = await findOwnerByFlexiblePhone(contactMappedPhone);
     if (owner?.id) {
       return {
         replyTarget,
-        conversationPhone: mappedPhone,
-        lookupCandidates: [mappedPhone, replyTarget],
+        conversationPhone: contactMappedPhone,
+        lookupCandidates: [contactMappedPhone, replyTarget],
         ownerIdHint: owner.id,
+        contactMappedPhone,
         source: "contact_match",
       };
     }
@@ -610,8 +612,9 @@ async function resolveInboundRouting(msg) {
   return {
     replyTarget,
     conversationPhone: rawConversationPhone,
-    lookupCandidates: [rawConversationPhone, replyTarget],
+    lookupCandidates: [rawConversationPhone, replyTarget, contactMappedPhone].filter(Boolean),
     ownerIdHint: owner?.id ?? null,
+    contactMappedPhone,
     source: "fallback",
   };
 }
@@ -1017,6 +1020,111 @@ async function getOwnerConversation(ownerId) {
     return null;
   }
   return data ?? null;
+}
+
+async function resolveOwnerConversationForInbound(routing) {
+  const inboundJid = routing?.replyTarget ?? "";
+  if (inboundJid.endsWith("@c.us") || inboundJid.endsWith("@lid")) {
+    try {
+      const { data: directConv } = await supabase
+        .from("agent_conversations")
+        .select("owner_id, phone_number, mode, facts")
+        .eq("phone_number", inboundJid)
+        .not("owner_id", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (directConv?.owner_id) {
+        return {
+          ownerId: directConv.owner_id,
+          ownerConv: directConv,
+          source: "inbound_phone_number_match",
+        };
+      }
+    } catch {
+      // Continue to next lookup.
+    }
+
+    try {
+      const { data: activeJidConv } = await supabase
+        .from("agent_conversations")
+        .select("owner_id, phone_number, mode, facts")
+        .eq("facts->>active_jid", inboundJid)
+        .not("owner_id", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (activeJidConv?.owner_id) {
+        return {
+          ownerId: activeJidConv.owner_id,
+          ownerConv: activeJidConv,
+          source: "inbound_active_jid_match",
+        };
+      }
+    } catch {
+      // Continue to alias lookup.
+    }
+
+    try {
+      const { data: aliasConvs } = await supabase
+        .from("agent_conversations")
+        .select("owner_id, phone_number, mode, facts, updated_at")
+        .contains("facts", { aliases: [inboundJid] })
+        .not("owner_id", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(20);
+      const bestAlias = (aliasConvs ?? []).find((c) => c?.owner_id);
+      if (bestAlias?.owner_id) {
+        return {
+          ownerId: bestAlias.owner_id,
+          ownerConv: bestAlias,
+          source: "inbound_alias_match",
+        };
+      }
+    } catch {
+      // Continue to phone fallback.
+    }
+  }
+
+  const ownerFromReply = await findOwnerByFlexiblePhone(routing.replyTarget);
+  const ownerFromContactMapped = routing.contactMappedPhone
+    ? await findOwnerByFlexiblePhone(routing.contactMappedPhone)
+    : null;
+  const ownerFromConversation =
+    ownerFromReply ??
+    ownerFromContactMapped ??
+    (await findOwnerByFlexiblePhone(routing.conversationPhone));
+  if (!ownerFromConversation?.id) return null;
+
+  let ownerConv = await getOwnerConversation(ownerFromConversation.id);
+  if (!ownerConv && routing.contactMappedPhone) {
+    try {
+      const { data: mappedConv } = await supabase
+        .from("agent_conversations")
+        .select("owner_id, phone_number, mode, facts")
+        .eq("phone_number", routing.contactMappedPhone)
+        .not("owner_id", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (mappedConv?.owner_id) {
+        ownerConv = mappedConv;
+      }
+    } catch {
+      // Ignore mapped-phone lookup failure.
+    }
+  }
+  return {
+    ownerId: ownerFromConversation.id,
+    ownerConv: ownerConv ?? null,
+    source: ownerFromContactMapped
+      ? ownerConv
+        ? "inbound_contact_mapped_phone_owner_row"
+        : "inbound_contact_mapped_phone_no_row"
+      : ownerConv
+        ? "inbound_phone_fallback_owner_row"
+        : "inbound_phone_fallback_no_row",
+  };
 }
 
 async function findOwnerByKnownJid(jid) {
@@ -1815,22 +1923,32 @@ client.on("message", async (msg) => {
   if (!msg.from.endsWith("@c.us") && !msg.from.endsWith("@lid")) return;
 
   const routing = await resolveInboundRouting(msg);
-
-  // Resolve owner from the inbound JID (and conversation alias as a fallback).
-  let resolvedOwnerId = routing.ownerIdHint ?? null;
-  if (!resolvedOwnerId) {
-    const ownerFromReply = await findOwnerByFlexiblePhone(routing.replyTarget);
-    resolvedOwnerId =
-      ownerFromReply?.id ??
-      (await findOwnerByFlexiblePhone(routing.conversationPhone))?.id ??
-      null;
-  }
+  const ownerResolution = await resolveOwnerConversationForInbound(routing);
+  let resolvedOwnerId = ownerResolution?.ownerId ?? routing.ownerIdHint ?? null;
+  let ownerConv = ownerResolution?.ownerConv ?? null;
+  let resolutionSource = ownerResolution?.source ?? routing.source;
 
   // If owner is known, track this inbound JID + timestamp on the owner's row
   // so future activations always pick the live thread.
-  let ownerConv = null;
   if (resolvedOwnerId) {
-    ownerConv = await getOwnerConversation(resolvedOwnerId);
+    if (!ownerConv) {
+      ownerConv = await getOwnerConversation(resolvedOwnerId);
+    }
+    if (!ownerConv) {
+      const defaultConversationKey = routing.conversationPhone || routing.replyTarget;
+      await supabase.from("agent_conversations").upsert(
+        {
+          phone_number: defaultConversationKey,
+          owner_id: resolvedOwnerId,
+          mode: "agent",
+          history: [],
+          facts: {},
+        },
+        { onConflict: "phone_number" }
+      );
+      ownerConv = await getOwnerConversation(resolvedOwnerId);
+      resolutionSource = `${resolutionSource}+owner_row_created`;
+    }
     ownerConv = await recordActiveJidForOwner({
       ownerId: resolvedOwnerId,
       ownerConv,
@@ -1838,39 +1956,27 @@ client.on("message", async (msg) => {
       inboundTs: msg.timestamp,
       aliases: [routing.replyTarget, routing.conversationPhone],
     });
+    resolutionSource = `${resolutionSource}+active_jid_updated`;
   }
 
-  // Mode resolution: owner row first, JID rows only if owner unknown.
+  // Mode resolution: owner row is the source of truth.
   let mode = "human";
-  let modeKey = ownerConv?.phone_number ?? routing.conversationPhone;
+  let modeKey = routing.conversationPhone;
 
-  if (resolvedOwnerId) {
+  if (ownerConv?.phone_number) {
     mode = ownerConv?.mode ?? "human";
-    modeKey = ownerConv?.phone_number ?? routing.conversationPhone;
+    modeKey = ownerConv.phone_number;
   } else {
-    let humanModeKey = null;
-    const lookupCandidates = [
-      ...new Set(routing.lookupCandidates ?? [routing.conversationPhone]),
-    ];
-    for (const candidate of lookupCandidates) {
-      const { data: conv } = await supabase
-        .from("agent_conversations")
-        .select("mode")
-        .eq("phone_number", candidate)
-        .maybeSingle();
-      if (!conv?.mode) continue;
-      if (conv.mode === "agent") {
-        mode = "agent";
-        modeKey = candidate;
-        break;
-      }
-      if (conv.mode === "human" && !humanModeKey) {
-        humanModeKey = candidate;
-      }
-    }
-    if (mode !== "agent" && humanModeKey) {
-      mode = "human";
-      modeKey = humanModeKey;
+    // Unknown owner fallback: only explicit per-JID mode row can activate.
+    const { data: unknownConv } = await supabase
+      .from("agent_conversations")
+      .select("phone_number, mode")
+      .eq("phone_number", routing.replyTarget)
+      .maybeSingle();
+    if (unknownConv?.mode) {
+      mode = unknownConv.mode;
+      modeKey = unknownConv.phone_number ?? modeKey;
+      resolutionSource = `${resolutionSource}+unknown_jid_mode_row`;
     }
   }
 
@@ -1879,6 +1985,7 @@ client.on("message", async (msg) => {
     conversationPhone: routing.conversationPhone,
     replyTarget: routing.replyTarget,
     ownerId: resolvedOwnerId,
+    resolutionSource,
     modeKey,
     mode,
   });
