@@ -556,6 +556,19 @@ function canonicalConversationPhone(value) {
 
 async function resolveInboundRouting(msg) {
   const replyTarget = msg.from;
+  const ownerFromKnownJid = await findOwnerByKnownJid(replyTarget);
+  if (ownerFromKnownJid?.id) {
+    const conversationPhone =
+      ownerFromKnownJid.conversationPhone ?? canonicalConversationPhone(replyTarget);
+    return {
+      replyTarget,
+      conversationPhone,
+      lookupCandidates: [conversationPhone, replyTarget],
+      ownerIdHint: ownerFromKnownJid.id,
+      source: ownerFromKnownJid.source,
+    };
+  }
+
   if (replyTarget.endsWith("@c.us")) {
     const conversationPhone = canonicalConversationPhone(replyTarget);
     const owner = await findOwnerByFlexiblePhone(conversationPhone);
@@ -614,15 +627,15 @@ async function resolveTargetJidForActivation(rawTarget) {
   try {
     const owner = await findOwnerByFlexiblePhone(cleaned);
     if (owner?.id) {
-      const { jid: activeJid } = await resolveActiveJidForOwner(owner.id);
-      if (activeJid) {
+      const ownerPreferredJid = await resolveBestKnownJidForOwner(owner.id);
+      if (ownerPreferredJid) {
         console.log("Activation JID resolved from owner active_jid:", {
           rawTarget: cleaned,
           ownerId: owner.id,
-          resolvedJid: activeJid,
-          source: "owner_active_jid",
+          resolvedJid: ownerPreferredJid,
+          source: "owner_known_alias",
         });
-        return activeJid;
+        return ownerPreferredJid;
       }
     }
   } catch (err) {
@@ -867,6 +880,15 @@ async function handleStaffGuidanceReply({ routePhone, guidanceText }) {
     awaiting_staff_direction: false,
     staff_instruction: guidanceText,
     staff_instruction_at: new Date().toISOString(),
+    active_jid: replyTarget,
+    active_jid_ts: Math.floor(Date.now() / 1000),
+    aliases: Array.from(
+      new Set([
+        ...(Array.isArray(conv?.facts?.aliases) ? conv.facts.aliases : []),
+        replyTarget,
+        routePhone,
+      ])
+    ).slice(-20),
     last_seen_jid: replyTarget,
   };
 
@@ -988,7 +1010,109 @@ async function getOwnerConversation(ownerId) {
   return data ?? null;
 }
 
-async function recordActiveJidForOwner({ ownerId, ownerConv, inboundJid, inboundTs }) {
+async function findOwnerByKnownJid(jid) {
+  if (!jid || (!jid.endsWith("@c.us") && !jid.endsWith("@lid"))) return null;
+
+  try {
+    const { data: directConv } = await supabase
+      .from("agent_conversations")
+      .select("owner_id, phone_number")
+      .eq("phone_number", jid)
+      .not("owner_id", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (directConv?.owner_id) {
+      return {
+        id: directConv.owner_id,
+        conversationPhone: directConv.phone_number,
+        source: "known_jid_phone_number",
+      };
+    }
+  } catch {
+    // Continue to other lookups.
+  }
+
+  try {
+    const { data: activeJidConv } = await supabase
+      .from("agent_conversations")
+      .select("owner_id, phone_number")
+      .eq("facts->>active_jid", jid)
+      .not("owner_id", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (activeJidConv?.owner_id) {
+      return {
+        id: activeJidConv.owner_id,
+        conversationPhone: activeJidConv.phone_number,
+        source: "known_jid_active_jid",
+      };
+    }
+  } catch {
+    // Continue to alias lookup.
+  }
+
+  try {
+    const { data: aliasConvs } = await supabase
+      .from("agent_conversations")
+      .select("owner_id, phone_number, updated_at")
+      .contains("facts", { aliases: [jid] })
+      .not("owner_id", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    const best = (aliasConvs ?? []).find((c) => c?.owner_id);
+    if (best?.owner_id) {
+      return {
+        id: best.owner_id,
+        conversationPhone: best.phone_number,
+        source: "known_jid_aliases",
+      };
+    }
+  } catch {
+    // Ignore alias lookup errors.
+  }
+
+  return null;
+}
+
+async function resolveBestKnownJidForOwner(ownerId) {
+  const ownerConv = await getOwnerConversation(ownerId);
+  if (!ownerConv) return null;
+
+  const facts = ownerConv.facts ?? {};
+  const aliasCandidates = new Set();
+  if (typeof facts.active_jid === "string") aliasCandidates.add(facts.active_jid);
+  if (Array.isArray(facts.aliases)) {
+    for (const alias of facts.aliases) {
+      if (typeof alias === "string") aliasCandidates.add(alias);
+    }
+  }
+  if (ownerConv.phone_number?.endsWith("@c.us") || ownerConv.phone_number?.endsWith("@lid")) {
+    aliasCandidates.add(ownerConv.phone_number);
+  }
+
+  let bestJid = null;
+  let bestTs = -1;
+  for (const jid of aliasCandidates) {
+    if (!jid.endsWith("@c.us") && !jid.endsWith("@lid")) continue;
+    try {
+      const chat = await client.getChatById(jid);
+      const recent = await chat.fetchMessages({ limit: 1 });
+      const ts = Number(recent?.[0]?.timestamp ?? 0);
+      if (ts > bestTs) {
+        bestTs = ts;
+        bestJid = jid;
+      }
+    } catch {
+      // Skip stale aliases not present in current WA session.
+    }
+  }
+
+  return bestJid;
+}
+
+async function recordActiveJidForOwner({ ownerId, ownerConv, inboundJid, inboundTs, aliases = [] }) {
   if (!ownerId || !inboundJid) return ownerConv ?? null;
 
   const existingFacts = ownerConv?.facts ?? {};
@@ -998,6 +1122,11 @@ async function recordActiveJidForOwner({ ownerId, ownerConv, inboundJid, inbound
     Array.isArray(existingFacts.aliases) ? existingFacts.aliases : []
   );
   aliasSet.add(inboundJid);
+  for (const alias of aliases) {
+    if (typeof alias === "string" && alias.trim()) {
+      aliasSet.add(alias.trim());
+    }
+  }
 
   const nextActiveJid =
     tsNow >= previousTs ? inboundJid : existingFacts.active_jid ?? inboundJid;
@@ -1044,21 +1173,6 @@ async function recordActiveJidForOwner({ ownerId, ownerConv, inboundJid, inbound
     owner_id: ownerId,
     facts: updatedFacts,
   };
-}
-
-async function resolveActiveJidForOwner(ownerId) {
-  const conv = await getOwnerConversation(ownerId);
-  const activeJid = conv?.facts?.active_jid;
-  if (!activeJid) return { conv, jid: null };
-  if (!activeJid.endsWith("@c.us") && !activeJid.endsWith("@lid")) {
-    return { conv, jid: null };
-  }
-  try {
-    await client.getChatById(activeJid);
-    return { conv, jid: activeJid };
-  } catch {
-    return { conv, jid: null };
-  }
 }
 
 async function getOwnerContext(phone, conv) {
@@ -1188,7 +1302,9 @@ async function activateAgentForTarget({
       Number(existingOwnerConv?.facts?.active_jid_ts ?? 0),
       Math.floor(Date.now() / 1000)
     ),
-    aliases: Array.from(aliasSet).slice(-10),
+    aliases: Array.from(
+      new Set([normalizedTargetJid, targetPhone, conversationKey, ...Array.from(aliasSet)])
+    ).slice(-20),
     last_seen_jid: normalizedTargetJid,
   };
 
@@ -1677,6 +1793,7 @@ client.on("message", async (msg) => {
       ownerConv,
       inboundJid: msg.from,
       inboundTs: msg.timestamp,
+      aliases: [routing.replyTarget, routing.conversationPhone],
     });
   }
 
