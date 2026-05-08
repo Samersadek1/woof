@@ -43,6 +43,7 @@ const SESSION_BUCKET = "whatsapp-sessions";
 const WA_SESSION_CLIENT_ID = process.env.WA_SESSION_CLIENT_ID || "msh-whatsapp-main";
 const sessionObjectPath = (session) => `${session}.zip`;
 const localSessionZipPath = (session) => resolve(".wwebjs_auth", `${session}.zip`);
+const STAFF_ROUTE_MARKER_RE = /\[#route\s+phone=([^\]\s]+)(?:\s+[^\]]*)?\]/i;
 const MAX_CONSECUTIVE_AGENT_ERRORS = 3;
 const MAX_TOOL_ROUNDS = 4;
 const INIT_GUARD_TIMEOUT_MS = Number(process.env.WA_INIT_GUARD_TIMEOUT_MS ?? 120000);
@@ -451,6 +452,9 @@ async function buildSystemPrompt(ownerProfile, options = {}) {
   const factsSection = options.facts && Object.keys(options.facts).length
     ? `\nCONVERSATION FACTS:\n${JSON.stringify(options.facts, null, 2)}\n`
     : "";
+  const staffDirectionSection = options.staffInstruction
+    ? `\nPRIORITY STAFF DIRECTION:\n${options.staffInstruction}\nFollow this staff direction exactly before taking any other action.\n`
+    : "";
 
   return `You are the MSH booking assistant for MySecondHome,
 a premium pet boarding facility in Dubai.
@@ -463,6 +467,7 @@ BUSINESS RULES:
 ${rules}
 ${handoffSection}
 ${factsSection}
+${staffDirectionSection}
 
 YOUR RULES:
 - Keep messages short -- this is WhatsApp, not email
@@ -798,6 +803,142 @@ function summarizeToolResult(result) {
     if (result.message) return String(result.message).slice(0, 120);
   }
   return String(result).slice(0, 120);
+}
+
+function extractStaffRoutePhone(text) {
+  const match = (text ?? "").match(STAFF_ROUTE_MARKER_RE);
+  return match?.[1]?.trim() ?? null;
+}
+
+async function getConversationByPhone(phone) {
+  if (!phone) return null;
+  const { data, error } = await supabase
+    .from("agent_conversations")
+    .select("*")
+    .eq("phone_number", phone)
+    .maybeSingle();
+  if (error) {
+    console.error("getConversationByPhone failed:", { phone, error: error.message });
+    return null;
+  }
+  return data ?? null;
+}
+
+async function setAwaitingStaffDirection(phone, reason, summary) {
+  const conv = await getConversationByPhone(phone);
+  const facts = {
+    ...(conv?.facts ?? {}),
+    awaiting_staff_direction: true,
+    escalation_reason: reason,
+    escalation_summary: summary,
+    escalation_requested_at: new Date().toISOString(),
+  };
+  await supabase
+    .from("agent_conversations")
+    .update({ mode: "human", facts })
+    .eq("phone_number", phone);
+}
+
+async function handleAwaitingStaffOwnerMessage({
+  conversationKey,
+  replyTarget,
+  ownerConv,
+  messageBody,
+  timestamp,
+}) {
+  const nowTs = Number(timestamp ?? Math.floor(Date.now() / 1000));
+  const existingFacts = ownerConv?.facts ?? {};
+  const updatedFacts = {
+    ...existingFacts,
+    active_jid: replyTarget,
+    active_jid_ts: Math.max(Number(existingFacts.active_jid_ts ?? 0), nowTs),
+    pending_owner_message: messageBody,
+    pending_owner_message_at: new Date().toISOString(),
+  };
+
+  await supabase
+    .from("agent_conversations")
+    .update({ facts: updatedFacts })
+    .eq("phone_number", conversationKey);
+
+  const lastAckTs = Number(existingFacts.last_owner_hold_ack_ts ?? 0);
+  const lastStaffPingTs = Number(existingFacts.last_staff_followup_ping_ts ?? 0);
+  const shouldAckOwner = nowTs - lastAckTs >= 120;
+  const shouldPingStaff = nowTs - lastStaffPingTs >= 120;
+
+  if (shouldAckOwner) {
+    await client.sendMessage(
+      replyTarget,
+      "Thanks for your message. Our team is reviewing this request and I will update you shortly."
+    );
+    updatedFacts.last_owner_hold_ack_ts = nowTs;
+  }
+
+  if (shouldPingStaff) {
+    await notifyStaff(
+      `🔔 Owner follow-up while awaiting staff direction\n` +
+        `Phone: ${conversationKey}\n` +
+        `Message: ${messageBody.slice(0, 300)}\n` +
+        `Reply to the latest escalation message to guide the bot.\n` +
+        `[#route phone=${conversationKey} state=awaiting_staff]`
+    );
+    updatedFacts.last_staff_followup_ping_ts = nowTs;
+  }
+
+  if (shouldAckOwner || shouldPingStaff) {
+    await supabase
+      .from("agent_conversations")
+      .update({ facts: updatedFacts })
+      .eq("phone_number", conversationKey);
+  }
+}
+
+async function handleStaffGuidanceReply({ routePhone, guidanceText }) {
+  const conv = await getConversationByPhone(routePhone);
+  if (!conv) {
+    await notifyStaff(`⚠️ Could not route staff guidance. Conversation not found for ${routePhone}`);
+    return;
+  }
+
+  const replyTarget = conv?.facts?.active_jid ?? routePhone;
+  let liveHistory = conv?.history ?? [];
+  try {
+    liveHistory = await fetchFormattedHistoryByChatId(replyTarget, 30);
+  } catch {
+    // Keep DB history fallback.
+  }
+
+  const lastUserMessage =
+    [...liveHistory].reverse().find((m) => m.role === "user")?.content ??
+    "Please continue the conversation with the owner based on staff direction.";
+
+  const updatedFacts = {
+    ...(conv?.facts ?? {}),
+    awaiting_staff_direction: false,
+    staff_instruction: guidanceText,
+    staff_instruction_at: new Date().toISOString(),
+    last_seen_jid: replyTarget,
+  };
+
+  await supabase
+    .from("agent_conversations")
+    .update({ mode: "agent", facts: updatedFacts })
+    .eq("phone_number", routePhone);
+
+  if (conv?.owner_id) {
+    await supabase
+      .from("agent_conversations")
+      .update({ mode: "agent" })
+      .eq("owner_id", conv.owner_id);
+  }
+
+  const reply = await runAgent(routePhone, lastUserMessage, {
+    overrideHistory: liveHistory,
+    lastSeenJid: replyTarget,
+    staffInstruction: guidanceText,
+  });
+  await client.sendMessage(replyTarget, reply);
+  await notifyStaff(`✅ Staff guidance applied and owner updated for ${routePhone}`);
 }
 
 async function ensureOwnerProfileColumn() {
@@ -1265,16 +1406,15 @@ async function executeTool(name, input, phone) {
     }
 
     if (name === "escalate_to_human") {
-      await supabase
-        .from("agent_conversations")
-        .update({ mode: "human" })
-        .eq("phone_number", phone);
+      await setAwaitingStaffDirection(phone, input.reason, input.summary);
 
       await notifyStaff(
         `🔔 WhatsApp conversation needs attention\n` +
           `Phone: ${phone}\n` +
           `Reason: ${input.reason}\n` +
-          `Summary: ${input.summary}`
+          `Summary: ${input.summary}\n\n` +
+          `Reply directly to this message with guidance for the bot.\n` +
+          `[#route phone=${phone} state=awaiting_staff]`
       );
 
       return { escalated: true };
@@ -1338,6 +1478,7 @@ async function runAgent(phone, message, options = {}) {
   const systemPrompt = await buildSystemPrompt(ownerProfile, {
     handoff: options.handoff,
     facts: updatedFacts,
+    staffInstruction: options.staffInstruction,
   });
 
   let currentMessages = [...claudeMessages];
@@ -1433,6 +1574,23 @@ client.on("message", async (msg) => {
 
   if (isFromStaffGroup) {
     const text = messageBody.trim();
+    const isCommand = text.startsWith("!");
+
+    if (!isCommand && msg.hasQuotedMsg) {
+      try {
+        const quoted = await msg.getQuotedMessage();
+        const routePhone = quoted?.fromMe ? extractStaffRoutePhone(quoted?.body ?? "") : null;
+        if (routePhone) {
+          await handleStaffGuidanceReply({
+            routePhone,
+            guidanceText: text,
+          });
+          return;
+        }
+      } catch (err) {
+        console.error("Staff guidance reply handling failed:", err?.message ?? err);
+      }
+    }
 
     if (text.startsWith("!bot ")) {
       const rawNumber = text.slice(5).trim();
@@ -1613,6 +1771,16 @@ client.on("message", async (msg) => {
     modeKey,
     mode,
   });
+  if (ownerConv?.facts?.awaiting_staff_direction) {
+    await handleAwaitingStaffOwnerMessage({
+      conversationKey: modeKey,
+      replyTarget: routing.replyTarget,
+      ownerConv,
+      messageBody,
+      timestamp: msg.timestamp,
+    });
+    return;
+  }
   if (mode !== "agent") return;
   const activeConversationKey = modeKey;
 
