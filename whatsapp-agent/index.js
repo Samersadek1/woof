@@ -47,6 +47,7 @@ const MAX_CONSECUTIVE_AGENT_ERRORS = 3;
 const MAX_TOOL_ROUNDS = 4;
 const INIT_GUARD_TIMEOUT_MS = Number(process.env.WA_INIT_GUARD_TIMEOUT_MS ?? 120000);
 const READY_STALL_TIMEOUT_MS = Number(process.env.WA_READY_STALL_TIMEOUT_MS ?? 180000);
+const AUTH_TO_READY_TIMEOUT_MS = Number(process.env.WA_AUTH_TO_READY_TIMEOUT_MS ?? 60000);
 const MAX_AUTO_RECOVERY_RETRIES = Number(process.env.WA_MAX_AUTO_RECOVERY_RETRIES ?? 2);
 const agentErrorCounts = new Map();
 let isClientInitializing = false;
@@ -54,6 +55,7 @@ let isClientReady = false;
 let isShuttingDown = false;
 let initGuardTimer = null;
 let readyStallTimer = null;
+let authReadyTimer = null;
 let autoRecoveryAttempts = 0;
 let latestQR = null;
 
@@ -178,6 +180,13 @@ function clearReadyStallTimer() {
   }
 }
 
+function clearAuthReadyTimer() {
+  if (authReadyTimer) {
+    clearTimeout(authReadyTimer);
+    authReadyTimer = null;
+  }
+}
+
 async function scheduleAutoRecover(reason) {
   if (isShuttingDown) return;
   if (autoRecoveryAttempts >= MAX_AUTO_RECOVERY_RETRIES) {
@@ -197,6 +206,7 @@ async function scheduleAutoRecover(reason) {
   });
   clearInitGuardTimer();
   clearReadyStallTimer();
+  clearAuthReadyTimer();
   isClientInitializing = false;
   isClientReady = false;
   try {
@@ -210,6 +220,10 @@ async function scheduleAutoRecover(reason) {
 
 function armReadyStallTimer(trigger) {
   clearReadyStallTimer();
+  console.log("Ready-stall timer armed:", {
+    trigger,
+    timeout_ms: READY_STALL_TIMEOUT_MS,
+  });
   readyStallTimer = setTimeout(() => {
     if (!isClientReady) {
       void scheduleAutoRecover(`ready-timeout:${trigger}`);
@@ -217,11 +231,25 @@ function armReadyStallTimer(trigger) {
   }, READY_STALL_TIMEOUT_MS);
 }
 
+function armAuthReadyTimer(trigger) {
+  clearAuthReadyTimer();
+  console.log("Auth-to-ready timer armed:", {
+    trigger,
+    timeout_ms: AUTH_TO_READY_TIMEOUT_MS,
+  });
+  authReadyTimer = setTimeout(() => {
+    if (!isClientReady) {
+      void scheduleAutoRecover(`auth-no-ready:${trigger}`);
+    }
+  }, AUTH_TO_READY_TIMEOUT_MS);
+}
+
 client.on("ready", async () => {
   isClientReady = true;
   autoRecoveryAttempts = 0;
   clearReadyStallTimer();
   clearInitGuardTimer();
+  clearAuthReadyTimer();
   latestQR = null;
   console.log("✓ MSH WhatsApp agent ready");
   console.log("RemoteAuth client ID:", WA_SESSION_CLIENT_ID);
@@ -240,6 +268,7 @@ client.on("ready", async () => {
 
 client.on("authenticated", () => {
   console.log("WhatsApp authenticated");
+  armAuthReadyTimer("authenticated_event");
 });
 
 client.on("auth_failure", (message) => {
@@ -259,6 +288,7 @@ client.on("disconnected", (reason) => {
   isClientReady = false;
   clearReadyStallTimer();
   clearInitGuardTimer();
+  clearAuthReadyTimer();
   console.error("WhatsApp disconnected:", reason);
   setTimeout(() => queueClientInitialize("disconnected"), 10_000);
 });
