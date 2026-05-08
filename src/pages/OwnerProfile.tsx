@@ -22,6 +22,7 @@ import { useDaycarePackages } from "@/hooks/useDaycare";
 import { useTopUpWallet } from "@/hooks/useWallet";
 import type { PetWithVaccinations } from "@/hooks/usePets";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
+import { VetClinicCombobox } from "@/components/VetClinicCombobox";
 import { VaccinationEditor } from "@/components/VaccinationEditor";
 import type { VaccinationRow } from "@/components/VaccinationEditor";
 import {
@@ -1882,7 +1883,11 @@ const OwnerProfilePage = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="pet_vet_name">Vet name</Label>
-                  <Input id="pet_vet_name" value={(petForm.vet_name as string) ?? ""} onChange={(e) => handlePetField("vet_name", e.target.value)} />
+                  <VetClinicCombobox
+                    id="pet_vet_name"
+                    value={(petForm.vet_name as string) ?? ""}
+                    onChange={(v) => handlePetField("vet_name", v)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="pet_vet_phone">Vet phone</Label>

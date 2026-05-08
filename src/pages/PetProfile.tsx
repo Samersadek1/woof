@@ -18,6 +18,7 @@ import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
+import { VetClinicCombobox } from "@/components/VetClinicCombobox";
 import { VaccinationEditor } from "@/components/VaccinationEditor";
 import { PetDocuments } from "@/components/PetDocuments";
 import { VaccicheckPanel } from "@/components/VaccicheckPanel";
@@ -1385,7 +1386,11 @@ const PetProfilePage = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit_vet_name">Vet name</Label>
-                <Input id="edit_vet_name" value={editForm.vet_name ?? ""} onChange={(e) => handleField("vet_name", e.target.value)} />
+                <VetClinicCombobox
+                  id="edit_vet_name"
+                  value={editForm.vet_name ?? ""}
+                  onChange={(v) => handleField("vet_name", v)}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit_vet_phone">Vet phone</Label>
