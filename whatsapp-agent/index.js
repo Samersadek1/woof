@@ -1870,6 +1870,7 @@ async function runAgent(phone, message, options = {}) {
   let finalText = "";
   const toolTrace = [];
   let toolRounds = 0;
+  let blockedReason = null;
 
   while (true) {
     const response = await anthropic.messages.create({
@@ -1891,6 +1892,7 @@ async function runAgent(phone, message, options = {}) {
 
     if (response.stop_reason === "tool_use") {
       if (toolRounds >= MAX_TOOL_ROUNDS) {
+        blockedReason = "tool_round_limit_reached";
         finalText =
           "Thanks - I have your details and I am still processing this request. I will confirm the next step shortly.";
         toolTrace.push("tool_round_limit_reached");
@@ -1919,7 +1921,9 @@ async function runAgent(phone, message, options = {}) {
       continue;
     }
 
-    finalText = "Something went wrong. Let me get someone to help you.";
+    blockedReason = `unexpected_stop_reason:${response.stop_reason ?? "unknown"}`;
+    finalText =
+      "Thanks - I have your details and I am still processing this request. I will confirm the next step shortly.";
     break;
   }
 
@@ -1939,6 +1943,20 @@ async function runAgent(phone, message, options = {}) {
     lastAssistantMessage.trim() === finalText.trim()
   ) {
     finalText = "Thanks - I am still on this and will update you shortly.";
+  }
+
+  if (blockedReason) {
+    await executeTool(
+      "escalate_to_human",
+      {
+        reason: blockedReason,
+        summary:
+          `Owner message: ${String(message).slice(0, 200)}\n` +
+          `Phone: ${phone}\n` +
+          `Tool trace: ${toolTrace.join(" | ").slice(0, 400) || "none"}`,
+      },
+      phone
+    );
   }
 
   const updatedHistory = [
