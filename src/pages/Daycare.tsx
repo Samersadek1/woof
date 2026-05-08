@@ -584,6 +584,8 @@ function PlannerTab() {
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [billingChoiceByPet, setBillingChoiceByPet] = useState<Record<string, string>>({});
   const [skipInvoiceDiscount, setSkipInvoiceDiscount] = useState(false);
+  const [hourlyDogsInput, setHourlyDogsInput] = useState("");
+  const [hourlyDogsTouched, setHourlyDogsTouched] = useState(false);
   const [checkInDraft, setCheckInDraft] = useState({
     session_date: TODAY,
     pickup_used: false,
@@ -661,22 +663,36 @@ function PlannerTab() {
   );
   const singleDayCount = singleDayPetIds.length;
   const hourlyCount = hourlyPetIds.length;
-  const invoicedDaycarePetCount = singleDayCount + hourlyCount;
+  /** Pets actually checked in on single-day or hourly (drives transport capacity). */
+  const physicalInvoicePetCount = singleDayCount + hourlyCount;
+
+  const effectiveHourlyDogs = useMemo(() => {
+    if (hourlyCount === 0) return 0;
+    const trimmed = hourlyDogsInput.trim();
+    if (trimmed === "") return Math.max(1, hourlyCount);
+    const n = Number.parseInt(trimmed, 10);
+    if (Number.isNaN(n) || n < 1) return Math.max(1, hourlyCount);
+    return Math.min(n, 99);
+  }, [hourlyCount, hourlyDogsInput]);
+
   const singleDayRatePreview = useMemo(
     () => daycareGroupPricing(singleDayCount, daycarePriceMap),
     [singleDayCount, daycarePriceMap],
   );
   const hourlyRatePreview = useMemo(
-    () => daycareHourlyGroupPricing(hourlyCount, daycarePriceMap),
-    [hourlyCount, daycarePriceMap],
+    () =>
+      hourlyCount > 0
+        ? daycareHourlyGroupPricing(effectiveHourlyDogs, daycarePriceMap)
+        : { pricingKey: "", total: 0, label: "" },
+    [hourlyCount, effectiveHourlyDogs, daycarePriceMap],
   );
   const transportRate = useMemo(() => {
     const key = transportPricingKey(checkInDraft.transport_zone);
     return transportPricingRows.find((r) => r.key === key)?.amount_aed ?? 0;
   }, [transportPricingRows, checkInDraft.transport_zone]);
   const transportTrips = [checkInDraft.pickup_used, checkInDraft.dropoff_used].filter(Boolean).length;
-  const previewTransportQty = invoicedDaycarePetCount
-    ? transportQuantityForPets(checkInDraft.transport_zone, invoicedDaycarePetCount)
+  const previewTransportQty = physicalInvoicePetCount
+    ? transportQuantityForPets(checkInDraft.transport_zone, physicalInvoicePetCount)
     : 0;
   const previewTransportTotal = transportRate * previewTransportQty * transportTrips;
   const immediateInvoiceSubtotalPreview =
@@ -695,7 +711,7 @@ function PlannerTab() {
     ],
     enabled:
       !!ownerId &&
-      invoicedDaycarePetCount > 0 &&
+      physicalInvoicePetCount > 0 &&
       immediateInvoiceSubtotalPreview > 0 &&
       !skipInvoiceDiscount,
     queryFn: async () => {
@@ -760,11 +776,24 @@ function PlannerTab() {
     });
   }, [selectedPetIds, getUsablePackagesForPet]);
 
+  useEffect(() => {
+    if (hourlyCount === 0) {
+      setHourlyDogsInput("");
+      setHourlyDogsTouched(false);
+      return;
+    }
+    if (!hourlyDogsTouched) {
+      setHourlyDogsInput(String(Math.max(1, hourlyCount)));
+    }
+  }, [hourlyCount, hourlyDogsTouched]);
+
   const handleOwnerSelect = (id: string, _label: string) => {
     setOwnerId(id);
     setPackageId(null);
     setSelectedPetIds([]);
     setBillingChoiceByPet({});
+    setHourlyDogsInput("");
+    setHourlyDogsTouched(false);
     syncPlannerSearchParams(setSearchParams, id, null);
   };
 
@@ -773,6 +802,8 @@ function PlannerTab() {
     setPackageId(null);
     setSelectedPetIds([]);
     setBillingChoiceByPet({});
+    setHourlyDogsInput("");
+    setHourlyDogsTouched(false);
     syncPlannerSearchParams(setSearchParams, null, null);
   };
 
@@ -846,10 +877,14 @@ function PlannerTab() {
     const okSingleIds = singleDayPetIds.filter((id) => sessionsCreated[id]);
     const okHourlyIds = hourlyPetIds.filter((id) => sessionsCreated[id]);
     const invoicedPetTotal = okSingleIds.length + okHourlyIds.length;
+    const hourlyDogsForInvoice = okHourlyIds.length > 0 ? effectiveHourlyDogs : 0;
 
     if (invoicedPetTotal > 0) {
       const singleRate = daycareGroupPricing(okSingleIds.length, daycarePriceMap);
-      const hourlyRate = daycareHourlyGroupPricing(okHourlyIds.length, daycarePriceMap);
+      const hourlyRate =
+        hourlyDogsForInvoice > 0
+          ? daycareHourlyGroupPricing(hourlyDogsForInvoice, daycarePriceMap)
+          : { pricingKey: "", total: 0, label: "" };
       const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
       const transportKey = transportPricingKey(checkInDraft.transport_zone);
       const lineItems: {
@@ -871,11 +906,11 @@ function PlannerTab() {
           preserveUnitPrice: true,
         });
       }
-      if (okHourlyIds.length > 0 && hourlyRate.pricingKey) {
+      if (okHourlyIds.length > 0 && hourlyDogsForInvoice > 0 && hourlyRate.pricingKey) {
         lineItems.push({
-          description: `${hourlyRate.label} (${okHourlyIds.length} dog${okHourlyIds.length === 1 ? "" : "s"})`,
-          quantity: okHourlyIds.length,
-          unitPrice: hourlyRate.total / okHourlyIds.length,
+          description: `${hourlyRate.label} (${hourlyDogsForInvoice} dog${hourlyDogsForInvoice === 1 ? "" : "s"})`,
+          quantity: hourlyDogsForInvoice,
+          unitPrice: hourlyRate.total / hourlyDogsForInvoice,
           pricingKey: hourlyRate.pricingKey,
           serviceType: "daycare",
           preserveUnitPrice: true,
@@ -941,6 +976,8 @@ function PlannerTab() {
       toast.success(`Checked in ${successCount} dog${successCount !== 1 ? "s" : ""}`);
       setSelectedPetIds([]);
       setBillingChoiceByPet({});
+      setHourlyDogsInput("");
+      setHourlyDogsTouched(false);
       setSkipInvoiceDiscount(false);
       setCheckInDraft((prev) => ({
         ...prev,
@@ -1043,6 +1080,51 @@ function PlannerTab() {
                 )}
               </div>
 
+              {hourlyCount > 0 && (
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-2 max-w-lg">
+                  <div className="space-y-1">
+                    <Label htmlFor="hourly_dog_count">Dogs — hourly billing</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Pricing follows the hourly rate card for this count. Transport still follows pets selected above ({hourlyCount} on hourly).
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="space-y-1">
+                      <Input
+                        id="hourly_dog_count"
+                        type="number"
+                        min={1}
+                        max={99}
+                        inputMode="numeric"
+                        className="h-9 w-[5.5rem]"
+                        value={hourlyDogsInput}
+                        onChange={(e) => {
+                          setHourlyDogsInput(e.target.value);
+                          setHourlyDogsTouched(true);
+                        }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-1 pb-0.5">
+                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                        <Button
+                          key={n}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 min-w-8 px-2"
+                          onClick={() => {
+                            setHourlyDogsInput(String(n));
+                            setHourlyDogsTouched(true);
+                          }}
+                        >
+                          {n}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="checkin_session_date">Date</Label>
@@ -1107,7 +1189,7 @@ function PlannerTab() {
                     </Select>
                     {(() => {
                       const zone = checkInDraft.transport_zone;
-                      const pets = Math.max(1, invoicedDaycarePetCount || selectedPetIds.length);
+                      const pets = Math.max(1, physicalInvoicePetCount || selectedPetIds.length);
                       const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === zone);
                       const over = privateDubaiOverCapacity(zone, pets);
                       const trips = transportTrips;
@@ -1140,7 +1222,7 @@ function PlannerTab() {
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
                     Auto pricing preview
                   </p>
-                  {invoicedDaycarePetCount === 0 ? (
+                  {physicalInvoicePetCount === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       No immediate invoice — all selected pets are using package credits.
                     </p>
@@ -1158,8 +1240,7 @@ function PlannerTab() {
                       {hourlyCount > 0 && (
                         <div className="flex items-center justify-between text-sm">
                           <span>
-                            {hourlyRatePreview.label} ({hourlyCount} dog
-                            {hourlyCount === 1 ? "" : "s"})
+                            {hourlyRatePreview.label} ({effectiveHourlyDogs} billed)
                           </span>
                           <span>AED {hourlyRatePreview.total.toFixed(2)}</span>
                         </div>
