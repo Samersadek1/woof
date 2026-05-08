@@ -532,8 +532,30 @@ async function resolveTargetJidForActivation(rawTarget) {
   const candidates = phoneDigitsCandidates(cleaned);
   if (!candidates.size) return canonicalConversationPhone(cleaned);
 
+  // Priority 1: owner's tracked active_jid (set by inbound handler).
+  try {
+    const owner = await findOwnerByFlexiblePhone(cleaned);
+    if (owner?.id) {
+      const { jid: activeJid } = await resolveActiveJidForOwner(owner.id);
+      if (activeJid) {
+        console.log("Activation JID resolved from owner active_jid:", {
+          rawTarget: cleaned,
+          ownerId: owner.id,
+          resolvedJid: activeJid,
+          source: "owner_active_jid",
+        });
+        return activeJid;
+      }
+    }
+  } catch (err) {
+    console.error("Activation owner active_jid lookup failed:", err?.message ?? err);
+  }
+
+  // Priority 2: scan all chats and pick the matching JID with the newest inbound message.
   try {
     const chats = await client.getChats();
+    let bestJid = null;
+    let bestTs = -1;
     for (const chat of chats) {
       if (chat.isGroup) continue;
       const jid = chat?.id?._serialized ?? "";
@@ -551,59 +573,30 @@ async function resolveTargetJidForActivation(rawTarget) {
         }
       }
 
-      if (phoneLikelyMatches(chatDigits, candidates)) {
-        console.log("Activation JID resolved from chats:", {
-          rawTarget: cleaned,
-          resolvedJid: jid,
-          source: "chat_lookup",
-        });
-        return jid;
+      if (!phoneLikelyMatches(chatDigits, candidates)) continue;
+
+      let ts = 0;
+      try {
+        const recent = await chat.fetchMessages({ limit: 1 });
+        ts = recent?.[0]?.timestamp ?? 0;
+      } catch {
+        ts = 0;
       }
+      if (ts > bestTs) {
+        bestTs = ts;
+        bestJid = jid;
+      }
+    }
+    if (bestJid) {
+      console.log("Activation JID resolved from chats:", {
+        rawTarget: cleaned,
+        resolvedJid: bestJid,
+        source: "chat_lookup_latest_activity",
+      });
+      return bestJid;
     }
   } catch (err) {
     console.error("Activation JID lookup failed:", err?.message ?? err);
-  }
-
-  // If chat lookup misses (common with LID identities), reuse the most recently
-  // active conversation alias for the same owner before falling back.
-  try {
-    const owner = await findOwnerByFlexiblePhone(cleaned);
-    if (owner?.id) {
-      const { data: aliases } = await supabase
-        .from("agent_conversations")
-        .select("phone_number, updated_at")
-        .eq("owner_id", owner.id)
-        .order("updated_at", { ascending: false })
-        .limit(10);
-
-      let bestAlias = null;
-      let bestTs = -1;
-      for (const alias of aliases ?? []) {
-        const aliasJid = (alias.phone_number ?? "").toString();
-        if (!aliasJid.endsWith("@c.us") && !aliasJid.endsWith("@lid")) continue;
-        try {
-          const chat = await client.getChatById(aliasJid);
-          const recent = await chat.fetchMessages({ limit: 1 });
-          const ts = recent?.[0]?.timestamp ?? 0;
-          if (ts > bestTs) {
-            bestTs = ts;
-            bestAlias = aliasJid;
-          }
-        } catch {
-          // Skip stale alias entries not currently available in WA session.
-        }
-      }
-      if (bestAlias) {
-        console.log("Activation JID resolved from owner alias:", {
-          rawTarget: cleaned,
-          resolvedJid: bestAlias,
-          source: "owner_alias_latest_activity",
-        });
-        return bestAlias;
-      }
-    }
-  } catch (err) {
-    console.error("Activation owner-alias lookup failed:", err?.message ?? err);
   }
 
   const fallback = canonicalConversationPhone(cleaned);
@@ -819,6 +812,95 @@ async function gracefulShutdown(signal) {
   }
 }
 
+async function getOwnerConversation(ownerId) {
+  if (!ownerId) return null;
+  const { data, error } = await supabase
+    .from("agent_conversations")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("getOwnerConversation failed:", { ownerId, error: error.message });
+    return null;
+  }
+  return data ?? null;
+}
+
+async function recordActiveJidForOwner({ ownerId, ownerConv, inboundJid, inboundTs }) {
+  if (!ownerId || !inboundJid) return ownerConv ?? null;
+
+  const existingFacts = ownerConv?.facts ?? {};
+  const tsNow = Number(inboundTs ?? Math.floor(Date.now() / 1000));
+  const previousTs = Number(existingFacts.active_jid_ts ?? 0);
+  const aliasSet = new Set(
+    Array.isArray(existingFacts.aliases) ? existingFacts.aliases : []
+  );
+  aliasSet.add(inboundJid);
+
+  const nextActiveJid =
+    tsNow >= previousTs ? inboundJid : existingFacts.active_jid ?? inboundJid;
+  const nextActiveTs = Math.max(previousTs, tsNow);
+
+  const updatedFacts = {
+    ...existingFacts,
+    active_jid: nextActiveJid,
+    active_jid_ts: nextActiveTs,
+    aliases: Array.from(aliasSet).slice(-10),
+    last_seen_jid: inboundJid,
+  };
+
+  const conversationKey = ownerConv?.phone_number ?? inboundJid;
+
+  const { error } = await supabase
+    .from("agent_conversations")
+    .upsert(
+      {
+        phone_number: conversationKey,
+        owner_id: ownerId,
+        facts: updatedFacts,
+      },
+      { onConflict: "phone_number" }
+    );
+  if (error) {
+    console.error("recordActiveJidForOwner failed:", {
+      ownerId,
+      conversationKey,
+      error: error.message,
+    });
+    return ownerConv;
+  }
+
+  console.log("Active JID recorded:", {
+    ownerId,
+    conversationKey,
+    activeJid: nextActiveJid,
+  });
+
+  return {
+    ...(ownerConv ?? { phone_number: conversationKey, owner_id: ownerId, mode: "human", history: [] }),
+    phone_number: conversationKey,
+    owner_id: ownerId,
+    facts: updatedFacts,
+  };
+}
+
+async function resolveActiveJidForOwner(ownerId) {
+  const conv = await getOwnerConversation(ownerId);
+  const activeJid = conv?.facts?.active_jid;
+  if (!activeJid) return { conv, jid: null };
+  if (!activeJid.endsWith("@c.us") && !activeJid.endsWith("@lid")) {
+    return { conv, jid: null };
+  }
+  try {
+    await client.getChatById(activeJid);
+    return { conv, jid: activeJid };
+  } catch {
+    return { conv, jid: null };
+  }
+}
+
 async function getOwnerContext(phone, conv) {
   let ownerId = conv?.owner_id ?? null;
   let ownerMatchSource = "conversation_owner_id";
@@ -887,32 +969,6 @@ async function fetchFormattedHistoryByChatId(chatId, limit = 20) {
   return fetchFormattedHistoryFromChat(chat, limit);
 }
 
-async function prepareBotActivationContext(targetJid, targetPhone) {
-  let formattedHistory = [];
-  try {
-    formattedHistory = await fetchFormattedHistoryByChatId(targetJid, 20);
-    console.log(
-      "Formatted history:",
-      formattedHistory.map((m) => m.role + ": " + m.content.slice(0, 40))
-    );
-  } catch (e) {
-    console.error("History fetch failed:", e.message);
-  }
-
-  const owner = await findOwnerByFlexiblePhone(targetPhone);
-  const ownerProfile = await buildOwnerProfile(owner?.id ?? null, targetPhone);
-  const handoff = buildHandoffPayload(formattedHistory);
-  const facts = extractConversationFacts({}, formattedHistory, handoff.pending_request, handoff);
-
-  return {
-    ownerId: owner?.id ?? null,
-    ownerProfile,
-    formattedHistory,
-    handoff,
-    facts,
-  };
-}
-
 async function activateAgentForTarget({
   triggerSource,
   targetJid,
@@ -926,35 +982,55 @@ async function activateAgentForTarget({
     targetPhone,
   });
 
-  await supabase
-    .from("agent_conversations")
-    .upsert({ phone_number: targetPhone, mode: "agent" });
+  const owner = await findOwnerByFlexiblePhone(targetPhone);
+  const ownerId = owner?.id ?? null;
 
-  const {
-    ownerId,
-    ownerProfile,
-    formattedHistory,
-    handoff,
-    facts: baseFacts,
-  } = await prepareBotActivationContext(normalizedTargetJid, targetPhone);
-  const facts = {
-    ...baseFacts,
-    last_seen_jid: normalizedTargetJid,
-  };
-
+  // Single canonical row: prefer existing owner row; otherwise use targetPhone.
   let conversationKey = targetPhone;
+  let existingOwnerConv = null;
   if (ownerId) {
-    const { data: ownerConv } = await supabase
-      .from("agent_conversations")
-      .select("phone_number")
-      .eq("owner_id", ownerId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (ownerConv?.phone_number) {
-      conversationKey = ownerConv.phone_number;
+    existingOwnerConv = await getOwnerConversation(ownerId);
+    if (existingOwnerConv?.phone_number) {
+      conversationKey = existingOwnerConv.phone_number;
     }
   }
+
+  let formattedHistory = [];
+  try {
+    formattedHistory = await fetchFormattedHistoryByChatId(normalizedTargetJid, 20);
+    console.log(
+      "Formatted history:",
+      formattedHistory.map((m) => m.role + ": " + m.content.slice(0, 40))
+    );
+  } catch (e) {
+    console.error("History fetch failed:", e.message);
+  }
+
+  const ownerProfile = await buildOwnerProfile(ownerId, targetPhone);
+  const handoff = buildHandoffPayload(formattedHistory);
+  const baseFacts = extractConversationFacts(
+    existingOwnerConv?.facts ?? {},
+    formattedHistory,
+    handoff.pending_request,
+    handoff,
+    { lastSeenJid: normalizedTargetJid }
+  );
+  const aliasSet = new Set(
+    Array.isArray(existingOwnerConv?.facts?.aliases)
+      ? existingOwnerConv.facts.aliases
+      : []
+  );
+  aliasSet.add(normalizedTargetJid);
+  const facts = {
+    ...baseFacts,
+    active_jid: normalizedTargetJid,
+    active_jid_ts: Math.max(
+      Number(existingOwnerConv?.facts?.active_jid_ts ?? 0),
+      Math.floor(Date.now() / 1000)
+    ),
+    aliases: Array.from(aliasSet).slice(-10),
+    last_seen_jid: normalizedTargetJid,
+  };
 
   await supabase.from("agent_conversations").upsert(
     {
@@ -978,7 +1054,7 @@ async function activateAgentForTarget({
   const greeting = await runAgent(
     conversationKey,
     "[SYSTEM: You have just been connected to this conversation. Review the chat history and greet the owner by name, acknowledging what they were asking about. Be warm and brief.]",
-    { handoff, lastSeenJid: normalizedTargetJid }
+    { handoff, lastSeenJid: normalizedTargetJid, overrideHistory: formattedHistory }
   );
   await client.sendMessage(normalizedTargetJid, greeting);
   if (notifyTemplate) {
@@ -1276,24 +1352,6 @@ async function runAgent(phone, message, options = {}) {
   return finalText;
 }
 
-async function resolveByLastSeenJid(replyTarget) {
-  try {
-    const { data: convs } = await supabase
-      .from("agent_conversations")
-      .select("phone_number, owner_id, mode, updated_at")
-      .eq("facts->>last_seen_jid", replyTarget)
-      .order("updated_at", { ascending: false })
-      .limit(20);
-
-    if (!convs?.length) return null;
-    const agentConv = convs.find((c) => c?.mode === "agent");
-    if (agentConv) return agentConv;
-    return convs[0];
-  } catch {
-    return null;
-  }
-}
-
 // SECTION 8 - MESSAGE HANDLERS
 client.on("message", async (msg) => {
   if (msg.isStatus) return;
@@ -1420,53 +1478,48 @@ client.on("message", async (msg) => {
   if (!msg.from.endsWith("@c.us") && !msg.from.endsWith("@lid")) return;
 
   const routing = await resolveInboundRouting(msg);
-  const lookupCandidates = [...new Set(routing.lookupCandidates ?? [routing.conversationPhone])];
-  let mode = "human";
-  let modeKey = routing.conversationPhone;
+
+  // Resolve owner from the inbound JID (and conversation alias as a fallback).
   let resolvedOwnerId = routing.ownerIdHint ?? null;
-  let humanModeKey = null;
-  const lastSeenMatch = await resolveByLastSeenJid(routing.replyTarget);
-  if (lastSeenMatch?.phone_number) {
-    mode = lastSeenMatch.mode ?? "human";
-    modeKey = lastSeenMatch.phone_number;
-    resolvedOwnerId = lastSeenMatch.owner_id ?? resolvedOwnerId;
-    if (mode === "human") {
-      humanModeKey = lastSeenMatch.phone_number;
-    }
+  if (!resolvedOwnerId) {
+    const ownerFromReply = await findOwnerByFlexiblePhone(routing.replyTarget);
+    resolvedOwnerId =
+      ownerFromReply?.id ??
+      (await findOwnerByFlexiblePhone(routing.conversationPhone))?.id ??
+      null;
   }
 
-  // Prefer owner_id as the source of truth when we can resolve owner.
-  const ownerFromReply = resolvedOwnerId
-    ? { id: resolvedOwnerId }
-    : await findOwnerByFlexiblePhone(routing.replyTarget);
-  const ownerFromConversation = ownerFromReply ?? (await findOwnerByFlexiblePhone(routing.conversationPhone));
-  if (ownerFromConversation?.id) {
-    resolvedOwnerId = ownerFromConversation.id;
-    const { data: ownerConvs } = await supabase
-      .from("agent_conversations")
-      .select("phone_number, mode, updated_at")
-      .eq("owner_id", ownerFromConversation.id)
-      .order("updated_at", { ascending: false })
-      .limit(20);
-    for (const conv of ownerConvs ?? []) {
-      if (conv?.mode === "agent") {
-        mode = "agent";
-        modeKey = conv.phone_number;
-        break;
-      }
-      if (conv?.mode === "human" && !humanModeKey) {
-        humanModeKey = conv.phone_number;
-      }
-    }
+  // If owner is known, track this inbound JID + timestamp on the owner's row
+  // so future activations always pick the live thread.
+  let ownerConv = null;
+  if (resolvedOwnerId) {
+    ownerConv = await getOwnerConversation(resolvedOwnerId);
+    ownerConv = await recordActiveJidForOwner({
+      ownerId: resolvedOwnerId,
+      ownerConv,
+      inboundJid: msg.from,
+      inboundTs: msg.timestamp,
+    });
   }
 
-  if (mode !== "agent") {
+  // Mode resolution: owner row first, JID rows only if owner unknown.
+  let mode = "human";
+  let modeKey = ownerConv?.phone_number ?? routing.conversationPhone;
+
+  if (resolvedOwnerId) {
+    mode = ownerConv?.mode ?? "human";
+    modeKey = ownerConv?.phone_number ?? routing.conversationPhone;
+  } else {
+    let humanModeKey = null;
+    const lookupCandidates = [
+      ...new Set(routing.lookupCandidates ?? [routing.conversationPhone]),
+    ];
     for (const candidate of lookupCandidates) {
       const { data: conv } = await supabase
         .from("agent_conversations")
         .select("mode")
         .eq("phone_number", candidate)
-        .single();
+        .maybeSingle();
       if (!conv?.mode) continue;
       if (conv.mode === "agent") {
         mode = "agent";
@@ -1477,11 +1530,12 @@ client.on("message", async (msg) => {
         humanModeKey = candidate;
       }
     }
+    if (mode !== "agent" && humanModeKey) {
+      mode = "human";
+      modeKey = humanModeKey;
+    }
   }
-  if (mode !== "agent" && humanModeKey) {
-    mode = "human";
-    modeKey = humanModeKey;
-  }
+
   console.log("Inbound routing:", {
     from: msg.from,
     conversationPhone: routing.conversationPhone,
