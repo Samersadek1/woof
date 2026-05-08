@@ -238,15 +238,22 @@ export function createConversationStore({ supabase, client, ownerResolver }) {
           .from("agent_conversations")
           .select("owner_id, phone_number, mode, facts, updated_at")
           .contains("facts", { aliases: [inboundJid] })
-          .not("owner_id", "is", null)
           .order("updated_at", { ascending: false })
           .limit(20);
-        const best = (aliasConvs ?? []).find((c) => c?.owner_id);
-        if (best?.owner_id) {
+        const ownerHit = (aliasConvs ?? []).find((c) => c?.owner_id);
+        if (ownerHit?.owner_id) {
           return {
-            ownerId: best.owner_id,
-            ownerConv: best,
+            ownerId: ownerHit.owner_id,
+            ownerConv: ownerHit,
             source: "inbound_alias_match",
+          };
+        }
+        const anonHit = (aliasConvs ?? []).find((c) => c?.phone_number);
+        if (anonHit?.phone_number) {
+          return {
+            ownerId: null,
+            ownerConv: anonHit,
+            source: "inbound_alias_match_anon",
           };
         }
       } catch {
@@ -259,6 +266,20 @@ export function createConversationStore({ supabase, client, ownerResolver }) {
         const bridge = await client.getContactLidAndPhone([inboundJid]);
         const bridgedPnRaw = Array.isArray(bridge) ? bridge[0]?.pn : bridge?.pn;
         const bridgedPhone = bridgedPnRaw ? canonicalConversationPhone(bridgedPnRaw) : null;
+        // #region agent log
+        fetch("http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "299bd9" },
+          body: JSON.stringify({
+            sessionId: "299bd9",
+            location: "lib/conversation.js:lid_bridge",
+            message: "lid_bridge attempt",
+            data: { inboundJid, bridgedPnRaw, bridgedPhone },
+            hypothesisId: "H1",
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         if (bridgedPhone) {
           const bridgedOwner = await ownerResolver.findOwnerByFlexiblePhone(bridgedPhone);
           if (bridgedOwner?.id) {
@@ -269,9 +290,60 @@ export function createConversationStore({ supabase, client, ownerResolver }) {
               source: ownerConv ? "inbound_lid_bridge_owner_row" : "inbound_lid_bridge_no_row",
             };
           }
+
+          // No owner record but a conversation row may already exist at the
+          // bridged @c.us key (e.g. staff activated `!bot <number>` for a
+          // chat that has no owners table entry yet). Find it and return it
+          // so the inbound resolves to the correct mode/state.
+          const { data: bridgedConv } = await supabase
+            .from("agent_conversations")
+            .select("owner_id, phone_number, mode, facts")
+            .eq("phone_number", bridgedPhone)
+            .maybeSingle();
+          // #region agent log
+          fetch("http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "299bd9" },
+            body: JSON.stringify({
+              sessionId: "299bd9",
+              location: "lib/conversation.js:lid_bridge_anon_lookup",
+              message: "anon conv lookup",
+              data: {
+                bridgedPhone,
+                found: !!bridgedConv?.phone_number,
+                mode: bridgedConv?.mode ?? null,
+              },
+              hypothesisId: "H1",
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          if (bridgedConv?.phone_number) {
+            const aliasSet = new Set(
+              Array.isArray(bridgedConv.facts?.aliases) ? bridgedConv.facts.aliases : [],
+            );
+            if (!aliasSet.has(inboundJid)) {
+              aliasSet.add(inboundJid);
+              await supabase
+                .from("agent_conversations")
+                .update({
+                  facts: {
+                    ...(bridgedConv.facts ?? {}),
+                    aliases: Array.from(aliasSet).slice(-20),
+                    last_seen_jid: inboundJid,
+                  },
+                })
+                .eq("phone_number", bridgedPhone);
+            }
+            return {
+              ownerId: bridgedConv.owner_id ?? null,
+              ownerConv: bridgedConv,
+              source: "inbound_lid_bridge_anon_conv",
+            };
+          }
         }
-      } catch {
-        // Bridge failures are non-fatal.
+      } catch (err) {
+        console.error("LID bridge failed:", { inboundJid, error: err?.message ?? err });
       }
     }
 

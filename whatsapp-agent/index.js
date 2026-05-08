@@ -511,11 +511,23 @@ async function handleOwnerInboundMessage(msg) {
       resolutionSource = `${resolutionSource}+agent_assigned_override`;
     }
   } else {
-    const { data: unknownConv } = await supabase
+    // Check for a conversation row keyed on any candidate from routing -- this
+    // catches the case where staff activated `!bot <c.us>` but the inbound is
+    // arriving on the matching @lid that the LID bridge could not bridge.
+    const candidates = Array.from(
+      new Set(
+        [routing.replyTarget, routing.conversationPhone, routing.contactMappedPhone].filter(
+          Boolean,
+        ),
+      ),
+    );
+    const { data: candidateRows } = await supabase
       .from("agent_conversations")
-      .select("phone_number, mode")
-      .eq("phone_number", routing.replyTarget)
-      .maybeSingle();
+      .select("phone_number, mode, facts")
+      .in("phone_number", candidates)
+      .order("updated_at", { ascending: false })
+      .limit(5);
+    const unknownConv = candidateRows?.[0] ?? null;
     if (unknownConv?.mode) {
       mode = unknownConv.mode;
       modeKey = unknownConv.phone_number ?? modeKey;
