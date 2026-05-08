@@ -54,6 +54,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PetBreedCombobox } from "@/components/PetBreedCombobox";
+import { VetClinicCombobox } from "@/components/VetClinicCombobox";
 import { Search, Plus, Eye, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
@@ -566,7 +568,12 @@ const CustomersPage = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="vet_name">Vet name</Label>
-                  <Input id="vet_name" value={form.vet_name ?? ""} onChange={(e) => handleField("vet_name", e.target.value)} />
+                  <VetClinicCombobox
+                    id="vet_name"
+                    placeholder="Select vet clinic"
+                    value={form.vet_name ?? ""}
+                    onChange={(v) => handleField("vet_name", v)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="vet_phone">Vet phone</Label>
@@ -704,12 +711,12 @@ const CustomersPage = () => {
                         </Select>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
-                        <Input
+                        <PetBreedCombobox
                           placeholder="Breed"
                           value={pet.breed}
-                          onChange={(e) =>
+                          onChange={(breed) =>
                             setWizardPets((prev) =>
-                              prev.map((p) => (p.id === pet.id ? { ...p, breed: e.target.value } : p)),
+                              prev.map((p) => (p.id === pet.id ? { ...p, breed } : p)),
                             )
                           }
                         />
