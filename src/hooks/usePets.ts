@@ -133,6 +133,36 @@ export function useDeleteVaccination() {
   });
 }
 
+export type VaccinationUpdate = Database["public"]["Tables"]["vaccinations"]["Update"];
+
+export function useUpdateVaccination() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      updates,
+    }: {
+      id: string;
+      updates: VaccinationUpdate;
+    }) => {
+      const { data, error } = await supabase
+        .from("vaccinations")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as Vaccination;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: petQueryKeys.pet(data.pet_id) });
+      queryClient.invalidateQueries({ queryKey: ["pets"] });
+    },
+  });
+}
+
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function getVaccinationStatus(

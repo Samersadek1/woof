@@ -18,6 +18,7 @@ import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { usePets, useCreatePet, getVaccinationStatus } from "@/hooks/usePets";
+import { petVaccinationSummaryLine } from "@/lib/vaccinationsDisplay";
 import { useDaycarePackages } from "@/hooks/useDaycare";
 import { useTopUpWallet } from "@/hooks/useWallet";
 import type { PetWithVaccinations } from "@/hooks/usePets";
@@ -1051,6 +1052,7 @@ const OwnerProfilePage = () => {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {pets.map((pet: PetWithVaccinations) => {
                 const vacStatus = overallVaccinationStatus(pet.vaccinations);
+                const vacSummary = petVaccinationSummaryLine(pet.vaccinations);
                 return (
                   <Card
                     key={pet.id}
@@ -1090,6 +1092,12 @@ const OwnerProfilePage = () => {
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {STATUS_LABEL[vacStatus]}
+                        </p>
+                        <p
+                          className="mt-1 text-xs text-muted-foreground line-clamp-2"
+                          title={vacSummary}
+                        >
+                          {vacSummary}
                         </p>
                       </div>
                     </CardContent>

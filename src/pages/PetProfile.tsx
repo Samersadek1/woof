@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { format, parse, differenceInYears, differenceInMonths, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
-import { usePet, useUpdatePet, useAddVaccination, useDeleteVaccination } from "@/hooks/usePets";
+import { usePet, useUpdatePet } from "@/hooks/usePets";
 import { useUpdateAssessment } from "@/hooks/useAssessment";
 import {
   useGroomingHistory,
@@ -19,7 +19,7 @@ import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
-import { VaccinationEditor } from "@/components/VaccinationEditor";
+import { VaccinationInformationTable } from "@/components/VaccinationInformationTable";
 import { PetDocuments } from "@/components/PetDocuments";
 import { VaccicheckPanel } from "@/components/VaccicheckPanel";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
@@ -112,18 +112,6 @@ const SIZE_CATEGORY_LABEL: Record<PetSizeCategory, string> = {
   XL: "X-Large (35kg+)",
 };
 
-const VAC_STATUS_BADGE: Record<string, string> = {
-  valid: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  expiring_soon: "bg-amber-100 text-amber-700 border-amber-200",
-  expired: "bg-red-100 text-red-700 border-red-200",
-};
-
-const VAC_STATUS_LABEL: Record<string, string> = {
-  valid: "Valid",
-  expiring_soon: "Expiring Soon",
-  expired: "Expired",
-};
-
 const BOOKING_STATUS_BADGE: Record<BookingStatus, string> = {
   confirmed: "bg-blue-100 text-blue-800 border-blue-200",
   checked_in: "bg-emerald-100 text-emerald-800 border-emerald-200",
@@ -214,9 +202,6 @@ const PetProfilePage = () => {
   const updatePet = useUpdatePet();
   const updateAssessment = useUpdateAssessment();
   const createParkBooking = useCreateParkBooking();
-  const addVaccination = useAddVaccination();
-  const deleteVaccination = useDeleteVaccination();
-
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<PetUpdate & { id: string }>({ id: petId! });
   const [historyServiceFilter, setHistoryServiceFilter] =
@@ -884,29 +869,14 @@ const PetProfilePage = () => {
 
         <VaccicheckPanel pet={pet} />
 
-        {/* ── Vaccinations ── */}
+        {/* ── Vaccination Information ── */}
         <section>
           <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
             <Syringe className="h-5 w-5" />
-            Vaccinations
+            Vaccination Information
           </h3>
 
-          <VaccinationEditor
-            mode="live"
-            petId={petId!}
-            savedRows={pet.vaccinations}
-            isSaving={addVaccination.isPending}
-            onAdd={async (row) => {
-              await addVaccination.mutateAsync({ ...row, pet_id: petId! });
-              toast.success("Vaccination added");
-            }}
-            onDelete={(id) => {
-              deleteVaccination.mutate(
-                { id, petId: petId! },
-                { onSuccess: () => toast.success("Vaccination removed") }
-              );
-            }}
-          />
+          <VaccinationInformationTable petId={petId!} vaccinations={pet.vaccinations} />
         </section>
 
         {/* ── Passport / Documents ── */}
