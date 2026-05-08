@@ -8,10 +8,6 @@
 //   2. Add a handler in HANDLERS keyed on the tool name.
 //   3. INSERT a row into tenant_tools for each tenant that should get it.
 
-// #region debug instrumentation
-import { dbg, clip } from "./_debug.js";
-// #endregion
-
 const CATALOG = {
   query_database: {
     permissions: "read",
@@ -118,6 +114,51 @@ const CATALOG = {
       required: ["owner_id", "pet_id", "visit_date", "slot_start"],
     },
   },
+  update_owner_profile: {
+    permissions: "write",
+    description: `Update editable fields on the OWNER currently in the conversation.
+      Use when the owner asks to correct or update their personal details (e.g.
+      "fix my surname", "update my email", "change my emergency contact").
+      Only the conversation's resolved owner can be updated -- never accept an
+      arbitrary owner_id from the user. Editable fields: first_name, last_name,
+      email, address, phone2, vet_name, vet_phone, emergency_contact_name,
+      emergency_contact_phone. Anything else (membership, wallet, phone,
+      emirates_id, billing) MUST be escalated to staff instead.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        updates: {
+          type: "object",
+          description: "Object with one or more editable fields to set.",
+          properties: {
+            first_name: { type: "string" },
+            last_name: { type: "string" },
+            email: { type: "string" },
+            address: { type: "string" },
+            phone2: { type: "string" },
+            vet_name: { type: "string" },
+            vet_phone: { type: "string" },
+            emergency_contact_name: { type: "string" },
+            emergency_contact_phone: { type: "string" },
+          },
+        },
+      },
+      required: ["updates"],
+    },
+    config: {
+      editableFields: [
+        "first_name",
+        "last_name",
+        "email",
+        "address",
+        "phone2",
+        "vet_name",
+        "vet_phone",
+        "emergency_contact_name",
+        "emergency_contact_phone",
+      ],
+    },
+  },
   save_memory: {
     permissions: "write",
     description: `Save an important fact about this owner or conversation to
@@ -142,10 +183,14 @@ const CATALOG = {
     permissions: "escalation",
     description: `Hand the conversation to staff. Use sparingly and ONLY when:
       (a) the request is genuinely outside the agent's scope (refunds, complaints,
-      payment disputes, medical emergencies), or (b) the owner explicitly asks
+      payment disputes, medical emergencies, sensitive profile fields like
+      membership/billing/phone/emirates_id), or (b) the owner explicitly asks
       to talk to a human. Do NOT escalate just because data is missing -- ask
       the owner instead. Do NOT escalate to "double-check" a routine booking;
-      create the draft booking instead and let staff approve via !confirm.`,
+      create the draft booking instead and let staff approve via !confirm.
+      IMPORTANT: escalation is a HANDOFF, not task completion. After calling
+      this tool, tell the owner that you've passed it to the team -- never say
+      "Done" or imply the change has been made.`,
     input_schema: {
       type: "object",
       properties: {
@@ -199,6 +244,9 @@ export function summarizeToolResult(result) {
     if (result.message) return String(result.message).slice(0, 120);
     if (result.escalated) return `escalated reason=${String(result.reason ?? "").slice(0, 80)}`;
     if (result.success && result.booking_ref) return `draft=${result.booking_ref}`;
+    if (result.success && Array.isArray(result.updated_fields)) {
+      return `updated=${result.updated_fields.join(",").slice(0, 80)}`;
+    }
     if (result.saved && result.key) return `saved=${result.key}`;
     return Object.entries(result)
       .slice(0, 4)
@@ -405,6 +453,65 @@ async function runCreateParkBooking({ supabase, notifyStaff }, input, ctx) {
   };
 }
 
+async function runUpdateOwnerProfile({ supabase, logEvent, getTenantId }, input, ctx, toolCfg) {
+  const editable = new Set(toolCfg.config?.editableFields ?? []);
+  const updates = input?.updates && typeof input.updates === "object" ? input.updates : {};
+
+  const { data: conv } = await supabase
+    .from("agent_conversations")
+    .select("owner_id")
+    .eq("phone_number", ctx.phone)
+    .maybeSingle();
+  const ownerId = conv?.owner_id ?? null;
+  if (!ownerId) {
+    return { error: "Cannot update profile: no owner is linked to this conversation yet." };
+  }
+
+  const sanitized = {};
+  for (const [key, raw] of Object.entries(updates)) {
+    if (!editable.has(key)) continue;
+    if (raw == null) continue;
+    const value = String(raw).trim();
+    if (!value) continue;
+    sanitized[key] = value.slice(0, 200);
+  }
+  if (!Object.keys(sanitized).length) {
+    return { error: "No editable fields supplied. Allowed: " + [...editable].join(", ") };
+  }
+
+  sanitized.updated_at = new Date().toISOString();
+
+  const { data: updated, error: upErr } = await supabase
+    .from("owners")
+    .update(sanitized)
+    .eq("id", ownerId)
+    .select("id, first_name, last_name, email, address, phone2, vet_name, vet_phone, emergency_contact_name, emergency_contact_phone")
+    .single();
+  if (upErr || !updated) {
+    return { error: `Profile update failed: ${upErr?.message ?? "unknown"}` };
+  }
+
+  await supabase
+    .from("agent_conversations")
+    .update({ owner_profile: null })
+    .eq("phone_number", ctx.phone);
+
+  await logEvent({
+    tenant_id: getTenantId(),
+    chat_id: ctx.phone,
+    event: "profile_updated",
+    payload: { fields: Object.keys(sanitized).filter((k) => k !== "updated_at") },
+  });
+
+  return {
+    success: true,
+    owner_id: ownerId,
+    updated_fields: Object.keys(sanitized).filter((k) => k !== "updated_at"),
+    profile: updated,
+    message: "Profile updated.",
+  };
+}
+
 async function runSaveMemory({ supabase, logEvent, getTenantId }, input, ctx) {
   const key = String(input?.key ?? "").trim();
   const value = String(input?.value ?? "").trim();
@@ -464,6 +571,7 @@ const HANDLERS = {
   call_rpc: runCallRpc,
   create_draft_booking: runCreateDraftBooking,
   create_park_booking: runCreateParkBooking,
+  update_owner_profile: runUpdateOwnerProfile,
   save_memory: runSaveMemory,
   escalate_to_human: runEscalateToHuman,
 };
@@ -495,25 +603,8 @@ export function createToolExecutor({
       const handler = HANDLERS[name];
       if (!handler) return { error: `Unknown tool: ${name}` };
 
-      const result = await handler(services, input, { phone }, toolCfg);
-      // #region debug instrumentation
-      dbg("tools.js:executeTool", `tool ${name} ran`, {
-        phone,
-        tool: name,
-        input: clip(input, 1500),
-        result: clip(result, 1500),
-      }, "H1+H3");
-      // #endregion
-      return result;
+      return await handler(services, input, { phone }, toolCfg);
     } catch (e) {
-      // #region debug instrumentation
-      dbg("tools.js:executeTool", `tool ${name} threw`, {
-        phone,
-        tool: name,
-        input: clip(input, 1500),
-        error: String(e),
-      }, "H1+H3");
-      // #endregion
       return { error: String(e) };
     }
   };

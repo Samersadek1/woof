@@ -10,9 +10,6 @@ import { maybeRollupHistory, HISTORY_KEEP_TURNS } from "./summary.js";
 import { recordAgentTurn, logAgentEvent } from "./turns.js";
 import { invalidateBudgetCache } from "./cost.js";
 import { summarizeToolResult } from "./tools.js";
-// #region debug instrumentation
-import { dbg, clip } from "./_debug.js";
-// #endregion
 
 export function buildSystemPrompt({ tenant, prompt, businessRules, ownerProfile, options = {} }) {
   const today = new Date().toISOString().split("T")[0];
@@ -248,21 +245,6 @@ export function createAgentRunner({
     const allTools = getToolDefinitions();
     const toolsForTurn = updatedFacts.awaiting_staff_direction ? [] : allTools;
 
-    // #region debug instrumentation
-    dbg("agent.js:turn_start", "system prompt + state for this turn", {
-      phone,
-      message: clip(message, 500),
-      ownerMatchSource,
-      awaiting_staff_direction: updatedFacts.awaiting_staff_direction ?? false,
-      staff_instruction: clip(updatedFacts.staff_instruction ?? null, 300),
-      open_intent: clip(updatedFacts.open_intent ?? null, 200),
-      facts_summary: clip(updatedFacts.summary ?? null, 600),
-      systemPrompt: clip(systemPrompt, 6000),
-      tools_offered: toolsForTurn.map((t) => t.name),
-      history_len: claudeMessages.length,
-    }, "H1+H2+H5");
-    // #endregion
-
     let currentMessages = [...claudeMessages];
     let finalText = "";
     const toolTrace = [];
@@ -282,20 +264,6 @@ export function createAgentRunner({
 
       inputTokens += response?.usage?.input_tokens ?? 0;
       outputTokens += response?.usage?.output_tokens ?? 0;
-
-      // #region debug instrumentation
-      dbg("agent.js:model_round", `round ${toolRounds + 1} response`, {
-        phone,
-        round: toolRounds + 1,
-        stop_reason: response.stop_reason,
-        text_blocks: response.content
-          .filter((b) => b.type === "text")
-          .map((b) => clip(b.text, 600)),
-        tool_uses: response.content
-          .filter((b) => b.type === "tool_use")
-          .map((b) => ({ name: b.name, input: clip(b.input, 800) })),
-      }, "H3");
-      // #endregion
 
       if (response.stop_reason === "end_turn") {
         finalText = response.content
