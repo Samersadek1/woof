@@ -8,7 +8,7 @@ export function buildPriceMap(rows: { key: string; amount_aed: number }[]): Pric
   return new Map(rows.map((r) => [r.key, r.amount_aed]));
 }
 
-/** Keys used by the Live Rate Card and daycare check-in hourly billing (matches `pricing.key`). */
+/** Keys used by the Live Rate Card (matches `pricing.key`). */
 export const DAYCARE_HOURLY_PRICING_KEYS = [
   "daycare_hourly_single_day",
   "daycare_hourly_2_dogs",
@@ -18,6 +18,31 @@ export const DAYCARE_HOURLY_PRICING_KEYS = [
   "daycare_hourly_5_dogs",
   "daycare_hourly_6_dogs",
 ] as const;
+
+/** Single hourly unit rate from the Live Rate Card (AED per dog per hour). */
+export const DAYCARE_HOURLY_UNIT_KEY = "daycare_hourly_single_day" as const;
+
+/**
+ * Linear daycare hourly total: unit rate × dogs × hours.
+ * Uses `daycare_hourly_single_day` as the per-dog hourly rate from `pricing`.
+ */
+export function daycareHourlyLinearTotal(
+  dogCount: number,
+  hours: number,
+  prices: PriceByKey,
+): { pricingKey: string; unitRate: number; total: number; label: string } {
+  if (dogCount <= 0 || hours <= 0) {
+    return { pricingKey: DAYCARE_HOURLY_UNIT_KEY, unitRate: 0, total: 0, label: "" };
+  }
+  const unitRate = amountFor(prices, DAYCARE_HOURLY_UNIT_KEY);
+  const total = unitRate * dogCount * hours;
+  return {
+    pricingKey: DAYCARE_HOURLY_UNIT_KEY,
+    unitRate,
+    total,
+    label: `Daycare hourly (${dogCount} dog${dogCount === 1 ? "" : "s"} × ${hours} hr)`,
+  };
+}
 
 export function daycareHourlyGroupPricing(
   dogCount: number,

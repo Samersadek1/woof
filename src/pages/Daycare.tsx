@@ -16,8 +16,8 @@ import {
 import {
   buildPriceMap,
   daycareGroupPricing,
-  daycareHourlyGroupPricing,
-  DAYCARE_HOURLY_PRICING_KEYS,
+  daycareHourlyLinearTotal,
+  DAYCARE_HOURLY_UNIT_KEY,
 } from "@/lib/servicePricing";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
@@ -631,7 +631,7 @@ function PlannerTab() {
           "daycare_4_dogs",
           "daycare_5_dogs",
           "daycare_6_dogs",
-          ...DAYCARE_HOURLY_PRICING_KEYS,
+          DAYCARE_HOURLY_UNIT_KEY,
         ]);
       if (error) throw error;
       return data ?? [];
@@ -671,9 +671,9 @@ function PlannerTab() {
   const effectiveHourlyDogs = useMemo(() => {
     if (hourlyCount === 0) return 0;
     const trimmed = hourlyDogsInput.trim();
-    if (trimmed === "") return Math.max(1, hourlyCount);
+    if (trimmed === "") return 1;
     const n = Number.parseInt(trimmed, 10);
-    if (Number.isNaN(n) || n < 1) return Math.max(1, hourlyCount);
+    if (Number.isNaN(n) || n < 1) return 1;
     return Math.min(n, 99);
   }, [hourlyCount, hourlyDogsInput]);
 
@@ -690,12 +690,12 @@ function PlannerTab() {
     () => daycareGroupPricing(singleDayCount, daycarePriceMap),
     [singleDayCount, daycarePriceMap],
   );
-  const hourlyRatePreview = useMemo(
+  const hourlyLinearPreview = useMemo(
     () =>
       hourlyCount > 0
-        ? daycareHourlyGroupPricing(effectiveHourlyDogs, daycarePriceMap)
-        : { pricingKey: "", total: 0, label: "" },
-    [hourlyCount, effectiveHourlyDogs, daycarePriceMap],
+        ? daycareHourlyLinearTotal(effectiveHourlyDogs, effectiveHours, daycarePriceMap)
+        : { pricingKey: "", unitRate: 0, total: 0, label: "" },
+    [hourlyCount, effectiveHourlyDogs, effectiveHours, daycarePriceMap],
   );
   const transportRate = useMemo(() => {
     const key = transportPricingKey(checkInDraft.transport_zone);
@@ -706,9 +706,7 @@ function PlannerTab() {
     ? transportQuantityForPets(checkInDraft.transport_zone, physicalInvoicePetCount)
     : 0;
   const previewTransportTotal = transportRate * previewTransportQty * transportTrips;
-  /** Tier total for dog count (one hour) × hours — matches rate card × duration. */
-  const hourlyDurationTotal =
-    hourlyCount > 0 ? hourlyRatePreview.total * effectiveHours : 0;
+  const hourlyDurationTotal = hourlyCount > 0 ? hourlyLinearPreview.total : 0;
   const immediateInvoiceSubtotalPreview =
     singleDayRatePreview.total + hourlyDurationTotal + previewTransportTotal;
   const { data: discountPreview, isLoading: discountPreviewLoading } = useQuery<{
@@ -799,7 +797,7 @@ function PlannerTab() {
       return;
     }
     if (!hourlyDogsTouched) {
-      setHourlyDogsInput(String(Math.max(1, hourlyCount)));
+      setHourlyDogsInput("1");
     }
     if (!hourlyHoursTouched) {
       setHourlyHoursInput("1");
@@ -905,10 +903,10 @@ function PlannerTab() {
 
     if (invoicedPetTotal > 0) {
       const singleRate = daycareGroupPricing(okSingleIds.length, daycarePriceMap);
-      const hourlyRate =
-        hourlyDogsForInvoice > 0
-          ? daycareHourlyGroupPricing(hourlyDogsForInvoice, daycarePriceMap)
-          : { pricingKey: "", total: 0, label: "" };
+      const hourlyLinear =
+        hourlyDogsForInvoice > 0 && hourlyHoursForInvoice > 0
+          ? daycareHourlyLinearTotal(hourlyDogsForInvoice, hourlyHoursForInvoice, daycarePriceMap)
+          : { pricingKey: "", unitRate: 0, total: 0, label: "" };
       const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
       const transportKey = transportPricingKey(checkInDraft.transport_zone);
       const lineItems: {
@@ -934,13 +932,13 @@ function PlannerTab() {
         okHourlyIds.length > 0 &&
         hourlyDogsForInvoice > 0 &&
         hourlyHoursForInvoice > 0 &&
-        hourlyRate.pricingKey
+        hourlyLinear.total > 0
       ) {
         lineItems.push({
-          description: `${hourlyRate.label} — ${hourlyDogsForInvoice} dog${hourlyDogsForInvoice === 1 ? "" : "s"} × ${hourlyHoursForInvoice} hr`,
-          quantity: hourlyHoursForInvoice,
-          unitPrice: hourlyRate.total,
-          pricingKey: hourlyRate.pricingKey,
+          description: hourlyLinear.label,
+          quantity: hourlyDogsForInvoice * hourlyHoursForInvoice,
+          unitPrice: hourlyLinear.unitRate,
+          pricingKey: hourlyLinear.pricingKey,
           serviceType: "daycare",
           preserveUnitPrice: true,
         });
@@ -1112,84 +1110,62 @@ function PlannerTab() {
               </div>
 
               {hourlyCount > 0 && (
-                <div className="rounded-lg border bg-muted/20 p-3 space-y-3 max-w-2xl">
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-4 max-w-xl">
                   <div className="space-y-1">
-                    <p className="text-sm font-medium">Hourly daycare billing</p>
+                    <p className="text-sm font-medium">Hourly daycare</p>
                     <p className="text-xs text-muted-foreground">
-                      Total = (hourly tier from the rate card for this dog count, per hour) × hours. Transport still follows pets selected above ({hourlyCount} on hourly).
+                      Hourly rate comes from the Live Rate Card (per dog per hour). Total = rate × dogs × hours. Transport follows pets checked in above ({hourlyCount} on hourly).
                     </p>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <Label htmlFor="hourly_dog_count">Number of dogs</Label>
-                      <div className="flex flex-wrap items-end gap-2">
-                        <Input
-                          id="hourly_dog_count"
-                          type="number"
-                          min={1}
-                          max={99}
-                          inputMode="numeric"
-                          className="h-9 w-[5.5rem]"
-                          value={hourlyDogsInput}
-                          onChange={(e) => {
-                            setHourlyDogsInput(e.target.value);
-                            setHourlyDogsTouched(true);
-                          }}
-                        />
-                        <div className="flex flex-wrap gap-1">
-                          {[1, 2, 3, 4, 5, 6].map((n) => (
-                            <Button
-                              key={n}
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8 min-w-8 px-2"
-                              onClick={() => {
-                                setHourlyDogsInput(String(n));
-                                setHourlyDogsTouched(true);
-                              }}
-                            >
-                              {n}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
+                      <Input
+                        id="hourly_dog_count"
+                        type="number"
+                        min={1}
+                        max={99}
+                        step={1}
+                        placeholder="1"
+                        inputMode="numeric"
+                        className="h-9 max-w-[8rem]"
+                        value={hourlyDogsInput}
+                        onChange={(e) => {
+                          setHourlyDogsInput(e.target.value);
+                          setHourlyDogsTouched(true);
+                        }}
+                      />
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <Label htmlFor="hourly_hours_count">Number of hours</Label>
-                      <div className="flex flex-wrap items-end gap-2">
-                        <Input
-                          id="hourly_hours_count"
-                          type="number"
-                          min={1}
-                          max={48}
-                          inputMode="numeric"
-                          className="h-9 w-[5.5rem]"
-                          value={hourlyHoursInput}
-                          onChange={(e) => {
-                            setHourlyHoursInput(e.target.value);
-                            setHourlyHoursTouched(true);
-                          }}
-                        />
-                        <div className="flex flex-wrap gap-1">
-                          {[1, 2, 3, 4, 6, 8].map((n) => (
-                            <Button
-                              key={n}
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8 min-w-8 px-2"
-                              onClick={() => {
-                                setHourlyHoursInput(String(n));
-                                setHourlyHoursTouched(true);
-                              }}
-                            >
-                              {n}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
+                      <Input
+                        id="hourly_hours_count"
+                        type="number"
+                        min={1}
+                        max={48}
+                        step={1}
+                        placeholder="1"
+                        inputMode="numeric"
+                        className="h-9 max-w-[8rem]"
+                        value={hourlyHoursInput}
+                        onChange={(e) => {
+                          setHourlyHoursInput(e.target.value);
+                          setHourlyHoursTouched(true);
+                        }}
+                      />
                     </div>
+                  </div>
+                  <div className="rounded-lg border border-primary/25 bg-background/90 p-4 space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Hourly total (check before confirming)
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      AED {hourlyLinearPreview.unitRate.toFixed(2)} × {effectiveHourlyDogs} dog
+                      {effectiveHourlyDogs === 1 ? "" : "s"} × {effectiveHours} hr
+                    </p>
+                    <p className="text-2xl font-semibold tabular-nums">
+                      AED {hourlyDurationTotal.toFixed(2)}
+                    </p>
                   </div>
                 </div>
               )}
@@ -1309,14 +1285,12 @@ function PlannerTab() {
                       {hourlyCount > 0 && (
                         <div className="space-y-0.5">
                           <div className="flex items-center justify-between text-sm">
-                            <span>
-                              {hourlyRatePreview.label} — {effectiveHourlyDogs} dog
-                              {effectiveHourlyDogs === 1 ? "" : "s"} × {effectiveHours} hr
-                            </span>
-                            <span>AED {hourlyDurationTotal.toFixed(2)}</span>
+                            <span>Hourly daycare (rate × dogs × hours)</span>
+                            <span className="tabular-nums">AED {hourlyDurationTotal.toFixed(2)}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            AED {hourlyRatePreview.total.toFixed(2)} / hr (tier) × {effectiveHours} hr
+                            AED {hourlyLinearPreview.unitRate.toFixed(2)} × {effectiveHourlyDogs} ×{" "}
+                            {effectiveHours}
                           </p>
                         </div>
                       )}
