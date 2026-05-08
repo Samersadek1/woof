@@ -79,6 +79,60 @@ const CATALOG = {
       required: ["owner_id", "pet_id", "visit_date", "slot_start"],
     },
   },
+  create_owner_profile: {
+    permissions: "write",
+    description: `Create a new owner profile when the conversation has NO owner
+      linked yet and the owner has provided enough details to register. Required:
+      first_name. Optional editable fields: last_name, email, address, phone,
+      phone2, vet_name, vet_phone, emergency_contact_name, emergency_contact_phone,
+      how_heard, notes. Never set membership/wallet/emirates_id/billing -- those
+      are staff-only. After this tool succeeds the conversation is automatically
+      linked to the new owner; tell the owner the profile has been created and
+      proceed with their original request (e.g. add a pet, make a booking).
+      Refuse to call this tool if an owner_id is already linked to this
+      conversation -- use update_owner_profile instead.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        profile: {
+          type: "object",
+          description: "Owner fields to insert. first_name is required.",
+          properties: {
+            first_name: { type: "string" },
+            last_name: { type: "string" },
+            phone: { type: "string" },
+            phone2: { type: "string" },
+            email: { type: "string" },
+            address: { type: "string" },
+            vet_name: { type: "string" },
+            vet_phone: { type: "string" },
+            emergency_contact_name: { type: "string" },
+            emergency_contact_phone: { type: "string" },
+            how_heard: { type: "string" },
+            notes: { type: "string" },
+          },
+          required: ["first_name"],
+        },
+      },
+      required: ["profile"],
+    },
+    config: {
+      editableFields: [
+        "first_name",
+        "last_name",
+        "phone",
+        "phone2",
+        "email",
+        "address",
+        "vet_name",
+        "vet_phone",
+        "emergency_contact_name",
+        "emergency_contact_phone",
+        "how_heard",
+        "notes",
+      ],
+    },
+  },
   update_owner_profile: {
     permissions: "write",
     description: `Update editable fields on the OWNER currently in the conversation.
@@ -209,6 +263,12 @@ export function summarizeToolResult(result) {
     if (result.message) return String(result.message).slice(0, 120);
     if (result.escalated) return `escalated reason=${String(result.reason ?? "").slice(0, 80)}`;
     if (result.success && result.booking_ref) return `draft=${result.booking_ref}`;
+    if (result.success && result.created && result.owner_id) {
+      return `owner_created=${String(result.owner_id).slice(0, 36)}`;
+    }
+    if (result.success && result.reused_existing && result.owner_id) {
+      return `owner_linked=${String(result.owner_id).slice(0, 36)}`;
+    }
     if (result.success && Array.isArray(result.updated_fields)) {
       return `updated=${result.updated_fields.join(",").slice(0, 80)}`;
     }
@@ -408,6 +468,99 @@ async function runCreateParkBooking({ supabase, notifyStaff }, input, ctx) {
   };
 }
 
+async function runCreateOwnerProfile(
+  { supabase, logEvent, getTenantId },
+  input,
+  ctx,
+  toolCfg,
+) {
+  const editable = new Set(toolCfg.config?.editableFields ?? []);
+  const profile = input?.profile && typeof input.profile === "object" ? input.profile : {};
+
+  const { data: conv } = await supabase
+    .from("agent_conversations")
+    .select("owner_id")
+    .eq("phone_number", ctx.phone)
+    .maybeSingle();
+  if (conv?.owner_id) {
+    return {
+      error:
+        "An owner is already linked to this conversation. Use update_owner_profile to change details, not create_owner_profile.",
+    };
+  }
+
+  const sanitized = {};
+  for (const [key, raw] of Object.entries(profile)) {
+    if (!editable.has(key)) continue;
+    if (raw == null) continue;
+    const value = String(raw).trim();
+    if (!value) continue;
+    sanitized[key] = value.slice(0, 200);
+  }
+  if (!sanitized.first_name) {
+    return { error: "create_owner_profile requires at least first_name." };
+  }
+
+  // De-dup on phone if provided. If we find an existing owner, link to that
+  // owner instead of inserting a duplicate.
+  let targetOwnerId = null;
+  if (sanitized.phone) {
+    const phoneDigits = sanitized.phone.replace(/\D+/g, "");
+    if (phoneDigits.length >= 7) {
+      const { data: existing } = await supabase
+        .from("owners")
+        .select("id, first_name, last_name, phone")
+        .or(`phone.ilike.%${phoneDigits.slice(-9)}%,phone2.ilike.%${phoneDigits.slice(-9)}%`)
+        .limit(1)
+        .maybeSingle();
+      if (existing?.id) targetOwnerId = existing.id;
+    }
+  }
+
+  let inserted = null;
+  if (!targetOwnerId) {
+    const { data, error: insErr } = await supabase
+      .from("owners")
+      .insert(sanitized)
+      .select(
+        "id, first_name, last_name, phone, phone2, email, address, vet_name, vet_phone, emergency_contact_name, emergency_contact_phone",
+      )
+      .single();
+    if (insErr || !data) {
+      return { error: `Profile creation failed: ${insErr?.message ?? "unknown"}` };
+    }
+    inserted = data;
+    targetOwnerId = data.id;
+  }
+
+  await supabase
+    .from("agent_conversations")
+    .update({ owner_id: targetOwnerId, owner_profile: null })
+    .eq("phone_number", ctx.phone);
+
+  await logEvent({
+    tenant_id: getTenantId(),
+    chat_id: ctx.phone,
+    event: inserted ? "profile_created" : "profile_linked",
+    payload: {
+      owner_id: targetOwnerId,
+      fields: Object.keys(sanitized),
+      reused_existing: !inserted,
+    },
+  });
+
+  return {
+    success: true,
+    owner_id: targetOwnerId,
+    created: !!inserted,
+    reused_existing: !inserted,
+    profile: inserted ?? null,
+    message: inserted
+      ? "Owner profile created and linked to this conversation."
+      : "Existing owner found and linked to this conversation.",
+  };
+}
+
 async function runUpdateOwnerProfile({ supabase, logEvent, getTenantId }, input, ctx, toolCfg) {
   const editable = new Set(toolCfg.config?.editableFields ?? []);
   const updates = input?.updates && typeof input.updates === "object" ? input.updates : {};
@@ -526,6 +679,7 @@ const HANDLERS = {
   call_rpc: runCallRpc,
   create_draft_booking: runCreateDraftBooking,
   create_park_booking: runCreateParkBooking,
+  create_owner_profile: runCreateOwnerProfile,
   update_owner_profile: runUpdateOwnerProfile,
   save_memory: runSaveMemory,
   escalate_to_human: runEscalateToHuman,
