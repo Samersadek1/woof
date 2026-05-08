@@ -297,8 +297,50 @@ async function setHumanModeForTarget(targetPhone, ownerId, reasonLabel) {
   });
 }
 
+async function notifyOwnerByOwnerId(ownerId, message) {
+  if (!ownerId) return;
+  const { data: conv } = await supabase
+    .from("agent_conversations")
+    .select("phone_number")
+    .eq("owner_id", ownerId)
+    .single();
+  if (conv?.phone_number) {
+    await channel.sendMessage(conv.phone_number, message);
+  }
+}
+
 async function handleStaffConfirmCommand(text) {
   const ref = text.slice(9).trim().toUpperCase();
+
+  if (ref.startsWith("P-")) {
+    const { data: park } = await supabase
+      .from("park_bookings")
+      .update({ status: "confirmed" })
+      .eq("booking_ref", ref)
+      .eq("status", "draft")
+      .select("id, booking_ref, visit_date, slot_start, slot_end, is_assessment, owner_id")
+      .single();
+    if (!park) {
+      await channel.notifyStaff(`✗ Could not confirm ${ref} -- not found or not a draft`);
+      return;
+    }
+    const slot = `${String(park.slot_start).slice(0, 5)}-${String(park.slot_end).slice(0, 5)}`;
+    const label = park.is_assessment ? "park assessment" : "park visit";
+    await notifyOwnerByOwnerId(
+      park.owner_id,
+      `Great news! Your ${label} ${ref} is confirmed ✓\n` +
+        `Date: ${park.visit_date}\n` +
+        `Slot: ${slot}\n\nSee you then!`,
+    );
+    await supabase
+      .from("agent_conversations")
+      .update({ draft_booking: null, mode: "agent" })
+      .eq("owner_id", park.owner_id);
+    await conversation.setOwnerAgentAssignment(park.owner_id, true);
+    await channel.notifyStaff(`✓ ${ref} confirmed and owner notified`);
+    return;
+  }
+
   const { data: booking, error } = await supabase
     .from("bookings")
     .update({ status: "confirmed" })
@@ -312,29 +354,16 @@ async function handleStaffConfirmCommand(text) {
     return;
   }
 
-  const { data: conv } = await supabase
-    .from("agent_conversations")
-    .select("phone_number")
-    .eq("owner_id", booking.owner_id)
-    .single();
-
-  if (conv?.phone_number) {
-    await channel.sendMessage(
-      conv.phone_number,
-      `Great news! Your booking ${ref} is confirmed ✓\n` +
-        `Check-in: ${booking.check_in_date}\n` +
-        `Check-out: ${booking.check_out_date}\n\n` +
-        `See you then!`,
-    );
-  }
+  await notifyOwnerByOwnerId(
+    booking.owner_id,
+    `Great news! Your booking ${ref} is confirmed ✓\n` +
+      `Check-in: ${booking.check_in_date}\n` +
+      `Check-out: ${booking.check_out_date}\n\nSee you then!`,
+  );
 
   await supabase
     .from("agent_conversations")
-    .update({ draft_booking: null })
-    .eq("owner_id", booking.owner_id);
-  await supabase
-    .from("agent_conversations")
-    .update({ mode: "agent" })
+    .update({ draft_booking: null, mode: "agent" })
     .eq("owner_id", booking.owner_id);
   await conversation.setOwnerAgentAssignment(booking.owner_id, true);
   await channel.notifyStaff(`✓ ${ref} confirmed and owner notified`);
@@ -345,38 +374,44 @@ async function handleStaffRejectCommand(text) {
   const ref = parts[0].toUpperCase();
   const reason = parts.slice(1).join(" ") || "No reason given";
 
-  await supabase
-    .from("bookings")
-    .update({ status: "cancelled", cancelled_reason: reason })
-    .eq("booking_ref", ref)
-    .eq("status", "draft");
-
-  const { data: booking } = await supabase
-    .from("bookings")
-    .select("owner_id")
-    .eq("booking_ref", ref)
-    .single();
-
-  if (booking?.owner_id) {
-    const { data: conv } = await supabase
-      .from("agent_conversations")
-      .select("phone_number")
-      .eq("owner_id", booking.owner_id)
+  let ownerId = null;
+  if (ref.startsWith("P-")) {
+    await supabase
+      .from("park_bookings")
+      .update({ status: "cancelled", notes: reason })
+      .eq("booking_ref", ref)
+      .eq("status", "draft");
+    const { data: park } = await supabase
+      .from("park_bookings")
+      .select("owner_id")
+      .eq("booking_ref", ref)
       .single();
+    ownerId = park?.owner_id ?? null;
+  } else {
+    await supabase
+      .from("bookings")
+      .update({ status: "cancelled", cancelled_reason: reason })
+      .eq("booking_ref", ref)
+      .eq("status", "draft");
+    const { data: booking } = await supabase
+      .from("bookings")
+      .select("owner_id")
+      .eq("booking_ref", ref)
+      .single();
+    ownerId = booking?.owner_id ?? null;
+  }
 
-    if (conv?.phone_number) {
-      await channel.sendMessage(
-        conv.phone_number,
-        `I'm sorry, we weren't able to confirm that booking. ` +
-          `${reason}. Please get in touch and we'll find another option.`,
-      );
-    }
-
+  if (ownerId) {
+    await notifyOwnerByOwnerId(
+      ownerId,
+      `I'm sorry, we weren't able to confirm that booking. ` +
+        `${reason}. Please get in touch and we'll find another option.`,
+    );
     await supabase
       .from("agent_conversations")
       .update({ mode: "agent" })
-      .eq("owner_id", booking.owner_id);
-    await conversation.setOwnerAgentAssignment(booking.owner_id, true);
+      .eq("owner_id", ownerId);
+    await conversation.setOwnerAgentAssignment(ownerId, true);
   }
 
   await channel.notifyStaff(`✓ ${ref} cancelled and owner notified`);

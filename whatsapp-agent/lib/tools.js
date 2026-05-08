@@ -8,6 +8,10 @@
 //   2. Add a handler in HANDLERS keyed on the tool name.
 //   3. INSERT a row into tenant_tools for each tenant that should get it.
 
+// #region debug instrumentation
+import { dbg, clip } from "./_debug.js";
+// #endregion
+
 const CATALOG = {
   query_database: {
     permissions: "read",
@@ -77,8 +81,9 @@ const CATALOG = {
   },
   create_draft_booking: {
     permissions: "write",
-    description: `Create a draft booking record after confirming details with the
-      owner. Always saved as draft; staff confirm or reject in the staff group.`,
+    description: `Create a draft BOARDING booking (overnight stay in a room).
+      Use ONLY for boarding -- not for park visits, daycare, grooming, or
+      assessments. Saved as draft; staff confirm or reject in the staff group.`,
     input_schema: {
       type: "object",
       properties: {
@@ -91,6 +96,26 @@ const CATALOG = {
         notes: { type: "string" },
       },
       required: ["owner_id", "pet_ids", "room_id", "check_in_date", "check_out_date"],
+    },
+  },
+  create_park_booking: {
+    permissions: "write",
+    description: `Create a draft PARK booking (hourly park visit or free
+      assessment). Park visits do NOT use rooms -- never look up the rooms
+      table for parks. Slots are 1 hour, 8am-6pm. Set is_assessment=true for
+      first-time pets that need an assessment (free of charge). Saved as draft;
+      staff confirm or reject in the staff group.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        owner_id: { type: "string" },
+        pet_id: { type: "string" },
+        visit_date: { type: "string", description: "YYYY-MM-DD" },
+        slot_start: { type: "string", description: "HH:MM (24h), on the hour, 08:00-17:00" },
+        is_assessment: { type: "boolean" },
+        notes: { type: "string" },
+      },
+      required: ["owner_id", "pet_id", "visit_date", "slot_start"],
     },
   },
   save_memory: {
@@ -115,9 +140,12 @@ const CATALOG = {
   },
   escalate_to_human: {
     permissions: "escalation",
-    description: `Hand the conversation to staff. Use when the request is
-      complex, the owner is upset, there is a pricing dispute, an assessment
-      is needed, or the agent is uncertain.`,
+    description: `Hand the conversation to staff. Use sparingly and ONLY when:
+      (a) the request is genuinely outside the agent's scope (refunds, complaints,
+      payment disputes, medical emergencies), or (b) the owner explicitly asks
+      to talk to a human. Do NOT escalate just because data is missing -- ask
+      the owner instead. Do NOT escalate to "double-check" a routine booking;
+      create the draft booking instead and let staff approve via !confirm.`,
     input_schema: {
       type: "object",
       properties: {
@@ -164,11 +192,19 @@ export function buildToolConfigMap(tenantTools) {
 }
 
 export function summarizeToolResult(result) {
-  if (result?.error) return `error=${result.error}`;
+  if (result?.error) return `error=${String(result.error).slice(0, 120)}`;
   if (Array.isArray(result)) return `rows=${result.length}`;
   if (result && typeof result === "object") {
     if (result.row_count !== undefined) return `rows=${result.row_count}`;
     if (result.message) return String(result.message).slice(0, 120);
+    if (result.escalated) return `escalated reason=${String(result.reason ?? "").slice(0, 80)}`;
+    if (result.success && result.booking_ref) return `draft=${result.booking_ref}`;
+    if (result.saved && result.key) return `saved=${result.key}`;
+    return Object.entries(result)
+      .slice(0, 4)
+      .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+      .join(",")
+      .slice(0, 120);
   }
   return String(result).slice(0, 120);
 }
@@ -281,6 +317,94 @@ async function runCreateDraftBooking({ supabase, notifyStaff }, input, ctx) {
   };
 }
 
+async function runCreateParkBooking({ supabase, notifyStaff }, input, ctx) {
+  const ownerId = input.owner_id;
+  const petId = input.pet_id;
+  const visitDate = input.visit_date;
+  const slotStart = String(input.slot_start ?? "").trim();
+  if (!ownerId || !petId || !visitDate || !slotStart) {
+    return { error: "park booking requires owner_id, pet_id, visit_date, slot_start" };
+  }
+
+  const startMatch = /^(\d{1,2}):?(\d{2})?$/.exec(slotStart);
+  if (!startMatch) return { error: "slot_start must be HH:MM" };
+  const startHour = Number(startMatch[1]);
+  if (Number.isNaN(startHour) || startHour < 8 || startHour > 17) {
+    return { error: "park slots run 08:00-17:00 (1h slots)" };
+  }
+  const startTime = `${String(startHour).padStart(2, "0")}:00:00`;
+  const endTime = `${String(startHour + 1).padStart(2, "0")}:00:00`;
+
+  const { data: pet } = await supabase
+    .from("pets")
+    .select("id, name, size_category, owner_id")
+    .eq("id", petId)
+    .maybeSingle();
+  if (!pet) return { error: "Pet not found" };
+  if (pet.owner_id && pet.owner_id !== ownerId) {
+    return { error: "Pet does not belong to that owner" };
+  }
+  const sizeLane =
+    pet.size_category && /small|toy|mini/i.test(pet.size_category) ? "small" : "big";
+
+  const { data: ref } = await supabase.rpc("generate_booking_ref");
+  const bookingRef = ref ? `P-${ref}` : `P-${Date.now().toString(36).toUpperCase()}`;
+
+  const { data: priceRow } = await supabase
+    .from("park_rates")
+    .select("price_per_slot_aed")
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+  const price = input.is_assessment ? 0 : (priceRow?.price_per_slot_aed ?? null);
+
+  const { data: row, error: insertErr } = await supabase
+    .from("park_bookings")
+    .insert({
+      visit_date: visitDate,
+      slot_start: startTime,
+      slot_end: endTime,
+      size_lane: sizeLane,
+      owner_id: ownerId,
+      pet_id: petId,
+      is_assessment: Boolean(input.is_assessment),
+      price,
+      notes: input.notes ?? null,
+      status: "draft",
+      booking_ref: bookingRef,
+    })
+    .select("id, booking_ref, visit_date, slot_start, slot_end, is_assessment, price")
+    .single();
+  if (insertErr || !row) return { error: insertErr?.message ?? "Park insert failed" };
+
+  await supabase
+    .from("agent_conversations")
+    .update({ draft_booking: { ...row, kind: "park" } })
+    .eq("phone_number", ctx.phone);
+
+  const label = row.is_assessment ? "Park assessment (free)" : "Park visit";
+  await notifyStaff(
+    `🐾 *Park booking request from WhatsApp*\n\n` +
+      `*Ref:* ${bookingRef}\n` +
+      `*Type:* ${label}\n` +
+      `*Date:* ${row.visit_date}\n` +
+      `*Slot:* ${row.slot_start.slice(0, 5)}-${row.slot_end.slice(0, 5)}\n` +
+      `*Pet:* ${pet.name}\n` +
+      (row.price != null ? `*Price:* AED ${row.price}\n` : "") +
+      `\nReply in this chat:\n` +
+      `✅ *!confirm ${bookingRef}* to approve\n` +
+      `❌ *!reject ${bookingRef} [reason]* to decline`,
+  );
+
+  return {
+    success: true,
+    booking_ref: bookingRef,
+    booking_id: row.id,
+    is_assessment: row.is_assessment,
+    message: `Draft ${bookingRef} created and sent to team for approval.`,
+  };
+}
+
 async function runSaveMemory({ supabase, logEvent, getTenantId }, input, ctx) {
   const key = String(input?.key ?? "").trim();
   const value = String(input?.value ?? "").trim();
@@ -339,6 +463,7 @@ const HANDLERS = {
   query_database: runQueryDatabase,
   call_rpc: runCallRpc,
   create_draft_booking: runCreateDraftBooking,
+  create_park_booking: runCreateParkBooking,
   save_memory: runSaveMemory,
   escalate_to_human: runEscalateToHuman,
 };
@@ -370,8 +495,25 @@ export function createToolExecutor({
       const handler = HANDLERS[name];
       if (!handler) return { error: `Unknown tool: ${name}` };
 
-      return await handler(services, input, { phone }, toolCfg);
+      const result = await handler(services, input, { phone }, toolCfg);
+      // #region debug instrumentation
+      dbg("tools.js:executeTool", `tool ${name} ran`, {
+        phone,
+        tool: name,
+        input: clip(input, 1500),
+        result: clip(result, 1500),
+      }, "H1+H3");
+      // #endregion
+      return result;
     } catch (e) {
+      // #region debug instrumentation
+      dbg("tools.js:executeTool", `tool ${name} threw`, {
+        phone,
+        tool: name,
+        input: clip(input, 1500),
+        error: String(e),
+      }, "H1+H3");
+      // #endregion
       return { error: String(e) };
     }
   };
