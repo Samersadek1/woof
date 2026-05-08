@@ -111,6 +111,8 @@ export interface CreateServiceInvoiceParams {
   lineItems: ServiceInvoiceLineItem[];
   notes?: string | null;
   invoiceStatus?: "draft" | "finalised";
+  /** When true, member/profile discount is not applied (full subtotal). */
+  skipMemberDiscount?: boolean;
 }
 
 /**
@@ -126,6 +128,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
     lineItems,
     notes,
     invoiceStatus = "draft",
+    skipMemberDiscount = false,
   } = params;
 
   // #region agent log
@@ -171,19 +174,21 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   let discountAed = 0;
   let total = subtotal;
 
-  try {
-    const { data: discData } = await supabase.rpc("apply_member_discount", {
-      p_owner_id: ownerId,
-      p_subtotal: subtotal,
-    });
-    const disc = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
-    if (disc) {
-      discountPct = disc.discount_pct;
-      discountAed = disc.discount_aed;
-      total = disc.final_aed;
+  if (!skipMemberDiscount) {
+    try {
+      const { data: discData } = await supabase.rpc("apply_member_discount", {
+        p_owner_id: ownerId,
+        p_subtotal: subtotal,
+      });
+      const disc = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
+      if (disc) {
+        discountPct = disc.discount_pct;
+        discountAed = disc.discount_aed;
+        total = disc.final_aed;
+      }
+    } catch {
+      // RPC may not exist yet — proceed without discount
     }
-  } catch {
-    // RPC may not exist yet — proceed without discount
   }
 
   const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];

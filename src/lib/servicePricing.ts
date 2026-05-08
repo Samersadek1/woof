@@ -8,11 +8,71 @@ export function buildPriceMap(rows: { key: string; amount_aed: number }[]): Pric
   return new Map(rows.map((r) => [r.key, r.amount_aed]));
 }
 
+/** Keys used by the Live Rate Card and daycare check-in hourly billing (matches `pricing.key`). */
+export const DAYCARE_HOURLY_PRICING_KEYS = [
+  "daycare_hourly_single_day",
+  "daycare_hourly_2_dogs",
+  "daycare_hourly_3_dogs",
+  "daycare_hourly_family_per_dog",
+  "daycare_hourly_4_dogs",
+  "daycare_hourly_5_dogs",
+  "daycare_hourly_6_dogs",
+] as const;
+
+export function daycareHourlyGroupPricing(
+  dogCount: number,
+  prices: PriceByKey,
+): { pricingKey: string; total: number; label: string } {
+  if (dogCount <= 0) {
+    return { pricingKey: "", total: 0, label: "" };
+  }
+  const n = dogCount;
+  const familyPerDog = amountFor(prices, "daycare_hourly_family_per_dog");
+  const explicitKeyByCount: Record<number, string> = {
+    1: "daycare_hourly_single_day",
+    2: "daycare_hourly_2_dogs",
+    3: "daycare_hourly_3_dogs",
+    4: "daycare_hourly_4_dogs",
+    5: "daycare_hourly_5_dogs",
+    6: "daycare_hourly_6_dogs",
+  };
+  const explicitKey = explicitKeyByCount[n];
+  if (explicitKey) {
+    const explicitAmount = amountFor(prices, explicitKey);
+    if (explicitAmount > 0) {
+      return {
+        pricingKey: explicitKey,
+        total: explicitAmount,
+        label: `Daycare hourly — ${n} dog${n === 1 ? "" : "s"}`,
+      };
+    }
+  }
+
+  if (n >= 4 && familyPerDog > 0) {
+    return {
+      pricingKey: "daycare_hourly_family_per_dog",
+      total: n * familyPerDog,
+      label: `Daycare hourly family rate — ${n} dogs`,
+    };
+  }
+
+  const base3 = amountFor(prices, "daycare_hourly_3_dogs");
+  const single = amountFor(prices, "daycare_hourly_single_day");
+  return {
+    pricingKey: "daycare_hourly_3_dogs",
+    total: base3 + (n - 3) * single,
+    label: `Daycare hourly — 3 dogs + ${n - 3} extra`,
+  };
+}
+
 export function daycareGroupPricing(
   dogCount: number,
   prices: PriceByKey,
 ): { pricingKey: string; total: number; label: string } {
-  const n = Math.max(1, dogCount);
+  if (dogCount <= 0) {
+    return { pricingKey: "", total: 0, label: "" };
+  }
+  const n = dogCount;
   const familyPerDog = amountFor(prices, "daycare_family_per_dog");
   const explicitKeyByCount: Record<number, string> = {
     1: "daycare_single_day",

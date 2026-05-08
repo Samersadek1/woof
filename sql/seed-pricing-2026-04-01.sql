@@ -23,6 +23,14 @@ INSERT INTO pricing (key, amount_aed, label, category) VALUES
   ('daycare_2_dogs',            173.25, 'Daycare — 2 Dogs',                          'daycare'),
   ('daycare_3_dogs',            231.00, 'Daycare — 3 Dogs',                          'daycare'),
 
+  ('daycare_hourly_single_day',  38.50, 'Daycare Hourly — 1 Dog',                  'daycare'),
+  ('daycare_hourly_2_dogs',      57.75, 'Daycare Hourly — 2 Dogs',                 'daycare'),
+  ('daycare_hourly_3_dogs',      77.00, 'Daycare Hourly — 3 Dogs',                 'daycare'),
+  ('daycare_hourly_family_per_dog', 29.00, 'Daycare Hourly — Family rate / dog (4+)', 'daycare'),
+  ('daycare_hourly_4_dogs',     116.00, 'Daycare Hourly — 4 Dogs',                 'daycare'),
+  ('daycare_hourly_5_dogs',     145.00, 'Daycare Hourly — 5 Dogs',                 'daycare'),
+  ('daycare_hourly_6_dogs',     174.00, 'Daycare Hourly — 6 Dogs',                 'daycare'),
+
   -- ─── BOARDING (DEFAULT/PEAK) — keys match current resolver expectations ───
   ('standard_single',           173.25, 'Standard Suite — Single (Peak)',            'boarding'),
   ('deluxe_single',             225.75, 'Deluxe Suite — Single (Peak)',              'boarding'),

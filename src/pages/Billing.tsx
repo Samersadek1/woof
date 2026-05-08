@@ -131,6 +131,17 @@ const CANONICAL_PRICING_KEYS: Array<{ key: string; label: string; category: stri
   { key: "daycare_4_dogs", label: "Daycare 4 dogs (single day)", category: "daycare" },
   { key: "daycare_5_dogs", label: "Daycare 5 dogs (single day)", category: "daycare" },
   { key: "daycare_6_dogs", label: "Daycare 6 dogs (single day)", category: "daycare" },
+  { key: "daycare_hourly_single_day", label: "Daycare hourly — 1 dog", category: "daycare" },
+  { key: "daycare_hourly_2_dogs", label: "Daycare hourly — 2 dogs", category: "daycare" },
+  { key: "daycare_hourly_3_dogs", label: "Daycare hourly — 3 dogs", category: "daycare" },
+  {
+    key: "daycare_hourly_family_per_dog",
+    label: "Daycare hourly family rate per dog (4+ dogs)",
+    category: "daycare",
+  },
+  { key: "daycare_hourly_4_dogs", label: "Daycare hourly — 4 dogs", category: "daycare" },
+  { key: "daycare_hourly_5_dogs", label: "Daycare hourly — 5 dogs", category: "daycare" },
+  { key: "daycare_hourly_6_dogs", label: "Daycare hourly — 6 dogs", category: "daycare" },
   { key: "park_1_dog", label: "Park 1 dog", category: "park" },
   { key: "park_2_dogs", label: "Park 2 dogs", category: "park" },
   { key: "park_3_dogs", label: "Park 3 dogs", category: "park" },
@@ -984,7 +995,7 @@ function PricingTab() {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Live Rate Card (pricing table)</CardTitle>
           <p className="text-xs text-muted-foreground font-normal pt-1">
-            These keys drive live billing for transport, daycare day-pass, park visits, and registration. Update these first.
+            These keys drive live billing for transport, daycare day-pass, daycare hourly, park visits, and registration. Update these first.
           </p>
         </CardHeader>
         <CardContent className="p-0">
