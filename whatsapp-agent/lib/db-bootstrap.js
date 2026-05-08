@@ -2,6 +2,8 @@
 // storage bucket. Runs once at boot. Failures here are fatal because routing
 // depends on these columns existing.
 
+import { loadSchemaCache, assertSchemaExpectations } from "./schema-introspect.js";
+
 export async function ensureSessionBucketAccess(supabase, sessionBucket) {
   const { error } = await supabase.storage.from(sessionBucket).list("", { limit: 1 });
   if (error) {
@@ -54,8 +56,39 @@ export async function assertAgentConversationColumns(supabase) {
   }
 }
 
+// Columns the agent's tools depend on. If any are missing at boot we fail
+// loudly so production drift is impossible to ignore.
+const SCHEMA_EXPECTATIONS = {
+  owners: ["id", "first_name", "last_name", "phone", "member_type", "wallet_balance"],
+  pets: ["id", "owner_id", "name", "species", "breed", "assessment_status", "size_category"],
+  bookings: ["id", "owner_id", "room_id", "check_in_date", "check_out_date", "status", "booking_ref"],
+  booking_pets: ["booking_id", "pet_id"],
+  rooms: ["id", "display_name"],
+  park_bookings: [
+    "id",
+    "booking_ref",
+    "visit_date",
+    "slot_start",
+    "slot_end",
+    "size_lane",
+    "owner_id",
+    "pet_id",
+    "is_assessment",
+    "price",
+    "status",
+  ],
+};
+
 export async function bootstrapAgentSchema(supabase, { sessionBucket }) {
   await ensureSessionBucketAccess(supabase, sessionBucket);
   await ensureAgentConversationColumns(supabase);
   await assertAgentConversationColumns(supabase);
+  const schemaCache = await loadSchemaCache(supabase);
+  assertSchemaExpectations(schemaCache, SCHEMA_EXPECTATIONS);
+  console.log("Schema cache loaded:", {
+    tables: schemaCache.allowedTables.size,
+    rpcs: schemaCache.allowedRpcs.size,
+    generated_at: schemaCache.generatedAt,
+  });
+  return { schemaCache };
 }

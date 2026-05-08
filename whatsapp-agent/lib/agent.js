@@ -11,7 +11,14 @@ import { recordAgentTurn, logAgentEvent } from "./turns.js";
 import { invalidateBudgetCache } from "./cost.js";
 import { summarizeToolResult } from "./tools.js";
 
-export function buildSystemPrompt({ tenant, prompt, businessRules, ownerProfile, options = {} }) {
+export function buildSystemPrompt({
+  tenant,
+  prompt,
+  businessRules,
+  ownerProfile,
+  schemaReference,
+  options = {},
+}) {
   const today = new Date().toISOString().split("T")[0];
   const sections = buildPromptSections({
     handoff: options.handoff,
@@ -27,6 +34,7 @@ export function buildSystemPrompt({ tenant, prompt, businessRules, ownerProfile,
     today,
     rules: prompt?.rules_markdown ?? businessRules ?? "",
     owner_profile: ownerProfile ?? "",
+    schema_reference: schemaReference ?? "",
     ...sections,
   });
 }
@@ -70,6 +78,7 @@ export function createAgentRunner({
   getPrompt,
   getBusinessRules,
   getToolDefinitions,
+  getSchemaReference = () => "",
   getFallbackString,
   executeTool,
   ownerResolver,
@@ -234,6 +243,7 @@ export function createAgentRunner({
       prompt,
       businessRules,
       ownerProfile,
+      schemaReference: getSchemaReference(),
       options: {
         handoff: options.handoff,
         facts: updatedFacts,

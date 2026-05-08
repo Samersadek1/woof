@@ -11,13 +11,11 @@
 const CATALOG = {
   query_database: {
     permissions: "read",
-    description: `Query Supabase tables. Use for all data lookups.
-      Always fetch owner and pet details in the same nested select as
-      bookings -- never make separate follow-up queries.
-      Correct pattern: bookings with rooms(display_name),
-      owners(first_name,last_name), booking_pets(pets(name,species)).
-      IMPORTANT: For table "rooms", use conservative selects like "id,display_name"
-      and avoid non-existent columns like rooms.category / rooms.type / rooms.capacity.`,
+    description: `Query Supabase tables. Use for all data lookups. Refer to
+      SCHEMA REFERENCE in the system prompt for the authoritative list of
+      tables and columns. Always fetch related rows via nested selects rather
+      than making follow-up queries (e.g. bookings with rooms(display_name),
+      owners(first_name,last_name), booking_pets(pets(name,species))).`,
     input_schema: {
       type: "object",
       properties: {
@@ -28,35 +26,11 @@ const CATALOG = {
       },
       required: ["table"],
     },
-    config: {
-      allowedTables: [
-        "bookings",
-        "booking_pets",
-        "pets",
-        "owners",
-        "rooms",
-        "daycare_sessions",
-        "daycare_packages",
-        "park_bookings",
-        "vaccinations",
-        "invoices",
-        "wallet_transactions",
-        "grooming_appointments",
-        "boarding_rates",
-        "grooming_package_rates",
-        "addon_rates",
-        "pricing",
-      ],
-    },
   },
   call_rpc: {
     permissions: "read",
-    description: `Call Supabase RPC. Available:
-      is_off_peak(check_date) -> boolean
-      resolve_boarding_rate(category, size_tier, season) -> numeric
-      tier_discount_pct(member_type) -> 0/10/20/30
-      resolve_line_total(booking_id) -> numeric
-      generate_booking_ref() -> tenant booking ref`,
+    description: `Call a Supabase RPC. Refer to SCHEMA REFERENCE for the
+      authoritative list of available RPCs and their argument signatures.`,
     input_schema: {
       type: "object",
       properties: {
@@ -64,15 +38,6 @@ const CATALOG = {
         params: { type: "object" },
       },
       required: ["function_name"],
-    },
-    config: {
-      allowedRpc: [
-        "is_off_peak",
-        "resolve_boarding_rate",
-        "tier_discount_pct",
-        "resolve_line_total",
-        "generate_booking_ref",
-      ],
     },
   },
   create_draft_booking: {
@@ -261,9 +226,11 @@ export function summarizeToolResult(result) {
 // Tool handlers
 // ---------------------------------------------------------------------------
 
-async function runQueryDatabase({ supabase }, input, _ctx, toolCfg) {
-  const allowedTables = new Set(toolCfg.config?.allowedTables ?? []);
-  if (!allowedTables.has(input.table)) return { error: "Table not allowed" };
+async function runQueryDatabase({ supabase, getSchemaCache }, input) {
+  const cache = getSchemaCache();
+  if (!cache?.allowedTables.has(input.table)) {
+    return { error: `Table not allowed or unknown: ${input.table}` };
+  }
 
   let q = supabase
     .from(input.table)
@@ -286,27 +253,15 @@ async function runQueryDatabase({ supabase }, input, _ctx, toolCfg) {
   }
 
   const { data, error } = await q;
-  if (error) {
-    const message = String(error.message ?? "");
-    if (
-      input.table === "rooms" &&
-      /column rooms\.(category|type|capacity) does not exist/i.test(message)
-    ) {
-      return {
-        recoverable: true,
-        message:
-          "rooms schema hint: select existing fields only (e.g. id, display_name). " +
-          "Do not query rooms.category, rooms.type, or rooms.capacity.",
-      };
-    }
-    return { error: message };
-  }
+  if (error) return { error: String(error.message ?? error) };
   return data;
 }
 
-async function runCallRpc({ supabase }, input, _ctx, toolCfg) {
-  const allowedRpc = new Set(toolCfg.config?.allowedRpc ?? []);
-  if (!allowedRpc.has(input.function_name)) return { error: "RPC not allowed" };
+async function runCallRpc({ supabase, getSchemaCache }, input) {
+  const cache = getSchemaCache();
+  if (!cache?.allowedRpcs.has(input.function_name)) {
+    return { error: `RPC not allowed or unknown: ${input.function_name}` };
+  }
   const { data, error } = await supabase.rpc(input.function_name, input.params ?? {});
   if (error) return { error: error.message };
   return data;
@@ -585,6 +540,7 @@ export function createToolExecutor({
   logEvent,
   setAwaitingStaffDirection,
   getToolConfig,
+  getSchemaCache = () => null,
   getTenantId = () => null,
 }) {
   const services = {
@@ -592,6 +548,7 @@ export function createToolExecutor({
     notifyStaff,
     logEvent,
     setAwaitingStaffDirection,
+    getSchemaCache,
     getTenantId,
   };
 

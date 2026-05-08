@@ -70,6 +70,7 @@ const tenantCtx = {
   toolDefs: [],
   toolConfig: new Map(),
   businessRules: "",
+  schemaCache: null,
 };
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { realtime: { transport: ws } });
@@ -227,6 +228,7 @@ const executeTool = createToolExecutor({
   logEvent: (payload) => logAgentEvent(supabase, payload),
   setAwaitingStaffDirection: conversation.setAwaitingStaffDirection,
   getToolConfig: (name) => tenantCtx.toolConfig.get(name) ?? null,
+  getSchemaCache: () => tenantCtx.schemaCache,
   getTenantId: () => tenantCtx.tenant?.id ?? null,
 });
 
@@ -240,6 +242,7 @@ const agent = createAgentRunner({
   getPrompt: () => tenantCtx.prompt,
   getBusinessRules: () => tenantCtx.businessRules,
   getToolDefinitions: () => tenantCtx.toolDefs,
+  getSchemaReference: () => tenantCtx.schemaCache?.reference ?? "",
   getFallbackString: fallback,
   executeTool,
   ownerResolver,
@@ -688,5 +691,6 @@ process.on("SIGINT", () => void runtime.gracefulShutdown("SIGINT"));
 // ---------------------------------------------------------------------------
 console.log(`Starting WhatsApp agent (tenant=${TENANT_SLUG})...`);
 await loadTenantContext();
-await bootstrapAgentSchema(supabase, { sessionBucket: SESSION_BUCKET });
+const { schemaCache } = await bootstrapAgentSchema(supabase, { sessionBucket: SESSION_BUCKET });
+tenantCtx.schemaCache = schemaCache;
 runtime.queueClientInitialize("startup");
