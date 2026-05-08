@@ -455,6 +455,9 @@ async function buildSystemPrompt(ownerProfile, options = {}) {
   const staffDirectionSection = options.staffInstruction
     ? `\nPRIORITY STAFF DIRECTION:\n${options.staffInstruction}\nFollow this staff direction exactly before taking any other action.\n`
     : "";
+  const escalationHoldSection = options.facts?.awaiting_staff_direction
+    ? `\nESCALATION HOLD MODE:\nA staff escalation is open. Keep engaging with the owner in this same chat, acknowledge updates, ask clarifying questions, and keep the conversation moving. Do not execute any booking/confirmation/cancellation actions until staff guidance is provided.\n`
+    : "";
 
   return `You are the MSH booking assistant for MySecondHome,
 a premium pet boarding facility in Dubai.
@@ -468,6 +471,7 @@ ${rules}
 ${handoffSection}
 ${factsSection}
 ${staffDirectionSection}
+${escalationHoldSection}
 
 YOUR RULES:
 - Keep messages short -- this is WhatsApp, not email
@@ -835,62 +839,8 @@ async function setAwaitingStaffDirection(phone, reason, summary) {
   };
   await supabase
     .from("agent_conversations")
-    .update({ mode: "human", facts })
+    .update({ mode: "agent", facts })
     .eq("phone_number", phone);
-}
-
-async function handleAwaitingStaffOwnerMessage({
-  conversationKey,
-  replyTarget,
-  ownerConv,
-  messageBody,
-  timestamp,
-}) {
-  const nowTs = Number(timestamp ?? Math.floor(Date.now() / 1000));
-  const existingFacts = ownerConv?.facts ?? {};
-  const updatedFacts = {
-    ...existingFacts,
-    active_jid: replyTarget,
-    active_jid_ts: Math.max(Number(existingFacts.active_jid_ts ?? 0), nowTs),
-    pending_owner_message: messageBody,
-    pending_owner_message_at: new Date().toISOString(),
-  };
-
-  await supabase
-    .from("agent_conversations")
-    .update({ facts: updatedFacts })
-    .eq("phone_number", conversationKey);
-
-  const lastAckTs = Number(existingFacts.last_owner_hold_ack_ts ?? 0);
-  const lastStaffPingTs = Number(existingFacts.last_staff_followup_ping_ts ?? 0);
-  const shouldAckOwner = nowTs - lastAckTs >= 120;
-  const shouldPingStaff = nowTs - lastStaffPingTs >= 120;
-
-  if (shouldAckOwner) {
-    await client.sendMessage(
-      replyTarget,
-      "Thanks for your message. Our team is reviewing this request and I will update you shortly."
-    );
-    updatedFacts.last_owner_hold_ack_ts = nowTs;
-  }
-
-  if (shouldPingStaff) {
-    await notifyStaff(
-      `🔔 Owner follow-up while awaiting staff direction\n` +
-        `Phone: ${conversationKey}\n` +
-        `Message: ${messageBody.slice(0, 300)}\n` +
-        `Reply to the latest escalation message to guide the bot.\n` +
-        `[#route phone=${conversationKey} state=awaiting_staff]`
-    );
-    updatedFacts.last_staff_followup_ping_ts = nowTs;
-  }
-
-  if (shouldAckOwner || shouldPingStaff) {
-    await supabase
-      .from("agent_conversations")
-      .update({ facts: updatedFacts })
-      .eq("phone_number", conversationKey);
-  }
 }
 
 async function handleStaffGuidanceReply({ routePhone, guidanceText }) {
@@ -1480,6 +1430,7 @@ async function runAgent(phone, message, options = {}) {
     facts: updatedFacts,
     staffInstruction: options.staffInstruction,
   });
+  const toolsForTurn = updatedFacts.awaiting_staff_direction ? [] : WA_TOOLS;
 
   let currentMessages = [...claudeMessages];
   let finalText = "";
@@ -1491,7 +1442,7 @@ async function runAgent(phone, message, options = {}) {
       model: MODEL,
       max_tokens: MAX_TOK,
       system: systemPrompt,
-      tools: WA_TOOLS,
+      tools: toolsForTurn,
       messages: currentMessages,
     });
 
@@ -1771,16 +1722,6 @@ client.on("message", async (msg) => {
     modeKey,
     mode,
   });
-  if (ownerConv?.facts?.awaiting_staff_direction) {
-    await handleAwaitingStaffOwnerMessage({
-      conversationKey: modeKey,
-      replyTarget: routing.replyTarget,
-      ownerConv,
-      messageBody,
-      timestamp: msg.timestamp,
-    });
-    return;
-  }
   if (mode !== "agent") return;
   const activeConversationKey = modeKey;
 
@@ -1793,6 +1734,10 @@ client.on("message", async (msg) => {
     const reply = await runAgent(activeConversationKey, messageBody, {
       overrideHistory: liveHistory,
       lastSeenJid: routing.replyTarget,
+      staffInstruction: ownerConv?.facts?.awaiting_staff_direction
+        ? ownerConv?.facts?.staff_instruction ??
+          "Escalation is pending staff direction. Continue engaging, gather clarifications, and avoid executing transactional actions."
+        : undefined,
     });
 
     await chat.clearState();
@@ -1809,19 +1754,9 @@ client.on("message", async (msg) => {
     agentErrorCounts.set(activeConversationKey, nextErrorCount);
 
     if (nextErrorCount >= MAX_CONSECUTIVE_AGENT_ERRORS) {
-      await supabase
-        .from("agent_conversations")
-        .update({ mode: "human" })
-        .eq("phone_number", modeKey);
-      if (resolvedOwnerId) {
-        await supabase
-          .from("agent_conversations")
-          .update({ mode: "human" })
-          .eq("owner_id", resolvedOwnerId);
-      }
       agentErrorCounts.delete(activeConversationKey);
       await notifyStaff(
-        `⚠️ Agent error for ${activeConversationKey}\n${err.message}\nReached ${MAX_CONSECUTIVE_AGENT_ERRORS} consecutive failures and switched to human mode`
+        `⚠️ Agent error for ${activeConversationKey}\n${err.message}\nReached ${MAX_CONSECUTIVE_AGENT_ERRORS} consecutive failures. Agent mode remains ON; use !human if manual takeover is needed.`
       );
     } else {
       await notifyStaff(
