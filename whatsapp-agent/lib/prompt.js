@@ -54,18 +54,15 @@ function compactMemoryNotes(memory) {
   return lines;
 }
 
-// Build a single MEMORY section that consolidates everything the agent
-// previously got from {{handoff_section}}, {{summary_section}},
-// {{facts_section}}, {{staff_direction_section}}, {{escalation_hold_section}}.
-// Returns both the new unified `memory_section` and the legacy keys (empty
-// strings) so older prompt templates that still reference them keep rendering
-// cleanly.
+// Build a single MEMORY section that consolidates handoff, summary, facts,
+// and staff direction. Returns { memory_section } -- unknown tokens render
+// as "" via fillTemplate so older prompt versions stay safe.
 export function buildPromptSections({ handoff, summary, facts, staffInstruction }) {
   const blocks = [];
 
   if (staffInstruction) {
     blocks.push(
-      `PRIORITY STAFF DIRECTION:\n${staffInstruction}\nFollow this direction exactly before responding to the owner.`
+      `PRIORITY STAFF DIRECTION:\n${staffInstruction}\nFollow this direction exactly before responding to the owner.`,
     );
   }
 
@@ -73,13 +70,13 @@ export function buildPromptSections({ handoff, summary, facts, staffInstruction 
     blocks.push(
       "ESCALATION HOLD: A staff escalation is open. Keep the owner engaged " +
         "(acknowledge, ask clarifying questions) but do NOT execute booking, " +
-        "confirmation, or cancellation actions until staff guidance arrives."
+        "confirmation, or cancellation actions until staff guidance arrives.",
     );
   }
 
   if (handoff?.pending_request) {
     blocks.push(
-      `HANDOFF CONTEXT (owner request before activation):\n${handoff.pending_request}\nAddress this first.`
+      `HANDOFF CONTEXT (owner request before activation):\n${handoff.pending_request}\nAddress this first.`,
     );
   }
 
@@ -88,25 +85,12 @@ export function buildPromptSections({ handoff, summary, facts, staffInstruction 
   }
 
   const factLines = compactFacts(facts);
-  if (factLines.length) {
-    blocks.push(`CONVERSATION FACTS:\n${factLines.join("\n")}`);
-  }
+  if (factLines.length) blocks.push(`CONVERSATION FACTS:\n${factLines.join("\n")}`);
 
   const memoryLines = compactMemoryNotes(facts?.memory);
-  if (memoryLines.length) {
-    blocks.push(`SAVED NOTES (from save_memory):\n${memoryLines.join("\n")}`);
-  }
-
-  const memory_section = blocks.length
-    ? `MEMORY:\n${blocks.join("\n\n")}`
-    : "";
+  if (memoryLines.length) blocks.push(`SAVED NOTES (from save_memory):\n${memoryLines.join("\n")}`);
 
   return {
-    memory_section,
-    handoff_section: "",
-    summary_section: "",
-    facts_section: "",
-    staff_direction_section: "",
-    escalation_hold_section: "",
+    memory_section: blocks.length ? `MEMORY:\n${blocks.join("\n\n")}` : "",
   };
 }

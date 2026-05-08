@@ -6,7 +6,6 @@
 //   - queueClientInitialize(trigger): kick the client into life
 //   - gracefulShutdown(signal): tear it down on SIGTERM / SIGINT
 //   - getLatestQR(): expose the last QR for the HTTP server
-//   - registerHandlers({ onReady, onMessage, onMessageCreate }): hook agent events
 
 import { rm } from "node:fs/promises";
 
@@ -265,6 +264,5 @@ export function createWaRuntime({
     queueClientInitialize,
     gracefulShutdown,
     getLatestQR: () => latestQR,
-    isReady: () => isClientReady,
   };
 }

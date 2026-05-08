@@ -203,6 +203,26 @@ export function createConversationStore({ supabase, client, ownerResolver }) {
     };
   }
 
+  // Append `inboundJid` to a conversation row's facts.aliases and update
+  // last_seen_jid. Bounded list keeps the row small.
+  async function persistAlias(conv, inboundJid, conversationKey = conv?.phone_number) {
+    const aliasSet = new Set(
+      Array.isArray(conv?.facts?.aliases) ? conv.facts.aliases : [],
+    );
+    if (aliasSet.has(inboundJid) || !conversationKey) return;
+    aliasSet.add(inboundJid);
+    await supabase
+      .from("agent_conversations")
+      .update({
+        facts: {
+          ...(conv?.facts ?? {}),
+          aliases: Array.from(aliasSet).slice(-20),
+          last_seen_jid: inboundJid,
+        },
+      })
+      .eq("phone_number", conversationKey);
+  }
+
   // Given the result of resolveInboundRouting, pick the canonical owner row
   // to act on. Critical for keeping LID/c.us conversations on a single
   // thread.
@@ -266,20 +286,6 @@ export function createConversationStore({ supabase, client, ownerResolver }) {
         const bridge = await client.getContactLidAndPhone([inboundJid]);
         const bridgedPnRaw = Array.isArray(bridge) ? bridge[0]?.pn : bridge?.pn;
         const bridgedPhone = bridgedPnRaw ? canonicalConversationPhone(bridgedPnRaw) : null;
-        // #region agent log
-        fetch("http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "299bd9" },
-          body: JSON.stringify({
-            sessionId: "299bd9",
-            location: "lib/conversation.js:lid_bridge",
-            message: "lid_bridge attempt",
-            data: { inboundJid, bridgedPnRaw, bridgedPhone },
-            hypothesisId: "H1",
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (bridgedPhone) {
           const bridgedOwner = await ownerResolver.findOwnerByFlexiblePhone(bridgedPhone);
           if (bridgedOwner?.id) {
@@ -291,50 +297,17 @@ export function createConversationStore({ supabase, client, ownerResolver }) {
             };
           }
 
-          // No owner record but a conversation row may already exist at the
-          // bridged @c.us key (e.g. staff activated `!bot <number>` for a
-          // chat that has no owners table entry yet). Find it and return it
-          // so the inbound resolves to the correct mode/state.
+          // No owner record, but staff may have activated `!bot <number>` for
+          // a chat that has no owners row. Look up the conversation by the
+          // bridged @c.us key, persist the inbound @lid as an alias, and
+          // resolve mode/state from that row.
           const { data: bridgedConv } = await supabase
             .from("agent_conversations")
             .select("owner_id, phone_number, mode, facts")
             .eq("phone_number", bridgedPhone)
             .maybeSingle();
-          // #region agent log
-          fetch("http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "299bd9" },
-            body: JSON.stringify({
-              sessionId: "299bd9",
-              location: "lib/conversation.js:lid_bridge_anon_lookup",
-              message: "anon conv lookup",
-              data: {
-                bridgedPhone,
-                found: !!bridgedConv?.phone_number,
-                mode: bridgedConv?.mode ?? null,
-              },
-              hypothesisId: "H1",
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           if (bridgedConv?.phone_number) {
-            const aliasSet = new Set(
-              Array.isArray(bridgedConv.facts?.aliases) ? bridgedConv.facts.aliases : [],
-            );
-            if (!aliasSet.has(inboundJid)) {
-              aliasSet.add(inboundJid);
-              await supabase
-                .from("agent_conversations")
-                .update({
-                  facts: {
-                    ...(bridgedConv.facts ?? {}),
-                    aliases: Array.from(aliasSet).slice(-20),
-                    last_seen_jid: inboundJid,
-                  },
-                })
-                .eq("phone_number", bridgedPhone);
-            }
+            await persistAlias(bridgedConv, inboundJid, bridgedPhone);
             return {
               ownerId: bridgedConv.owner_id ?? null,
               ownerConv: bridgedConv,

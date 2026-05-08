@@ -50,11 +50,12 @@ text as private guidance to the bot for the routed phone.
    - `slug`, `display_name`, `language`, `timezone`
    - `staff_group_id`, `wa_session_client_id`
    - `booking_ref_prefix`, `default_mode`, `daily_token_cap`
-   - `prompt.system_prompt_template` (use `{{display_name}}`, `{{rules}}`,
-     `{{owner_profile}}`, `{{handoff_section}}`, `{{summary_section}}`,
-     `{{facts_section}}`, `{{staff_direction_section}}`,
-     `{{escalation_hold_section}}`, `{{today}}`)
-   - `tools` allow-list
+   - `prompt.system_prompt_template` (tokens: `{{display_name}}`,
+     `{{owner_profile}}`, `{{rules}}`, `{{schema_reference}}`,
+     `{{memory_section}}`, `{{today}}`). The schema reference is
+     auto-built at boot from `agent_introspect()`; the memory section
+     consolidates handoff context, summary, facts, and staff direction.
+   - `tools` allow-list (and any DB-side `agent_*` RPC the model should call)
 2. Seed it into Supabase:
 
 ```

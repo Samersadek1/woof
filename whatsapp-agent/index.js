@@ -312,63 +312,62 @@ async function notifyOwnerByOwnerId(ownerId, message) {
   }
 }
 
+// Maps a booking_ref prefix to (table, columns, owner-message-builder).
+function bookingTargetFor(ref) {
+  if (ref.startsWith("P-")) {
+    return {
+      table: "park_bookings",
+      cancelColumn: "notes",
+      selectCols: "id, booking_ref, visit_date, slot_start, slot_end, is_assessment, owner_id",
+      buildOwnerMessage: (row) => {
+        const slot = `${String(row.slot_start).slice(0, 5)}-${String(row.slot_end).slice(0, 5)}`;
+        const label = row.is_assessment ? "park assessment" : "park visit";
+        return (
+          `Great news! Your ${label} ${row.booking_ref} is confirmed ✓\n` +
+          `Date: ${row.visit_date}\n` +
+          `Slot: ${slot}\n\nSee you then!`
+        );
+      },
+    };
+  }
+  return {
+    table: "bookings",
+    cancelColumn: "cancelled_reason",
+    selectCols: "id, booking_ref, check_in_date, check_out_date, owner_id",
+    buildOwnerMessage: (row) =>
+      `Great news! Your booking ${row.booking_ref} is confirmed ✓\n` +
+      `Check-in: ${row.check_in_date}\n` +
+      `Check-out: ${row.check_out_date}\n\nSee you then!`,
+  };
+}
+
+async function reactivateOwnerAgent(ownerId, extraUpdate = {}) {
+  if (!ownerId) return;
+  await supabase
+    .from("agent_conversations")
+    .update({ mode: "agent", ...extraUpdate })
+    .eq("owner_id", ownerId);
+  await conversation.setOwnerAgentAssignment(ownerId, true);
+}
+
 async function handleStaffConfirmCommand(text) {
   const ref = text.slice(9).trim().toUpperCase();
+  const target = bookingTargetFor(ref);
 
-  if (ref.startsWith("P-")) {
-    const { data: park } = await supabase
-      .from("park_bookings")
-      .update({ status: "confirmed" })
-      .eq("booking_ref", ref)
-      .eq("status", "draft")
-      .select("id, booking_ref, visit_date, slot_start, slot_end, is_assessment, owner_id")
-      .single();
-    if (!park) {
-      await channel.notifyStaff(`✗ Could not confirm ${ref} -- not found or not a draft`);
-      return;
-    }
-    const slot = `${String(park.slot_start).slice(0, 5)}-${String(park.slot_end).slice(0, 5)}`;
-    const label = park.is_assessment ? "park assessment" : "park visit";
-    await notifyOwnerByOwnerId(
-      park.owner_id,
-      `Great news! Your ${label} ${ref} is confirmed ✓\n` +
-        `Date: ${park.visit_date}\n` +
-        `Slot: ${slot}\n\nSee you then!`,
-    );
-    await supabase
-      .from("agent_conversations")
-      .update({ draft_booking: null, mode: "agent" })
-      .eq("owner_id", park.owner_id);
-    await conversation.setOwnerAgentAssignment(park.owner_id, true);
-    await channel.notifyStaff(`✓ ${ref} confirmed and owner notified`);
-    return;
-  }
-
-  const { data: booking, error } = await supabase
-    .from("bookings")
+  const { data: row } = await supabase
+    .from(target.table)
     .update({ status: "confirmed" })
     .eq("booking_ref", ref)
     .eq("status", "draft")
-    .select("id, booking_ref, check_in_date, check_out_date, owner_id")
+    .select(target.selectCols)
     .single();
-
-  if (error || !booking) {
+  if (!row) {
     await channel.notifyStaff(`✗ Could not confirm ${ref} -- not found or not a draft`);
     return;
   }
 
-  await notifyOwnerByOwnerId(
-    booking.owner_id,
-    `Great news! Your booking ${ref} is confirmed ✓\n` +
-      `Check-in: ${booking.check_in_date}\n` +
-      `Check-out: ${booking.check_out_date}\n\nSee you then!`,
-  );
-
-  await supabase
-    .from("agent_conversations")
-    .update({ draft_booking: null, mode: "agent" })
-    .eq("owner_id", booking.owner_id);
-  await conversation.setOwnerAgentAssignment(booking.owner_id, true);
+  await notifyOwnerByOwnerId(row.owner_id, target.buildOwnerMessage(row));
+  await reactivateOwnerAgent(row.owner_id, { draft_booking: null });
   await channel.notifyStaff(`✓ ${ref} confirmed and owner notified`);
 }
 
@@ -376,33 +375,16 @@ async function handleStaffRejectCommand(text) {
   const parts = text.slice(8).trim().split(" ");
   const ref = parts[0].toUpperCase();
   const reason = parts.slice(1).join(" ") || "No reason given";
+  const target = bookingTargetFor(ref);
 
-  let ownerId = null;
-  if (ref.startsWith("P-")) {
-    await supabase
-      .from("park_bookings")
-      .update({ status: "cancelled", notes: reason })
-      .eq("booking_ref", ref)
-      .eq("status", "draft");
-    const { data: park } = await supabase
-      .from("park_bookings")
-      .select("owner_id")
-      .eq("booking_ref", ref)
-      .single();
-    ownerId = park?.owner_id ?? null;
-  } else {
-    await supabase
-      .from("bookings")
-      .update({ status: "cancelled", cancelled_reason: reason })
-      .eq("booking_ref", ref)
-      .eq("status", "draft");
-    const { data: booking } = await supabase
-      .from("bookings")
-      .select("owner_id")
-      .eq("booking_ref", ref)
-      .single();
-    ownerId = booking?.owner_id ?? null;
-  }
+  const { data: row } = await supabase
+    .from(target.table)
+    .update({ status: "cancelled", [target.cancelColumn]: reason })
+    .eq("booking_ref", ref)
+    .eq("status", "draft")
+    .select("owner_id")
+    .single();
+  const ownerId = row?.owner_id ?? null;
 
   if (ownerId) {
     await notifyOwnerByOwnerId(
@@ -410,13 +392,8 @@ async function handleStaffRejectCommand(text) {
       `I'm sorry, we weren't able to confirm that booking. ` +
         `${reason}. Please get in touch and we'll find another option.`,
     );
-    await supabase
-      .from("agent_conversations")
-      .update({ mode: "agent" })
-      .eq("owner_id", ownerId);
-    await conversation.setOwnerAgentAssignment(ownerId, true);
+    await reactivateOwnerAgent(ownerId);
   }
-
   await channel.notifyStaff(`✓ ${ref} cancelled and owner notified`);
 }
 

@@ -204,27 +204,29 @@ export function buildToolConfigMap(tenantTools) {
 export function summarizeToolResult(result) {
   if (result?.error) return `error=${String(result.error).slice(0, 120)}`;
   if (Array.isArray(result)) return `rows=${result.length}`;
-  if (result && typeof result === "object") {
-    if (result.row_count !== undefined) return `rows=${result.row_count}`;
-    if (result.message) return String(result.message).slice(0, 120);
-    if (result.escalated) return `escalated reason=${String(result.reason ?? "").slice(0, 80)}`;
-    if (result.success && result.booking_ref) return `draft=${result.booking_ref}`;
-    if (result.success && Array.isArray(result.updated_fields)) {
-      return `updated=${result.updated_fields.join(",").slice(0, 80)}`;
-    }
-    if (result.saved && result.key) return `saved=${result.key}`;
-    return Object.entries(result)
-      .slice(0, 4)
-      .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
-      .join(",")
-      .slice(0, 120);
+  if (!result || typeof result !== "object") return String(result ?? "").slice(0, 120);
+
+  if (result.row_count !== undefined) return `rows=${result.row_count}`;
+  if (result.message) return String(result.message).slice(0, 120);
+  if (result.escalated) return "escalated";
+  if (result.success && result.booking_ref) return `draft=${result.booking_ref}`;
+  if (result.success && Array.isArray(result.updated_fields)) {
+    return `updated=${result.updated_fields.join(",").slice(0, 80)}`;
   }
-  return String(result).slice(0, 120);
+  if (result.saved && result.key) return `saved=${result.key}`;
+
+  return Object.entries(result)
+    .slice(0, 4)
+    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+    .join(",")
+    .slice(0, 120);
 }
 
 // ---------------------------------------------------------------------------
 // Tool handlers
 // ---------------------------------------------------------------------------
+
+const FILTER_OPERATORS = ["eq", "neq", "lt", "lte", "gt", "gte"];
 
 async function runQueryDatabase({ supabase, getSchemaCache }, input) {
   const cache = getSchemaCache();
@@ -240,13 +242,10 @@ async function runQueryDatabase({ supabase, getSchemaCache }, input) {
   for (const [col, val] of Object.entries(input.filter ?? {})) {
     if (Array.isArray(val)) {
       q = q.in(col, val);
-    } else if (typeof val === "object" && val !== null) {
-      if (val.eq !== undefined) q = q.eq(col, val.eq);
-      if (val.neq !== undefined) q = q.neq(col, val.neq);
-      if (val.lt !== undefined) q = q.lt(col, val.lt);
-      if (val.lte !== undefined) q = q.lte(col, val.lte);
-      if (val.gt !== undefined) q = q.gt(col, val.gt);
-      if (val.gte !== undefined) q = q.gte(col, val.gte);
+    } else if (val && typeof val === "object") {
+      for (const op of FILTER_OPERATORS) {
+        if (val[op] !== undefined) q = q[op](col, val[op]);
+      }
     } else {
       q = q.eq(col, val);
     }
@@ -424,23 +423,22 @@ async function runUpdateOwnerProfile({ supabase, logEvent, getTenantId }, input,
 
   const sanitized = {};
   for (const [key, raw] of Object.entries(updates)) {
-    if (!editable.has(key)) continue;
-    if (raw == null) continue;
+    if (!editable.has(key) || raw == null) continue;
     const value = String(raw).trim();
-    if (!value) continue;
-    sanitized[key] = value.slice(0, 200);
+    if (value) sanitized[key] = value.slice(0, 200);
   }
-  if (!Object.keys(sanitized).length) {
+  const updatedFields = Object.keys(sanitized);
+  if (!updatedFields.length) {
     return { error: "No editable fields supplied. Allowed: " + [...editable].join(", ") };
   }
 
-  sanitized.updated_at = new Date().toISOString();
-
   const { data: updated, error: upErr } = await supabase
     .from("owners")
-    .update(sanitized)
+    .update({ ...sanitized, updated_at: new Date().toISOString() })
     .eq("id", ownerId)
-    .select("id, first_name, last_name, email, address, phone2, vet_name, vet_phone, emergency_contact_name, emergency_contact_phone")
+    .select(
+      "id, first_name, last_name, email, address, phone2, vet_name, vet_phone, emergency_contact_name, emergency_contact_phone",
+    )
     .single();
   if (upErr || !updated) {
     return { error: `Profile update failed: ${upErr?.message ?? "unknown"}` };
@@ -455,13 +453,13 @@ async function runUpdateOwnerProfile({ supabase, logEvent, getTenantId }, input,
     tenant_id: getTenantId(),
     chat_id: ctx.phone,
     event: "profile_updated",
-    payload: { fields: Object.keys(sanitized).filter((k) => k !== "updated_at") },
+    payload: { fields: updatedFields },
   });
 
   return {
     success: true,
     owner_id: ownerId,
-    updated_fields: Object.keys(sanitized).filter((k) => k !== "updated_at"),
+    updated_fields: updatedFields,
     profile: updated,
     message: "Profile updated.",
   };

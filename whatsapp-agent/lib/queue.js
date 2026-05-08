@@ -6,20 +6,12 @@ const queues = new Map();
 
 export function withChatLock(key, task) {
   const previous = queues.get(key) ?? Promise.resolve();
-  const next = previous
-    .catch(() => undefined)
-    .then(() => task());
+  const next = previous.catch(() => undefined).then(() => task());
   queues.set(
     key,
     next.finally(() => {
-      if (queues.get(key) === next) {
-        queues.delete(key);
-      }
-    })
+      if (queues.get(key) === next) queues.delete(key);
+    }),
   );
   return next;
-}
-
-export function pendingChatLockSize() {
-  return queues.size;
 }

@@ -88,5 +88,3 @@ export function extractStaffRoutePhone(text) {
   const match = (text ?? "").match(STAFF_ROUTE_MARKER_RE);
   return match?.[1]?.trim() ?? null;
 }
-
-export const STAFF_ROUTE_MARKER_REGEX = STAFF_ROUTE_MARKER_RE;
