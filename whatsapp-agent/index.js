@@ -8,7 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 import ws from "ws";
 import express from "express";
 import QRCode from "qrcode";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 // SECTION 2 - CLIENTS
@@ -57,6 +57,7 @@ let initGuardTimer = null;
 let readyStallTimer = null;
 let authReadyTimer = null;
 let autoRecoveryAttempts = 0;
+let hasHardResetSession = false;
 let latestQR = null;
 
 // Keep import explicit per required structure.
@@ -189,7 +190,44 @@ function clearAuthReadyTimer() {
 
 async function scheduleAutoRecover(reason) {
   if (isShuttingDown) return;
+  if (isClientReady) {
+    console.log("Auto-recovery ignored (client already ready):", { reason });
+    return;
+  }
   if (autoRecoveryAttempts >= MAX_AUTO_RECOVERY_RETRIES) {
+    if (reason.startsWith("auth-no-ready:") && !hasHardResetSession) {
+      hasHardResetSession = true;
+      autoRecoveryAttempts = 0;
+      console.error("Escalating to hard session reset:", { reason });
+      clearInitGuardTimer();
+      clearReadyStallTimer();
+      clearAuthReadyTimer();
+      isClientInitializing = false;
+      isClientReady = false;
+      try {
+        await client.destroy();
+        console.log("Client destroyed for hard reset");
+      } catch (err) {
+        console.error("Client destroy failed during hard reset:", err?.message ?? err);
+      }
+
+      try {
+        await store.delete({ session: `RemoteAuth-${WA_SESSION_CLIENT_ID}` });
+        console.log("RemoteAuth session object deleted for hard reset");
+      } catch (err) {
+        console.error("RemoteAuth delete failed during hard reset:", err?.message ?? err);
+      }
+
+      try {
+        await rm(localSessionZipPath(`RemoteAuth-${WA_SESSION_CLIENT_ID}`), { force: true });
+      } catch {
+        // Ignore local cleanup errors.
+      }
+
+      setTimeout(() => queueClientInitialize("hard-reset-auth-no-ready"), 3000);
+      return;
+    }
+
     console.error("Auto-recovery skipped (retry limit reached):", {
       reason,
       attempts: autoRecoveryAttempts,
@@ -225,7 +263,7 @@ function armReadyStallTimer(trigger) {
     timeout_ms: READY_STALL_TIMEOUT_MS,
   });
   readyStallTimer = setTimeout(() => {
-    if (!isClientReady) {
+    if (!isClientReady && !isShuttingDown) {
       void scheduleAutoRecover(`ready-timeout:${trigger}`);
     }
   }, READY_STALL_TIMEOUT_MS);
@@ -238,7 +276,7 @@ function armAuthReadyTimer(trigger) {
     timeout_ms: AUTH_TO_READY_TIMEOUT_MS,
   });
   authReadyTimer = setTimeout(() => {
-    if (!isClientReady) {
+    if (!isClientReady && !isShuttingDown) {
       void scheduleAutoRecover(`auth-no-ready:${trigger}`);
     }
   }, AUTH_TO_READY_TIMEOUT_MS);
@@ -247,6 +285,7 @@ function armAuthReadyTimer(trigger) {
 client.on("ready", async () => {
   isClientReady = true;
   autoRecoveryAttempts = 0;
+  hasHardResetSession = false;
   clearReadyStallTimer();
   clearInitGuardTimer();
   clearAuthReadyTimer();
