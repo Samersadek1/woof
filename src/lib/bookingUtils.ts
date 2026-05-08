@@ -267,7 +267,8 @@ interface AutoInvoiceParams {
   checkInDate: string;
   checkOutDate: string;
   roomRateType?: "peak" | "off_peak";
-  addons?: { key: string; label: string; quantity?: number }[];
+  /** When `unitPriceAed` is set, that amount is used (staff override per booking) instead of resolving `key` from the pricing tables. */
+  addons?: { key: string; label: string; quantity?: number; unitPriceAed?: number }[];
 }
 
 export async function createBookingInvoice(params: AutoInvoiceParams): Promise<void> {
@@ -314,14 +315,19 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
   }];
 
   for (const addon of addons) {
-    const rate = addonPriceMap.get(addon.key) ?? 0;
     const qty = Math.max(1, addon.quantity ?? 1);
+    const manual =
+      addon.unitPriceAed != null &&
+      Number.isFinite(addon.unitPriceAed) &&
+      addon.unitPriceAed >= 0;
+    const rate = manual ? addon.unitPriceAed! : (addonPriceMap.get(addon.key) ?? 0);
     lineItems.push({
       description: addon.label,
       quantity: qty,
       unitPrice: rate,
       pricingKey: addon.key,
       serviceType: serviceTypeForBoardingAddonKey(addon.key),
+      preserveUnitPrice: manual,
     });
   }
 

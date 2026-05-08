@@ -171,6 +171,40 @@ function formatAed(value: number): string {
   return `AED ${value.toLocaleString("en-AE", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
+/** Invoice line keys — optional manual staff prices per booking (`unitPriceAed` on invoice). */
+const BOARDING_ADDON_BLOW_DRY_KEY = "boarding_addon_blow_dry";
+const BOARDING_ADDON_DESEDGING_KEY = "boarding_addon_deshedding";
+
+function parseManualAedInput(raw: string): number | null {
+  const n = parseFloat(raw.trim());
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+function petSizeHintForBoarding(pet: {
+  name: string | null;
+  species: string | null;
+  size: string | null;
+}): string {
+  if (pet.species === "cat") return "Cat";
+  return pet.size ? `Dog · ${pet.size}` : "Dog · ?";
+}
+
+function selectedPetsSizeSummary(
+  ownerPets: { id: string; name: string | null; species: string | null; size: string | null }[],
+  petIds: string[],
+): string {
+  if (petIds.length === 0) return "";
+  return petIds
+    .map((id) => {
+      const p = ownerPets.find((x) => x.id === id);
+      if (!p) return null;
+      return `${p.name ?? "Pet"} (${petSizeHintForBoarding(p)})`;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -371,6 +405,11 @@ type NewBookingForm = {
   transport_zone: TransportZone;
   addon_groom: boolean;
   addon_bath: boolean;
+  addon_blow_dry: boolean;
+  addon_deshedding: boolean;
+  /** Staff-editable AED amounts per booking (strings for inputs). */
+  addon_blow_dry_price: string;
+  addon_deshedding_price: string;
   room_rate_type: "peak" | "off_peak";
   pet_care_by_pet_id: Record<
     string,
@@ -396,6 +435,10 @@ const BLANK_FORM: NewBookingForm = {
   transport_zone: "dubai_shared",
   addon_groom: false,
   addon_bath: false,
+  addon_blow_dry: false,
+  addon_deshedding: false,
+  addon_blow_dry_price: "",
+  addon_deshedding_price: "",
   room_rate_type: "off_peak",
   pet_care_by_pet_id: {},
 };
@@ -485,6 +528,56 @@ export function DogBoardingCalendar({
         rateType: form.room_rate_type,
       }),
   });
+
+  const dogTransportEstimate = useMemo(() => {
+    const trips =
+      (form.pickup_required ? 1 : 0) + (form.dropoff_required ? 1 : 0);
+    if (!activeTransportRate || trips === 0) return 0;
+    const qty = transportQuantityForPets(
+      form.transport_zone,
+      Math.max(1, form.pet_ids.length),
+    );
+    return activeTransportRate.amount_aed * qty * trips;
+  }, [
+    activeTransportRate,
+    form.transport_zone,
+    form.pet_ids.length,
+    form.pickup_required,
+    form.dropoff_required,
+  ]);
+
+  const dogManualAddonTotal = useMemo(() => {
+    let t = 0;
+    if (form.addon_blow_dry) {
+      const n = parseManualAedInput(form.addon_blow_dry_price);
+      if (n != null) t += n;
+    }
+    if (form.addon_deshedding) {
+      const n = parseManualAedInput(form.addon_deshedding_price);
+      if (n != null) t += n;
+    }
+    return t;
+  }, [
+    form.addon_blow_dry,
+    form.addon_deshedding,
+    form.addon_blow_dry_price,
+    form.addon_deshedding_price,
+  ]);
+
+  const dogBookingEstimateTotal = useMemo(() => {
+    let total = 0;
+    if (dogRatePreview.data && dogNights > 0) {
+      total += dogRatePreview.data.unitPrice * dogNights;
+    }
+    total += dogTransportEstimate;
+    total += dogManualAddonTotal;
+    return total;
+  }, [
+    dogRatePreview.data,
+    dogNights,
+    dogTransportEstimate,
+    dogManualAddonTotal,
+  ]);
 
   const handleBelongingsFlowFinished = () => {
     queryClient.invalidateQueries({ queryKey: ["bookings"] });
@@ -587,12 +680,28 @@ export function DogBoardingCalendar({
       return;
     }
 
+    if (form.addon_blow_dry && parseManualAedInput(form.addon_blow_dry_price) == null) {
+      toast.error("Enter a valid AED amount for Blow Dry");
+      return;
+    }
+    if (form.addon_deshedding && parseManualAedInput(form.addon_deshedding_price) == null) {
+      toast.error("Enter a valid AED amount for De-shedding");
+      return;
+    }
+
+    const petAddonHintForNotes = selectedPetsSizeSummary(ownerPets, form.pet_ids);
     const transportLabel = transportZoneLabel(form.transport_zone);
     const addons = [
       form.pickup_required && `Pickup (${transportLabel})`,
       form.dropoff_required && `Drop-off (${transportLabel})`,
       form.addon_groom && "Full Groom on checkout",
       form.addon_bath && "Full Bath on checkout",
+      form.addon_blow_dry &&
+        parseManualAedInput(form.addon_blow_dry_price) != null &&
+        `Blow dry (${formatAed(parseManualAedInput(form.addon_blow_dry_price)!)}${petAddonHintForNotes ? ` · ${petAddonHintForNotes}` : ""})`,
+      form.addon_deshedding &&
+        parseManualAedInput(form.addon_deshedding_price) != null &&
+        `De-shedding (${formatAed(parseManualAedInput(form.addon_deshedding_price)!)}${petAddonHintForNotes ? ` · ${petAddonHintForNotes}` : ""})`,
     ]
       .filter(Boolean)
       .join(", ");
@@ -649,6 +758,29 @@ export function DogBoardingCalendar({
         if (form.addon_bath) {
           const line = boardCheckoutGroomingAddon("full_bath");
           if (line) addonItems.push(line);
+        }
+        const dogSizeHint = selectedPetsSizeSummary(ownerPets, form.pet_ids);
+        if (form.addon_blow_dry) {
+          const amt = parseManualAedInput(form.addon_blow_dry_price);
+          if (amt != null) {
+            addonItems.push({
+              key: BOARDING_ADDON_BLOW_DRY_KEY,
+              label: dogSizeHint ? `Blow dry — ${dogSizeHint}` : "Blow dry",
+              quantity: 1,
+              unitPriceAed: amt,
+            });
+          }
+        }
+        if (form.addon_deshedding) {
+          const amt = parseManualAedInput(form.addon_deshedding_price);
+          if (amt != null) {
+            addonItems.push({
+              key: BOARDING_ADDON_DESEDGING_KEY,
+              label: dogSizeHint ? `De-shedding — ${dogSizeHint}` : "De-shedding",
+              quantity: 1,
+              unitPriceAed: amt,
+            });
+          }
         }
 
         createBookingInvoice({
@@ -1205,8 +1337,14 @@ export function DogBoardingCalendar({
             <Separator />
 
             {/* Add-ons */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               <Label className="text-sm font-medium">Add-ons</Label>
+              {form.pet_ids.length > 0 && (
+                <p className="text-xs text-muted-foreground leading-snug">
+                  <span className="font-medium text-foreground">Pets:</span>{" "}
+                  {selectedPetsSizeSummary(ownerPets, form.pet_ids)}
+                </p>
+              )}
               <div className="space-y-2">
                 {[
                   { key: "addon_groom", label: "Full Groom on checkout" },
@@ -1222,6 +1360,112 @@ export function DogBoardingCalendar({
                   </div>
                 ))}
               </div>
+              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Optional grooming add-ons (manual price)</p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="addon_blow_dry"
+                      checked={form.addon_blow_dry}
+                      onCheckedChange={(v) =>
+                        setForm((f) => ({ ...f, addon_blow_dry: !!v }))
+                      }
+                    />
+                    <Label htmlFor="addon_blow_dry" className="cursor-pointer font-normal">
+                      Blow dry
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">AED</span>
+                    <Input
+                      id="addon_blow_dry_price"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="h-8 w-[7rem]"
+                      placeholder="0"
+                      disabled={!form.addon_blow_dry}
+                      value={form.addon_blow_dry_price}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, addon_blow_dry_price: e.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="addon_deshedding"
+                      checked={form.addon_deshedding}
+                      onCheckedChange={(v) =>
+                        setForm((f) => ({ ...f, addon_deshedding: !!v }))
+                      }
+                    />
+                    <Label htmlFor="addon_deshedding" className="cursor-pointer font-normal">
+                      De-shedding
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">AED</span>
+                    <Input
+                      id="addon_deshedding_price"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="h-8 w-[7rem]"
+                      placeholder="0"
+                      disabled={!form.addon_deshedding}
+                      value={form.addon_deshedding_price}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, addon_deshedding_price: e.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {form.pet_ids.length > 0 && (
+                <div className="rounded-lg border-2 border-primary/25 bg-primary/5 p-4 space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Estimated total (this booking)
+                  </p>
+                  <div className="space-y-1.5 text-sm">
+                    {dogRatePreview.data && dogNights > 0 && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">
+                          Room ({dogNights} night{dogNights !== 1 ? "s" : ""})
+                        </span>
+                        <span className="tabular-nums font-medium">
+                          {formatAed(dogRatePreview.data.unitPrice * dogNights)}
+                        </span>
+                      </div>
+                    )}
+                    {(form.pickup_required || form.dropoff_required) && dogTransportEstimate > 0 && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">Transport (est.)</span>
+                        <span className="tabular-nums font-medium">
+                          {formatAed(dogTransportEstimate)}
+                        </span>
+                      </div>
+                    )}
+                    {(form.addon_blow_dry || form.addon_deshedding) && dogManualAddonTotal > 0 && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">Blow dry &amp; De-shedding</span>
+                        <span className="tabular-nums font-medium">
+                          {formatAed(dogManualAddonTotal)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xl font-semibold tabular-nums border-t pt-2">
+                    {formatAed(dogBookingEstimateTotal)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Includes room (when resolved), transport (if selected), and manual add-ons above.
+                    Full groom/bath use standard rates on the invoice when selected.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Do Not Move */}
@@ -1565,6 +1809,10 @@ type CatBookingForm = {
   transport_zone: TransportZone;
   addon_groom: boolean;
   addon_bath: boolean;
+  addon_blow_dry: boolean;
+  addon_deshedding: boolean;
+  addon_blow_dry_price: string;
+  addon_deshedding_price: string;
   room_rate_type: "peak" | "off_peak";
   cat_litter_type: string;
   cat_indoor_only: boolean;
@@ -1594,6 +1842,10 @@ const CAT_BLANK_FORM: CatBookingForm = {
   transport_zone: "dubai_shared",
   addon_groom: false,
   addon_bath: false,
+  addon_blow_dry: false,
+  addon_deshedding: false,
+  addon_blow_dry_price: "",
+  addon_deshedding_price: "",
   room_rate_type: "off_peak",
   cat_litter_type: "",
   cat_indoor_only: false,
@@ -1711,6 +1963,56 @@ function CatBoardingCalendar({
       }),
   });
 
+  const catTransportEstimate = useMemo(() => {
+    const trips =
+      (form.pickup_required ? 1 : 0) + (form.dropoff_required ? 1 : 0);
+    if (!catActiveTransportRate || trips === 0) return 0;
+    const qty = transportQuantityForPets(
+      form.transport_zone,
+      Math.max(1, form.pet_ids.length),
+    );
+    return catActiveTransportRate.amount_aed * qty * trips;
+  }, [
+    catActiveTransportRate,
+    form.transport_zone,
+    form.pet_ids.length,
+    form.pickup_required,
+    form.dropoff_required,
+  ]);
+
+  const catManualAddonTotal = useMemo(() => {
+    let t = 0;
+    if (form.addon_blow_dry) {
+      const n = parseManualAedInput(form.addon_blow_dry_price);
+      if (n != null) t += n;
+    }
+    if (form.addon_deshedding) {
+      const n = parseManualAedInput(form.addon_deshedding_price);
+      if (n != null) t += n;
+    }
+    return t;
+  }, [
+    form.addon_blow_dry,
+    form.addon_deshedding,
+    form.addon_blow_dry_price,
+    form.addon_deshedding_price,
+  ]);
+
+  const catBookingEstimateTotal = useMemo(() => {
+    let total = 0;
+    if (catRatePreview.data && catNights > 0) {
+      total += catRatePreview.data.unitPrice * catNights;
+    }
+    total += catTransportEstimate;
+    total += catManualAddonTotal;
+    return total;
+  }, [
+    catRatePreview.data,
+    catNights,
+    catTransportEstimate,
+    catManualAddonTotal,
+  ]);
+
   const handleBelongingsFlowFinished = () => {
     queryClient.invalidateQueries({ queryKey: ["bookings"] });
     setDetailBooking(null);
@@ -1797,12 +2099,28 @@ function CatBoardingCalendar({
       return;
     }
 
+    if (form.addon_blow_dry && parseManualAedInput(form.addon_blow_dry_price) == null) {
+      toast.error("Enter a valid AED amount for Blow Dry");
+      return;
+    }
+    if (form.addon_deshedding && parseManualAedInput(form.addon_deshedding_price) == null) {
+      toast.error("Enter a valid AED amount for De-shedding");
+      return;
+    }
+
     const catTransportLabel = transportZoneLabel(form.transport_zone);
+    const catPetAddonHint = selectedPetsSizeSummary(ownerPets, form.pet_ids);
     const addons = [
       form.pickup_required && `Pickup (${catTransportLabel})`,
       form.dropoff_required && `Drop-off (${catTransportLabel})`,
       form.addon_groom && "Full Groom on checkout",
       form.addon_bath && "Full Bath on checkout",
+      form.addon_blow_dry &&
+        parseManualAedInput(form.addon_blow_dry_price) != null &&
+        `Blow dry (${formatAed(parseManualAedInput(form.addon_blow_dry_price)!)}${catPetAddonHint ? ` · ${catPetAddonHint}` : ""})`,
+      form.addon_deshedding &&
+        parseManualAedInput(form.addon_deshedding_price) != null &&
+        `De-shedding (${formatAed(parseManualAedInput(form.addon_deshedding_price)!)}${catPetAddonHint ? ` · ${catPetAddonHint}` : ""})`,
     ]
       .filter(Boolean)
       .join(", ");
@@ -1862,6 +2180,29 @@ function CatBoardingCalendar({
         if (form.addon_bath) {
           const line = boardCheckoutGroomingAddon("full_bath");
           if (line) addonItems.push(line);
+        }
+        const catSizeHint = selectedPetsSizeSummary(ownerPets, form.pet_ids);
+        if (form.addon_blow_dry) {
+          const amt = parseManualAedInput(form.addon_blow_dry_price);
+          if (amt != null) {
+            addonItems.push({
+              key: BOARDING_ADDON_BLOW_DRY_KEY,
+              label: catSizeHint ? `Blow dry — ${catSizeHint}` : "Blow dry",
+              quantity: 1,
+              unitPriceAed: amt,
+            });
+          }
+        }
+        if (form.addon_deshedding) {
+          const amt = parseManualAedInput(form.addon_deshedding_price);
+          if (amt != null) {
+            addonItems.push({
+              key: BOARDING_ADDON_DESEDGING_KEY,
+              label: catSizeHint ? `De-shedding — ${catSizeHint}` : "De-shedding",
+              quantity: 1,
+              unitPriceAed: amt,
+            });
+          }
         }
 
         createBookingInvoice({
@@ -2298,8 +2639,14 @@ function CatBoardingCalendar({
 
             <Separator />
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <Label className="text-sm font-medium">Add-ons</Label>
+              {form.pet_ids.length > 0 && (
+                <p className="text-xs text-muted-foreground leading-snug">
+                  <span className="font-medium text-foreground">Pets:</span>{" "}
+                  {selectedPetsSizeSummary(ownerPets, form.pet_ids)}
+                </p>
+              )}
               <div className="space-y-2">
                 {[
                   { key: "addon_groom", label: "Full Groom on checkout" },
@@ -2311,6 +2658,100 @@ function CatBoardingCalendar({
                   </div>
                 ))}
               </div>
+              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Optional grooming add-ons (manual price)</p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="cat_addon_blow_dry"
+                      checked={form.addon_blow_dry}
+                      onCheckedChange={(v) => setForm((f) => ({ ...f, addon_blow_dry: !!v }))}
+                    />
+                    <Label htmlFor="cat_addon_blow_dry" className="cursor-pointer font-normal">Blow dry</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">AED</span>
+                    <Input
+                      id="cat_addon_blow_dry_price"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="h-8 w-[7rem]"
+                      placeholder="0"
+                      disabled={!form.addon_blow_dry}
+                      value={form.addon_blow_dry_price}
+                      onChange={(e) => setForm((f) => ({ ...f, addon_blow_dry_price: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="cat_addon_deshedding"
+                      checked={form.addon_deshedding}
+                      onCheckedChange={(v) => setForm((f) => ({ ...f, addon_deshedding: !!v }))}
+                    />
+                    <Label htmlFor="cat_addon_deshedding" className="cursor-pointer font-normal">De-shedding</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">AED</span>
+                    <Input
+                      id="cat_addon_deshedding_price"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="h-8 w-[7rem]"
+                      placeholder="0"
+                      disabled={!form.addon_deshedding}
+                      value={form.addon_deshedding_price}
+                      onChange={(e) => setForm((f) => ({ ...f, addon_deshedding_price: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {form.pet_ids.length > 0 && (
+                <div className="rounded-lg border-2 border-primary/25 bg-primary/5 p-4 space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Estimated total (this booking)
+                  </p>
+                  <div className="space-y-1.5 text-sm">
+                    {catRatePreview.data && catNights > 0 && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">
+                          Room ({catNights} night{catNights !== 1 ? "s" : ""})
+                        </span>
+                        <span className="tabular-nums font-medium">
+                          {formatAed(catRatePreview.data.unitPrice * catNights)}
+                        </span>
+                      </div>
+                    )}
+                    {(form.pickup_required || form.dropoff_required) && catTransportEstimate > 0 && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">Transport (est.)</span>
+                        <span className="tabular-nums font-medium">
+                          {formatAed(catTransportEstimate)}
+                        </span>
+                      </div>
+                    )}
+                    {(form.addon_blow_dry || form.addon_deshedding) && catManualAddonTotal > 0 && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">Blow dry &amp; De-shedding</span>
+                        <span className="tabular-nums font-medium">
+                          {formatAed(catManualAddonTotal)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xl font-semibold tabular-nums border-t pt-2">
+                    {formatAed(catBookingEstimateTotal)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Includes room (when resolved), transport (if selected), and manual add-ons above.
+                    Full groom/bath use standard rates on the invoice when selected.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between rounded-md border p-3">
