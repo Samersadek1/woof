@@ -12,6 +12,7 @@ const DEFAULT_STATE_FILE = process.env.RAILWAY_LOG_STATE_FILE
   ? path.resolve(process.env.RAILWAY_LOG_STATE_FILE)
   : path.resolve(".railway-log-state.json");
 const OUTPUT_JSON = process.env.RAILWAY_WATCH_JSON === "1";
+const TENANT_SLUG = (process.env.TENANT_SLUG || "").trim();
 
 function parseArgs(argv) {
   const flags = new Set(argv.slice(2));
@@ -126,7 +127,8 @@ function summarizeLogHealth(lines) {
   const text = lines.join("\n");
   const count = (regex) => (text.match(regex) || []).length;
 
-  const readyCount = count(/MSH WhatsApp agent ready/g);
+  // "ready" log is now "<DisplayName> WhatsApp agent ready" (tenant-driven).
+  const readyCount = count(/WhatsApp agent ready/g);
   const authCount = count(/WhatsApp authenticated/g);
   const ownerNullCount = count(/ownerId:\s*null/g);
   const fallbackResolutionCount = count(/resolutionSource:\s*'fallback'/g);
@@ -135,9 +137,19 @@ function summarizeLogHealth(lines) {
   );
   const escalationCount = count(/Escalation requested by agent:/g);
   const initFailures = count(/WhatsApp initialize failed|Auto-recovery triggered/g);
+  const tenantLoadFailures = count(
+    /Failed to load tenant|No active tenant_prompts|Missing TENANT_SLUG/g
+  );
+  const tokenCapHits = count(/Daily token cap reached/g);
 
   const critical = [];
   const warnings = [];
+
+  if (tenantLoadFailures > 0) {
+    critical.push(
+      `Tenant config load failed ${tenantLoadFailures} time(s). Verify TENANT_SLUG and tenant rows.`
+    );
+  }
 
   if (blockedCount > escalationCount) {
     critical.push(
@@ -151,6 +163,10 @@ function summarizeLogHealth(lines) {
 
   if (ownerNullCount > 3) {
     critical.push(`Repeated owner matching misses detected (${ownerNullCount} occurrences).`);
+  }
+
+  if (tokenCapHits > 0) {
+    warnings.push(`Daily token cap reached ${tokenCapHits} time(s); tenant pushed to human mode.`);
   }
 
   if (initFailures > 0) {
@@ -171,6 +187,8 @@ function summarizeLogHealth(lines) {
     blockedCount,
     escalationCount,
     initFailures,
+    tenantLoadFailures,
+    tokenCapHits,
     critical,
     warnings,
   };
@@ -178,9 +196,10 @@ function summarizeLogHealth(lines) {
 
 function renderSummary(result) {
   const level = scoreSeverity(result.summary).toUpperCase();
+  const tenantLabel = TENANT_SLUG ? ` tenant=${TENANT_SLUG}` : "";
   const lines = [
-    `[${isoNow()}] Railway watch ${level}`,
-    `new_lines=${result.newLines.length} ready=${result.summary.readyCount} auth=${result.summary.authCount} owner_null=${result.summary.ownerNullCount} blocked=${result.summary.blockedCount} escalations=${result.summary.escalationCount}`,
+    `[${isoNow()}] Railway watch ${level}${tenantLabel}`,
+    `new_lines=${result.newLines.length} ready=${result.summary.readyCount} auth=${result.summary.authCount} owner_null=${result.summary.ownerNullCount} blocked=${result.summary.blockedCount} escalations=${result.summary.escalationCount} tenant_load_fail=${result.summary.tenantLoadFailures} token_cap=${result.summary.tokenCapHits}`,
   ];
 
   if (result.summary.critical.length) {
@@ -239,6 +258,7 @@ async function tick({ failOnAlerts }) {
       JSON.stringify(
         {
           ts: isoNow(),
+          tenant: TENANT_SLUG || null,
           severity: scoreSeverity(result.summary),
           stateFile: DEFAULT_STATE_FILE,
           metrics: result.summary,
