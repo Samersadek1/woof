@@ -16,5 +16,5 @@ function parseClinics(raw: string): readonly string[] {
   return out;
 }
 
+/** Fallback when `vet_clinics` is empty or unavailable (bundle defaults). */
 export const VET_CLINICS = parseClinics(RAW);
-export const VET_CLINICS_SET = new Set<string>(VET_CLINICS);

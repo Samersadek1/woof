@@ -20,5 +20,5 @@ function parseBreeds(raw: string): readonly string[] {
 
 const RAW = [s1a, s1b, s2, s3, s4].map((s) => s.trim()).join("");
 
+/** Fallback when `dog_breeds` is empty or unavailable (bundle defaults). */
 export const PET_BREEDS = parseBreeds(RAW);
-export const PET_BREEDS_SET = new Set<string>(PET_BREEDS);

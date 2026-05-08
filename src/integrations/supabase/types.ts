@@ -413,6 +413,27 @@ export type Database = {
           },
         ]
       }
+      dog_breeds: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
       daycare_package_types: {
         Row: {
           base_price_aed: number
@@ -1759,6 +1780,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      vet_clinics: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
       }
       wallet_topup_requests: {
         Row: {

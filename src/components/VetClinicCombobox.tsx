@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import {
-  VET_CLINICS,
-  VET_CLINICS_SET,
-  VET_NOT_LISTED_OPTION,
-} from "@/data/vetClinics";
+import { VET_CLINICS, VET_NOT_LISTED_OPTION } from "@/data/vetClinics";
+import { useVetClinicsQuery } from "@/hooks/useReferenceLists";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -38,12 +35,23 @@ export function VetClinicCombobox({
   const [open, setOpen] = useState(false);
   const preserveManualEmpty = useRef(false);
 
+  const { data: clinicRows, isLoading } = useVetClinicsQuery();
+
+  const clinicNames = useMemo(() => {
+    if (clinicRows && clinicRows.length > 0) {
+      return clinicRows.map((r) => r.name);
+    }
+    return [...VET_CLINICS];
+  }, [clinicRows]);
+
+  const clinicSet = useMemo(() => new Set(clinicNames), [clinicNames]);
+
   const trimmed = value.trim();
-  const inList = trimmed.length > 0 && VET_CLINICS_SET.has(trimmed);
+  const inList = trimmed.length > 0 && clinicSet.has(trimmed);
 
   const [manualChoice, setManualChoice] = useState(() => {
     const t = value.trim();
-    return t.length > 0 && !VET_CLINICS_SET.has(t);
+    return t.length > 0 && !clinicSet.has(t);
   });
 
   useEffect(() => {
@@ -56,9 +64,9 @@ export function VetClinicCombobox({
       setManualChoice(false);
       return;
     }
-    if (VET_CLINICS_SET.has(t)) setManualChoice(false);
+    if (clinicSet.has(t)) setManualChoice(false);
     else setManualChoice(true);
-  }, [value]);
+  }, [value, clinicSet]);
 
   const triggerLabel = useMemo(() => {
     if (inList) return trimmed;
@@ -76,6 +84,8 @@ export function VetClinicCombobox({
     setOpen(false);
   }
 
+  const busy = disabled || isLoading;
+
   return (
     <div className="space-y-2">
       <Popover open={open} onOpenChange={setOpen}>
@@ -86,14 +96,18 @@ export function VetClinicCombobox({
             variant="outline"
             role="combobox"
             aria-expanded={open}
-            disabled={disabled}
+            disabled={busy}
             className={cn(
               "h-10 w-full justify-between font-normal",
               !trimmed && !manualChoice && "text-muted-foreground",
             )}
           >
             <span className="truncate text-left">{triggerLabel}</span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            {isLoading ? (
+              <Loader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
+            ) : (
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            )}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
@@ -117,7 +131,7 @@ export function VetClinicCombobox({
                 </CommandGroup>
               ) : null}
               <CommandGroup heading="Clinics">
-                {VET_CLINICS.map((name) => (
+                {clinicNames.map((name) => (
                   <CommandItem
                     key={name}
                     value={name}

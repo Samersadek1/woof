@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import TopBar from "@/components/dashboard/TopBar";
+import { ReferenceListsSettings } from "@/components/settings/ReferenceListsSettings";
 import { supabase } from "@/integrations/supabase/client";
 
 type SaveResult = "idle" | "success" | "error";
@@ -153,6 +154,8 @@ const SettingsPage = () => {
               <AlertDescription>{loadError}</AlertDescription>
             </Alert>
           )}
+
+          <ReferenceListsSettings />
 
           {loading ? (
             <div className="flex flex-col gap-8">

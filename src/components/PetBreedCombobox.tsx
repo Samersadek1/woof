@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { PET_BREEDS, PET_BREEDS_SET } from "@/data/petBreeds";
+import { PET_BREEDS } from "@/data/petBreeds";
+import { useDogBreedsQuery } from "@/hooks/useReferenceLists";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -30,13 +31,26 @@ export function PetBreedCombobox({
   placeholder = "Select breed…",
 }: PetBreedComboboxProps) {
   const [open, setOpen] = useState(false);
+  const { data: breedRows, isLoading } = useDogBreedsQuery();
+
+  const breedNames = useMemo(() => {
+    if (breedRows && breedRows.length > 0) {
+      return breedRows.map((r) => r.name);
+    }
+    return [...PET_BREEDS];
+  }, [breedRows]);
+
+  const breedSet = useMemo(() => new Set(breedNames), [breedNames]);
+
   const trimmed = value.trim();
-  const inList = trimmed.length > 0 && PET_BREEDS_SET.has(trimmed);
+  const inList = trimmed.length > 0 && breedSet.has(trimmed);
 
   const displayLabel = useMemo(() => {
     if (!trimmed) return placeholder;
     return trimmed;
   }, [trimmed, placeholder]);
+
+  const busy = disabled || isLoading;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -47,14 +61,18 @@ export function PetBreedCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          disabled={disabled}
+          disabled={busy}
           className={cn(
             "h-10 w-full justify-between font-normal",
             !trimmed && "text-muted-foreground",
           )}
         >
           <span className="truncate text-left">{displayLabel}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {isLoading ? (
+            <Loader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
+          ) : (
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
@@ -77,7 +95,7 @@ export function PetBreedCombobox({
               </CommandGroup>
             ) : null}
             <CommandGroup heading="Breeds">
-              {PET_BREEDS.map((breed) => (
+              {breedNames.map((breed) => (
                 <CommandItem
                   key={breed}
                   value={breed}
