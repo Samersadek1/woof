@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
+  addMinutes,
   addDays,
   format,
   parse,
@@ -147,8 +148,8 @@ const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
 
 function parseGroomingMeta(
   notes: string | null | undefined,
-): { services: string[]; groomingDate: string | null } {
-  if (!notes) return { services: [], groomingDate: null };
+): { services: string[]; groomingDate: string | null; estimatedPickup: string | null } {
+  if (!notes) return { services: [], groomingDate: null, estimatedPickup: null };
   const lines = notes
     .split("\n")
     .map((l) => l.trim())
@@ -156,6 +157,9 @@ function parseGroomingMeta(
   const servicesLine = lines.find((l) => l.toLowerCase().startsWith("services:"));
   const groomingDateLine = lines.find((l) =>
     l.toLowerCase().startsWith("grooming date:"),
+  );
+  const estimatedPickupLine = lines.find((l) =>
+    l.toLowerCase().startsWith("estimated pickup:"),
   );
   const services = servicesLine
     ? servicesLine
@@ -167,7 +171,10 @@ function parseGroomingMeta(
   const groomingDate = groomingDateLine
     ? groomingDateLine.slice("grooming date:".length).trim() || null
     : null;
-  return { services, groomingDate };
+  const estimatedPickup = estimatedPickupLine
+    ? estimatedPickupLine.slice("estimated pickup:".length).trim() || null
+    : null;
+  return { services, groomingDate, estimatedPickup };
 }
 
 function appointmentServiceLabels(a: GroomingAppointmentWithJoins): string[] {
@@ -184,12 +191,26 @@ function appointmentTimeToInputValue(t: string | null): string {
 
 function userVisitNotesFromStored(notes: string | null): string {
   if (!notes) return "";
-  const metaPrefixes = ["services:", "grooming date:", "discount:"];
+  const metaPrefixes = ["services:", "grooming date:", "discount:", "estimated pickup:"];
   return notes
     .split("\n")
     .filter((l) => !metaPrefixes.some((p) => l.toLowerCase().trimStart().startsWith(p)))
     .join("\n")
     .trim();
+}
+
+function estimatedPickupFromStartAndDuration(timeValue: string, durationMinutes: number): string {
+  if (!/^\d{2}:\d{2}$/.test(timeValue)) return "—";
+  const safeMinutes =
+    Number.isFinite(durationMinutes) && durationMinutes > 0
+      ? durationMinutes
+      : 0;
+  try {
+    const start = parse(`${timeValue}:00`, "HH:mm:ss", new Date(2000, 0, 1));
+    return format(addMinutes(start, safeMinutes), "h:mm a");
+  } catch {
+    return "—";
+  }
 }
 
 function workflowUndoTarget(raw: string): string | null {
@@ -560,6 +581,10 @@ const GroomingPage = () => {
   const [groomingDate, setGroomingDate] = useState<Date>(new Date());
   const [apptTime, setApptTime] = useState("10:00");
   const [durationMin, setDurationMin] = useState(60);
+  const estPickupTimeLabel = useMemo(
+    () => estimatedPickupFromStartAndDuration(apptTime, durationMin),
+    [apptTime, durationMin],
+  );
   const [groomerName, setGroomerName] = useState("");
   const [showPreferredGroomerHint, setShowPreferredGroomerHint] = useState(false);
   const lastPrefilledOwnerIdForGroomer = useRef<string | null>(null);
@@ -838,6 +863,7 @@ const GroomingPage = () => {
     const metaNotes = [
       selectedServiceLabels ? `Services: ${selectedServiceLabels}` : null,
       `Grooming date: ${format(editGroomingDate, "yyyy-MM-dd")}`,
+      `Estimated pickup: ${estimatedPickupFromStartAndDuration(editApptTime, editDurationMin)}`,
     ].filter(Boolean);
     const composedNotes = [editVisitNotes.trim(), ...metaNotes].filter(Boolean).join("\n");
 
@@ -929,6 +955,7 @@ const GroomingPage = () => {
     const metaNotes = [
       selectedServiceLabels ? `Services: ${selectedServiceLabels}` : null,
       `Grooming date: ${format(groomingDate, "yyyy-MM-dd")}`,
+      `Estimated pickup: ${estPickupTimeLabel}`,
       normalizedDiscountPct > 0
         ? `Discount: ${normalizedDiscountPct}% (original AED ${originalForNote})`
         : null,
@@ -2008,7 +2035,7 @@ const GroomingPage = () => {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-2">
                   <Label>Duration (minutes)</Label>
                   <Input
@@ -2019,6 +2046,14 @@ const GroomingPage = () => {
                     onChange={(e) =>
                       setDurationMin(parseInt(e.target.value, 10) || 60)
                     }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Est. pickup time</Label>
+                  <Input
+                    readOnly
+                    value={estPickupTimeLabel}
+                    className="bg-muted/40 font-medium tabular-nums"
                   />
                 </div>
                 <div className="space-y-2">
