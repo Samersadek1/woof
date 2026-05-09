@@ -1793,7 +1793,11 @@ const OwnerProfilePage = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit_vet_name">Vet name</Label>
-                  <Input id="edit_vet_name" value={ownerForm.vet_name ?? ""} onChange={(e) => handleOwnerField("vet_name", e.target.value)} />
+                  <VetClinicCombobox
+                    id="edit_vet_name"
+                    value={ownerForm.vet_name ?? ""}
+                    onChange={(v) => handleOwnerField("vet_name", v)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit_vet_phone">Vet phone</Label>
