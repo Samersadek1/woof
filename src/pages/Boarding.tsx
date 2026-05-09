@@ -194,6 +194,12 @@ const BOARDING_GROOMING_ADDONS: BoardingAddonOption[] = [
     species: ["dog", "cat"],
   },
   {
+    id: "full_bath",
+    label: "Full Bath",
+    pricingKey: "boarding_addon_full_bath",
+    species: ["dog", "cat"],
+  },
+  {
     id: "blow_dry",
     label: "Blow dry",
     pricingKey: "boarding_addon_blow_dry",
@@ -203,6 +209,12 @@ const BOARDING_GROOMING_ADDONS: BoardingAddonOption[] = [
     id: "fur_brushing",
     label: "Fur brushing",
     pricingKey: "boarding_addon_fur_brushing",
+    species: ["dog", "cat"],
+  },
+  {
+    id: "ear_cleaning",
+    label: "Ear Cleaning",
+    pricingKey: "boarding_addon_ear_cleaning",
     species: ["dog", "cat"],
   },
   {
