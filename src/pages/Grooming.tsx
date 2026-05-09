@@ -9,7 +9,7 @@ import {
 } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
-import { useOwners } from "@/hooks/useOwners";
+import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -560,6 +560,8 @@ const GroomingPage = () => {
   const [apptTime, setApptTime] = useState("10:00");
   const [durationMin, setDurationMin] = useState(60);
   const [groomerName, setGroomerName] = useState("");
+  const [showPreferredGroomerHint, setShowPreferredGroomerHint] = useState(false);
+  const lastPrefilledOwnerIdForGroomer = useRef<string | null>(null);
   const [price, setPrice] = useState("");
   /** Empty or 0% = no discount; quick buttons and manual input share this value */
   const [discountPct, setDiscountPct] = useState("");
@@ -593,9 +595,29 @@ const GroomingPage = () => {
   const [editVisitNotes, setEditVisitNotes] = useState("");
 
   const { data: pets = [] } = usePets(ownerId ?? "");
+  const { data: ownerForGroomingPref } = useOwner(ownerId ?? "");
   const { data: bookingHits = [] } = useBookingsForGroomingLink(
     linkBoarding ? bookingSearch : "",
   );
+
+  useEffect(() => {
+    if (!ownerId) {
+      setGroomerName("");
+      setShowPreferredGroomerHint(false);
+      lastPrefilledOwnerIdForGroomer.current = null;
+    }
+  }, [ownerId]);
+
+  useEffect(() => {
+    if (!sheetOpen || !ownerId) return;
+    if (!ownerForGroomingPref || ownerForGroomingPref.id !== ownerId) return;
+    if (lastPrefilledOwnerIdForGroomer.current === ownerId) return;
+
+    const pref = ownerForGroomingPref.preferred_groomer?.trim() ?? "";
+    setGroomerName(pref);
+    setShowPreferredGroomerHint(!!pref);
+    lastPrefilledOwnerIdForGroomer.current = ownerId;
+  }, [sheetOpen, ownerId, ownerForGroomingPref]);
 
   const { data: panelInvoice } = useInvoiceForGroomingAppointment(actionAppt?.id ?? null);
   const { data: payInvoice, isLoading: payInvoiceLoading } =
@@ -728,6 +750,8 @@ const GroomingPage = () => {
     setDurationMin(60);
     setSelectedServices(["full_groom"]);
     setGroomerName("");
+    setShowPreferredGroomerHint(false);
+    lastPrefilledOwnerIdForGroomer.current = null;
     setPrice("");
     setDiscountPct("");
     setVisitNotes("");
@@ -1762,7 +1786,16 @@ const GroomingPage = () => {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+      <Sheet
+        open={sheetOpen}
+        onOpenChange={(open) => {
+          setSheetOpen(open);
+          if (!open) {
+            lastPrefilledOwnerIdForGroomer.current = null;
+            setShowPreferredGroomerHint(false);
+          }
+        }}
+      >
         <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
           <SheetHeader>
             <SheetTitle>New appointment</SheetTitle>
@@ -2035,9 +2068,17 @@ const GroomingPage = () => {
                 <Label>Groomer</Label>
                 <Input
                   value={groomerName}
-                  onChange={(e) => setGroomerName(e.target.value)}
+                  onChange={(e) => {
+                    setGroomerName(e.target.value);
+                    setShowPreferredGroomerHint(false);
+                  }}
                   placeholder="Groomer name"
                 />
+                {showPreferredGroomerHint ? (
+                  <p className="text-xs text-muted-foreground">
+                    Preferred groomer from client profile
+                  </p>
+                ) : null}
               </div>
             </section>
 

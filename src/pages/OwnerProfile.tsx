@@ -751,6 +751,7 @@ const OwnerProfilePage = () => {
         emergency_contact_phone: owner.emergency_contact_phone,
         vet_name: owner.vet_name,
         vet_phone: owner.vet_phone,
+        preferred_groomer: owner.preferred_groomer,
         how_heard: owner.how_heard,
         emirates_id: owner.emirates_id,
         is_vip: owner.is_vip,
@@ -947,6 +948,12 @@ const OwnerProfilePage = () => {
                     .join(", ")}
                 </p>
               )}
+              {owner.preferred_groomer?.trim() ? (
+                <p className="text-sm text-muted-foreground pt-1">
+                  <span className="font-medium text-foreground">Preferred groomer: </span>
+                  {owner.preferred_groomer.trim()}
+                </p>
+              ) : null}
             </div>
 
             <div className="flex items-center gap-6">
@@ -1744,6 +1751,19 @@ const OwnerProfilePage = () => {
               <Separator />
 
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preferences</p>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit_preferred_groomer">Preferred groomer</Label>
+                <Input
+                  id="edit_preferred_groomer"
+                  value={ownerForm.preferred_groomer ?? ""}
+                  onChange={(e) => handleOwnerField("preferred_groomer", e.target.value)}
+                  placeholder="Name of preferred groomer (optional)"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Pre-fills the groomer field on new grooming appointments. Edits on a booking do not change this.
+                </p>
+              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="edit_how_heard">How did you hear about us?</Label>

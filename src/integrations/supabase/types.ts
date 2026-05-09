@@ -1170,6 +1170,7 @@ export type Database = {
           other_notes: string | null
           phone: string | null
           phone2: string | null
+          preferred_groomer: string | null
           updated_at: string
           vet_name: string | null
           vet_phone: string | null
@@ -1209,6 +1210,7 @@ export type Database = {
           other_notes?: string | null
           phone?: string | null
           phone2?: string | null
+          preferred_groomer?: string | null
           updated_at?: string
           vet_name?: string | null
           vet_phone?: string | null
@@ -1248,6 +1250,7 @@ export type Database = {
           other_notes?: string | null
           phone?: string | null
           phone2?: string | null
+          preferred_groomer?: string | null
           updated_at?: string
           vet_name?: string | null
           vet_phone?: string | null
