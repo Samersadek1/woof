@@ -115,6 +115,7 @@ const INITIAL_FORM: OwnerInsert = {
   last_name: "",
   phone: "",
   email: "",
+  nationality: "",
   member_type: "standard",
   notes: "",
   address: "",
@@ -246,16 +247,22 @@ const CustomersPage = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    createOwner.mutate(form, {
-      onSuccess: () => {
-        toast.success("Owner created successfully");
-        setDrawerOpen(false);
-        setForm({ ...INITIAL_FORM });
+    createOwner.mutate(
+      {
+        ...form,
+        nationality: form.nationality?.trim() || null,
       },
-      onError: (err) => {
-        toast.error(err.message || "Failed to create owner");
+      {
+        onSuccess: () => {
+          toast.success("Owner created successfully");
+          setDrawerOpen(false);
+          setForm({ ...INITIAL_FORM });
+        },
+        onError: (err) => {
+          toast.error(err.message || "Failed to create owner");
+        },
       },
-    });
+    );
   };
 
   const petCount = (owner: OwnerWithPetCount) => owner.pets?.length ?? 0;
@@ -301,6 +308,7 @@ const CustomersPage = () => {
     const owner = await createOwner.mutateAsync({
       ...wizardOwner,
       member_type: "standard",
+      nationality: wizardOwner.nationality?.trim() || null,
     });
     setCreatedOwnerId(owner.id);
     setWizardStep(2);
@@ -522,6 +530,17 @@ const CustomersPage = () => {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="nationality">Nationality</Label>
+                <Input
+                  id="nationality"
+                  value={form.nationality ?? ""}
+                  onChange={(e) => handleField("nationality", e.target.value)}
+                  placeholder="e.g. UAE, British, Indian"
+                  autoComplete="country-name"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="member_type">Member type</Label>
@@ -664,6 +683,12 @@ const CustomersPage = () => {
                       onChange={(e) => setWizardOwner((p) => ({ ...p, email: e.target.value }))}
                     />
                   </div>
+                  <Input
+                    placeholder="Nationality (optional)"
+                    value={wizardOwner.nationality ?? ""}
+                    onChange={(e) => setWizardOwner((p) => ({ ...p, nationality: e.target.value }))}
+                    autoComplete="country-name"
+                  />
                   <Button
                     onClick={async () => {
                       try {

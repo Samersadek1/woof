@@ -1166,6 +1166,7 @@ export type Database = {
           member_type: Database["public"]["Enums"]["member_type"]
           membership_date: string | null
           membership_fee_paid: boolean
+          nationality: string | null
           notes: string | null
           notify_birthday: boolean
           notify_boarding: boolean
@@ -1206,6 +1207,7 @@ export type Database = {
           member_type?: Database["public"]["Enums"]["member_type"]
           membership_date?: string | null
           membership_fee_paid?: boolean
+          nationality?: string | null
           notes?: string | null
           notify_birthday?: boolean
           notify_boarding?: boolean
@@ -1246,6 +1248,7 @@ export type Database = {
           member_type?: Database["public"]["Enums"]["member_type"]
           membership_date?: string | null
           membership_fee_paid?: boolean
+          nationality?: string | null
           notes?: string | null
           notify_birthday?: boolean
           notify_boarding?: boolean

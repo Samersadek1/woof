@@ -797,6 +797,7 @@ const OwnerProfilePage = () => {
         last_name: owner.last_name,
         phone: owner.phone,
         email: owner.email,
+        nationality: owner.nationality,
         member_type: owner.member_type,
         notes: owner.notes,
         address: owner.address,
@@ -1747,6 +1748,17 @@ const OwnerProfilePage = () => {
                   <Label htmlFor="edit_email">Email</Label>
                   <Input id="edit_email" type="email" value={ownerForm.email ?? ""} onChange={(e) => handleOwnerField("email", e.target.value)} />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit_nationality">Nationality</Label>
+                <Input
+                  id="edit_nationality"
+                  value={ownerForm.nationality ?? ""}
+                  onChange={(e) => handleOwnerField("nationality", e.target.value)}
+                  placeholder="e.g. UAE, British, Indian"
+                  autoComplete="country-name"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
