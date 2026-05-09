@@ -1584,6 +1584,7 @@ export type Database = {
           cam_number: string | null
           cam_password: string | null
           cam_username: string | null
+          camera_recording: boolean
           capacity_type: Database["public"]["Enums"]["capacity_type"]
           created_at: string
           display_name: string
@@ -1605,6 +1606,7 @@ export type Database = {
           cam_number?: string | null
           cam_password?: string | null
           cam_username?: string | null
+          camera_recording?: boolean
           capacity_type?: Database["public"]["Enums"]["capacity_type"]
           created_at?: string
           display_name: string
@@ -1626,6 +1628,7 @@ export type Database = {
           cam_number?: string | null
           cam_password?: string | null
           cam_username?: string | null
+          camera_recording?: boolean
           capacity_type?: Database["public"]["Enums"]["capacity_type"]
           created_at?: string
           display_name?: string
@@ -2146,6 +2149,9 @@ export type Database = {
         | "cattery_super_presidential"
         | "cattery_presidential"
         | "cattery_deluxe"
+        | "park_lane"
+        | "pall_mall"
+        | "kennels"
       room_wing:
         | "oxford"
         | "piccadilly"
@@ -2154,6 +2160,9 @@ export type Database = {
         | "back_kennels"
         | "cattery"
         | "grooming_upstairs"
+        | "bond_rooms"
+        | "dluxe"
+        | "standard_room"
       species: "dog" | "cat" | "other"
       staff_role:
         | "booking_coordinator"
@@ -2370,6 +2379,9 @@ export const Constants = {
         "cattery_super_presidential",
         "cattery_presidential",
         "cattery_deluxe",
+        "park_lane",
+        "pall_mall",
+        "kennels",
       ],
       room_wing: [
         "oxford",
@@ -2379,6 +2391,9 @@ export const Constants = {
         "back_kennels",
         "cattery",
         "grooming_upstairs",
+        "bond_rooms",
+        "dluxe",
+        "standard_room",
       ],
       species: ["dog", "cat", "other"],
       staff_role: [

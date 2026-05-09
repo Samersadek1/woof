@@ -135,14 +135,20 @@ const WING_LABELS: Record<RoomWing, string> = {
   back_kennels: "Back Kennels",
   cattery: "Cat Boarding",
   grooming_upstairs: "Grooming Upstairs",
+  bond_rooms: "Bond Rooms",
+  dluxe: "Dluxe",
+  standard_room: "Standard Room",
 };
 
 const WING_ORDER: RoomWing[] = [
+  "bond_rooms",
   "oxford",
   "piccadilly",
   "park_lane",
   "fleet",
   "back_kennels",
+  "dluxe",
+  "standard_room",
 ];
 
 const CAT_TIER_ORDER: CatRoomType[] = [

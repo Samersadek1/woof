@@ -205,6 +205,7 @@ export function useAllRooms() {
 }
 
 type RoomUpdate = Database["public"]["Tables"]["rooms"]["Update"];
+type RoomInsert = Database["public"]["Tables"]["rooms"]["Insert"];
 
 export function useUpdateRoom() {
   const queryClient = useQueryClient();
@@ -220,6 +221,35 @@ export function useUpdateRoom() {
 
       if (error) throw error;
       return data as Room;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rooms"] });
+    },
+  });
+}
+
+export function useCreateRoom() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: RoomInsert) => {
+      const { data, error } = await supabase.from("rooms").insert(payload).select().single();
+      if (error) throw error;
+      return data as Room;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rooms"] });
+    },
+  });
+}
+
+export function useDeleteRoom() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("rooms").delete().eq("id", id);
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
