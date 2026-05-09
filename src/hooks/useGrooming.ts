@@ -6,6 +6,12 @@ import {
 } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import {
+  GROOMING_WORKFLOW_STATUSES,
+  timestampClearsForUndoTo,
+  timestampSetsForForwardStep,
+  type GroomingWorkflowStatus,
+} from "@/lib/groomingWorkflow";
 
 type GroomingRow = Database["public"]["Tables"]["grooming_appointments"]["Row"];
 type GroomingInsert = Database["public"]["Tables"]["grooming_appointments"]["Insert"];
@@ -122,7 +128,7 @@ export function useCreateGroomingAppointment() {
         .from("grooming_appointments")
         .insert({
           ...row,
-          status: row.status ?? "scheduled",
+          status: row.status ?? "new",
           no_show: row.no_show ?? false,
         })
         .select()
@@ -185,24 +191,103 @@ export function useUpdateGroomingAppointment() {
   });
 }
 
+/** Insert audit row + update appointment status (and workflow timestamps). */
+export async function runGroomingStatusTransition(params: {
+  id: string;
+  toStatus: string;
+  isUndo?: boolean;
+}): Promise<GroomingRow> {
+  const { data: current, error: fetchErr } = await supabase
+    .from("grooming_appointments")
+    .select("id, status, appointment_date, pet_id, owner_id")
+    .eq("id", params.id)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const fromStatus = current.status;
+  const now = new Date().toISOString();
+
+  const patch: GroomingUpdate = { status: params.toStatus };
+  if (params.toStatus === "cancelled") {
+    patch.no_show = false;
+  }
+
+  if (params.isUndo) {
+    const target = params.toStatus as GroomingWorkflowStatus;
+    if ((GROOMING_WORKFLOW_STATUSES as readonly string[]).includes(target)) {
+      Object.assign(patch, timestampClearsForUndoTo(target) as GroomingUpdate);
+    }
+  } else if (
+    (GROOMING_WORKFLOW_STATUSES as readonly string[]).includes(params.toStatus)
+  ) {
+    Object.assign(
+      patch,
+      timestampSetsForForwardStep(params.toStatus as GroomingWorkflowStatus, now) as GroomingUpdate,
+    );
+  }
+
+  const { error: logErr } = await supabase.from("grooming_status_events").insert({
+    appointment_id: params.id,
+    from_status: fromStatus,
+    to_status: params.toStatus,
+  });
+  if (logErr) throw logErr;
+
+  const { data: updated, error: upErr } = await supabase
+    .from("grooming_appointments")
+    .update(patch)
+    .eq("id", params.id)
+    .select()
+    .single();
+  if (upErr) throw upErr;
+  return updated as GroomingRow;
+}
+
+export function useGroomingStatusTransition() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: runGroomingStatusTransition,
+    onSuccess: (data) => {
+      invalidateGrooming(qc, {
+        appointmentDate: data.appointment_date,
+        petId: data.pet_id,
+        ownerId: data.owner_id,
+      });
+    },
+  });
+}
+
+/** Draft invoice created at booking time (service_id = grooming appointment id). */
+export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
+  return useQuery({
+    queryKey: ["invoice", "grooming", appointmentId],
+    enabled: !!appointmentId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("invoices")
+        .select("id, invoice_number, status, total, total_aed, payment_method")
+        .eq("service_id", appointmentId!)
+        .eq("service_type", "grooming")
+        .maybeSingle();
+      if (error) throw error;
+      return data as {
+        id: string;
+        invoice_number: string | null;
+        status: string;
+        total: number | null;
+        total_aed: number | null;
+        payment_method: string | null;
+      } | null;
+    },
+  });
+}
+
 export function useMarkInProgress() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { data, error } = await supabase
-        .from("grooming_appointments")
-        .update({
-          status: "in_progress",
-          in_progress_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data as GroomingRow;
-    },
+    mutationFn: (id: string) => runGroomingStatusTransition({ id, toStatus: "in_progress" }),
     onSuccess: (data) => {
       invalidateGrooming(qc, {
         appointmentDate: data.appointment_date,
@@ -217,20 +302,7 @@ export function useMarkComplete() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { data, error } = await supabase
-        .from("grooming_appointments")
-        .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data as GroomingRow;
-    },
+    mutationFn: (id: string) => runGroomingStatusTransition({ id, toStatus: "completed" }),
     onSuccess: (data) => {
       invalidateGrooming(qc, {
         appointmentDate: data.appointment_date,

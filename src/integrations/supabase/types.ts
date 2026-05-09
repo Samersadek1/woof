@@ -721,6 +721,7 @@ export type Database = {
           appointment_date: string
           appointment_time: string | null
           booking_id: string | null
+          checked_in_at: string | null
           coat_type: string | null
           completed_at: string | null
           created_at: string
@@ -732,6 +733,7 @@ export type Database = {
           no_show: boolean
           notes: string | null
           owner_id: string
+          paid_at: string | null
           pet_id: string
           price: number | null
           service: Database["public"]["Enums"]["grooming_service"]
@@ -742,6 +744,7 @@ export type Database = {
           appointment_date: string
           appointment_time?: string | null
           booking_id?: string | null
+          checked_in_at?: string | null
           coat_type?: string | null
           completed_at?: string | null
           created_at?: string
@@ -753,6 +756,7 @@ export type Database = {
           no_show?: boolean
           notes?: string | null
           owner_id: string
+          paid_at?: string | null
           pet_id: string
           price?: number | null
           service: Database["public"]["Enums"]["grooming_service"]
@@ -763,6 +767,7 @@ export type Database = {
           appointment_date?: string
           appointment_time?: string | null
           booking_id?: string | null
+          checked_in_at?: string | null
           coat_type?: string | null
           completed_at?: string | null
           created_at?: string
@@ -774,6 +779,7 @@ export type Database = {
           no_show?: boolean
           notes?: string | null
           owner_id?: string
+          paid_at?: string | null
           pet_id?: string
           price?: number | null
           service?: Database["public"]["Enums"]["grooming_service"]
@@ -807,6 +813,38 @@ export type Database = {
             columns: ["pet_id"]
             isOneToOne: false
             referencedRelation: "pets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      grooming_status_events: {
+        Row: {
+          appointment_id: string
+          created_at: string
+          from_status: string | null
+          id: string
+          to_status: string
+        }
+        Insert: {
+          appointment_id: string
+          created_at?: string
+          from_status?: string | null
+          id?: string
+          to_status: string
+        }
+        Update: {
+          appointment_id?: string
+          created_at?: string
+          from_status?: string | null
+          id?: string
+          to_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grooming_status_events_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_appointments"
             referencedColumns: ["id"]
           },
         ]

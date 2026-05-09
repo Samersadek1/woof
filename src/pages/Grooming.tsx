@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   addDays,
   format,
@@ -23,13 +23,30 @@ import {
   useGroomingGlobalSearch,
   useCreateGroomingAppointment,
   useUpdateGroomingAppointment,
-  useMarkInProgress,
-  useMarkComplete,
-  useMarkNoShow,
+  useGroomingStatusTransition,
+  useInvoiceForGroomingAppointment,
   useBookingsForGroomingLink,
   type GroomingAppointmentWithJoins,
   type BookingLinkRow,
 } from "@/hooks/useGrooming";
+import { useProcessPayment, formatAed } from "@/hooks/useBilling";
+import {
+  normalizeGroomingWorkflowStatus,
+  previousWorkflowStatus,
+  workflowStatusBadgeClass,
+  workflowStatusLabel,
+  type GroomingWorkflowStatus,
+} from "@/lib/groomingWorkflow";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,11 +84,15 @@ import {
   ChevronRight,
   Loader2,
   Package,
+  Pencil,
   Plus,
   Printer,
   Search,
+  Undo2,
   X,
   CalendarIcon,
+  FileText,
+  CreditCard,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
@@ -150,6 +171,45 @@ function appointmentServiceLabels(a: GroomingAppointmentWithJoins): string[] {
   const primary = serviceLabel(a.service);
   const extra = parseGroomingMeta(a.notes).services;
   return Array.from(new Set([primary, ...extra]));
+}
+
+function appointmentTimeToInputValue(t: string | null): string {
+  if (!t) return "10:00";
+  const s = t.slice(0, 5);
+  return /^\d{2}:\d{2}$/.test(s) ? s : "10:00";
+}
+
+function userVisitNotesFromStored(notes: string | null): string {
+  if (!notes) return "";
+  const metaPrefixes = ["services:", "grooming date:", "discount:"];
+  return notes
+    .split("\n")
+    .filter((l) => !metaPrefixes.some((p) => l.toLowerCase().trimStart().startsWith(p)))
+    .join("\n")
+    .trim();
+}
+
+function workflowUndoTarget(raw: string): string | null {
+  const wf = normalizeGroomingWorkflowStatus(raw);
+  if (wf === "cancelled" || wf === "other") return null;
+  return previousWorkflowStatus(wf as GroomingWorkflowStatus);
+}
+
+function serviceCheckboxValuesFromAppointment(
+  a: GroomingAppointmentWithJoins,
+): GroomingServiceCheckbox[] {
+  const primaryOpt = GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.mapsTo === a.service);
+  const primary = primaryOpt?.value;
+  const { services } = parseGroomingMeta(a.notes);
+  const labelSet = new Set(services.map((s) => s.toLowerCase()));
+  const extras = GROOMING_SERVICE_CHECKBOX_OPTIONS.filter((o) =>
+    labelSet.has(o.label.toLowerCase()),
+  ).map((o) => o.value);
+  const set = new Set<GroomingServiceCheckbox>();
+  if (primary) set.add(primary);
+  extras.forEach((e) => set.add(e));
+  const arr = Array.from(set);
+  return arr.length ? arr : ["full_groom"];
 }
 
 function serviceLabel(s: GroomingService): string {
@@ -311,15 +371,12 @@ function GroomingOwnerSearch({
 function AppointmentCard({
   a,
   onPrint,
+  onOpenActions,
 }: {
   a: GroomingAppointmentWithJoins;
   onPrint: (appointmentId: string) => void;
+  onOpenActions: (row: GroomingAppointmentWithJoins) => void;
 }) {
-  const markStart = useMarkInProgress();
-  const markDone = useMarkComplete();
-  const markNs = useMarkNoShow();
-
-  const status = a.status;
   const ownerName = a.owners
     ? ownerDisplayName(a.owners.first_name, a.owners.last_name)
     : "—";
@@ -340,10 +397,21 @@ function AppointmentCard({
   );
 
   return (
-    <Card>
+    <Card
+      className="cursor-pointer transition-shadow hover:shadow-md"
+      onClick={() => onOpenActions(a)}
+    >
       <CardContent className="p-0">
         <div className="grid gap-4 p-4 lg:grid-cols-[10rem_1fr_14rem] lg:items-start">
           <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant="outline"
+                className={cn("font-medium border", workflowStatusBadgeClass(a.status))}
+              >
+                {workflowStatusLabel(a.status)}
+              </Badge>
+            </div>
             <p className="text-2xl font-semibold tabular-nums">
               {formatApptTime(a.appointment_time)}
             </p>
@@ -352,7 +420,7 @@ function AppointmentCard({
             </Badge>
           </div>
 
-          <div className="space-y-2 min-w-0">
+          <div className="space-y-2 min-w-0" onClick={(e) => e.stopPropagation()}>
             <p className="text-xl font-bold truncate">{petName}</p>
             <p className="text-sm text-muted-foreground">
               {breedWeight || "—"}
@@ -434,7 +502,7 @@ function AppointmentCard({
               </p>
             ) : null}
 
-            <div className="flex flex-col gap-2 lg:items-end">
+            <div className="flex flex-col gap-2 lg:items-end" onClick={(e) => e.stopPropagation()}>
               <Button
                 size="sm"
                 variant="outline"
@@ -444,77 +512,6 @@ function AppointmentCard({
                 <Printer className="mr-2 h-4 w-4" />
                 Print card
               </Button>
-              {status === "scheduled" && (
-                <Button
-                  size="sm"
-                  className="w-full lg:w-auto"
-                  disabled={markStart.isPending}
-                  onClick={() =>
-                    markStart.mutate(a.id, {
-                      onError: (e) =>
-                        toast.error(
-                          e instanceof Error ? e.message : "Could not start.",
-                        ),
-                    })
-                  }
-                >
-                  {markStart.isPending && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  Start
-                </Button>
-              )}
-              {status === "in_progress" && (
-                <>
-                  <Button
-                    size="sm"
-                    className="w-full lg:w-auto bg-emerald-600 hover:bg-emerald-700"
-                    disabled={markDone.isPending}
-                    onClick={() =>
-                      markDone.mutate(a.id, {
-                        onError: (e) =>
-                          toast.error(
-                            e instanceof Error ? e.message : "Could not complete.",
-                          ),
-                      })
-                    }
-                  >
-                    {markDone.isPending && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    )}
-                    Complete
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full lg:w-auto text-muted-foreground"
-                    disabled={markNs.isPending}
-                    onClick={() =>
-                      markNs.mutate(a.id, {
-                        onError: (e) =>
-                          toast.error(
-                            e instanceof Error ? e.message : "Could not update.",
-                          ),
-                      })
-                    }
-                  >
-                    No Show
-                  </Button>
-                </>
-              )}
-              {status === "completed" && (
-                <Badge className="bg-emerald-600 hover:bg-emerald-600 w-fit lg:ml-auto">
-                  Completed
-                  {a.completed_at
-                    ? ` · ${format(parseISO(a.completed_at), "h:mm a")}`
-                    : ""}
-                </Badge>
-              )}
-              {status === "cancelled" && (
-                <Badge variant="secondary" className="w-fit lg:ml-auto">
-                  {a.no_show ? "No show" : "Cancelled"}
-                </Badge>
-              )}
             </div>
           </div>
         </div>
@@ -571,10 +568,36 @@ const GroomingPage = () => {
   const [serviceFilter, setServiceFilter] = useState<string>("all");
   const [serviceSearch, setServiceSearch] = useState("");
 
+  const navigate = useNavigate();
+  const statusTransition = useGroomingStatusTransition();
+  const processPayment = useProcessPayment();
+  const updateAppt = useUpdateGroomingAppointment();
+
+  const [actionAppt, setActionAppt] = useState<GroomingAppointmentWithJoins | null>(null);
+  const [editAppt, setEditAppt] = useState<GroomingAppointmentWithJoins | null>(null);
+  const [paymentAppt, setPaymentAppt] = useState<GroomingAppointmentWithJoins | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<GroomingAppointmentWithJoins | null>(null);
+  const [paymentStaffName, setPaymentStaffName] = useState("Front desk");
+
+  const [editSelectedServices, setEditSelectedServices] = useState<GroomingServiceCheckbox[]>([
+    "full_groom",
+  ]);
+  const [editApptDate, setEditApptDate] = useState<Date>(new Date());
+  const [editGroomingDate, setEditGroomingDate] = useState<Date>(new Date());
+  const [editApptTime, setEditApptTime] = useState("10:00");
+  const [editDurationMin, setEditDurationMin] = useState(60);
+  const [editGroomerName, setEditGroomerName] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editVisitNotes, setEditVisitNotes] = useState("");
+
   const { data: pets = [] } = usePets(ownerId ?? "");
   const { data: bookingHits = [] } = useBookingsForGroomingLink(
     linkBoarding ? bookingSearch : "",
   );
+
+  const { data: panelInvoice } = useInvoiceForGroomingAppointment(actionAppt?.id ?? null);
+  const { data: payInvoice, isLoading: payInvoiceLoading } =
+    useInvoiceForGroomingAppointment(paymentAppt?.id ?? null);
 
   const { data: groomingRates = [] } = useQuery({
     queryKey: ["grooming_service_rates"],
@@ -666,6 +689,16 @@ const GroomingPage = () => {
     return Math.min(100, Math.max(0, parsed));
   }, [discountPct]);
 
+  const mappedEditServices = useMemo(
+    () =>
+      editSelectedServices.map(
+        (svc) =>
+          GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.mapsTo ??
+          "full_groom",
+      ),
+    [editSelectedServices],
+  );
+
   const openNewSheet = () => {
     setApptDate(day);
     setGroomingDate(day);
@@ -691,6 +724,19 @@ const GroomingPage = () => {
     setPrice(String(defaultOriginalPrice));
   }, [defaultOriginalPrice, sheetOpen]);
 
+  useEffect(() => {
+    if (!editAppt) return;
+    setEditSelectedServices(serviceCheckboxValuesFromAppointment(editAppt));
+    setEditApptDate(parseISO(editAppt.appointment_date));
+    const gd = parseGroomingMeta(editAppt.notes).groomingDate;
+    setEditGroomingDate(gd ? parseISO(gd) : parseISO(editAppt.appointment_date));
+    setEditApptTime(appointmentTimeToInputValue(editAppt.appointment_time));
+    setEditDurationMin(editAppt.duration_minutes ?? 60);
+    setEditGroomerName(editAppt.grooming_notes ?? "");
+    setEditPrice(editAppt.price != null ? String(editAppt.price) : "");
+    setEditVisitNotes(userVisitNotesFromStored(editAppt.notes));
+  }, [editAppt]);
+
   const timeToDb = (t: string) => {
     const parts = t.split(":");
     const h = parts[0] ?? "10";
@@ -701,6 +747,62 @@ const GroomingPage = () => {
   const togglePetSelected = (id: string) => {
     setSelectedPetIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const handleSaveEdit = () => {
+    if (!editAppt || updateAppt.isPending) return;
+    if (editSelectedServices.length === 0) {
+      toast.error("Select at least one service.");
+      return;
+    }
+    if (!/^\d{2}:\d{2}$/.test(editApptTime)) {
+      toast.error("Enter a valid appointment time.");
+      return;
+    }
+    const primaryService = mappedEditServices[0];
+    if (!primaryService) {
+      toast.error("Could not resolve a valid service.");
+      return;
+    }
+    const priceNum = parseFloat(editPrice);
+    const finalPrice =
+      Number.isFinite(priceNum) && priceNum >= 0 ? Number(priceNum.toFixed(2)) : NaN;
+    if (Number.isNaN(finalPrice)) {
+      toast.error("Enter a valid price.");
+      return;
+    }
+    const selectedServiceLabels = editSelectedServices
+      .map((svc) =>
+        GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.label ?? svc,
+      )
+      .join(", ");
+    const metaNotes = [
+      selectedServiceLabels ? `Services: ${selectedServiceLabels}` : null,
+      `Grooming date: ${format(editGroomingDate, "yyyy-MM-dd")}`,
+    ].filter(Boolean);
+    const composedNotes = [editVisitNotes.trim(), ...metaNotes].filter(Boolean).join("\n");
+
+    updateAppt.mutate(
+      {
+        id: editAppt.id,
+        appointment_date: format(editApptDate, "yyyy-MM-dd"),
+        appointment_time: timeToDb(editApptTime),
+        duration_minutes: editDurationMin,
+        service: primaryService,
+        grooming_notes: editGroomerName.trim() || null,
+        price: finalPrice,
+        notes: composedNotes || null,
+      },
+      {
+        onSuccess: () => {
+          toast.success("Appointment updated.");
+          setEditAppt(null);
+          setActionAppt(null);
+        },
+        onError: (e) =>
+          toast.error(e instanceof Error ? e.message : "Could not save changes."),
+      },
     );
   };
 
@@ -987,6 +1089,7 @@ const GroomingPage = () => {
                   <AppointmentCard
                     key={a.id}
                     a={a}
+                    onOpenActions={setActionAppt}
                     onPrint={(appointmentId) =>
                       window.open(
                         `/print/grooming-card/${appointmentId}`,
@@ -1074,9 +1177,17 @@ const GroomingPage = () => {
                             </div>
                           </TableCell>
                           <TableCell>{groomerDisplay(r)}</TableCell>
-                          <TableCell className="capitalize">
-                            {r.status.replace("_", " ")}
-                            {r.no_show ? " (no show)" : ""}
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "font-normal border",
+                                workflowStatusBadgeClass(r.status),
+                              )}
+                            >
+                              {workflowStatusLabel(r.status)}
+                              {r.no_show ? " · No show" : ""}
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {r.price != null ? `AED ${r.price}` : "—"}
@@ -1091,6 +1202,546 @@ const GroomingPage = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      <AlertDialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this appointment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The slot will be marked as cancelled. This can be seen in history search.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Back</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!cancelTarget) return;
+                statusTransition.mutate(
+                  { id: cancelTarget.id, toStatus: "cancelled" },
+                  {
+                    onSuccess: () => {
+                      toast.success("Appointment cancelled.");
+                      setCancelTarget(null);
+                      setActionAppt(null);
+                    },
+                    onError: (e) =>
+                      toast.error(e instanceof Error ? e.message : "Could not cancel."),
+                  },
+                );
+              }}
+            >
+              Cancel appointment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Sheet open={!!actionAppt} onOpenChange={(o) => !o && setActionAppt(null)}>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Grooming appointment</SheetTitle>
+            <SheetDescription>
+              {actionAppt
+                ? `${actionAppt.pets?.name ?? "Pet"} · ${actionAppt.owners ? ownerDisplayName(actionAppt.owners.first_name, actionAppt.owners.last_name) : "—"}`
+                : ""}
+            </SheetDescription>
+          </SheetHeader>
+          {actionAppt && (
+            <div className="mt-6 flex flex-col gap-3">
+              <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm flex flex-wrap items-center gap-2">
+                <span className="text-muted-foreground">Status</span>
+                <Badge
+                  variant="outline"
+                  className={cn("border font-medium", workflowStatusBadgeClass(actionAppt.status))}
+                >
+                  {workflowStatusLabel(actionAppt.status)}
+                </Badge>
+              </div>
+
+              {normalizeGroomingWorkflowStatus(actionAppt.status) === "new" && (
+                <>
+                  <Button
+                    disabled={statusTransition.isPending}
+                    onClick={() =>
+                      statusTransition.mutate(
+                        { id: actionAppt.id, toStatus: "checked_in" },
+                        {
+                          onSuccess: () => toast.success("Checked in."),
+                          onError: (e) =>
+                            toast.error(e instanceof Error ? e.message : "Update failed."),
+                        },
+                      )
+                    }
+                  >
+                    Check In
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditAppt(actionAppt);
+                      setActionAppt(null);
+                    }}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                  <Button variant="destructive" onClick={() => setCancelTarget(actionAppt)}>
+                    Cancel
+                  </Button>
+                </>
+              )}
+
+              {normalizeGroomingWorkflowStatus(actionAppt.status) === "checked_in" && (
+                <>
+                  <Button
+                    disabled={statusTransition.isPending}
+                    onClick={() =>
+                      statusTransition.mutate(
+                        { id: actionAppt.id, toStatus: "in_progress" },
+                        {
+                          onSuccess: () => toast.success("Started."),
+                          onError: (e) =>
+                            toast.error(e instanceof Error ? e.message : "Update failed."),
+                        },
+                      )
+                    }
+                  >
+                    Start
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditAppt(actionAppt);
+                      setActionAppt(null);
+                    }}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                  <Button variant="destructive" onClick={() => setCancelTarget(actionAppt)}>
+                    Cancel
+                  </Button>
+                </>
+              )}
+
+              {normalizeGroomingWorkflowStatus(actionAppt.status) === "in_progress" && (
+                <>
+                  <Button
+                    disabled={statusTransition.isPending}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={() =>
+                      statusTransition.mutate(
+                        { id: actionAppt.id, toStatus: "completed" },
+                        {
+                          onSuccess: () => toast.success("Completed."),
+                          onError: (e) =>
+                            toast.error(e instanceof Error ? e.message : "Update failed."),
+                        },
+                      )
+                    }
+                  >
+                    Complete
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditAppt(actionAppt);
+                      setActionAppt(null);
+                    }}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                </>
+              )}
+
+              {normalizeGroomingWorkflowStatus(actionAppt.status) === "completed" && (
+                <>
+                  <Button
+                    onClick={() => {
+                      setPaymentAppt(actionAppt);
+                      setActionAppt(null);
+                    }}
+                  >
+                    <CreditCard className="mr-2 h-4 w-4" />
+                    Take Payment
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditAppt(actionAppt);
+                      setActionAppt(null);
+                    }}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                </>
+              )}
+
+              {normalizeGroomingWorkflowStatus(actionAppt.status) === "paid" && (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={!panelInvoice?.id}
+                    onClick={() => {
+                      if (panelInvoice?.id) {
+                        navigate(`/billing/invoices/${panelInvoice.id}`);
+                        setActionAppt(null);
+                      }
+                    }}
+                  >
+                    <FileText className="mr-2 h-4 w-4" />
+                    View Invoice
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditAppt(actionAppt);
+                      setActionAppt(null);
+                    }}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                </>
+              )}
+
+              {normalizeGroomingWorkflowStatus(actionAppt.status) === "cancelled" && (
+                <p className="text-sm text-muted-foreground">This appointment was cancelled.</p>
+              )}
+
+              {normalizeGroomingWorkflowStatus(actionAppt.status) === "other" && (
+                <p className="text-sm text-muted-foreground">
+                  This record uses a legacy or unknown status. Use Edit to align services and notes,
+                  or Undo if available.
+                </p>
+              )}
+
+              {workflowUndoTarget(actionAppt.status) && (
+                <Button
+                  variant="ghost"
+                  className="mt-2 text-muted-foreground"
+                  disabled={statusTransition.isPending}
+                  onClick={() => {
+                    const prev = workflowUndoTarget(actionAppt.status);
+                    if (!prev) return;
+                    statusTransition.mutate(
+                      { id: actionAppt.id, toStatus: prev, isUndo: true },
+                      {
+                        onSuccess: () => toast.success(`Reverted to ${workflowStatusLabel(prev)}.`),
+                        onError: (e) =>
+                          toast.error(e instanceof Error ? e.message : "Could not undo."),
+                      },
+                    );
+                  }}
+                >
+                  <Undo2 className="mr-2 h-4 w-4" />
+                  Undo last step
+                </Button>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={!!paymentAppt} onOpenChange={(o) => !o && setPaymentAppt(null)}>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Take payment</SheetTitle>
+            <SheetDescription>
+              Record cash or card against the grooming invoice. Status moves to Paid on success.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-6 space-y-4">
+            {paymentAppt && (
+              <p className="text-sm">
+                <span className="font-medium">{paymentAppt.pets?.name}</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  · {formatApptTime(paymentAppt.appointment_time)}
+                </span>
+              </p>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="payment-staff">Recorded by</Label>
+              <Input
+                id="payment-staff"
+                value={paymentStaffName}
+                onChange={(e) => setPaymentStaffName(e.target.value)}
+                placeholder="Staff name"
+              />
+            </div>
+            {payInvoiceLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading invoice…
+              </div>
+            ) : !payInvoice ? (
+              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3">
+                No invoice linked to this appointment. Draft invoices are normally created when the
+                appointment is booked; you can add one from Billing if needed.
+              </p>
+            ) : (
+              <>
+                <div className="rounded-lg border p-4 space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Invoice</p>
+                  <p className="font-mono text-sm">{payInvoice.invoice_number ?? payInvoice.id.slice(0, 8)}</p>
+                  <p className="text-2xl font-semibold tabular-nums">
+                    {formatAed(payInvoice.total_aed ?? payInvoice.total ?? 0)}
+                  </p>
+                  <p className="text-xs text-muted-foreground capitalize">
+                    Status: {payInvoice.status.replace(/_/g, " ")}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    disabled={processPayment.isPending || statusTransition.isPending}
+                    onClick={async () => {
+                      if (!paymentAppt || !payInvoice) return;
+                      try {
+                        if (payInvoice.status === "paid") {
+                          await statusTransition.mutateAsync({
+                            id: paymentAppt.id,
+                            toStatus: "paid",
+                          });
+                          toast.success("Appointment marked paid.");
+                          setPaymentAppt(null);
+                          return;
+                        }
+                        await processPayment.mutateAsync({
+                          invoiceId: payInvoice.id,
+                          method: "cash",
+                          staffName: paymentStaffName.trim() || "Front desk",
+                        });
+                        await statusTransition.mutateAsync({
+                          id: paymentAppt.id,
+                          toStatus: "paid",
+                        });
+                        setPaymentAppt(null);
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Payment failed.");
+                      }
+                    }}
+                  >
+                    {processPayment.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Mark paid (cash)
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={processPayment.isPending || statusTransition.isPending}
+                    onClick={async () => {
+                      if (!paymentAppt || !payInvoice) return;
+                      try {
+                        if (payInvoice.status === "paid") {
+                          await statusTransition.mutateAsync({
+                            id: paymentAppt.id,
+                            toStatus: "paid",
+                          });
+                          toast.success("Appointment marked paid.");
+                          setPaymentAppt(null);
+                          return;
+                        }
+                        await processPayment.mutateAsync({
+                          invoiceId: payInvoice.id,
+                          method: "card",
+                          staffName: paymentStaffName.trim() || "Front desk",
+                        });
+                        await statusTransition.mutateAsync({
+                          id: paymentAppt.id,
+                          toStatus: "paid",
+                        });
+                        setPaymentAppt(null);
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Payment failed.");
+                      }
+                    }}
+                  >
+                    {processPayment.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Mark paid (card)
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={!!editAppt} onOpenChange={(o) => !o && setEditAppt(null)}>
+        <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Edit appointment</SheetTitle>
+            <SheetDescription>
+              Update services, schedule, groomer, notes, and price. Saves to the database immediately.
+            </SheetDescription>
+          </SheetHeader>
+          {editAppt && (
+            <div className="mt-6 space-y-6">
+              <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Client · Pet · </span>
+                <span className="font-medium">
+                  {editAppt.owners
+                    ? ownerDisplayName(editAppt.owners.first_name, editAppt.owners.last_name)
+                    : "—"}
+                  {" · "}
+                  {editAppt.pets?.name ?? "—"}
+                </span>
+              </div>
+              <section className="space-y-4">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Appointment details
+                </h3>
+                <div className="space-y-2">
+                  <Label>Service</Label>
+                  <div className="grid grid-cols-2 gap-2 rounded-lg border p-3">
+                    {GROOMING_SERVICE_CHECKBOX_OPTIONS.map((o) => {
+                      const checked = editSelectedServices.includes(o.value);
+                      return (
+                        <label
+                          key={o.value}
+                          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const shouldCheck = e.target.checked;
+                              setEditSelectedServices((prev) => {
+                                if (shouldCheck) {
+                                  if (prev.includes(o.value)) return prev;
+                                  return [...prev, o.value];
+                                }
+                                return prev.filter((v) => v !== o.value);
+                              });
+                            }}
+                          />
+                          <span>{o.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>Appointment Date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full justify-start text-left font-normal",
+                            !editApptDate && "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {format(editApptDate, "d MMM yyyy")}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={editApptDate}
+                          onSelect={(d) => d && setEditApptDate(d)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Grooming Date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full justify-start text-left font-normal",
+                            !editGroomingDate && "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {format(editGroomingDate, "d MMM yyyy")}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={editGroomingDate}
+                          onSelect={(d) => d && setEditGroomingDate(d)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Time</Label>
+                    <Input
+                      type="time"
+                      value={editApptTime}
+                      onChange={(e) => setEditApptTime(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Duration (minutes)</Label>
+                    <Input
+                      type="number"
+                      min={15}
+                      step={5}
+                      value={editDurationMin}
+                      onChange={(e) =>
+                        setEditDurationMin(parseInt(e.target.value, 10) || 60)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Price (AED)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={editPrice}
+                      onChange={(e) => setEditPrice(e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Groomer</Label>
+                  <Input
+                    value={editGroomerName}
+                    onChange={(e) => setEditGroomerName(e.target.value)}
+                    placeholder="Groomer name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Textarea
+                    value={editVisitNotes}
+                    onChange={(e) => setEditVisitNotes(e.target.value)}
+                    placeholder="Visit instructions…"
+                    rows={3}
+                  />
+                </div>
+              </section>
+              <SheetFooter className="gap-2 sm:justify-end">
+                <Button type="button" variant="outline" onClick={() => setEditAppt(null)}>
+                  Close
+                </Button>
+                <Button type="button" disabled={updateAppt.isPending} onClick={handleSaveEdit}>
+                  {updateAppt.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save changes
+                </Button>
+              </SheetFooter>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
