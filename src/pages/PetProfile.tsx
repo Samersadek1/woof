@@ -26,6 +26,7 @@ import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -69,6 +70,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
+import {
+  EMPTY_PET_ALERTS,
+  PET_ALERT_LABELS,
+  parsePetSpecialAlerts,
+  petAlertBannerLines,
+  petHasSpecialAlerts,
+  serializePetSpecialAlerts,
+  type PetSpecialAlertsShape,
+} from "@/lib/petAlerts";
 
 type PetUpdate = Database["public"]["Tables"]["pets"]["Update"];
 type AssessmentStatus = Database["public"]["Enums"]["assessment_status"];
@@ -204,6 +214,7 @@ const PetProfilePage = () => {
   const createParkBooking = useCreateParkBooking();
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<PetUpdate & { id: string }>({ id: petId! });
+  const [alertDraft, setAlertDraft] = useState<PetSpecialAlertsShape>({ ...EMPTY_PET_ALERTS });
   const [historyServiceFilter, setHistoryServiceFilter] =
     useState<HistoryServiceFilter>("all");
   const [bookingDetail, setBookingDetail] = useState<BookingDetailSelection | null>(null);
@@ -291,6 +302,7 @@ const PetProfilePage = () => {
 
   const openEditDrawer = () => {
     if (!pet) return;
+    setAlertDraft(parsePetSpecialAlerts(pet.special_alerts));
     setEditForm({
       id: pet.id,
       name: pet.name,
@@ -347,7 +359,9 @@ const PetProfilePage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const photoUrl = await uploadPhoto();
-    updatePet.mutate({ ...editForm, photo_url: photoUrl }, {
+    updatePet.mutate(
+      { ...editForm, photo_url: photoUrl, special_alerts: serializePetSpecialAlerts(alertDraft) },
+      {
       onSuccess: () => {
         toast.success("Pet updated");
         setEditOpen(false);
@@ -355,7 +369,8 @@ const PetProfilePage = () => {
         setPhotoPreview(null);
       },
       onError: (err) => toast.error(err.message || "Failed to update pet"),
-    });
+    },
+    );
   };
 
   const scheduleAssessment = async () => {
@@ -551,6 +566,31 @@ const PetProfilePage = () => {
               ))}
             </div>
 
+          </CardContent>
+        </Card>
+
+        {/* ── Special Alerts ── */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Special Alerts</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {petHasSpecialAlerts(parsePetSpecialAlerts(pet.special_alerts)) ? (
+              <ul className="flex flex-wrap gap-2 list-none p-0 m-0">
+                {petAlertBannerLines(parsePetSpecialAlerts(pet.special_alerts)).map((line) => (
+                  <li key={line}>
+                    <Badge
+                      variant="outline"
+                      className="border-orange-300 bg-orange-50 text-orange-950 font-normal"
+                    >
+                      {line}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">None recorded. Use Edit to add alerts.</p>
+            )}
           </CardContent>
         </Card>
 
@@ -1346,6 +1386,45 @@ const PetProfilePage = () => {
               <div className="flex items-center justify-between rounded-md border p-3">
                 <Label htmlFor="edit_spayed" className="cursor-pointer">Spayed / Neutered</Label>
                 <Switch id="edit_spayed" checked={editForm.spayed_neutered ?? false} onCheckedChange={(v) => handleField("spayed_neutered", v)} />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Special alerts */}
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Special Alerts
+            </p>
+            <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+              {(Object.entries(PET_ALERT_LABELS) as [keyof typeof PET_ALERT_LABELS, string][]).map(
+                ([key, label]) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`edit_alert_${key}`}
+                      checked={alertDraft[key]}
+                      onCheckedChange={(v) =>
+                        setAlertDraft((d) => ({ ...d, [key]: !!v }))
+                      }
+                    />
+                    <Label htmlFor={`edit_alert_${key}`} className="cursor-pointer font-normal leading-snug">
+                      {label}
+                    </Label>
+                  </div>
+                ),
+              )}
+              <div className="space-y-1 pt-1">
+                <Label htmlFor="edit_alert_other" className="text-xs text-muted-foreground font-normal">
+                  Other (free text)
+                </Label>
+                <Textarea
+                  id="edit_alert_other"
+                  rows={2}
+                  placeholder="Additional alert details…"
+                  value={alertDraft.other_text}
+                  onChange={(e) =>
+                    setAlertDraft((d) => ({ ...d, other_text: e.target.value }))
+                  }
+                />
               </div>
             </div>
 

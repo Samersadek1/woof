@@ -259,6 +259,13 @@ export default function InvoicePrintPage() {
             </section>
           ) : null}
 
+          {invoice.notes?.trim() ? (
+            <section className="relative z-[1] mb-4 border border-black p-2 print-sans text-[11px]">
+              <p className="print-label mb-1 font-semibold uppercase">Notes</p>
+              <p className="whitespace-pre-line">{invoice.notes}</p>
+            </section>
+          ) : null}
+
           <footer className="relative z-[1] border-t border-black pt-2 print-sans text-[11px]">
             <p>Thank you for choosing MSH.</p>
             {outstanding > 0 ? <p>Payment terms: payable upon receipt.</p> : null}

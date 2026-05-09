@@ -262,6 +262,15 @@ export default function InvoiceDetailPage() {
           </CardContent>
         </Card>
 
+        {inv.notes?.trim() ? (
+          <Card>
+            <CardContent className="p-5 space-y-1">
+              <h3 className="font-semibold text-sm">Notes</h3>
+              <p className="text-sm text-muted-foreground whitespace-pre-line">{inv.notes}</p>
+            </CardContent>
+          </Card>
+        ) : null}
+
         <Card><CardContent className="p-0">
           <Table>
             <TableHeader><TableRow className="bg-muted/40"><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Unit</TableHead><TableHead className="text-right">Discount</TableHead><TableHead className="text-right">Line Total</TableHead></TableRow></TableHeader>

@@ -734,6 +734,7 @@ export type Database = {
           notes: string | null
           owner_id: string
           paid_at: string | null
+          payment_method: string | null
           pet_id: string
           price: number | null
           service: Database["public"]["Enums"]["grooming_service"]
@@ -757,6 +758,7 @@ export type Database = {
           notes?: string | null
           owner_id: string
           paid_at?: string | null
+          payment_method?: string | null
           pet_id: string
           price?: number | null
           service: Database["public"]["Enums"]["grooming_service"]
@@ -780,6 +782,7 @@ export type Database = {
           notes?: string | null
           owner_id?: string
           paid_at?: string | null
+          payment_method?: string | null
           pet_id?: string
           price?: number | null
           service?: Database["public"]["Enums"]["grooming_service"]
@@ -1408,6 +1411,7 @@ export type Database = {
           photo_url: string | null
           registration_invoiced: boolean
           size_category: Database["public"]["Enums"]["pet_size_category"] | null
+          special_alerts: Json | null
           spayed_neutered: boolean | null
           species: Database["public"]["Enums"]["species"]
           updated_at: string
@@ -1448,6 +1452,7 @@ export type Database = {
           size_category?:
             | Database["public"]["Enums"]["pet_size_category"]
             | null
+          special_alerts?: Json | null
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
@@ -1488,6 +1493,7 @@ export type Database = {
           size_category?:
             | Database["public"]["Enums"]["pet_size_category"]
             | null
+          special_alerts?: Json | null
           spayed_neutered?: boolean | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string

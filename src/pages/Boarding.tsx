@@ -51,6 +51,7 @@ import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConf
 import {
   TRANSPORT_PRICING_KEYS,
   TRANSPORT_ZONE_OPTIONS,
+  boardingTransportFreePromo,
   type TransportZone,
   privateDubaiOverCapacity,
   transportPricingKey,
@@ -59,7 +60,19 @@ import {
 } from "@/lib/transportPricing";
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
 import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErrors";
-import { ChevronLeft, ChevronRight, Plus, Loader2, ExternalLink, Eye, Luggage, Printer } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Loader2,
+  ExternalLink,
+  Eye,
+  Luggage,
+  Printer,
+  TriangleAlert,
+} from "lucide-react";
+import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
+import { bookingAnyPetHasAlerts, parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
 import { supabase } from "@/integrations/supabase/client";
@@ -169,6 +182,81 @@ function nightsBetween(checkIn: string, checkOut: string): number {
 
 function formatAed(value: number): string {
   return `AED ${value.toLocaleString("en-AE", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function BoardingTransportRateHint({
+  activeRate,
+  zone,
+  petCount,
+  pickup,
+  dropoff,
+  promo,
+  petNoun,
+}: {
+  activeRate?: { amount_aed: number };
+  zone: TransportZone;
+  petCount: number;
+  pickup: boolean;
+  dropoff: boolean;
+  promo: ReturnType<typeof boardingTransportFreePromo>;
+  petNoun: "dog" | "cat";
+}) {
+  if (!pickup && !dropoff) return null;
+  const over = privateDubaiOverCapacity(zone, petCount);
+  const capGroup = petNoun === "dog" ? "dogs" : "pets";
+  const freeBadge = (
+    <Badge variant="outline" className="border-emerald-300 bg-emerald-100 text-emerald-800 shrink-0">
+      Free
+    </Badge>
+  );
+  if (promo.applies) {
+    return (
+      <div className="space-y-2">
+        <div className="space-y-1.5">
+          {pickup && (
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Pickup (one-way)</span>
+              <span className="flex items-center gap-2">
+                <span className="font-medium text-emerald-700">Free</span>
+                {freeBadge}
+              </span>
+            </div>
+          )}
+          {dropoff && (
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Drop-off (one-way)</span>
+              <span className="flex items-center gap-2">
+                <span className="font-medium text-emerald-700">Free</span>
+                {freeBadge}
+              </span>
+            </div>
+          )}
+        </div>
+        {over && (
+          <p className="text-xs text-destructive">
+            Private is capped at 3 {capGroup}. Split the group or choose Dubai — Shared.
+          </p>
+        )}
+      </div>
+    );
+  }
+  if (!activeRate) return null;
+  const qty = transportQuantityForPets(zone, Math.max(1, petCount));
+  const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === zone);
+  return (
+    <>
+      <p className="text-xs text-muted-foreground">
+        AED {activeRate.amount_aed.toFixed(2)} × {qty}
+        {zone === "dubai_private" ? " (flat per trip)" : ` per ${petNoun}`}
+        {opt ? ` — ${opt.helper}` : ""}
+      </p>
+      {over && (
+        <p className="text-xs text-destructive">
+          Private is capped at 3 {capGroup}. Split the group or choose Dubai — Shared.
+        </p>
+      )}
+    </>
+  );
 }
 
 /** Invoice line keys — optional manual staff prices per booking (`unitPriceAed` on invoice). */
@@ -620,6 +708,10 @@ export function DogBoardingCalendar({
   );
   const dogRatePetCount = Math.max(1, form.pet_ids.length);
   const dogNights = nightsBetween(form.check_in_date, form.check_out_date);
+  const dogTransportPromo = useMemo(
+    () => boardingTransportFreePromo(dogNights, form.transport_zone),
+    [dogNights, form.transport_zone],
+  );
   const dogRatePreview = useQuery({
     queryKey: [
       "boarding_rate_preview",
@@ -643,6 +735,7 @@ export function DogBoardingCalendar({
     const trips =
       (form.pickup_required ? 1 : 0) + (form.dropoff_required ? 1 : 0);
     if (!activeTransportRate || trips === 0) return 0;
+    if (dogTransportPromo.applies) return 0;
     const qty = transportQuantityForPets(
       form.transport_zone,
       Math.max(1, form.pet_ids.length),
@@ -650,6 +743,7 @@ export function DogBoardingCalendar({
     return activeTransportRate.amount_aed * qty * trips;
   }, [
     activeTransportRate,
+    dogTransportPromo.applies,
     form.transport_zone,
     form.pet_ids.length,
     form.pickup_required,
@@ -808,14 +902,17 @@ export function DogBoardingCalendar({
 
     const petAddonHintForNotes = selectedPetsSizeSummary(ownerPets, form.pet_ids);
     const transportLabel = transportZoneLabel(form.transport_zone);
+    const transportComplimentary = dogTransportPromo.applies;
     const selectedAddonsForInvoice = selectedAddonEntries(
       form.addon_enabled,
       form.addon_price_aed,
       selectedDogSpecies,
     );
     const addons = [
-      form.pickup_required && `Pickup (${transportLabel})`,
-      form.dropoff_required && `Drop-off (${transportLabel})`,
+      form.pickup_required &&
+        `Pickup (${transportLabel})${transportComplimentary ? " — Free" : ""}`,
+      form.dropoff_required &&
+        `Drop-off (${transportLabel})${transportComplimentary ? " — Free" : ""}`,
       ...selectedAddonsForInvoice.map(
         ({ addon, amount }) =>
           `${addon.label} (${formatAed(amount)}${petAddonHintForNotes ? ` · ${petAddonHintForNotes}` : ""})`,
@@ -867,8 +964,23 @@ export function DogBoardingCalendar({
         const tZone = transportZoneLabel(form.transport_zone);
         const tQty = transportQuantityForPets(form.transport_zone, form.pet_ids.length);
         const tSuffix = tQty > 1 ? ` × ${tQty} dogs` : "";
-        if (form.pickup_required) addonItems.push({ key: tKey, label: `Pickup — ${tZone}${tSuffix}`, quantity: tQty });
-        if (form.dropoff_required) addonItems.push({ key: tKey, label: `Drop-off — ${tZone}${tSuffix}`, quantity: tQty });
+        const tComplimentary = dogTransportPromo.applies;
+        if (form.pickup_required) {
+          addonItems.push({
+            key: tKey,
+            label: `Pickup — ${tZone}${tSuffix}${tComplimentary ? " (complimentary)" : ""}`,
+            quantity: tQty,
+            ...(tComplimentary ? { unitPriceAed: 0 } : {}),
+          });
+        }
+        if (form.dropoff_required) {
+          addonItems.push({
+            key: tKey,
+            label: `Drop-off — ${tZone}${tSuffix}${tComplimentary ? " (complimentary)" : ""}`,
+            quantity: tQty,
+            ...(tComplimentary ? { unitPriceAed: 0 } : {}),
+          });
+        }
         const dogSizeHint = selectedPetsSizeSummary(ownerPets, form.pet_ids);
         for (const { addon, amount } of selectedAddonsForInvoice) {
           addonItems.push({
@@ -996,6 +1108,12 @@ export function DogBoardingCalendar({
               onClick={() => setDetailBooking(booking)}
             >
               <span className="truncate min-w-0 flex-1">{label || booking.booking_ref || "—"}</span>
+              {bookingAnyPetHasAlerts(booking) ? (
+                <TriangleAlert
+                  className="h-3.5 w-3.5 shrink-0 text-orange-100 drop-shadow-sm"
+                  aria-label="Pet alert"
+                />
+              ) : null}
               {booking.booking_pets.length > 1 && (
                 <span className="shrink-0 opacity-80">+{booking.booking_pets.length - 1}</span>
               )}
@@ -1194,9 +1312,22 @@ export function DogBoardingCalendar({
                           checked={form.pet_ids.includes(pet.id)}
                           onCheckedChange={() => togglePet(pet.id)}
                         />
-                        <Label htmlFor={`pet-${pet.id}`} className="cursor-pointer font-normal">
-                          {pet.name}
-                          <span className="ml-1 text-muted-foreground text-xs capitalize">({pet.species})</span>
+                        <Label
+                          htmlFor={`pet-${pet.id}`}
+                          className="cursor-pointer font-normal flex-1 flex flex-wrap items-center gap-2"
+                        >
+                          <span>
+                            {pet.name}
+                            <span className="ml-1 text-muted-foreground text-xs capitalize">({pet.species})</span>
+                          </span>
+                          {petHasSpecialAlerts(parsePetSpecialAlerts(pet.special_alerts)) ? (
+                            <Badge
+                              variant="outline"
+                              className="border-orange-400 bg-orange-50 text-orange-900 text-[10px] h-5"
+                            >
+                              Alert
+                            </Badge>
+                          ) : null}
                         </Label>
                       </div>
                     ))}
@@ -1214,6 +1345,7 @@ export function DogBoardingCalendar({
                   return (
                     <div key={petId} className="space-y-2 rounded border p-3">
                       <p className="text-sm font-semibold">{pet?.name ?? "Pet"}</p>
+                      <PetSpecialAlertsBanner specialAlerts={pet?.special_alerts} />
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Feeding notes</Label>
                         <Textarea
@@ -1407,27 +1539,22 @@ export function DogBoardingCalendar({
                       ))}
                     </SelectContent>
                   </Select>
-                  {activeTransportRate && (() => {
-                    const qty = transportQuantityForPets(form.transport_zone, form.pet_ids.length);
-                    const over = privateDubaiOverCapacity(form.transport_zone, form.pet_ids.length);
-                    const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === form.transport_zone);
-                    return (
-                      <>
-                        <p className="text-xs text-muted-foreground">
-                          AED {activeTransportRate.amount_aed.toFixed(2)} × {qty}
-                          {form.transport_zone === "dubai_private" ? " (flat per trip)" : " per dog"}
-                          {opt ? ` — ${opt.helper}` : ""}
-                        </p>
-                        {over && (
-                          <p className="text-xs text-destructive">
-                            Private is capped at 3 dogs. Switch to Shared or split the group.
-                          </p>
-                        )}
-                      </>
-                    );
-                  })()}
+                  <BoardingTransportRateHint
+                    activeRate={activeTransportRate}
+                    zone={form.transport_zone}
+                    petCount={form.pet_ids.length}
+                    pickup={form.pickup_required}
+                    dropoff={form.dropoff_required}
+                    promo={dogTransportPromo}
+                    petNoun="dog"
+                  />
                 </div>
               )}
+              {dogTransportPromo.applies && (form.pickup_required || form.dropoff_required) ? (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                  {dogTransportPromo.notice}
+                </div>
+              ) : null}
             </div>
 
             <Separator />
@@ -1508,11 +1635,23 @@ export function DogBoardingCalendar({
                         </span>
                       </div>
                     )}
-                    {(form.pickup_required || form.dropoff_required) && dogTransportEstimate > 0 && (
+                    {(form.pickup_required || form.dropoff_required) && (
                       <div className="flex justify-between gap-4">
                         <span className="text-muted-foreground">Transport (est.)</span>
-                        <span className="tabular-nums font-medium">
-                          {formatAed(dogTransportEstimate)}
+                        <span className="tabular-nums font-medium flex items-center justify-end gap-2">
+                          {dogTransportPromo.applies ? (
+                            <>
+                              <span className="text-emerald-700">Free</span>
+                              <Badge
+                                variant="outline"
+                                className="border-emerald-300 bg-emerald-100 text-emerald-800 text-[10px] shrink-0"
+                              >
+                                Free
+                              </Badge>
+                            </>
+                          ) : (
+                            formatAed(dogTransportEstimate)
+                          )}
                         </span>
                       </div>
                     )}
@@ -2011,6 +2150,10 @@ function CatBoardingCalendar({
   );
   const catRatePetCount = Math.max(1, form.pet_ids.length);
   const catNights = nightsBetween(form.check_in_date, form.check_out_date);
+  const catTransportPromo = useMemo(
+    () => boardingTransportFreePromo(catNights, form.transport_zone),
+    [catNights, form.transport_zone],
+  );
   const catRatePreview = useQuery({
     queryKey: [
       "boarding_rate_preview",
@@ -2034,6 +2177,7 @@ function CatBoardingCalendar({
     const trips =
       (form.pickup_required ? 1 : 0) + (form.dropoff_required ? 1 : 0);
     if (!catActiveTransportRate || trips === 0) return 0;
+    if (catTransportPromo.applies) return 0;
     const qty = transportQuantityForPets(
       form.transport_zone,
       Math.max(1, form.pet_ids.length),
@@ -2041,6 +2185,7 @@ function CatBoardingCalendar({
     return catActiveTransportRate.amount_aed * qty * trips;
   }, [
     catActiveTransportRate,
+    catTransportPromo.applies,
     form.transport_zone,
     form.pet_ids.length,
     form.pickup_required,
@@ -2183,6 +2328,7 @@ function CatBoardingCalendar({
     }
 
     const catTransportLabel = transportZoneLabel(form.transport_zone);
+    const catTransportComplimentary = catTransportPromo.applies;
     const catPetAddonHint = selectedPetsSizeSummary(ownerPets, form.pet_ids);
     const selectedAddonsForInvoice = selectedAddonEntries(
       form.addon_enabled,
@@ -2190,8 +2336,10 @@ function CatBoardingCalendar({
       selectedCatSpecies,
     );
     const addons = [
-      form.pickup_required && `Pickup (${catTransportLabel})`,
-      form.dropoff_required && `Drop-off (${catTransportLabel})`,
+      form.pickup_required &&
+        `Pickup (${catTransportLabel})${catTransportComplimentary ? " — Free" : ""}`,
+      form.dropoff_required &&
+        `Drop-off (${catTransportLabel})${catTransportComplimentary ? " — Free" : ""}`,
       ...selectedAddonsForInvoice.map(
         ({ addon, amount }) =>
           `${addon.label} (${formatAed(amount)}${catPetAddonHint ? ` · ${catPetAddonHint}` : ""})`,
@@ -2246,8 +2394,23 @@ function CatBoardingCalendar({
         const catTZone = transportZoneLabel(form.transport_zone);
         const catTQty = transportQuantityForPets(form.transport_zone, form.pet_ids.length);
         const catTSuffix = catTQty > 1 ? ` × ${catTQty} cats` : "";
-        if (form.pickup_required) addonItems.push({ key: catTKey, label: `Pickup — ${catTZone}${catTSuffix}`, quantity: catTQty });
-        if (form.dropoff_required) addonItems.push({ key: catTKey, label: `Drop-off — ${catTZone}${catTSuffix}`, quantity: catTQty });
+        const catTComplimentary = catTransportPromo.applies;
+        if (form.pickup_required) {
+          addonItems.push({
+            key: catTKey,
+            label: `Pickup — ${catTZone}${catTSuffix}${catTComplimentary ? " (complimentary)" : ""}`,
+            quantity: catTQty,
+            ...(catTComplimentary ? { unitPriceAed: 0 } : {}),
+          });
+        }
+        if (form.dropoff_required) {
+          addonItems.push({
+            key: catTKey,
+            label: `Drop-off — ${catTZone}${catTSuffix}${catTComplimentary ? " (complimentary)" : ""}`,
+            quantity: catTQty,
+            ...(catTComplimentary ? { unitPriceAed: 0 } : {}),
+          });
+        }
         const catSizeHint = selectedPetsSizeSummary(ownerPets, form.pet_ids);
         for (const { addon, amount } of selectedAddonsForInvoice) {
           addonItems.push({
@@ -2349,6 +2512,12 @@ function CatBoardingCalendar({
               onClick={() => setDetailBooking(booking)}
             >
               <span className="truncate min-w-0 flex-1">{label}</span>
+              {bookingAnyPetHasAlerts(booking) ? (
+                <TriangleAlert
+                  className="h-3.5 w-3.5 shrink-0 text-orange-100 drop-shadow-sm"
+                  aria-label="Pet alert"
+                />
+              ) : null}
               {booking.booking_pets.length > 1 && <span className="shrink-0 opacity-80">+{booking.booking_pets.length - 1}</span>}
               {bookingBelongingsCount(booking) > 0 ? <Luggage className="h-3 w-3 shrink-0 opacity-90" aria-hidden /> : null}
             </div>
@@ -2468,7 +2637,23 @@ function CatBoardingCalendar({
                     {catPets.map((pet) => (
                       <div key={pet.id} className="flex items-center gap-2">
                         <Checkbox id={`cat-${pet.id}`} checked={form.pet_ids.includes(pet.id)} onCheckedChange={() => togglePet(pet.id)} />
-                        <Label htmlFor={`cat-${pet.id}`} className="cursor-pointer font-normal">{pet.name} <span className="ml-1 text-muted-foreground text-xs">(cat)</span></Label>
+                        <Label
+                          htmlFor={`cat-${pet.id}`}
+                          className="cursor-pointer font-normal flex-1 flex flex-wrap items-center gap-2"
+                        >
+                          <span>
+                            {pet.name}{" "}
+                            <span className="ml-1 text-muted-foreground text-xs">(cat)</span>
+                          </span>
+                          {petHasSpecialAlerts(parsePetSpecialAlerts(pet.special_alerts)) ? (
+                            <Badge
+                              variant="outline"
+                              className="border-orange-400 bg-orange-50 text-orange-900 text-[10px] h-5"
+                            >
+                              Alert
+                            </Badge>
+                          ) : null}
+                        </Label>
                       </div>
                     ))}
                   </div>
@@ -2485,6 +2670,7 @@ function CatBoardingCalendar({
                   return (
                     <div key={petId} className="space-y-2 rounded border p-3">
                       <p className="text-sm font-semibold">{pet?.name ?? "Cat"}</p>
+                      <PetSpecialAlertsBanner specialAlerts={pet?.special_alerts} />
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Feeding notes</Label>
                         <Textarea
@@ -2645,27 +2831,22 @@ function CatBoardingCalendar({
                       ))}
                     </SelectContent>
                   </Select>
-                  {catActiveTransportRate && (() => {
-                    const qty = transportQuantityForPets(form.transport_zone, form.pet_ids.length);
-                    const over = privateDubaiOverCapacity(form.transport_zone, form.pet_ids.length);
-                    const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === form.transport_zone);
-                    return (
-                      <>
-                        <p className="text-xs text-muted-foreground">
-                          AED {catActiveTransportRate.amount_aed.toFixed(2)} × {qty}
-                          {form.transport_zone === "dubai_private" ? " (flat per trip)" : " per cat"}
-                          {opt ? ` — ${opt.helper}` : ""}
-                        </p>
-                        {over && (
-                          <p className="text-xs text-destructive">
-                            Private is capped at 3 pets. Switch to Shared or split the group.
-                          </p>
-                        )}
-                      </>
-                    );
-                  })()}
+                  <BoardingTransportRateHint
+                    activeRate={catActiveTransportRate}
+                    zone={form.transport_zone}
+                    petCount={form.pet_ids.length}
+                    pickup={form.pickup_required}
+                    dropoff={form.dropoff_required}
+                    promo={catTransportPromo}
+                    petNoun="cat"
+                  />
                 </div>
               )}
+              {catTransportPromo.applies && (form.pickup_required || form.dropoff_required) ? (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                  {catTransportPromo.notice}
+                </div>
+              ) : null}
             </div>
 
             <Separator />
@@ -2767,11 +2948,23 @@ function CatBoardingCalendar({
                         </span>
                       </div>
                     )}
-                    {(form.pickup_required || form.dropoff_required) && catTransportEstimate > 0 && (
+                    {(form.pickup_required || form.dropoff_required) && (
                       <div className="flex justify-between gap-4">
                         <span className="text-muted-foreground">Transport (est.)</span>
-                        <span className="tabular-nums font-medium">
-                          {formatAed(catTransportEstimate)}
+                        <span className="tabular-nums font-medium flex items-center justify-end gap-2">
+                          {catTransportPromo.applies ? (
+                            <>
+                              <span className="text-emerald-700">Free</span>
+                              <Badge
+                                variant="outline"
+                                className="border-emerald-300 bg-emerald-100 text-emerald-800 text-[10px] shrink-0"
+                              >
+                                Free
+                              </Badge>
+                            </>
+                          ) : (
+                            formatAed(catTransportEstimate)
+                          )}
                         </span>
                       </div>
                     )}

@@ -18,6 +18,7 @@ export type BookingPetDetail = {
     other_notes: string | null;
     feeding_instructions: string | null;
     medications: string | null;
+    special_alerts: Database["public"]["Tables"]["pets"]["Row"]["special_alerts"];
   } | null;
 };
 
@@ -30,7 +31,7 @@ export type BookingWithDetails = Booking & {
 };
 
 const BOOKING_BASE_SELECT =
-  "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications))";
+  "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts))";
 
 const BOOKING_DETAIL_SELECT =
   `${BOOKING_BASE_SELECT}, booking_items(count)`;

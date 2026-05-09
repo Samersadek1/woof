@@ -40,6 +40,11 @@ import {
 } from "@/lib/groomingWorkflow";
 import { grandTotalFromNet, invoiceDisplayTotals, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
 import {
+  GROOMING_PAYMENT_METHOD_OPTIONS,
+  groomingPaymentMethodLabel,
+  type GroomingPaymentMethod,
+} from "@/lib/groomingPaymentMethod";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -52,8 +57,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
+import { parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -445,7 +459,17 @@ function AppointmentCard({
           </div>
 
           <div className="space-y-2 min-w-0" onClick={(e) => e.stopPropagation()}>
-            <p className="text-xl font-bold truncate">{petName}</p>
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <p className="text-xl font-bold truncate">{petName}</p>
+              {petHasSpecialAlerts(parsePetSpecialAlerts(a.pets?.special_alerts)) ? (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 border-orange-500 bg-orange-100 text-orange-950 text-[10px] font-semibold uppercase tracking-wide"
+                >
+                  ⚠ Alert
+                </Badge>
+              ) : null}
+            </div>
             <p className="text-sm text-muted-foreground">
               {breedWeight || "—"}
             </p>
@@ -513,6 +537,12 @@ function AppointmentCard({
             </div>
             <p className="text-lg font-semibold tabular-nums">
               AED {a.price != null ? a.price.toFixed(0) : "—"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Payment:{" "}
+              <span className="text-foreground font-medium">
+                {groomingPaymentMethodLabel(a.payment_method)}
+              </span>
             </p>
             <p className="text-sm text-muted-foreground">
               Groomer:{" "}
@@ -591,6 +621,7 @@ const GroomingPage = () => {
   const [price, setPrice] = useState("");
   /** Empty or 0% = no discount; quick buttons and manual input share this value */
   const [discountPct, setDiscountPct] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<GroomingPaymentMethod>("cash");
   const [visitNotes, setVisitNotes] = useState("");
   const [linkBoarding, setLinkBoarding] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
@@ -792,6 +823,7 @@ const GroomingPage = () => {
     lastPrefilledOwnerIdForGroomer.current = null;
     setPrice("");
     setDiscountPct("");
+    setPaymentMethod("cash");
     setVisitNotes("");
     setOwnerId(null);
     setOwnerLabel(null);
@@ -941,10 +973,6 @@ const GroomingPage = () => {
       return;
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:beforeMutate',message:'grooming create submitted',data:{primaryService,selectedServices,hasOwnerId:!!ownerId,petCount:petIdsToBook.length,appointmentDate:format(apptDate,'yyyy-MM-dd'),groomingDate:format(groomingDate,'yyyy-MM-dd'),appointmentTime:apptTime,durationMin,linkBoarding,hasBookingId:!!bookingId,enteredPrice:price||null,discountPct:normalizedDiscountPct,finalPrice},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-
     const selectedServiceLabels = selectedServices
       .map((svc) =>
         GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.label ?? svc,
@@ -975,6 +1003,7 @@ const GroomingPage = () => {
       price: finalPrice,
       notes: composedNotes || null,
       booking_id: linkBoarding ? bookingId : null,
+      payment_method: paymentMethod,
     };
 
     try {
@@ -999,6 +1028,7 @@ const GroomingPage = () => {
         ownerId: ownerId!,
         serviceType: "grooming",
         referenceId: createdRows[0].id,
+        notes: `Payment method: ${groomingPaymentMethodLabel(paymentMethod)}`,
         lineItems: createdRows.map((appt) => {
           const petName =
             pets.find((p) => p.id === appt.pet_id)?.name ?? "Pet";
@@ -1024,9 +1054,6 @@ const GroomingPage = () => {
           : typeof e === "object" && e !== null && "message" in e
             ? String((e as { message: string }).message)
             : "Could not create.";
-      // #region agent log
-      fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:onError',message:'grooming create failed',data:{primaryService,selectedServices,appointmentDate:format(apptDate,'yyyy-MM-dd'),appointmentTime:apptTime,error:msg},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       toast.error(msg);
     }
   };
@@ -1893,14 +1920,22 @@ const GroomingPage = () => {
                       <label
                         key={p.id}
                         htmlFor={`groom-pet-${p.id}`}
-                        className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/50"
+                        className="flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/50"
                       >
                         <Checkbox
                           id={`groom-pet-${p.id}`}
                           checked={selectedPetIds.includes(p.id)}
                           onCheckedChange={() => togglePetSelected(p.id)}
                         />
-                        <span className="text-sm font-medium">{p.name}</span>
+                        <span className="text-sm font-medium flex-1 min-w-0">{p.name}</span>
+                        {petHasSpecialAlerts(parsePetSpecialAlerts(p.special_alerts)) ? (
+                          <Badge
+                            variant="outline"
+                            className="border-orange-400 bg-orange-50 text-orange-900 text-[10px] shrink-0"
+                          >
+                            Alert
+                          </Badge>
+                        ) : null}
                       </label>
                     ))}
                   </div>
@@ -1910,6 +1945,7 @@ const GroomingPage = () => {
                 <div className="space-y-2">
                   <Label>Pet</Label>
                   <p className="text-sm font-medium">{pets[0].name}</p>
+                  <PetSpecialAlertsBanner specialAlerts={pets[0].special_alerts} />
                 </div>
               )}
               {selectedPetsOrdered.length > 0 && (
@@ -1918,6 +1954,7 @@ const GroomingPage = () => {
                     <Card key={pet.id} className="border bg-muted/10">
                       <CardContent className="space-y-1 p-3 text-sm pt-4">
                         <p className="font-semibold border-b pb-2 mb-2">{pet.name}</p>
+                        <PetSpecialAlertsBanner specialAlerts={pet.special_alerts} />
                         <p>
                           <span className="text-muted-foreground">Breed: </span>
                           {pet.breed ?? "—"}
@@ -2140,6 +2177,27 @@ const GroomingPage = () => {
                     </div>
                   ) : null}
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Payment method</Label>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(v) => setPaymentMethod(v as GroomingPaymentMethod)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GROOMING_PAYMENT_METHOD_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  How the client plans to pay at checkout (stored on the appointment and copied to the draft invoice).
+                </p>
               </div>
               <div className="space-y-2">
                 <Label>Groomer</Label>
