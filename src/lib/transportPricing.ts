@@ -117,11 +117,78 @@ export type BoardingTransportFreePromo =
   | { applies: false }
   | { applies: true; notice: string };
 
+/** Simplified region picker in Boarding New Booking (maps to pricing keys). */
+export type BoardingTransportRegion = "dubai" | "abudhabi" | "other";
+
+export const BOARDING_TRANSPORT_REGION_OPTIONS: {
+  value: BoardingTransportRegion;
+  label: string;
+}[] = [
+  { value: "dubai", label: "Dubai" },
+  { value: "abudhabi", label: "Abu Dhabi" },
+  { value: "other", label: "Other" },
+];
+
+/**
+ * Maps UI region to internal transport zone / pricing key.
+ * Other → same rate card as Abu Dhabi / Other Emirates; staff can override AED per leg.
+ */
+export function regionToTransportZone(region: BoardingTransportRegion): TransportZone {
+  switch (region) {
+    case "dubai":
+      return "dubai_shared";
+    case "abudhabi":
+      return "abudhabi";
+    case "other":
+      return "abudhabi";
+  }
+}
+
+/** Parses AED amounts from boarding transport price inputs (comma-safe). */
+export function parseBoardingTransportAed(value: string): number {
+  const n = parseFloat(String(value).replace(/,/g, "").trim());
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+export function transportRegionLabel(region: BoardingTransportRegion): string {
+  switch (region) {
+    case "dubai":
+      return "Dubai";
+    case "abudhabi":
+      return "Abu Dhabi";
+    case "other":
+      return "Other";
+  }
+}
+
+/**
+ * Dubai: free transport when stay is 5+ nights.
+ * Abu Dhabi: free when stay is 10+ nights.
+ * Other: no automatic free rule.
+ */
+export function boardingTransportFreePromoFromRegion(
+  nights: number,
+  region: BoardingTransportRegion,
+): BoardingTransportFreePromo {
+  const n = Number.isFinite(nights) && nights > 0 ? nights : 0;
+  if (n < 1) return { applies: false };
+
+  if (region === "dubai" && n >= 5) {
+    return { applies: true, notice: "🎉 Free transport" };
+  }
+  if (region === "abudhabi" && n >= 10) {
+    return {
+      applies: true,
+      notice: "🎉 Free transport included for stays of 10+ nights in Abu Dhabi",
+    };
+  }
+  return { applies: false };
+}
+
 const DUBAI_ZONES: TransportZone[] = ["dubai_shared", "dubai_private"];
 
 /**
- * Dubai (shared or private): free pickup/drop-off when stay is 5+ nights.
- * Abu Dhabi (`abudhabi` zone): free when stay is 10+ nights.
+ * @deprecated Prefer boardingTransportFreePromoFromRegion + BoardingTransportRegion in new booking UI.
  */
 export function boardingTransportFreePromo(
   nights: number,
@@ -133,7 +200,7 @@ export function boardingTransportFreePromo(
   if (DUBAI_ZONES.includes(zone) && n >= 5) {
     return {
       applies: true,
-      notice: "🎉 Free transport included for stays of 5+ nights in Dubai",
+      notice: "🎉 Free transport",
     };
   }
   if (zone === "abudhabi" && n >= 10) {
