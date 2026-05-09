@@ -4,9 +4,12 @@ import { Button } from "@/components/ui/button";
 export function PrintLayout({
   children,
   imageUrls = [],
+  variant = "cards",
 }: {
   children: React.ReactNode;
   imageUrls?: Array<string | null | undefined>;
+  /** `schedule` uses A4-friendly margins and table-focused print rules (grooming daily schedule). */
+  variant?: "cards" | "schedule";
 }) {
   const [imagesReady, setImagesReady] = useState(false);
 
@@ -53,11 +56,35 @@ export function PrintLayout({
     <>
       <style>{`
         @media print {
-          @page { size: A5; margin: 10mm; }
+          @page {
+            size: ${variant === "schedule" ? "A4" : "A5"};
+            margin: ${variant === "schedule" ? "12mm" : "10mm"};
+          }
           html, body { margin: 0 !important; padding: 0 !important; background: white !important; color: black !important; }
           .no-print { display: none !important; }
           .print-page { page-break-after: always; break-after: page; }
           .print-page:last-child { page-break-after: auto; break-after: auto; }
+
+          .schedule-day-section {
+            page-break-before: always;
+            break-before: page;
+          }
+          .schedule-day-section-first {
+            page-break-before: auto;
+            break-before: auto;
+          }
+
+          .schedule-th {
+            background: #e8e8e8 !important;
+            color: #111 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .schedule-data-row:nth-child(even) td {
+            background: #f5f5f5 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
         }
 
         .print-root {
@@ -69,30 +96,77 @@ export function PrintLayout({
 
         .print-label,
         .print-sans {
-          font-family: "Helvetica Neue", Arial, sans-serif;
+          font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
         }
 
         .print-keep-color {
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
+
+        .grooming-schedule-print .schedule-table {
+          border: 1px solid #374151;
+        }
+        .grooming-schedule-print .schedule-th {
+          border: 1px solid #374151;
+          padding: 8px 6px;
+          font-weight: 700;
+          font-size: 10px;
+          text-transform: none;
+          letter-spacing: 0.01em;
+          vertical-align: bottom;
+          background: #e8e8e8;
+          color: #111;
+        }
+        .grooming-schedule-print .schedule-td {
+          border: 1px solid #9ca3af;
+          padding: 8px 6px;
+          vertical-align: top;
+          min-height: 3rem;
+          font-size: 10px;
+          line-height: 1.35;
+          background: #fff;
+        }
+        .grooming-schedule-print .schedule-data-row:nth-child(even) .schedule-td {
+          background: #f5f5f5;
+        }
+        .grooming-schedule-print .schedule-col-pet { width: 26%; }
+        .grooming-schedule-print .schedule-col-date { width: 14%; }
+        .grooming-schedule-print .schedule-col-groomer { width: 12%; }
+        .grooming-schedule-print .schedule-col-services { width: 18%; }
+        .grooming-schedule-print .schedule-col-notes { width: 30%; }
       `}</style>
 
       <div className="print-root min-h-screen">
         <div className="no-print sticky top-0 z-10 border-b bg-white p-3 print-sans">
-          <div className="mx-auto flex max-w-[600px] items-center gap-2">
-            {imagesReady ? (
-              <Button onClick={() => window.print()}>Print</Button>
-            ) : (
-              <Button disabled>Loading photos...</Button>
-            )}
-            <Button variant="outline" onClick={() => window.history.back()}>
-              Back
-            </Button>
+          <div className="mx-auto flex max-w-[900px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {imagesReady ? (
+                <Button type="button" onClick={() => window.print()}>
+                  {variant === "schedule" ? "Print schedule" : "Print"}
+                </Button>
+              ) : (
+                <Button type="button" disabled>
+                  Loading photos...
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => window.history.back()}>
+                Back
+              </Button>
+            </div>
+            {variant === "schedule" ? (
+              <p className="max-w-md text-xs text-muted-foreground">
+                In the print dialog, turn off{" "}
+                <span className="font-medium">Headers and footers</span> for a clean margin (browser
+                setting).
+              </p>
+            ) : null}
           </div>
         </div>
 
-        <div className="mx-auto max-w-[600px] p-6 print:max-w-none print:p-0">
+        <div
+          className={`mx-auto p-6 print:max-w-none print:p-0 ${variant === "schedule" ? "max-w-[900px]" : "max-w-[600px]"}`}
+        >
           {children}
         </div>
       </div>

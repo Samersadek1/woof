@@ -3,8 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { PrintLayout } from "@/components/print/PrintLayout";
 import {
-  fetchGroomingRowsForDate,
-  GroomingCardBlock,
+  fetchGroomingRowsForDateRange,
+  GroomingSchedulePrintView,
 } from "@/pages/print/groomingPrintShared";
 
 function normalizedDate(value: string | null): string {
@@ -12,35 +12,41 @@ function normalizedDate(value: string | null): string {
   return format(new Date(), "yyyy-MM-dd");
 }
 
+/** Resolve optional date range; `date` sets both ends (backward compatible). */
+function normalizedRange(searchParams: URLSearchParams): { from: string; to: string } {
+  const fallback = normalizedDate(searchParams.get("date"));
+  const fromRaw = searchParams.get("from") ?? searchParams.get("date");
+  const toRaw = searchParams.get("to") ?? searchParams.get("date");
+  const from = normalizedDate(fromRaw);
+  const to = normalizedDate(toRaw);
+  if (from <= to) return { from, to };
+  return { from: to, to: from };
+}
+
 export default function GroomingCardsPrintPage() {
   const [searchParams] = useSearchParams();
-  const date = normalizedDate(searchParams.get("date"));
+  const { from, to } = normalizedRange(searchParams);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["print", "grooming-cards", date],
-    queryFn: () => fetchGroomingRowsForDate(date),
+    queryKey: ["print", "grooming-cards", from, to],
+    queryFn: () => fetchGroomingRowsForDateRange(from, to),
   });
 
   return (
-    <PrintLayout>
-      <p className="print-sans mb-3 text-xs">Grooming cards for {date}</p>
-      {isLoading ? <p className="print-sans text-sm">Loading appointments...</p> : null}
+    <PrintLayout variant="schedule">
+      {isLoading ? <p className="print-sans text-sm">Loading appointments…</p> : null}
       {error ? (
         <p className="print-sans text-sm text-red-700">
-          Could not load grooming appointments for this date.
+          Could not load grooming appointments for this range.
         </p>
       ) : null}
-      {!isLoading && !error && (data?.appointments.length ?? 0) === 0 ? (
-        <p className="print-sans text-sm">No grooming appointments for this date.</p>
-      ) : null}
-      {data?.appointments.map((appointment) => (
-        <GroomingCardBlock
-          key={appointment.id}
-          appointment={appointment}
-          previousGroomDate={data.previousByPetId[appointment.pet_id] ?? null}
-          invoiceMoney={data.amountByAppointmentId[appointment.id] ?? null}
+      {!isLoading && !error && data ? (
+        <GroomingSchedulePrintView
+          appointments={data.appointments}
+          dateFrom={from}
+          dateTo={to}
         />
-      ))}
+      ) : null}
     </PrintLayout>
   );
 }

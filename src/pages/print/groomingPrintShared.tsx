@@ -1,4 +1,4 @@
-import { format, parseISO } from "date-fns";
+import { addMinutes, format, parse, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { labelForGroomingService, type GroomingService } from "@/lib/groomingCatalog";
 import { ownerDisplayName } from "@/lib/bookingUtils";
@@ -28,9 +28,11 @@ export type GroomingPrintRow = {
   id: string;
   appointment_date: string;
   appointment_time: string | null;
+  duration_minutes: number | null;
   service: GroomingService;
   grooming_notes: string | null;
   notes: string | null;
+  visit_notes: string | null;
   pet_id: string;
   owner_id: string;
   price: number | null;
@@ -39,6 +41,9 @@ export type GroomingPrintRow = {
     first_name: string;
     last_name: string | null;
     phone: string | null;
+    phone2: string | null;
+    email: string | null;
+    address: string | null;
   } | null;
   pets: {
     name: string;
@@ -51,6 +56,13 @@ export type GroomingPrintRow = {
     booking_ref: string | null;
   } | null;
 };
+
+const GROOMING_APPOINTMENT_PRINT_SELECT = `
+  id, appointment_date, appointment_time, duration_minutes, service, grooming_notes, notes, visit_notes, pet_id, owner_id, price, booking_id,
+  owners(first_name, last_name, phone, phone2, email, address),
+  pets(name, breed, size_category, grooming_notes, medical_conditions),
+  bookings(booking_ref)
+`;
 
 const PACKAGE_LABEL: Partial<Record<GroomingService, string>> = {
   full_groom: "Grande - Full Groom",
@@ -74,8 +86,9 @@ export function formatAppointmentTime(time: string | null): string {
 type PreviousGroomMap = Record<string, string | null>;
 type AmountMap = Record<string, GroomingInvoiceMoney | null>;
 
-export async function fetchGroomingRowsForDate(
-  date: string,
+export async function fetchGroomingRowsForDateRange(
+  fromDate: string,
+  toDate: string,
 ): Promise<{
   appointments: GroomingPrintRow[];
   previousByPetId: PreviousGroomMap;
@@ -83,21 +96,26 @@ export async function fetchGroomingRowsForDate(
 }> {
   const { data, error } = await supabase
     .from("grooming_appointments")
-    .select(
-      `
-      id, appointment_date, appointment_time, service, grooming_notes, notes, pet_id, owner_id, price, booking_id,
-      owners(first_name, last_name, phone),
-      pets(name, breed, size_category, grooming_notes, medical_conditions),
-      bookings(booking_ref)
-    `,
-    )
-    .eq("appointment_date", date)
+    .select(GROOMING_APPOINTMENT_PRINT_SELECT)
+    .gte("appointment_date", fromDate)
+    .lte("appointment_date", toDate)
     .neq("status", "cancelled")
+    .order("appointment_date", { ascending: true })
     .order("appointment_time", { ascending: true, nullsFirst: false });
 
   if (error) throw error;
   const appointments = (data ?? []) as GroomingPrintRow[];
   return enrichGroomingRows(appointments);
+}
+
+export async function fetchGroomingRowsForDate(
+  date: string,
+): Promise<{
+  appointments: GroomingPrintRow[];
+  previousByPetId: PreviousGroomMap;
+  amountByAppointmentId: AmountMap;
+}> {
+  return fetchGroomingRowsForDateRange(date, date);
 }
 
 export async function fetchGroomingRowById(
@@ -109,14 +127,7 @@ export async function fetchGroomingRowById(
 }> {
   const { data, error } = await supabase
     .from("grooming_appointments")
-    .select(
-      `
-      id, appointment_date, appointment_time, service, grooming_notes, notes, pet_id, owner_id, price, booking_id,
-      owners(first_name, last_name, phone),
-      pets(name, breed, size_category, grooming_notes, medical_conditions),
-      bookings(booking_ref)
-    `,
-    )
+    .select(GROOMING_APPOINTMENT_PRINT_SELECT)
     .eq("id", bookingId)
     .single();
 
@@ -185,6 +196,212 @@ async function enrichGroomingRows(rows: GroomingPrintRow[]): Promise<{
     previousByPetId,
     amountByAppointmentId,
   };
+}
+
+function parseGroomingNotesMeta(notes: string | null | undefined): {
+  services: string[];
+  groomingDate: string | null;
+  estimatedPickup: string | null;
+} {
+  if (!notes) return { services: [], groomingDate: null, estimatedPickup: null };
+  const lines = notes
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const servicesLine = lines.find((l) => l.toLowerCase().startsWith("services:"));
+  const groomingDateLine = lines.find((l) =>
+    l.toLowerCase().startsWith("grooming date:"),
+  );
+  const estimatedPickupLine = lines.find((l) =>
+    l.toLowerCase().startsWith("estimated pickup:"),
+  );
+  const services = servicesLine
+    ? servicesLine
+        .slice("services:".length)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  const groomingDate = groomingDateLine
+    ? groomingDateLine.slice("grooming date:".length).trim() || null
+    : null;
+  const estimatedPickup = estimatedPickupLine
+    ? estimatedPickupLine.slice("estimated pickup:".length).trim() || null
+    : null;
+  return { services, groomingDate, estimatedPickup };
+}
+
+function stripMetaFromVisitNotes(notes: string | null | undefined): string {
+  if (!notes) return "";
+  const metaPrefixes = ["services:", "grooming date:", "discount:", "estimated pickup:"];
+  return notes
+    .split("\n")
+    .filter((l) => !metaPrefixes.some((p) => l.toLowerCase().trimStart().startsWith(p)))
+    .join("\n")
+    .trim();
+}
+
+function appointmentTimeHHMM(time: string | null): string {
+  if (!time) return "10:00";
+  const s = time.slice(0, 5);
+  return /^\d{2}:\d{2}$/.test(s) ? s : "10:00";
+}
+
+function estimatedPickupFromDuration(
+  timeValue: string,
+  durationMinutes: number | null,
+): string | null {
+  if (!/^\d{2}:\d{2}$/.test(timeValue)) return null;
+  const safe =
+    durationMinutes != null && Number.isFinite(durationMinutes) && durationMinutes > 0
+      ? durationMinutes
+      : 0;
+  if (safe <= 0) return null;
+  try {
+    const start = parse(`${timeValue}:00`, "HH:mm:ss", new Date(2000, 0, 1));
+    return format(addMinutes(start, safe), "h:mm a");
+  } catch {
+    return null;
+  }
+}
+
+function schedulePickupDisplay(a: GroomingPrintRow): string | null {
+  const meta = parseGroomingNotesMeta(a.notes);
+  if (meta.estimatedPickup?.trim()) return meta.estimatedPickup.trim();
+  return estimatedPickupFromDuration(
+    appointmentTimeHHMM(a.appointment_time),
+    a.duration_minutes,
+  );
+}
+
+function scheduleServicesDisplay(a: GroomingPrintRow): string {
+  const primary = labelForGroomingService(a.service);
+  const extra = parseGroomingNotesMeta(a.notes).services;
+  const parts = [primary, ...extra.filter((x) => x?.trim())];
+  return Array.from(new Set(parts)).join(", ");
+}
+
+function scheduleNotesDisplay(a: GroomingPrintRow): string {
+  const visit = stripMetaFromVisitNotes(a.notes);
+  const vn = (a.visit_notes ?? "").trim();
+  if (visit && vn) return `${visit}\n\nStaff visit: ${vn}`;
+  return visit || vn || "—";
+}
+
+export function GroomingSchedulePrintView({
+  appointments,
+  dateFrom,
+  dateTo,
+}: {
+  appointments: GroomingPrintRow[];
+  dateFrom: string;
+  dateTo: string;
+}) {
+  const fromLabel = format(parseISO(dateFrom), "EEEE, d MMMM yyyy");
+  const toLabel = format(parseISO(dateTo), "EEEE, d MMMM yyyy");
+
+  const byDate = new Map<string, GroomingPrintRow[]>();
+  for (const a of appointments) {
+    const list = byDate.get(a.appointment_date) ?? [];
+    list.push(a);
+    byDate.set(a.appointment_date, list);
+  }
+  const dates = Array.from(byDate.keys()).sort();
+
+  return (
+    <div className="grooming-schedule-print print-sans text-black">
+      <header className="schedule-print-header mb-8 text-center">
+        <h1 className="schedule-print-title text-lg font-bold leading-tight md:text-xl">
+          Grooming Schedule for Second Home Domestic Pets Grooming LLC
+        </h1>
+        <p className="schedule-print-subtitle mt-3 text-xs leading-relaxed text-neutral-700 md:text-sm">
+          From: {fromLabel}
+          <span className="mx-2">·</span>
+          To: {toLabel}
+        </p>
+      </header>
+
+      {appointments.length === 0 ? (
+        <p className="text-sm">No grooming appointments in this range.</p>
+      ) : (
+        dates.map((dKey, idx) => {
+          const rows = byDate.get(dKey)!;
+          return (
+            <section
+              key={dKey}
+              className={
+                idx === 0 ? "schedule-day-section-first" : "schedule-day-section"
+              }
+            >
+              <table className="schedule-table w-full table-fixed border-collapse text-left text-[11px] leading-snug">
+                <thead>
+                  <tr>
+                    <th className="schedule-th schedule-col-pet">Pet Name</th>
+                    <th className="schedule-th schedule-col-date">Date</th>
+                    <th className="schedule-th schedule-col-groomer">Groomer</th>
+                    <th className="schedule-th schedule-col-services">Service(s)</th>
+                    <th className="schedule-th schedule-col-notes">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((a) => {
+                    const owner = ownerDisplayName(
+                      a.owners?.first_name,
+                      a.owners?.last_name,
+                    );
+                    const pickup = schedulePickupDisplay(a);
+                    const dateLines = [
+                      format(parseISO(a.appointment_date), "EEE, d MMM yyyy"),
+                      formatAppointmentTime(a.appointment_time),
+                      pickup ? `Pickup: ${pickup}` : null,
+                    ].filter(Boolean) as string[];
+
+                    return (
+                      <tr key={a.id} className="schedule-data-row">
+                        <td className="schedule-td schedule-td-pet align-top">
+                          <div className="font-bold text-neutral-900">
+                            {a.pets?.name ?? "—"}
+                          </div>
+                          <div className="mt-1">Owner: {owner}</div>
+                          {a.pets?.breed ? (
+                            <div className="mt-0.5">Breed: {a.pets.breed}</div>
+                          ) : null}
+                          {a.owners?.address?.trim() ? (
+                            <div className="mt-0.5 whitespace-pre-wrap">
+                              {a.owners.address.trim()}
+                            </div>
+                          ) : null}
+                          {a.owners?.phone?.trim() ? (
+                            <div className="mt-0.5">Home: {a.owners.phone.trim()}</div>
+                          ) : null}
+                          {a.owners?.phone2?.trim() ? (
+                            <div className="mt-0.5">Cell: {a.owners.phone2.trim()}</div>
+                          ) : null}
+                          {a.owners?.email?.trim() ? (
+                            <div className="mt-0.5 break-all">{a.owners.email.trim()}</div>
+                          ) : null}
+                        </td>
+                        <td className="schedule-td schedule-td-date align-top whitespace-pre-line">
+                          {dateLines.join("\n")}
+                        </td>
+                        <td className="schedule-td align-top">
+                          {a.grooming_notes?.trim() || "—"}
+                        </td>
+                        <td className="schedule-td align-top">{scheduleServicesDisplay(a)}</td>
+                        <td className="schedule-td schedule-td-notes align-top whitespace-pre-wrap">
+                          {scheduleNotesDisplay(a)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </section>
+          );
+        })
+      )}
+    </div>
+  );
 }
 
 export function GroomingCardBlock({
