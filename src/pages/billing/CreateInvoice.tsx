@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
 
 type PricingRow = Database["public"]["Tables"]["pricing"]["Row"];
 type InvoiceInsert = Database["public"]["Tables"]["invoices"]["Insert"];
@@ -138,7 +139,9 @@ export default function CreateInvoicePage() {
   const lineDiscount = lines.reduce((s, l) => s + l.discount, 0);
   const lineTotal = lines.reduce((s, l) => s + l.total, 0);
   const adjustmentTotal = adjustments.reduce((s, a) => s + Math.max(0, a.amount), 0);
-  const grandTotal = Math.max(0, lineTotal - adjustmentTotal);
+  const netExVat = Math.max(0, lineTotal - adjustmentTotal);
+  const vatAed = vatAmountFromNet(netExVat);
+  const invoiceGross = grandTotalFromNet(netExVat);
 
   const submit = async () => {
     if (!ownerId) return toast.error("Owner is required.");
@@ -162,8 +165,9 @@ export default function CreateInvoicePage() {
         discount_amount: lineDiscount + adjustmentTotal,
         discount_aed: lineDiscount + adjustmentTotal,
         discount_pct: subtotal > 0 ? ((lineDiscount + adjustmentTotal) / subtotal) * 100 : 0,
-        total: grandTotal,
-        total_aed: grandTotal,
+        total: invoiceGross,
+        total_aed: invoiceGross,
+        vat_aed: vatAed,
       };
       const { data: inv, error: invErr } = await supabase
         .from("invoices")
@@ -382,7 +386,9 @@ export default function CreateInvoicePage() {
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{aed(subtotal)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Discounts</span><span>-{aed(lineDiscount)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Adjustments</span><span>-{aed(adjustmentTotal)}</span></div>
-              <div className="flex justify-between text-base font-semibold border-t pt-2"><span>Total</span><span>{aed(grandTotal)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Net (ex VAT)</span><span>{aed(netExVat)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{aed(vatAed)}</span></div>
+              <div className="flex justify-between text-base font-semibold border-t pt-2"><span>Total (incl. VAT)</span><span>{aed(invoiceGross)}</span></div>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => navigate("/billing/invoices")}>Cancel</Button>

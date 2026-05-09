@@ -19,6 +19,7 @@ import {
   daycareHourlyLinearTotal,
   DAYCARE_HOURLY_UNIT_KEY,
 } from "@/lib/servicePricing";
+import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -749,6 +750,19 @@ function PlannerTab() {
     },
   });
 
+  const daycareInvoiceNetExVatPreview = useMemo(() => {
+    if (physicalInvoicePetCount === 0 || immediateInvoiceSubtotalPreview <= 0) return null;
+    if (skipInvoiceDiscount) return immediateInvoiceSubtotalPreview;
+    if (discountPreviewLoading) return immediateInvoiceSubtotalPreview;
+    return discountPreview?.final_aed ?? immediateInvoiceSubtotalPreview;
+  }, [
+    physicalInvoicePetCount,
+    immediateInvoiceSubtotalPreview,
+    skipInvoiceDiscount,
+    discountPreviewLoading,
+    discountPreview?.final_aed,
+  ]);
+
   useEffect(() => {
     if (!packageId || !packages?.length) return;
     if (!packages.some((p) => p.id === packageId)) {
@@ -1336,17 +1350,28 @@ function PlannerTab() {
                           </span>
                         </div>
                       )}
+                      <div className="flex items-center justify-between text-sm">
+                        <span>Net (ex VAT)</span>
+                        <span className="tabular-nums">
+                          {daycareInvoiceNetExVatPreview != null
+                            ? `AED ${daycareInvoiceNetExVatPreview.toFixed(2)}`
+                            : "—"}
+                        </span>
+                      </div>
+                      {daycareInvoiceNetExVatPreview != null ? (
+                        <div className="flex items-center justify-between text-sm">
+                          <span>{vatLineLabel()}</span>
+                          <span className="tabular-nums">
+                            AED {vatAmountFromNet(daycareInvoiceNetExVatPreview).toFixed(2)}
+                          </span>
+                        </div>
+                      ) : null}
                       <div className="flex items-center justify-between font-semibold">
-                        <span>Total to invoice now</span>
-                        <span>
-                          AED{" "}
-                          {(
-                            skipInvoiceDiscount
-                              ? immediateInvoiceSubtotalPreview
-                              : discountPreviewLoading
-                                ? immediateInvoiceSubtotalPreview
-                                : (discountPreview?.final_aed ?? immediateInvoiceSubtotalPreview)
-                          ).toFixed(2)}
+                        <span>Total incl. VAT</span>
+                        <span className="tabular-nums">
+                          {daycareInvoiceNetExVatPreview != null
+                            ? `AED ${grandTotalFromNet(daycareInvoiceNetExVatPreview).toFixed(2)}`
+                            : "—"}
                         </span>
                       </div>
                     </>

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { ownerDisplayName } from "@/lib/bookingUtils";
+import { invoiceDisplayTotals } from "@/lib/vatConfig";
 
 type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
 
@@ -43,7 +44,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
       let q = supabase
         .from("invoices")
         .select(
-          "id, invoice_number, owner_id, service_type, status, total, total_aed, due_date, created_at, owners(first_name, last_name)",
+          "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name)",
         )
         .order("created_at", { ascending: false });
 
@@ -69,6 +70,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         status: InvoiceStatus;
         total: number;
         total_aed: number | null;
+        vat_aed: number | null;
         due_date: string | null;
         created_at: string;
         owners: { first_name: string | null; last_name: string | null } | null;
@@ -83,6 +85,11 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
           daysOverdue = Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
         }
 
+        const grand = invoiceDisplayTotals({
+          total: row.total,
+          total_aed: row.total_aed,
+          vat_aed: row.vat_aed,
+        }).grandTotal;
         return {
           id: row.id,
           invoice_number: row.invoice_number,
@@ -90,7 +97,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
           owner_name: ownerDisplayName(owner?.first_name, owner?.last_name),
           service_type: row.service_type,
           status: row.status,
-          total_aed: row.total_aed ?? row.total ?? 0,
+          total_aed: grand,
           due_date: row.due_date,
           created_at: row.created_at,
           days_overdue: daysOverdue,

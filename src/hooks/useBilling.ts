@@ -15,6 +15,12 @@ import {
   useRefundWallet,
   type WalletMutationPayload,
 } from "@/hooks/useWallet";
+import {
+  grandTotalFromNet,
+  invoiceAmountDue,
+  invoiceDisplayTotals,
+  vatAmountFromNet,
+} from "@/lib/vatConfig";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,7 +93,10 @@ export interface InvoiceWithItems {
   subtotal_aed: number;
   discount_pct: number;
   discount_aed: number;
+  /** Stored invoice total: gross incl. VAT when vat_aed is set; legacy ex-VAT when vat_aed is null. */
+  total: number;
   total_aed: number;
+  vat_aed: number | null;
   payment_method: PaymentMethod | null;
   paid_at: string | null;
   due_date: string | null;
@@ -505,6 +514,10 @@ export function useCreateInvoice() {
         // Leave raw totals if discount RPC unavailable.
       }
 
+      const netExVat = normalizedTotal;
+      const vatAed = vatAmountFromNet(netExVat);
+      const grossTotal = grandTotalFromNet(netExVat);
+
       const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         .toISOString()
         .split("T")[0];
@@ -521,8 +534,9 @@ export function useCreateInvoice() {
           discount_pct: normalizedDiscountPct,
           discount_aed: normalizedDiscountAed,
           discount_amount: normalizedDiscountAed,
-          total: normalizedTotal,
-          total_aed: normalizedTotal,
+          total: grossTotal,
+          total_aed: grossTotal,
+          vat_aed: vatAed,
           due_date: dueDate,
           notes: input.notes ?? null,
         })
@@ -552,7 +566,7 @@ export function useCreateInvoice() {
       return {
         invoiceId: inv.id as string,
         invoiceNumber: inv.invoice_number as string | null,
-        total: normalizedTotal,
+        total: grossTotal,
       };
     },
     onSuccess: (_data, variables) => {
@@ -651,7 +665,7 @@ export function useProcessPayment() {
         // Fallback: client-side wallet deduction (used before process_wallet_payment RPC is deployed)
         const { data: inv, error: invErr } = await supabase
           .from("invoices")
-          .select("owner_id, total, total_aed")
+          .select("owner_id, total, total_aed, vat_aed")
           .eq("id", input.invoiceId)
           .single();
         if (invErr) throw invErr;
@@ -663,7 +677,11 @@ export function useProcessPayment() {
           .single();
         if (ownerErr) throw ownerErr;
 
-        const amount = inv.total_aed || inv.total || 0;
+        const amount = invoiceAmountDue({
+          total: inv.total,
+          total_aed: inv.total_aed,
+          vat_aed: inv.vat_aed,
+        });
         const currentBalance = ownerRow.wallet_balance ?? 0;
 
         if (currentBalance < amount) {
@@ -697,12 +715,16 @@ export function useProcessPayment() {
       // Card or cash payment
       const { data: invoice, error: fetchErr } = await supabase
         .from("invoices")
-        .select("owner_id, total, total_aed")
+        .select("owner_id, total, total_aed, vat_aed")
         .eq("id", input.invoiceId)
         .single();
       if (fetchErr) throw fetchErr;
 
-      const amount = invoice.total_aed || invoice.total || 0;
+      const amount = invoiceAmountDue({
+        total: invoice.total,
+        total_aed: invoice.total_aed,
+        vat_aed: invoice.vat_aed,
+      });
 
       const { error: updateErr } = await supabase
         .from("invoices")
@@ -774,7 +796,7 @@ export function useVoidInvoice() {
     ): Promise<{ success: boolean; refundAed: number }> => {
       const { data: invoice, error: fetchErr } = await supabase
         .from("invoices")
-        .select("owner_id, total, total_aed")
+        .select("owner_id, total, total_aed, vat_aed")
         .eq("id", input.invoiceId)
         .single();
       if (fetchErr) throw fetchErr;
@@ -803,7 +825,11 @@ export function useVoidInvoice() {
         owner_id: invoice.owner_id,
         invoice_id: input.invoiceId,
         adjustment_type: "cancellation_refund",
-        original_amount: invoice.total_aed || invoice.total || 0,
+        original_amount: invoiceAmountDue({
+          total: invoice.total,
+          total_aed: invoice.total_aed,
+          vat_aed: invoice.vat_aed,
+        }),
         adjusted_amount: input.refundAmount,
         reason: input.reason,
         approved_by: input.staffName,
@@ -898,7 +924,7 @@ export function useOwnerStatement(ownerId: string) {
       if (error) {
         const { data: rows, error: qErr } = await supabase
           .from("invoices")
-          .select("id, invoice_number, status, total, total_aed, created_at, due_date, booking_id")
+          .select("id, invoice_number, status, total, total_aed, vat_aed, created_at, due_date, booking_id")
           .eq("owner_id", ownerId)
           .order("created_at", { ascending: false });
         if (qErr) throw qErr;
@@ -907,7 +933,11 @@ export function useOwnerStatement(ownerId: string) {
           invoice_number: r.invoice_number,
           service_type: null as string | null,
           status: r.status,
-          total_aed: r.total_aed || r.total || 0,
+          total_aed: invoiceDisplayTotals({
+            total: r.total,
+            total_aed: r.total_aed,
+            vat_aed: r.vat_aed,
+          }).grandTotal,
           created_at: r.created_at,
           due_date: r.due_date,
           days_overdue: 0,
@@ -1104,7 +1134,9 @@ export function useInvoicesForOwner(
           subtotal_aed: inv.subtotal_aed || inv.subtotal || 0,
           discount_pct: inv.discount_pct,
           discount_aed: inv.discount_aed || inv.discount_amount || 0,
-          total_aed: inv.total_aed || inv.total || 0,
+          total: inv.total,
+          total_aed: inv.total_aed ?? inv.total ?? 0,
+          vat_aed: inv.vat_aed ?? null,
           payment_method: inv.payment_method as PaymentMethod | null,
           paid_at: inv.paid_at ?? (inv.status === "paid" ? inv.updated_at : null),
           due_date: inv.due_date,

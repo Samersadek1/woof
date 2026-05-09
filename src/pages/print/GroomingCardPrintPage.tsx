@@ -27,7 +27,7 @@ export default function GroomingCardPrintPage() {
         <GroomingCardBlock
           appointment={data.appointment}
           previousGroomDate={data.previousGroomDate}
-          amountCharged={data.amountCharged}
+          invoiceMoney={data.invoiceMoney}
         />
       ) : null}
     </PrintLayout>

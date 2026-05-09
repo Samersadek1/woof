@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PrintLayout } from "@/components/print/PrintLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { ownerDisplayName } from "@/lib/bookingUtils";
+import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
 
 type InvoiceRow = {
   id: string;
@@ -17,6 +18,7 @@ type InvoiceRow = {
   discount_amount: number;
   total_aed: number | null;
   total: number;
+  vat_aed: number | null;
   amount_paid: number;
   payment_method: string | null;
   notes: string | null;
@@ -54,7 +56,7 @@ async function fetchInvoicePrintable(invoiceId: string) {
     .select(
       `
       id, invoice_number, status, issue_date, due_date, subtotal_aed, subtotal,
-      discount_aed, discount_amount, total_aed, total, amount_paid, payment_method, notes, owner_id,
+      discount_aed, discount_amount, total_aed, total, vat_aed, amount_paid, payment_method, notes, owner_id,
       owners(first_name, last_name, phone, address, email),
       line_items:invoice_line_items(id, description, quantity, unit_price, total_price, sort_order)
     `,
@@ -95,9 +97,16 @@ export default function InvoicePrintPage() {
 
   const subtotal = invoice ? invoice.subtotal_aed ?? invoice.subtotal : 0;
   const discount = invoice ? invoice.discount_aed ?? invoice.discount_amount ?? 0 : 0;
-  const taxable = invoice ? invoice.total_aed ?? invoice.total : 0;
-  const vat = taxable * 0.05;
-  const grandTotal = taxable + vat;
+  const money = invoice
+    ? invoiceDisplayTotals({
+        total: invoice.total,
+        total_aed: invoice.total_aed,
+        vat_aed: invoice.vat_aed,
+      })
+    : { netExVat: 0, vat: 0, grandTotal: 0 };
+  const netAfterDiscount = money.netExVat;
+  const vat = money.vat;
+  const grandTotal = money.grandTotal;
   const paidAmount = invoice?.amount_paid ?? 0;
   const outstanding = Math.max(grandTotal - paidAmount, 0);
   const wm = invoice ? watermark(invoice.status) : null;
@@ -192,7 +201,11 @@ export default function InvoicePrintPage() {
                 </div>
               ) : null}
               <div className="flex justify-between">
-                <span>VAT 5%</span>
+                <span>Subtotal (ex VAT)</span>
+                <span>AED {netAfterDiscount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>{vatLineLabel()}</span>
                 <span>AED {vat.toFixed(2)}</span>
               </div>
               <div className="flex justify-between border-t border-black pt-1 text-sm font-bold">

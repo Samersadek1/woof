@@ -2,6 +2,27 @@ import { format, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { labelForGroomingService, type GroomingService } from "@/lib/groomingCatalog";
 import { ownerDisplayName } from "@/lib/bookingUtils";
+import {
+  grandTotalFromNet,
+  invoiceDisplayTotals,
+  vatAmountFromNet,
+  vatLineLabel,
+} from "@/lib/vatConfig";
+
+export type GroomingInvoiceMoney = {
+  netExVat: number;
+  vat: number;
+  grandTotal: number;
+};
+
+function groomingMoneyFromPrice(price: number): GroomingInvoiceMoney {
+  const netExVat = Math.max(0, price);
+  return {
+    netExVat,
+    vat: vatAmountFromNet(netExVat),
+    grandTotal: grandTotalFromNet(netExVat),
+  };
+}
 
 export type GroomingPrintRow = {
   id: string;
@@ -51,7 +72,7 @@ export function formatAppointmentTime(time: string | null): string {
 }
 
 type PreviousGroomMap = Record<string, string | null>;
-type AmountMap = Record<string, number | null>;
+type AmountMap = Record<string, GroomingInvoiceMoney | null>;
 
 export async function fetchGroomingRowsForDate(
   date: string,
@@ -84,7 +105,7 @@ export async function fetchGroomingRowById(
 ): Promise<{
   appointment: GroomingPrintRow;
   previousGroomDate: string | null;
-  amountCharged: number | null;
+  invoiceMoney: GroomingInvoiceMoney | null;
 }> {
   const { data, error } = await supabase
     .from("grooming_appointments")
@@ -106,7 +127,9 @@ export async function fetchGroomingRowById(
   return {
     appointment: row,
     previousGroomDate: enriched.previousByPetId[row.pet_id] ?? null,
-    amountCharged: enriched.amountByAppointmentId[row.id] ?? row.price,
+    invoiceMoney:
+      enriched.amountByAppointmentId[row.id] ??
+      (row.price != null ? groomingMoneyFromPrice(row.price) : null),
   };
 }
 
@@ -134,7 +157,7 @@ async function enrichGroomingRows(rows: GroomingPrintRow[]): Promise<{
         .order("appointment_date", { ascending: false }),
       supabase
         .from("invoices")
-        .select("service_id, total_aed, total")
+        .select("service_id, total_aed, total, vat_aed")
         .eq("service_type", "grooming")
         .in("service_id", appointmentIds),
     ]);
@@ -150,7 +173,11 @@ async function enrichGroomingRows(rows: GroomingPrintRow[]): Promise<{
   const amountByAppointmentId: AmountMap = {};
   for (const inv of invoices ?? []) {
     if (!inv.service_id) continue;
-    amountByAppointmentId[inv.service_id] = inv.total_aed ?? inv.total ?? null;
+    amountByAppointmentId[inv.service_id] = invoiceDisplayTotals({
+      total: inv.total,
+      total_aed: inv.total_aed,
+      vat_aed: inv.vat_aed,
+    });
   }
 
   return {
@@ -163,15 +190,16 @@ async function enrichGroomingRows(rows: GroomingPrintRow[]): Promise<{
 export function GroomingCardBlock({
   appointment,
   previousGroomDate,
-  amountCharged,
+  invoiceMoney,
 }: {
   appointment: GroomingPrintRow;
   previousGroomDate: string | null;
-  amountCharged: number | null;
+  invoiceMoney: GroomingInvoiceMoney | null;
 }) {
   const owner = ownerDisplayName(appointment.owners?.first_name, appointment.owners?.last_name);
   const serviceLabel = labelForGroomingService(appointment.service);
   const packageLabel = PACKAGE_LABEL[appointment.service] ?? serviceLabel;
+  const money = invoiceMoney ?? groomingMoneyFromPrice(appointment.price ?? 0);
 
   return (
     <article className="print-page border border-black p-4 text-[12px]">
@@ -234,9 +262,13 @@ export function GroomingCardBlock({
         </div>
       </section>
 
-      <footer className="mt-3 border-t border-black pt-2 print-sans text-xs">
+      <footer className="mt-3 border-t border-black pt-2 print-sans text-xs space-y-0.5">
         <p>Booking ref: {appointment.bookings?.booking_ref ?? appointment.booking_id ?? appointment.id.slice(0, 8)}</p>
-        <p>Amount charged (pre-VAT): AED {(amountCharged ?? appointment.price ?? 0).toFixed(2)}</p>
+        <p>Subtotal (ex VAT): AED {money.netExVat.toFixed(2)}</p>
+        <p>
+          {vatLineLabel()}: AED {money.vat.toFixed(2)}
+        </p>
+        <p className="font-semibold">Total incl. VAT: AED {money.grandTotal.toFixed(2)}</p>
       </footer>
     </article>
   );

@@ -266,7 +266,7 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("invoices")
-        .select("id, invoice_number, status, total, total_aed, payment_method")
+        .select("id, invoice_number, status, total, total_aed, vat_aed, payment_method")
         .eq("service_id", appointmentId!)
         .eq("service_type", "grooming")
         .maybeSingle();
@@ -277,6 +277,7 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
         status: string;
         total: number | null;
         total_aed: number | null;
+        vat_aed: number | null;
         payment_method: string | null;
       } | null;
     },

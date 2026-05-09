@@ -37,6 +37,7 @@ import {
   type InvoiceWithItems,
   type InvoiceStatus,
 } from "@/hooks/useBilling";
+import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -272,6 +273,30 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const topUp = useTopUpWallet();
   const overdueCount = invoices.filter((inv) => inv.status === "overdue").length;
 
+  const payDialogTotals = useMemo(
+    () =>
+      payDialogInvoice
+        ? invoiceDisplayTotals({
+            total: payDialogInvoice.total,
+            total_aed: payDialogInvoice.total_aed,
+            vat_aed: payDialogInvoice.vat_aed,
+          })
+        : null,
+    [payDialogInvoice],
+  );
+
+  const viewInvoiceTotals = useMemo(
+    () =>
+      viewInvoice
+        ? invoiceDisplayTotals({
+            total: viewInvoice.total,
+            total_aed: viewInvoice.total_aed,
+            vat_aed: viewInvoice.vat_aed,
+          })
+        : null,
+    [viewInvoice],
+  );
+
   const handleFinalise = (inv: InvoiceWithItems) => {
     finalise.mutate(inv.id, {
       onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} finalised`),
@@ -396,7 +421,15 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{format(parseISO(inv.created_at), "d MMM yyyy")}</TableCell>
                       <TableCell className="text-sm capitalize">{inv.service_type?.replace(/_/g, " ") ?? "—"}</TableCell>
                       <TableCell><Badge variant="outline" className={sb.className}>{sb.label}</Badge></TableCell>
-                      <TableCell className="text-sm font-semibold tabular-nums text-right">{formatAed(inv.total_aed)}</TableCell>
+                      <TableCell className="text-sm font-semibold tabular-nums text-right">
+                        {formatAed(
+                          invoiceDisplayTotals({
+                            total: inv.total,
+                            total_aed: inv.total_aed,
+                            vat_aed: inv.vat_aed,
+                          }).grandTotal,
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button size="sm" variant="ghost" onClick={() => setViewInvoice(inv)} title="View">
@@ -470,10 +503,18 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                 <CreditCard className="h-5 w-5" /> Process Payment
               </DialogTitle>
               <DialogDescription>
-                Invoice {payDialogInvoice.invoice_number ?? payDialogInvoice.id.slice(0, 8)} — {formatAed(payDialogInvoice.total_aed)}
+                Invoice {payDialogInvoice.invoice_number ?? payDialogInvoice.id.slice(0, 8)} —{" "}
+                {payDialogTotals ? formatAed(payDialogTotals.grandTotal) : "—"} incl. VAT
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 mt-2">
+              {payDialogTotals ? (
+                <div className="rounded-md border p-3 text-sm space-y-1">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (before VAT)</span><span>{formatAed(payDialogTotals.netExVat)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{formatAed(payDialogTotals.vat)}</span></div>
+                  <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{formatAed(payDialogTotals.grandTotal)}</span></div>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label>Payment method</Label>
                 <Select value={payMethod} onValueChange={(v) => setPayMethod(v as "wallet" | "card" | "cash")}>
@@ -494,7 +535,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
               <Button variant="outline" onClick={() => setPayDialogInvoice(null)} disabled={processPayment.isPending}>Cancel</Button>
               <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
                 {processPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Pay {formatAed(payDialogInvoice.total_aed)}
+                Pay {payDialogTotals ? formatAed(payDialogTotals.grandTotal) : "—"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -586,10 +627,22 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                     <span className="text-emerald-600">-{formatAed(viewInvoice.discount_aed)}</span>
                   </div>
                 )}
-                <div className="flex justify-between w-60 font-bold text-lg border-t-2 border-foreground pt-2 mt-1">
-                  <span>Total</span>
-                  <span>{formatAed(viewInvoice.total_aed)}</span>
-                </div>
+                {viewInvoiceTotals ? (
+                  <>
+                    <div className="flex justify-between w-60">
+                      <span className="text-muted-foreground">Subtotal (ex VAT)</span>
+                      <span>{formatAed(viewInvoiceTotals.netExVat)}</span>
+                    </div>
+                    <div className="flex justify-between w-60">
+                      <span className="text-muted-foreground">{vatLineLabel()}</span>
+                      <span>{formatAed(viewInvoiceTotals.vat)}</span>
+                    </div>
+                    <div className="flex justify-between w-60 font-bold text-lg border-t-2 border-foreground pt-2 mt-1">
+                      <span>Grand total (incl. VAT)</span>
+                      <span>{formatAed(viewInvoiceTotals.grandTotal)}</span>
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               {viewInvoice.payment_method && (

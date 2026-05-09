@@ -1017,6 +1017,7 @@ export type Database = {
           subtotal_aed: number | null
           total: number
           total_aed: number | null
+          vat_aed: number | null
           updated_at: string
           voided_at: string | null
           voided_reason: string | null
@@ -1043,6 +1044,7 @@ export type Database = {
           subtotal_aed?: number | null
           total?: number
           total_aed?: number | null
+          vat_aed?: number | null
           updated_at?: string
           voided_at?: string | null
           voided_reason?: string | null
@@ -1069,6 +1071,7 @@ export type Database = {
           subtotal_aed?: number | null
           total?: number
           total_aed?: number | null
+          vat_aed?: number | null
           updated_at?: string
           voided_at?: string | null
           voided_reason?: string | null

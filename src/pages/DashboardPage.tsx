@@ -11,6 +11,8 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { ownerDisplayName } from "@/lib/bookingUtils";
+import { invoiceDisplayTotals } from "@/lib/vatConfig";
 import {
   AlertCircle,
   AlertTriangle,
@@ -81,7 +83,7 @@ const DashboardPage = () => {
       const UNPAID = ["draft", "issued", "finalised", "outstanding", "overdue", "partially_paid"];
       const { data, error } = await supabase
         .from("invoices")
-        .select("id, owner_id, total, total_aed, amount_paid, due_date, status, owners(first_name, last_name)")
+        .select("id, owner_id, total, total_aed, vat_aed, amount_paid, due_date, status, owners(first_name, last_name)")
         .eq("due_date", asOf)
         .in("status", UNPAID)
         .order("created_at", { ascending: false });
@@ -89,9 +91,13 @@ const DashboardPage = () => {
 
       const grouped = new Map<string, { ownerId: string; ownerName: string; balance: number }>();
       for (const inv of data ?? []) {
-        const total = inv.total_aed ?? inv.total ?? 0;
+        const grand = invoiceDisplayTotals({
+          total: inv.total,
+          total_aed: inv.total_aed,
+          vat_aed: inv.vat_aed,
+        }).grandTotal;
         const paid = inv.amount_paid ?? 0;
-        const outstanding = Math.max(0, total - paid);
+        const outstanding = Math.max(0, grand - paid);
         if (outstanding <= 0) continue;
         const ownerId = inv.owner_id ?? "unknown";
         const ownerName = ownerDisplayName(

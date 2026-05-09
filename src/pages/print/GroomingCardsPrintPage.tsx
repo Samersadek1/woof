@@ -38,7 +38,7 @@ export default function GroomingCardsPrintPage() {
           key={appointment.id}
           appointment={appointment}
           previousGroomDate={data.previousByPetId[appointment.pet_id] ?? null}
-          amountCharged={data.amountByAppointmentId[appointment.id] ?? appointment.price}
+          invoiceMoney={data.amountByAppointmentId[appointment.id] ?? null}
         />
       ))}
     </PrintLayout>

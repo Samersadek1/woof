@@ -37,6 +37,7 @@ import {
   workflowStatusLabel,
   type GroomingWorkflowStatus,
 } from "@/lib/groomingWorkflow";
+import { grandTotalFromNet, invoiceDisplayTotals, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -622,6 +623,18 @@ const GroomingPage = () => {
   const { data: panelInvoice } = useInvoiceForGroomingAppointment(actionAppt?.id ?? null);
   const { data: payInvoice, isLoading: payInvoiceLoading } =
     useInvoiceForGroomingAppointment(paymentAppt?.id ?? null);
+
+  const payInvoiceTotals = useMemo(
+    () =>
+      payInvoice
+        ? invoiceDisplayTotals({
+            total: payInvoice.total ?? payInvoice.total_aed ?? 0,
+            total_aed: payInvoice.total_aed,
+            vat_aed: payInvoice.vat_aed,
+          })
+        : null,
+    [payInvoice],
+  );
 
   const { data: groomingRates = [] } = useQuery({
     queryKey: ["grooming_service_rates"],
@@ -1528,12 +1541,25 @@ const GroomingPage = () => {
               </p>
             ) : (
               <>
-                <div className="rounded-lg border p-4 space-y-1">
+                <div className="rounded-lg border p-4 space-y-2">
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Invoice</p>
                   <p className="font-mono text-sm">{payInvoice.invoice_number ?? payInvoice.id.slice(0, 8)}</p>
-                  <p className="text-2xl font-semibold tabular-nums">
-                    {formatAed(payInvoice.total_aed ?? payInvoice.total ?? 0)}
-                  </p>
+                  {payInvoiceTotals ? (
+                    <div className="text-sm space-y-1">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-muted-foreground">Subtotal (before VAT)</span>
+                        <span className="tabular-nums">{formatAed(payInvoiceTotals.netExVat)}</span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-muted-foreground">{vatLineLabel()}</span>
+                        <span className="tabular-nums">{formatAed(payInvoiceTotals.vat)}</span>
+                      </div>
+                      <div className="flex justify-between gap-2 text-base font-semibold border-t pt-1">
+                        <span>Grand total</span>
+                        <span className="tabular-nums">{formatAed(payInvoiceTotals.grandTotal)}</span>
+                      </div>
+                    </div>
+                  ) : null}
                   <p className="text-xs text-muted-foreground capitalize">
                     Status: {payInvoice.status.replace(/_/g, " ")}
                   </p>
@@ -2061,6 +2087,22 @@ const GroomingPage = () => {
                     <p className="text-xs text-muted-foreground">
                       Final price matches the original price above.
                     </p>
+                  ) : null}
+                  {newApptFinalAed != null ? (
+                    <div className="space-y-1 pt-1 text-sm">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-muted-foreground">{vatLineLabel()}</span>
+                        <span className="tabular-nums font-medium">
+                          {vatAmountFromNet(newApptFinalAed).toFixed(2)} AED
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-3 font-bold">
+                        <span>Total incl. VAT</span>
+                        <span className="tabular-nums">
+                          {grandTotalFromNet(newApptFinalAed).toFixed(2)} AED
+                        </span>
+                      </div>
+                    </div>
                   ) : null}
                 </div>
               </div>

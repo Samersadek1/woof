@@ -30,6 +30,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700 border-slate-300",
@@ -85,11 +86,24 @@ export default function InvoiceDetailPage() {
       0,
     );
     const totalDiscount = lineDiscount + adjustmentDiscount + (invoice?.discount_aed ?? 0);
-    const grandTotal = invoice?.total_aed ?? invoice?.total ?? lineTotal;
-    const vat = Math.max(0, grandTotal - (lineSubtotal - lineDiscount));
+    const money = invoice
+      ? invoiceDisplayTotals({
+          total: invoice.total,
+          total_aed: invoice.total_aed,
+          vat_aed: invoice.vat_aed,
+        })
+      : { netExVat: 0, vat: 0, grandTotal: 0 };
     const amountPaid = (data?.payments ?? []).reduce((sum, p) => sum + Math.max(0, p.amount), 0);
-    const outstanding = Math.max(0, grandTotal - amountPaid);
-    return { lineSubtotal, totalDiscount, vat, grandTotal, amountPaid, outstanding };
+    const outstanding = Math.max(0, money.grandTotal - amountPaid);
+    return {
+      lineSubtotal,
+      totalDiscount,
+      netExVat: money.netExVat,
+      vat: money.vat,
+      grandTotal: money.grandTotal,
+      amountPaid,
+      outstanding,
+    };
   }, [data]);
 
   if (isLoading) {
@@ -320,8 +334,9 @@ export default function InvoiceDetailPage() {
           <CardContent className="p-5 grid gap-1 text-sm md:max-w-md ml-auto">
             <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{aed(computed.lineSubtotal)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Total discount</span><span>{aed(computed.totalDiscount)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">VAT (5%)</span><span>{aed(computed.vat)}</span></div>
-            <div className="flex justify-between font-semibold text-base pt-2 border-t"><span>Grand total</span><span>{aed(computed.grandTotal)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (ex VAT)</span><span>{aed(computed.netExVat)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{aed(computed.vat)}</span></div>
+            <div className="flex justify-between font-semibold text-base pt-2 border-t"><span>Grand total (incl. VAT)</span><span>{aed(computed.grandTotal)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Amount paid</span><span>{aed(computed.amountPaid)}</span></div>
             <div className="flex justify-between font-semibold"><span>Balance outstanding</span><span>{aed(computed.outstanding)}</span></div>
           </CardContent>
@@ -364,7 +379,11 @@ export default function InvoiceDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Wallet payment</DialogTitle><DialogDescription>Current wallet {aed(inv.owners?.wallet_balance ?? 0)}</DialogDescription></DialogHeader>
           <div className="space-y-2 text-sm">
-            <p>Invoice total: <strong>{aed(computed.grandTotal)}</strong></p>
+            <div className="rounded-md border p-3 space-y-1">
+              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (before VAT)</span><span>{aed(computed.netExVat)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{aed(computed.vat)}</span></div>
+              <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{aed(computed.grandTotal)}</span></div>
+            </div>
             <p>Shortfall: <strong>{aed(Math.max(0, computed.grandTotal - (inv.owners?.wallet_balance ?? 0)))}</strong></p>
             <Label>Processed by</Label>
             <Input value={performedBy} onChange={(e) => setPerformedBy(e.target.value)} placeholder="Staff name" />
@@ -380,7 +399,11 @@ export default function InvoiceDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Record {cashCardOpen} payment</DialogTitle></DialogHeader>
           <div className="space-y-2 text-sm">
-            <p>Total: <strong>{aed(computed.grandTotal)}</strong></p>
+            <div className="rounded-md border p-3 space-y-1">
+              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (before VAT)</span><span>{aed(computed.netExVat)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{aed(computed.vat)}</span></div>
+              <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{aed(computed.grandTotal)}</span></div>
+            </div>
             <Label>Reference note (optional)</Label>
             <Textarea value={refundNote} onChange={(e) => setRefundNote(e.target.value)} />
             <Label>Processed by</Label>

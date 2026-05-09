@@ -29,6 +29,7 @@ import {
   type PaymentMethod as BillingPaymentMethod,
   type ServiceType,
 } from "@/hooks/useBilling";
+import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -257,6 +258,12 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
 
   if (!invoice) return null;
 
+  const pay = invoiceDisplayTotals({
+    total: invoice.total,
+    total_aed: invoice.total_aed,
+    vat_aed: invoice.vat_aed,
+  });
+
   const handlePay = async () => {
     if (!staffName.trim()) { toast.error("Enter staff name"); return; }
     const result = await processPayment.mutateAsync({ invoiceId: invoice.id, method, staffName: staffName.trim() });
@@ -275,10 +282,15 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
             <CreditCard className="h-5 w-5" /> Process Payment
           </DialogTitle>
           <DialogDescription>
-            Invoice {invoice.invoice_number ?? invoice.id.slice(0, 8)} — {formatAed(invoice.total_aed)}
+            Invoice {invoice.invoice_number ?? invoice.id.slice(0, 8)} — {formatAed(pay.grandTotal)} incl. VAT
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-2">
+          <div className="rounded-md border p-3 text-sm space-y-1">
+            <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (before VAT)</span><span>{formatAed(pay.netExVat)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{formatAed(pay.vat)}</span></div>
+            <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{formatAed(pay.grandTotal)}</span></div>
+          </div>
           <div className="space-y-2">
             <Label>Payment method</Label>
             <Select value={method} onValueChange={(v) => setMethod(v as BillingPaymentMethod)}>
@@ -299,7 +311,7 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
           <Button variant="outline" onClick={onClose} disabled={processPayment.isPending}>Cancel</Button>
           <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
             {processPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Pay {formatAed(invoice.total_aed)}
+            Pay {formatAed(pay.grandTotal)}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -347,7 +359,15 @@ function VoidDialog({ open, invoice, ownerId, onClose }: { open: boolean; invoic
             <Ban className="h-5 w-5" /> Void Invoice
           </DialogTitle>
           <DialogDescription>
-            Invoice {invoice.invoice_number ?? invoice.id.slice(0, 8)} — {formatAed(invoice.total_aed)}
+            Invoice {invoice.invoice_number ?? invoice.id.slice(0, 8)} —{" "}
+            {formatAed(
+              invoiceDisplayTotals({
+                total: invoice.total,
+                total_aed: invoice.total_aed,
+                vat_aed: invoice.vat_aed,
+              }).grandTotal,
+            )}{" "}
+            incl. VAT
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-2">
@@ -410,6 +430,12 @@ function InvoiceDetailDialog({
   }, [invoice]);
 
   if (!invoice) return null;
+
+  const view = invoiceDisplayTotals({
+    total: invoice.total,
+    total_aed: invoice.total_aed,
+    vat_aed: invoice.vat_aed,
+  });
 
   const sb = INVOICE_STATUS_BADGE[invoice.status] ?? INVOICE_STATUS_BADGE.draft;
   const lineItems = invoice.line_items ?? [];
@@ -489,9 +515,17 @@ function InvoiceDetailDialog({
                 <span style={{ color: "#16a34a" }}>-{formatAed(invoice.discount_aed)}</span>
               </div>
             )}
+            <div style={{ display: "flex", justifyContent: "space-between", width: 240 }}>
+              <span style={{ color: "#666" }}>Subtotal (ex VAT)</span>
+              <span>{formatAed(view.netExVat)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", width: 240 }}>
+              <span style={{ color: "#666" }}>{vatLineLabel()}</span>
+              <span>{formatAed(view.vat)}</span>
+            </div>
             <div style={{ display: "flex", justifyContent: "space-between", width: 240, fontWeight: 700, fontSize: 18, borderTop: "2px solid #111", paddingTop: 8, marginTop: 4 }}>
-              <span>Total</span>
-              <span>{formatAed(invoice.total_aed)}</span>
+              <span>Grand total (incl. VAT)</span>
+              <span>{formatAed(view.grandTotal)}</span>
             </div>
           </div>
 
@@ -853,7 +887,15 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{format(parseISO(inv.created_at), "d MMM yyyy")}</TableCell>
                       <TableCell className="text-sm capitalize">{inv.service_type?.replace(/_/g, " ") ?? "—"}</TableCell>
                       <TableCell><Badge variant="outline" className={sb.className}>{sb.label}</Badge></TableCell>
-                      <TableCell className="text-sm font-semibold tabular-nums text-right">{formatAed(inv.total_aed)}</TableCell>
+                      <TableCell className="text-sm font-semibold tabular-nums text-right">
+                        {formatAed(
+                          invoiceDisplayTotals({
+                            total: inv.total,
+                            total_aed: inv.total_aed,
+                            vat_aed: inv.vat_aed,
+                          }).grandTotal,
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           <Button size="sm" variant="outline" onClick={() => setViewInvoice(inv)} title="View invoice">

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { invoiceAmountDue } from "@/lib/vatConfig";
 
 type PaymentMethod = Extract<Database["public"]["Enums"]["payment_method"], "cash" | "card">;
 
@@ -63,7 +64,7 @@ export function useRecordCashOrCardPayment() {
     mutationFn: async ({ invoiceId, method, performedBy, note }: CashCardPaymentArgs) => {
       const { data: invoice, error: invoiceErr } = await supabase
         .from("invoices")
-        .select("id, owner_id, total, total_aed")
+        .select("id, owner_id, total, total_aed, vat_aed")
         .eq("id", invoiceId)
         .single();
       if (invoiceErr) throw invoiceErr;
@@ -75,7 +76,11 @@ export function useRecordCashOrCardPayment() {
         .single();
       if (ownerErr) throw ownerErr;
 
-      const amount = invoice.total_aed ?? invoice.total ?? 0;
+      const amount = invoiceAmountDue({
+        total: invoice.total,
+        total_aed: invoice.total_aed,
+        vat_aed: invoice.vat_aed,
+      });
       const txType: Database["public"]["Enums"]["transaction_type"] =
         method === "cash" ? "cash_payment" : "card_payment";
 
