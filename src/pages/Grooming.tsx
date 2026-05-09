@@ -124,6 +124,8 @@ type GroomingServiceCheckbox =
   | "paw_wash"
   | "malaseb_bath";
 
+const DISCOUNT_QUICK_PCTS = [5, 10, 15, 20, 25, 30, 50, 100] as const;
+
 const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
   value: GroomingServiceCheckbox;
   label: string;
@@ -559,8 +561,8 @@ const GroomingPage = () => {
   const [durationMin, setDurationMin] = useState(60);
   const [groomerName, setGroomerName] = useState("");
   const [price, setPrice] = useState("");
-  const [discountEnabled, setDiscountEnabled] = useState(false);
-  const [discountPct, setDiscountPct] = useState("0");
+  /** Empty or 0% = no discount; quick buttons and manual input share this value */
+  const [discountPct, setDiscountPct] = useState("");
   const [visitNotes, setVisitNotes] = useState("");
   const [linkBoarding, setLinkBoarding] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
@@ -684,10 +686,30 @@ const GroomingPage = () => {
     [mappedServices, rateMap],
   );
   const normalizedDiscountPct = useMemo(() => {
-    const parsed = Number.parseFloat(discountPct);
+    const trimmed = discountPct.trim();
+    if (trimmed === "") return 0;
+    const parsed = Number.parseFloat(trimmed);
     if (!Number.isFinite(parsed)) return 0;
     return Math.min(100, Math.max(0, parsed));
   }, [discountPct]);
+
+  const newApptOriginalAed = useMemo(() => {
+    const n = Number.parseFloat(price);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return n;
+  }, [price]);
+
+  const newApptFinalAed = useMemo(() => {
+    if (newApptOriginalAed == null) return null;
+    return Number((newApptOriginalAed * (1 - normalizedDiscountPct / 100)).toFixed(2));
+  }, [newApptOriginalAed, normalizedDiscountPct]);
+
+  const newApptSaveAed = useMemo(() => {
+    if (newApptOriginalAed == null || normalizedDiscountPct <= 0 || newApptFinalAed == null) {
+      return null;
+    }
+    return Number((newApptOriginalAed - newApptFinalAed).toFixed(2));
+  }, [newApptOriginalAed, newApptFinalAed, normalizedDiscountPct]);
 
   const mappedEditServices = useMemo(
     () =>
@@ -707,8 +729,7 @@ const GroomingPage = () => {
     setSelectedServices(["full_groom"]);
     setGroomerName("");
     setPrice("");
-    setDiscountEnabled(false);
-    setDiscountPct("0");
+    setDiscountPct("");
     setVisitNotes("");
     setOwnerId(null);
     setOwnerLabel(null);
@@ -844,25 +865,21 @@ const GroomingPage = () => {
 
     const priceNum = parseFloat(price);
     const serviceRate = defaultOriginalPrice;
-    const discountedPrice = discountEnabled
-      ? priceNum * (1 - normalizedDiscountPct / 100)
-      : priceNum;
+    const baseForCharge = Number.isFinite(priceNum) && priceNum >= 0 ? priceNum : null;
+    const fallbackBase =
+      typeof serviceRate === "number" && serviceRate >= 0 ? serviceRate : null;
+    const basePrice = baseForCharge ?? fallbackBase;
     const finalPrice =
-      Number.isFinite(discountedPrice) && discountedPrice >= 0
-        ? Number(discountedPrice.toFixed(2))
-        : typeof serviceRate === "number" && serviceRate >= 0
-          ? Number(serviceRate.toFixed(2))
-          : NaN;
+      basePrice != null
+        ? Number((basePrice * (1 - normalizedDiscountPct / 100)).toFixed(2))
+        : NaN;
     if (Number.isNaN(finalPrice) || finalPrice < 0) {
       toast.error("Price is not loaded yet. Wait a moment or enter it manually.");
       return;
     }
-    if (String(finalPrice) !== price) {
-      setPrice(String(finalPrice));
-    }
 
     // #region agent log
-    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:beforeMutate',message:'grooming create submitted',data:{primaryService,selectedServices,hasOwnerId:!!ownerId,petCount:petIdsToBook.length,appointmentDate:format(apptDate,'yyyy-MM-dd'),groomingDate:format(groomingDate,'yyyy-MM-dd'),appointmentTime:apptTime,durationMin,linkBoarding,hasBookingId:!!bookingId,enteredPrice:price||null,discountEnabled,discountPct:normalizedDiscountPct,finalPrice},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:beforeMutate',message:'grooming create submitted',data:{primaryService,selectedServices,hasOwnerId:!!ownerId,petCount:petIdsToBook.length,appointmentDate:format(apptDate,'yyyy-MM-dd'),groomingDate:format(groomingDate,'yyyy-MM-dd'),appointmentTime:apptTime,durationMin,linkBoarding,hasBookingId:!!bookingId,enteredPrice:price||null,discountPct:normalizedDiscountPct,finalPrice},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
 
     const selectedServiceLabels = selectedServices
@@ -870,11 +887,13 @@ const GroomingPage = () => {
         GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.label ?? svc,
       )
       .join(", ");
+    const originalForNote =
+      baseForCharge != null ? baseForCharge.toFixed(2) : String(serviceRate ?? "0");
     const metaNotes = [
       selectedServiceLabels ? `Services: ${selectedServiceLabels}` : null,
       `Grooming date: ${format(groomingDate, "yyyy-MM-dd")}`,
-      discountEnabled
-        ? `Discount: ${normalizedDiscountPct}% (original AED ${price || "0"})`
+      normalizedDiscountPct > 0
+        ? `Discount: ${normalizedDiscountPct}% (original AED ${originalForNote})`
         : null,
     ].filter(Boolean);
     const composedNotes = [visitNotes.trim(), ...metaNotes]
@@ -1956,46 +1975,61 @@ const GroomingPage = () => {
                 </div>
               </div>
               <div className="space-y-3 rounded-lg border p-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="enable-discount" className="cursor-pointer">
-                    Apply discount
-                  </Label>
-                  <Switch
-                    id="enable-discount"
-                    checked={discountEnabled}
-                    onCheckedChange={setDiscountEnabled}
+                <Label>Discount</Label>
+                <p className="text-xs text-muted-foreground">
+                  Choose a preset or enter a custom percentage. Leave empty or 0 for no discount.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {DISCOUNT_QUICK_PCTS.map((pct) => {
+                    const active =
+                      discountPct.trim() !== "" &&
+                      Number.parseFloat(discountPct) === pct;
+                    return (
+                      <Button
+                        key={pct}
+                        type="button"
+                        size="sm"
+                        variant={active ? "default" : "outline"}
+                        className="min-w-[3.25rem]"
+                        onClick={() => setDiscountPct(String(pct))}
+                      >
+                        {pct}%
+                      </Button>
+                    );
+                  })}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="discount-pct-manual">Custom discount (%)</Label>
+                  <Input
+                    id="discount-pct-manual"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    placeholder="0"
+                    value={discountPct}
+                    onChange={(e) => setDiscountPct(e.target.value)}
                   />
                 </div>
-                {discountEnabled ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label>Discount (%)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={discountPct}
-                        onChange={(e) => setDiscountPct(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Final Price (AED)</Label>
-                      <Input
-                        readOnly
-                        value={
-                          Number.isFinite(Number.parseFloat(price))
-                            ? (Number.parseFloat(price) * (1 - normalizedDiscountPct / 100)).toFixed(2)
-                            : "0.00"
-                        }
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Final price matches the original editable price.
-                  </p>
-                )}
+                <div className="space-y-2">
+                  <Label>Final price (AED)</Label>
+                  <Input
+                    readOnly
+                    className="font-medium tabular-nums"
+                    value={
+                      newApptFinalAed != null ? newApptFinalAed.toFixed(2) : "—"
+                    }
+                  />
+                  {newApptSaveAed != null && newApptSaveAed > 0 ? (
+                    <p className="text-sm font-medium text-emerald-700">
+                      You save: {newApptSaveAed % 1 === 0 ? newApptSaveAed.toFixed(0) : newApptSaveAed.toFixed(2)} AED
+                    </p>
+                  ) : normalizedDiscountPct <= 0 && newApptOriginalAed != null ? (
+                    <p className="text-xs text-muted-foreground">
+                      Final price matches the original price above.
+                    </p>
+                  ) : null}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Groomer</Label>
