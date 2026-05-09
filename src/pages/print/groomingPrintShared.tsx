@@ -309,7 +309,7 @@ export function GroomingSchedulePrintView({
   const dates = Array.from(byDate.keys()).sort();
 
   return (
-    <div className="grooming-schedule-print print-sans text-black">
+    <div className="grooming-schedule-print print-sans w-full max-w-none text-black">
       <header className="schedule-print-header mb-8 text-center">
         <h1 className="schedule-print-title text-lg font-bold leading-tight md:text-xl">
           Grooming Schedule for Second Home Domestic Pets Grooming LLC
@@ -333,7 +333,7 @@ export function GroomingSchedulePrintView({
                 idx === 0 ? "schedule-day-section-first" : "schedule-day-section"
               }
             >
-              <table className="schedule-table w-full table-fixed border-collapse text-left text-[11px] leading-snug">
+              <table className="schedule-table w-full border-collapse text-left text-[11px] leading-relaxed">
                 <thead>
                   <tr>
                     <th className="schedule-th schedule-col-pet">Pet Name</th>
@@ -359,27 +359,25 @@ export function GroomingSchedulePrintView({
                     return (
                       <tr key={a.id} className="schedule-data-row">
                         <td className="schedule-td schedule-td-pet align-top">
-                          <div className="font-bold text-neutral-900">
-                            {a.pets?.name ?? "—"}
-                          </div>
-                          <div className="mt-1">Owner: {owner}</div>
-                          {a.pets?.breed ? (
-                            <div className="mt-0.5">Breed: {a.pets.breed}</div>
-                          ) : null}
-                          {a.owners?.address?.trim() ? (
-                            <div className="mt-0.5 whitespace-pre-wrap">
-                              {a.owners.address.trim()}
+                          <div className="schedule-pet-lines text-neutral-900">
+                            <div className="text-base font-bold leading-tight">
+                              {a.pets?.name ?? "—"}
                             </div>
-                          ) : null}
-                          {a.owners?.phone?.trim() ? (
-                            <div className="mt-0.5">Home: {a.owners.phone.trim()}</div>
-                          ) : null}
-                          {a.owners?.phone2?.trim() ? (
-                            <div className="mt-0.5">Cell: {a.owners.phone2.trim()}</div>
-                          ) : null}
-                          {a.owners?.email?.trim() ? (
-                            <div className="mt-0.5 break-all">{a.owners.email.trim()}</div>
-                          ) : null}
+                            <div>Owner: {owner}</div>
+                            {a.pets?.breed ? <div>Breed: {a.pets.breed}</div> : null}
+                            {a.owners?.address?.trim() ? (
+                              <div className="whitespace-pre-wrap break-words">{a.owners.address.trim()}</div>
+                            ) : null}
+                            {a.owners?.phone?.trim() ? (
+                              <div>Home: {a.owners.phone.trim()}</div>
+                            ) : null}
+                            {a.owners?.phone2?.trim() ? (
+                              <div>Cell: {a.owners.phone2.trim()}</div>
+                            ) : null}
+                            {a.owners?.email?.trim() ? (
+                              <div className="break-all">{a.owners.email.trim()}</div>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="schedule-td schedule-td-date align-top whitespace-pre-line">
                           {dateLines.join("\n")}

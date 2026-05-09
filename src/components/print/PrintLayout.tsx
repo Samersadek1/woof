@@ -106,10 +106,12 @@ export function PrintLayout({
 
         .grooming-schedule-print .schedule-table {
           border: 1px solid #374151;
+          width: 100%;
+          table-layout: fixed;
         }
         .grooming-schedule-print .schedule-th {
           border: 1px solid #374151;
-          padding: 8px 6px;
+          padding: 14px 12px;
           font-weight: 700;
           font-size: 10px;
           text-transform: none;
@@ -120,26 +122,36 @@ export function PrintLayout({
         }
         .grooming-schedule-print .schedule-td {
           border: 1px solid #9ca3af;
-          padding: 8px 6px;
+          padding: 26px 14px;
           vertical-align: top;
-          min-height: 3rem;
-          font-size: 10px;
-          line-height: 1.35;
+          min-height: 9rem;
+          font-size: 11px;
+          line-height: 1.55;
           background: #fff;
         }
         .grooming-schedule-print .schedule-data-row:nth-child(even) .schedule-td {
           background: #f5f5f5;
         }
-        .grooming-schedule-print .schedule-col-pet { width: 26%; }
-        .grooming-schedule-print .schedule-col-date { width: 14%; }
-        .grooming-schedule-print .schedule-col-groomer { width: 12%; }
-        .grooming-schedule-print .schedule-col-services { width: 18%; }
-        .grooming-schedule-print .schedule-col-notes { width: 30%; }
+        .grooming-schedule-print .schedule-col-pet { width: 36%; }
+        .grooming-schedule-print .schedule-col-date { width: 10%; }
+        .grooming-schedule-print .schedule-col-groomer { width: 8%; }
+        .grooming-schedule-print .schedule-col-services { width: 8%; }
+        .grooming-schedule-print .schedule-col-notes { width: 38%; }
+        .grooming-schedule-print .schedule-pet-lines {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+          line-height: 1.55;
+        }
       `}</style>
 
       <div className="print-root min-h-screen">
         <div className="no-print sticky top-0 z-10 border-b bg-white p-3 print-sans">
-          <div className="mx-auto flex max-w-[900px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            className={`mx-auto flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between ${
+              variant === "schedule" ? "w-full max-w-none px-4" : "max-w-[900px]"
+            }`}
+          >
             <div className="flex flex-wrap items-center gap-2">
               {imagesReady ? (
                 <Button type="button" onClick={() => window.print()}>
@@ -165,7 +177,11 @@ export function PrintLayout({
         </div>
 
         <div
-          className={`mx-auto p-6 print:max-w-none print:p-0 ${variant === "schedule" ? "max-w-[900px]" : "max-w-[600px]"}`}
+          className={`mx-auto p-6 print:max-w-none print:p-0 ${
+            variant === "schedule"
+              ? "w-full max-w-none px-4 print:w-full print:px-0"
+              : "max-w-[600px]"
+          }`}
         >
           {children}
         </div>
