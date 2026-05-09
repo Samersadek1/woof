@@ -44,13 +44,7 @@ import {
   SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Calendar } from "@/components/ui/calendar";
@@ -558,7 +552,7 @@ const GroomingPage = () => {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
-  const [petId, setPetId] = useState<string>("");
+  const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
   ]);
@@ -626,10 +620,27 @@ const GroomingPage = () => {
     return m;
   }, [groomingRates, groomingPriceCard]);
 
-  const selectedPet = useMemo(
-    () => pets.find((p) => p.id === petId),
-    [pets, petId],
+  const petsIdFingerprint = useMemo(
+    () =>
+      pets
+        .map((p) => p.id)
+        .sort()
+        .join(","),
+    [pets],
   );
+
+  const selectedPetsOrdered = useMemo(
+    () => pets.filter((p) => selectedPetIds.includes(p.id)),
+    [pets, selectedPetIds],
+  );
+
+  /** Single-pet owners: keep the only pet selected automatically (same UX as before). */
+  useEffect(() => {
+    if (!sheetOpen || !ownerId) return;
+    if (pets.length === 1) {
+      setSelectedPetIds([pets[0].id]);
+    }
+  }, [sheetOpen, ownerId, petsIdFingerprint, pets.length]);
 
   const mappedServices = useMemo(
     () =>
@@ -668,7 +679,7 @@ const GroomingPage = () => {
     setVisitNotes("");
     setOwnerId(null);
     setOwnerLabel(null);
-    setPetId("");
+    setSelectedPetIds([]);
     setLinkBoarding(false);
     setBookingSearch("");
     setBookingId(null);
@@ -687,14 +698,27 @@ const GroomingPage = () => {
     return `${h.padStart(2, "0")}:${m.padStart(2, "0")}:00`;
   };
 
-  const handleCreate = () => {
+  const togglePetSelected = (id: string) => {
+    setSelectedPetIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const handleCreate = async () => {
     if (createAppt.isPending) return;
-    if (!ownerId || !petId) {
-      toast.error("Select an owner and a pet.");
+    if (!ownerId) {
+      toast.error("Select an owner.");
       return;
     }
-    if (!pets.some((p) => p.id === petId)) {
-      toast.error("Selected pet is no longer available for this owner. Please reselect.");
+    const petIdsToBook = pets
+      .filter((p) => selectedPetIds.includes(p.id))
+      .map((p) => p.id);
+    if (petIdsToBook.length === 0) {
+      toast.error(
+        pets.length > 1
+          ? "Select at least one pet."
+          : "No pet available for this owner.",
+      );
       return;
     }
     if (linkBoarding && !bookingId) {
@@ -736,7 +760,7 @@ const GroomingPage = () => {
     }
 
     // #region agent log
-    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:beforeMutate',message:'grooming create submitted',data:{primaryService,selectedServices,hasOwnerId:!!ownerId,hasPetId:!!petId,appointmentDate:format(apptDate,'yyyy-MM-dd'),groomingDate:format(groomingDate,'yyyy-MM-dd'),appointmentTime:apptTime,durationMin,linkBoarding,hasBookingId:!!bookingId,enteredPrice:price||null,discountEnabled,discountPct:normalizedDiscountPct,finalPrice},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:beforeMutate',message:'grooming create submitted',data:{primaryService,selectedServices,hasOwnerId:!!ownerId,petCount:petIdsToBook.length,appointmentDate:format(apptDate,'yyyy-MM-dd'),groomingDate:format(groomingDate,'yyyy-MM-dd'),appointmentTime:apptTime,durationMin,linkBoarding,hasBookingId:!!bookingId,enteredPrice:price||null,discountEnabled,discountPct:normalizedDiscountPct,finalPrice},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
 
     const selectedServiceLabels = selectedServices
@@ -755,57 +779,71 @@ const GroomingPage = () => {
       .filter(Boolean)
       .join("\n");
 
-    createAppt.mutate(
-      {
-        appointment_date: format(apptDate, "yyyy-MM-dd"),
-        appointment_time: timeToDb(apptTime),
-        duration_minutes: durationMin,
-        service: primaryService,
-        owner_id: ownerId,
-        pet_id: petId,
-        groomer_id: null,
-        grooming_notes: groomerName.trim() || null,
-        price: finalPrice,
-        notes: composedNotes || null,
-        booking_id: linkBoarding ? bookingId : null,
-      },
-      {
-        onSuccess: (appt) => {
-          toast.success("Appointment created.");
-          setSheetOpen(false);
+    const insertBase = {
+      appointment_date: format(apptDate, "yyyy-MM-dd"),
+      appointment_time: timeToDb(apptTime),
+      duration_minutes: durationMin,
+      service: primaryService,
+      owner_id: ownerId,
+      groomer_id: null,
+      grooming_notes: groomerName.trim() || null,
+      price: finalPrice,
+      notes: composedNotes || null,
+      booking_id: linkBoarding ? bookingId : null,
+    };
 
-          const svcLabel = selectedServiceLabels || labelForGroomingService(primaryService);
-          createServiceInvoice({
-            ownerId: ownerId!,
+    try {
+      const createdRows = [];
+      for (const pid of petIdsToBook) {
+        const appt = await createAppt.mutateAsync({
+          ...insertBase,
+          pet_id: pid,
+        });
+        createdRows.push(appt);
+      }
+
+      toast.success(
+        createdRows.length === 1
+          ? "Appointment created."
+          : `${createdRows.length} appointments created.`,
+      );
+      setSheetOpen(false);
+
+      const svcLabel = selectedServiceLabels || labelForGroomingService(primaryService);
+      createServiceInvoice({
+        ownerId: ownerId!,
+        serviceType: "grooming",
+        referenceId: createdRows[0].id,
+        lineItems: createdRows.map((appt) => {
+          const petName =
+            pets.find((p) => p.id === appt.pet_id)?.name ?? "Pet";
+          return {
+            description: `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")}`,
+            quantity: 1,
+            unitPrice: finalPrice,
             serviceType: "grooming",
-            referenceId: appt.id,
-            lineItems: [{
-              description: `${svcLabel} — ${format(apptDate, "d MMM yyyy")}`,
-              quantity: 1,
-              unitPrice: finalPrice,
-              serviceType: "grooming",
-              preserveUnitPrice: true,
-            }],
-          }).then(() => {
-            toast.success("Draft invoice created");
-          }).catch((err) => {
-            console.error("Auto-invoice failed:", err);
-          });
-        },
-        onError: (e) => {
-          const msg =
-            e instanceof Error
-              ? e.message
-              : typeof e === "object" && e !== null && "message" in e
-                ? String((e as { message: string }).message)
-                : "Could not create.";
-          // #region agent log
-          fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:onError',message:'grooming create failed',data:{primaryService,selectedServices,appointmentDate:format(apptDate,'yyyy-MM-dd'),appointmentTime:apptTime,error:msg},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
-          toast.error(msg);
-        },
-      },
-    );
+            preserveUnitPrice: true,
+          };
+        }),
+      })
+        .then(() => {
+          toast.success("Draft invoice created");
+        })
+        .catch((err) => {
+          console.error("Auto-invoice failed:", err);
+        });
+    } catch (e) {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === "object" && e !== null && "message" in e
+            ? String((e as { message: string }).message)
+            : "Could not create.";
+      // #region agent log
+      fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H3',location:'src/pages/Grooming.tsx:handleCreate:onError',message:'grooming create failed',data:{primaryService,selectedServices,appointmentDate:format(apptDate,'yyyy-MM-dd'),appointmentTime:apptTime,error:msg},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      toast.error(msg);
+    }
   };
 
   const sortedHistory = useMemo(() => {
@@ -1055,7 +1093,7 @@ const GroomingPage = () => {
       </main>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
           <SheetHeader>
             <SheetTitle>New appointment</SheetTitle>
             <SheetDescription>
@@ -1076,54 +1114,73 @@ const GroomingPage = () => {
                   onSelect={(id, label) => {
                     setOwnerId(id);
                     setOwnerLabel(label);
-                    setPetId("");
+                    setSelectedPetIds([]);
                   }}
                   onClear={() => {
                     setOwnerId(null);
                     setOwnerLabel(null);
-                    setPetId("");
+                    setSelectedPetIds([]);
                   }}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Pet</Label>
-                <Select
-                  value={petId}
-                  onValueChange={setPetId}
-                  disabled={!ownerId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select pet" />
-                  </SelectTrigger>
-                  <SelectContent>
+              {ownerId && pets.length === 0 && (
+                <p className="text-sm text-muted-foreground">Loading pets…</p>
+              )}
+              {pets.length > 1 && (
+                <div className="space-y-2">
+                  <Label>Pets</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Select one or more pets for this appointment.
+                  </p>
+                  <div className="rounded-lg border divide-y max-h-52 overflow-y-auto">
                     {pets.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
+                      <label
+                        key={p.id}
+                        htmlFor={`groom-pet-${p.id}`}
+                        className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/50"
+                      >
+                        <Checkbox
+                          id={`groom-pet-${p.id}`}
+                          checked={selectedPetIds.includes(p.id)}
+                          onCheckedChange={() => togglePetSelected(p.id)}
+                        />
+                        <span className="text-sm font-medium">{p.name}</span>
+                      </label>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {selectedPet && (
-                <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-1">
-                  <p>
-                    <span className="text-muted-foreground">Breed: </span>
-                    {selectedPet.breed ?? "—"}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Weight: </span>
-                    {selectedPet.weight_kg != null
-                      ? `${selectedPet.weight_kg} kg`
-                      : "—"}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Coat / colour: </span>
-                    {selectedPet.colour ?? "—"}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Grooming notes: </span>
-                    {selectedPet.grooming_notes ?? "—"}
-                  </p>
+                  </div>
+                </div>
+              )}
+              {pets.length === 1 && (
+                <div className="space-y-2">
+                  <Label>Pet</Label>
+                  <p className="text-sm font-medium">{pets[0].name}</p>
+                </div>
+              )}
+              {selectedPetsOrdered.length > 0 && (
+                <div className="space-y-3">
+                  {selectedPetsOrdered.map((pet) => (
+                    <Card key={pet.id} className="border bg-muted/10">
+                      <CardContent className="space-y-1 p-3 text-sm pt-4">
+                        <p className="font-semibold border-b pb-2 mb-2">{pet.name}</p>
+                        <p>
+                          <span className="text-muted-foreground">Breed: </span>
+                          {pet.breed ?? "—"}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Weight: </span>
+                          {pet.weight_kg != null ? `${pet.weight_kg} kg` : "—"}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Coat / colour: </span>
+                          {pet.colour ?? "—"}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Grooming notes: </span>
+                          {pet.grooming_notes ?? "—"}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
               )}
             </section>
