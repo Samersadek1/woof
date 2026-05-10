@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { COMMON_NATIONALITIES, WORLD_COUNTRIES_REST } from "@/data/worldCountries";
-import { Button } from "@/components/ui/button";
 import {
   Command,
   CommandEmpty,
@@ -47,26 +46,34 @@ export function NationalityCombobox({
     return trimmed;
   }, [trimmed, placeholder]);
 
+  // Match SelectTrigger (see `select.tsx`) so this reads as a dropdown, not another text input.
+  const triggerClassName = cn(
+    "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm font-normal ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+    !trimmed && "text-muted-foreground",
+  );
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    // `modal={false}` avoids focus/stacking conflicts when this sits inside a Sheet or Dialog (Add Owner).
+    <Popover modal={false} open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
+        <button
           id={id}
           type="button"
-          variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-haspopup="listbox"
           disabled={disabled}
-          className={cn(
-            "h-10 w-full justify-between font-normal",
-            !trimmed && "text-muted-foreground",
-          )}
+          className={triggerClassName}
         >
           <span className="truncate text-left">{triggerLabel}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
+        </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+      <PopoverContent
+        className="z-[200] w-[var(--radix-popover-trigger-width)] p-0"
+        align="start"
+        sideOffset={4}
+      >
         <Command>
           <CommandInput placeholder="Search countries…" />
           <CommandList className="max-h-[min(60vh,320px)]">
