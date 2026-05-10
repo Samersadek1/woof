@@ -399,12 +399,28 @@ export function useBillingCalculator(
             if (params.pickup || params.dropoff) {
               const zone: TransportZone =
                 normalizeStoredTransportZone(params.transportZone ?? null) ?? "dubai_shared";
-              const tKey = transportPricingKey(zone);
-              const tMap = await resolveAddonPricesForKeys([tKey]);
-              const tp = tMap.get(tKey) ?? 0;
-              const zoneLabel = transportZoneLabel(zone);
-              if (params.pickup) lineItems.push({ pricingKey: tKey, label: `Pickup (${zoneLabel}) × ${pkgType.total_days}`, quantity: pkgType.total_days, unitPrice: tp, total: tp * pkgType.total_days });
-              if (params.dropoff) lineItems.push({ pricingKey: tKey, label: `Drop-off (${zoneLabel}) × ${pkgType.total_days}`, quantity: pkgType.total_days, unitPrice: tp, total: tp * pkgType.total_days });
+              if (zone !== "complimentary") {
+                const tKey = transportPricingKey(zone);
+                const tMap = await resolveAddonPricesForKeys([tKey]);
+                const tp = tMap.get(tKey) ?? 0;
+                const zoneLabel = transportZoneLabel(zone);
+                if (params.pickup)
+                  lineItems.push({
+                    pricingKey: tKey,
+                    label: `Pickup (${zoneLabel}) × ${pkgType.total_days}`,
+                    quantity: pkgType.total_days,
+                    unitPrice: tp,
+                    total: tp * pkgType.total_days,
+                  });
+                if (params.dropoff)
+                  lineItems.push({
+                    pricingKey: tKey,
+                    label: `Drop-off (${zoneLabel}) × ${pkgType.total_days}`,
+                    quantity: pkgType.total_days,
+                    unitPrice: tp,
+                    total: tp * pkgType.total_days,
+                  });
+              }
             }
           }
           break;

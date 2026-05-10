@@ -960,12 +960,12 @@ function PlannerTab() {
 
       const includePickup = checkInDraft.pickup_used;
       const includeDropoff = checkInDraft.dropoff_used;
-      const transportQty = transportQuantityForPets(
-        checkInDraft.transport_zone,
-        invoicedPetTotal,
-      );
+      const billTransport = checkInDraft.transport_zone !== "complimentary";
+      const transportQty = billTransport
+        ? transportQuantityForPets(checkInDraft.transport_zone, invoicedPetTotal)
+        : 0;
 
-      if (includePickup) {
+      if (billTransport && includePickup) {
         lineItems.push({
           description: privateFlat
             ? `Pickup transport (${zoneLabel}) — family flat rate`
@@ -976,7 +976,7 @@ function PlannerTab() {
           serviceType: "transport",
         });
       }
-      if (includeDropoff) {
+      if (billTransport && includeDropoff) {
         lineItems.push({
           description: privateFlat
             ? `Drop-off transport (${zoneLabel}) — family flat rate`
@@ -1254,6 +1254,13 @@ function PlannerTab() {
                       const trips = transportTrips;
                       const qty = transportQuantityForPets(zone, pets);
                       const total = transportRate * qty * Math.max(1, trips);
+                      if (zone === "complimentary") {
+                        return (
+                          <p className="text-xs text-muted-foreground">
+                            Complimentary transport — no charge and no transport lines on the invoice.
+                          </p>
+                        );
+                      }
                       return (
                         <>
                           <p className="text-xs text-muted-foreground">
@@ -1312,8 +1319,13 @@ function PlannerTab() {
                         <div className="flex items-center justify-between text-sm text-muted-foreground">
                           <span>
                             Transport ({transportTrips} trip{transportTrips === 1 ? "" : "s"})
+                            {checkInDraft.transport_zone === "complimentary" ? " — complimentary" : ""}
                           </span>
-                          <span>AED {previewTransportTotal.toFixed(2)}</span>
+                          <span>
+                            {checkInDraft.transport_zone === "complimentary"
+                              ? "No charge"
+                              : `AED ${previewTransportTotal.toFixed(2)}`}
+                          </span>
                         </div>
                       )}
                       <div className="flex items-center justify-between text-sm">
@@ -1925,7 +1937,8 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
         }];
         const zoneLabel = transportZoneLabel(form.transport_zone);
         const transportKey = transportPricingKey(form.transport_zone);
-        if (form.pickup) {
+        const billPackageTransport = form.transport_zone !== "complimentary";
+        if (billPackageTransport && form.pickup) {
           lineItems.push({
             description: `Pickup transport (${zoneLabel}) × ${totalDays} days`,
             quantity: totalDays,
@@ -1934,7 +1947,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
             serviceType: "transport",
           });
         }
-        if (form.dropoff) {
+        if (billPackageTransport && form.dropoff) {
           lineItems.push({
             description: `Drop-off transport (${zoneLabel}) × ${totalDays} days`,
             quantity: totalDays,
@@ -2059,6 +2072,13 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
                     </Select>
                     {(() => {
                       const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === form.transport_zone);
+                      if (form.transport_zone === "complimentary") {
+                        return (
+                          <p className="text-xs text-muted-foreground">
+                            Complimentary transport — no charge on this invoice.
+                          </p>
+                        );
+                      }
                       return (
                         <p className="text-xs text-muted-foreground">
                           AED {transportRate.toFixed(2)}/trip × {totalDays} days

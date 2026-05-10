@@ -55,7 +55,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
-import { NationalityCombobox } from "@/components/NationalityCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
 import { Search, Plus, Eye, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -116,7 +115,6 @@ const INITIAL_FORM: OwnerInsert = {
   last_name: "",
   phone: "",
   email: "",
-  nationality: "",
   member_type: "standard",
   notes: "",
   address: "",
@@ -251,7 +249,6 @@ const CustomersPage = () => {
     createOwner.mutate(
       {
         ...form,
-        nationality: form.nationality?.trim() || null,
       },
       {
         onSuccess: () => {
@@ -309,7 +306,6 @@ const CustomersPage = () => {
     const owner = await createOwner.mutateAsync({
       ...wizardOwner,
       member_type: "standard",
-      nationality: wizardOwner.nationality?.trim() || null,
     });
     setCreatedOwnerId(owner.id);
     setWizardStep(2);
@@ -531,15 +527,6 @@ const CustomersPage = () => {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="nationality">Nationality</Label>
-                <NationalityCombobox
-                  id="nationality"
-                  value={form.nationality ?? ""}
-                  onChange={(v) => handleField("nationality", v)}
-                />
-              </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="member_type">Member type</Label>
@@ -682,10 +669,6 @@ const CustomersPage = () => {
                       onChange={(e) => setWizardOwner((p) => ({ ...p, email: e.target.value }))}
                     />
                   </div>
-                  <NationalityCombobox
-                    value={wizardOwner.nationality ?? ""}
-                    onChange={(v) => setWizardOwner((p) => ({ ...p, nationality: v }))}
-                  />
                   <Button
                     onClick={async () => {
                       try {
