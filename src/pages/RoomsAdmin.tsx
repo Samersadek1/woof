@@ -421,14 +421,15 @@ const RoomsAdminPage = () => {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
-                  <TableHead className="min-w-[220px]">Room</TableHead>
+                  <TableHead className="min-w-[180px]">Room name</TableHead>
+                  <TableHead className="min-w-[88px] w-[88px] text-center">Room no.</TableHead>
                   <TableHead className="min-w-[150px]">Wing</TableHead>
                   <TableHead className="min-w-[190px]">Room Type</TableHead>
                   <TableHead className="min-w-[120px]">Capacity</TableHead>
                   <TableHead className="text-right min-w-[80px]">Max Pets</TableHead>
                   <TableHead className="text-right min-w-[120px]">Nightly Rate (AED)</TableHead>
                   <TableHead className="min-w-[100px]">Camera No.</TableHead>
-                  <TableHead className="text-center min-w-[110px]">Recording</TableHead>
+                  <TableHead className="text-center min-w-[120px]">Camera recording</TableHead>
                   <TableHead className="text-center min-w-[80px]">Active</TableHead>
                   <TableHead className="w-[52px]" />
                 </TableRow>
@@ -441,21 +442,19 @@ const RoomsAdminPage = () => {
                     className={room.is_active ? "" : "opacity-50 bg-muted/20"}
                   >
                     <TableCell>
-                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                        <span className="font-medium">
-                          <TextCell
-                            room={room}
-                            field="display_name"
-                            value={room.display_name}
-                          />
-                        </span>
-                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <span className="shrink-0">No.</span>
-                          <span className="min-w-[3rem] font-normal text-foreground">
-                            <TextCell room={room} field="room_number" value={room.room_number} />
-                          </span>
-                        </span>
-                      </div>
+                      <span className="font-medium">
+                        <TextCell
+                          room={room}
+                          field="display_name"
+                          value={room.display_name}
+                        />
+                      </span>
+                    </TableCell>
+
+                    <TableCell className="text-center">
+                      <span className="inline-block min-w-[2.5rem] font-mono text-sm tabular-nums">
+                        <TextCell room={room} field="room_number" value={room.room_number} />
+                      </span>
                     </TableCell>
 
                     <TableCell>
@@ -651,15 +650,20 @@ const RoomsAdminPage = () => {
                   }
                 />
               </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="nr-cam" className="cursor-pointer">
+              <div className="flex items-center justify-between rounded-md border p-3 gap-3">
+                <Label htmlFor="nr-cam" className="cursor-pointer shrink-0">
                   Camera recording
                 </Label>
-                <Switch
-                  id="nr-cam"
-                  checked={!!newRoom.camera_recording}
-                  onCheckedChange={(v) => setNewRoom((f) => ({ ...f, camera_recording: v }))}
-                />
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground tabular-nums">
+                    {newRoom.camera_recording ? "Yes" : "No"}
+                  </span>
+                  <Switch
+                    id="nr-cam"
+                    checked={!!newRoom.camera_recording}
+                    onCheckedChange={(v) => setNewRoom((f) => ({ ...f, camera_recording: v }))}
+                  />
+                </div>
               </div>
             </div>
             <DialogFooter>
