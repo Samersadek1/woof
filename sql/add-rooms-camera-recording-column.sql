@@ -1,5 +1,6 @@
 -- Adds rooms.camera_recording for Manage Rooms (camera toggle).
--- Apply once per Supabase project: Dashboard → SQL Editor → Run.
+-- Prefer: supabase/migrations/20260510120000_add_rooms_camera_recording.sql (CLI migrate).
+-- Or apply once per project: Dashboard → SQL Editor → Run this file.
 -- Idempotent: safe to re-run.
 
 ALTER TABLE public.rooms

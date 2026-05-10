@@ -140,15 +140,52 @@ type EditingCell = { id: string; field: string } | null;
 
 type Species = "dog" | "cat";
 
+/** Supabase / react-query often pass plain objects, not Error instances. */
+function formatRoomMutationError(err: unknown): string {
+  if (err == null) return "Unknown error";
+  if (typeof err === "string") return err;
+  if (err instanceof Error && typeof err.message === "string" && err.message.trim()) {
+    return err.message;
+  }
+  if (typeof err === "object") {
+    const o = err as Record<string, unknown>;
+    const msg = o.message;
+    if (typeof msg === "string" && msg.trim()) return msg;
+    if (typeof msg === "object" && msg !== null) {
+      try {
+        return JSON.stringify(msg);
+      } catch {
+        /* fall through */
+      }
+    }
+    if (typeof o.error === "string" && o.error.trim()) return o.error;
+    if (typeof o.details === "string" && o.details.trim()) return o.details;
+    if (typeof o.hint === "string" && o.hint.trim()) return o.hint;
+    try {
+      return JSON.stringify(o);
+    } catch {
+      return "Unknown error";
+    }
+  }
+  return String(err);
+}
+
 function roomsCameraRecordingMigrationHint(message: string): string | null {
   const m = message.toLowerCase();
   if (
     m.includes("camera_recording") ||
-    (m.includes("schema cache") && m.includes("rooms"))
+    (m.includes("schema cache") && m.includes("rooms")) ||
+    (m.includes("could not find") && m.includes("rooms"))
   ) {
-    return "The database is missing column rooms.camera_recording. In Supabase → SQL Editor, run sql/add-rooms-camera-recording-column.sql, then try again.";
+    return "The database is missing column rooms.camera_recording. Apply the migration: supabase/migrations/20260510120000_add_rooms_camera_recording.sql (Supabase CLI or SQL Editor), then refresh the app.";
   }
   return null;
+}
+
+function toastRoomSaveFailed(err: unknown) {
+  const msg = formatRoomMutationError(err);
+  const hint = roomsCameraRecordingMigrationHint(msg);
+  toast.error(hint ?? `Save failed: ${msg}`, hint ? { duration: 12_000 } : undefined);
 }
 
 const DOG_WINGS: RoomWing[] = [
@@ -229,7 +266,7 @@ const RoomsAdminPage = () => {
 
     updateRoom.mutate(
       { id, [field]: value },
-      { onError: (err) => toast.error("Save failed: " + err.message) },
+      { onError: toastRoomSaveFailed },
     );
   };
 
@@ -245,7 +282,7 @@ const RoomsAdminPage = () => {
   const saveEnum = <T extends string>(id: string, field: string, value: T) => {
     updateRoom.mutate(
       { id, [field]: value },
-      { onError: (err) => toast.error("Save failed: " + err.message) },
+      { onError: toastRoomSaveFailed },
     );
   };
 
@@ -259,7 +296,7 @@ const RoomsAdminPage = () => {
               ? `${room.display_name} is now active`
               : `${room.display_name} deactivated`,
           ),
-        onError: (err) => toast.error("Save failed: " + err.message),
+        onError: toastRoomSaveFailed,
       },
     );
   };
@@ -268,13 +305,7 @@ const RoomsAdminPage = () => {
     const next = !(room.camera_recording ?? false);
     updateRoom.mutate(
       { id: room.id, camera_recording: next },
-      {
-        onError: (err) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          const hint = roomsCameraRecordingMigrationHint(msg);
-          toast.error(hint ?? "Save failed: " + msg, hint ? { duration: 12_000 } : undefined);
-        },
-      },
+      { onError: toastRoomSaveFailed },
     );
   };
 
@@ -298,7 +329,7 @@ const RoomsAdminPage = () => {
           setNewRoom(emptyInsertDefaults());
         },
         onError: (err) => {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = formatRoomMutationError(err);
           const hint = roomsCameraRecordingMigrationHint(msg);
           toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
         },
@@ -314,9 +345,7 @@ const RoomsAdminPage = () => {
         setPendingDelete(null);
       },
       onError: (err) =>
-        toast.error(
-          err instanceof Error ? err.message : "Delete failed (room may have bookings).",
-        ),
+        toast.error(formatRoomMutationError(err) || "Delete failed (room may have bookings)."),
     });
   };
 
