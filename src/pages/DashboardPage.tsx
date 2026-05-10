@@ -231,7 +231,6 @@ const DashboardPage = () => {
       <main className="flex-1 overflow-auto p-4 md:p-6">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-base font-medium">Staff Operations Dashboard</h2>
             <p className="text-sm text-muted-foreground">
               {metrics?.as_of ? `As of ${format(parseISO(metrics.as_of), "EEEE, d MMM yyyy")}` : "Operations snapshot"}
             </p>
