@@ -202,6 +202,7 @@ function BoardingTransportRateHint({
   dropoff,
   promo,
   petNoun,
+  freeOfCharge,
 }: {
   activeRate?: { amount_aed: number };
   zone: TransportZone;
@@ -210,16 +211,19 @@ function BoardingTransportRateHint({
   dropoff: boolean;
   promo: ReturnType<typeof boardingTransportFreePromoFromRegion>;
   petNoun: "dog" | "cat";
+  /** Staff override: transport included at no cost (in addition to stay-length promos). */
+  freeOfCharge?: boolean;
 }) {
   if (!pickup && !dropoff) return null;
   const over = privateDubaiOverCapacity(zone, petCount);
   const capGroup = petNoun === "dog" ? "dogs" : "pets";
+  const showFree = promo.applies || !!freeOfCharge;
   const freeBadge = (
     <Badge variant="outline" className="border-emerald-300 bg-emerald-100 text-emerald-800 shrink-0">
       Free
     </Badge>
   );
-  if (promo.applies) {
+  if (showFree) {
     return (
       <div className="space-y-2">
         <div className="space-y-1.5">
@@ -617,6 +621,8 @@ type NewBookingForm = {
   do_not_move: boolean;
   pickup_required: boolean;
   dropoff_required: boolean;
+  /** When true, pickup/drop-off legs are not billed (staff-granted free transport). */
+  transport_free_of_charge: boolean;
   transport_region: BoardingTransportRegion;
   /** Per-leg AED totals (Pickup / Drop-off) shown next to checkboxes. */
   transport_pickup_price_aed: string;
@@ -647,6 +653,7 @@ const BLANK_FORM: NewBookingForm = {
   do_not_move: false,
   pickup_required: false,
   dropoff_required: false,
+  transport_free_of_charge: false,
   transport_region: "dubai",
   transport_pickup_price_aed: "",
   transport_dropoff_price_aed: "",
@@ -762,7 +769,7 @@ export function DogBoardingCalendar({
 
   const dogTransportEstimate = useMemo(() => {
     if (!form.pickup_required && !form.dropoff_required) return 0;
-    if (dogTransportPromo.applies) return 0;
+    if (dogTransportPromo.applies || form.transport_free_of_charge) return 0;
     let sum = 0;
     if (form.pickup_required) {
       sum += parseBoardingTransportAed(form.transport_pickup_price_aed);
@@ -775,13 +782,14 @@ export function DogBoardingCalendar({
     dogTransportPromo.applies,
     form.pickup_required,
     form.dropoff_required,
+    form.transport_free_of_charge,
     form.transport_pickup_price_aed,
     form.transport_dropoff_price_aed,
   ]);
 
   useEffect(() => {
     if (!newBookingOpen) return;
-    if (dogTransportPromo.applies) {
+    if (dogTransportPromo.applies || form.transport_free_of_charge) {
       setForm((f) => ({
         ...f,
         transport_pickup_price_aed: "0",
@@ -803,7 +811,15 @@ export function DogBoardingCalendar({
     form.transport_region,
     dogSuggestedTripTransportAed,
     dogTransportPromo.applies,
+    form.transport_free_of_charge,
   ]);
+
+  useEffect(() => {
+    if (!newBookingOpen) return;
+    if (!form.pickup_required && !form.dropoff_required && form.transport_free_of_charge) {
+      setForm((f) => ({ ...f, transport_free_of_charge: false }));
+    }
+  }, [newBookingOpen, form.pickup_required, form.dropoff_required, form.transport_free_of_charge]);
 
   const selectedDogSpecies = useMemo<BoardingAddonSpecies>(() => {
     const hasCat = form.pet_ids.some((id) => ownerPets.find((p) => p.id === id)?.species === "cat");
@@ -957,7 +973,7 @@ export function DogBoardingCalendar({
 
     const petAddonHintForNotes = selectedPetsSizeSummary(ownerPets, form.pet_ids);
     const transportLabel = transportRegionLabel(form.transport_region);
-    const transportComplimentary = dogTransportPromo.applies;
+    const transportComplimentary = dogTransportPromo.applies || form.transport_free_of_charge;
     const selectedAddonsForInvoice = selectedAddonEntries(
       form.addon_enabled,
       form.addon_price_aed,
@@ -1014,7 +1030,7 @@ export function DogBoardingCalendar({
         const tZone = transportRegionLabel(form.transport_region);
         const tQty = transportQuantityForPets(resolvedDogTransportZone, form.pet_ids.length);
         const tSuffix = tQty > 1 ? ` × ${tQty} dogs` : "";
-        const tComplimentary = dogTransportPromo.applies;
+        const tComplimentary = dogTransportPromo.applies || form.transport_free_of_charge;
         if (form.pickup_required) {
           const pickupTotal = tComplimentary
             ? 0
@@ -1592,7 +1608,7 @@ export function DogBoardingCalendar({
                   </Label>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  {dogTransportPromo.applies && form.pickup_required ? (
+                  {(dogTransportPromo.applies || form.transport_free_of_charge) && form.pickup_required ? (
                     <span className="text-xs font-medium text-emerald-700">Complimentary</span>
                   ) : null}
                   <Input
@@ -1600,7 +1616,7 @@ export function DogBoardingCalendar({
                     inputMode="decimal"
                     placeholder="0"
                     className="h-8 w-[7rem] text-right"
-                    disabled={dogTransportPromo.applies || !form.pickup_required}
+                    disabled={dogTransportPromo.applies || form.transport_free_of_charge || !form.pickup_required}
                     value={form.transport_pickup_price_aed}
                     onChange={(e) =>
                       setForm((f) => ({
@@ -1626,7 +1642,7 @@ export function DogBoardingCalendar({
                   </Label>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  {dogTransportPromo.applies && form.dropoff_required ? (
+                  {(dogTransportPromo.applies || form.transport_free_of_charge) && form.dropoff_required ? (
                     <span className="text-xs font-medium text-emerald-700">Complimentary</span>
                   ) : null}
                   <Input
@@ -1634,7 +1650,7 @@ export function DogBoardingCalendar({
                     inputMode="decimal"
                     placeholder="0"
                     className="h-8 w-[7rem] text-right"
-                    disabled={dogTransportPromo.applies || !form.dropoff_required}
+                    disabled={dogTransportPromo.applies || form.transport_free_of_charge || !form.dropoff_required}
                     value={form.transport_dropoff_price_aed}
                     onChange={(e) =>
                       setForm((f) => ({
@@ -1655,11 +1671,39 @@ export function DogBoardingCalendar({
                   dropoff={form.dropoff_required}
                   promo={dogTransportPromo}
                   petNoun="dog"
+                  freeOfCharge={form.transport_free_of_charge}
                 />
+              )}
+              {(form.pickup_required || form.dropoff_required) && (
+                <div className="flex items-start gap-3 rounded-md border border-muted bg-muted/20 px-3 py-2">
+                  <Checkbox
+                    id="dog_transport_free_of_charge"
+                    checked={form.transport_free_of_charge}
+                    disabled={dogTransportPromo.applies}
+                    onCheckedChange={(v) =>
+                      setForm((f) => ({ ...f, transport_free_of_charge: v === true }))
+                    }
+                  />
+                  <div className="space-y-0.5">
+                    <Label htmlFor="dog_transport_free_of_charge" className="cursor-pointer font-medium text-sm">
+                      Transportation — Free of charge
+                    </Label>
+                    <p className="text-xs text-muted-foreground leading-snug">
+                      When enabled, pickup and drop-off are not billed on the invoice.
+                    </p>
+                  </div>
+                </div>
               )}
               {dogTransportPromo.applies && (form.pickup_required || form.dropoff_required) ? (
                 <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
                   {dogTransportPromo.notice}
+                </div>
+              ) : null}
+              {form.transport_free_of_charge &&
+              !dogTransportPromo.applies &&
+              (form.pickup_required || form.dropoff_required) ? (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                  Transportation included at no charge — not added to the invoice.
                 </div>
               ) : null}
             </div>
@@ -1746,7 +1790,7 @@ export function DogBoardingCalendar({
                       <div className="flex justify-between gap-4">
                         <span className="text-muted-foreground">Transport (est.)</span>
                         <span className="tabular-nums font-medium flex items-center justify-end gap-2">
-                          {dogTransportPromo.applies ? (
+                          {dogTransportPromo.applies || form.transport_free_of_charge ? (
                             <>
                               <span className="text-emerald-700">Free</span>
                               <Badge
