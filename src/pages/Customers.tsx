@@ -55,6 +55,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
+import { NationalityCombobox } from "@/components/NationalityCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
 import { Search, Plus, Eye, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -532,12 +533,10 @@ const CustomersPage = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="nationality">Nationality</Label>
-                <Input
+                <NationalityCombobox
                   id="nationality"
                   value={form.nationality ?? ""}
-                  onChange={(e) => handleField("nationality", e.target.value)}
-                  placeholder="e.g. UAE, British, Indian"
-                  autoComplete="country-name"
+                  onChange={(v) => handleField("nationality", v)}
                 />
               </div>
 
@@ -683,11 +682,9 @@ const CustomersPage = () => {
                       onChange={(e) => setWizardOwner((p) => ({ ...p, email: e.target.value }))}
                     />
                   </div>
-                  <Input
-                    placeholder="Nationality (optional)"
+                  <NationalityCombobox
                     value={wizardOwner.nationality ?? ""}
-                    onChange={(e) => setWizardOwner((p) => ({ ...p, nationality: e.target.value }))}
-                    autoComplete="country-name"
+                    onChange={(v) => setWizardOwner((p) => ({ ...p, nationality: v }))}
                   />
                   <Button
                     onClick={async () => {
