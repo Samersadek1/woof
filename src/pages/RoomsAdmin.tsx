@@ -140,6 +140,17 @@ type EditingCell = { id: string; field: string } | null;
 
 type Species = "dog" | "cat";
 
+function roomsCameraRecordingMigrationHint(message: string): string | null {
+  const m = message.toLowerCase();
+  if (
+    m.includes("camera_recording") ||
+    (m.includes("schema cache") && m.includes("rooms"))
+  ) {
+    return "The database is missing column rooms.camera_recording. In Supabase → SQL Editor, run sql/add-rooms-camera-recording-column.sql, then try again.";
+  }
+  return null;
+}
+
 const DOG_WINGS: RoomWing[] = [
   "bond_rooms",
   "dluxe",
@@ -258,7 +269,11 @@ const RoomsAdminPage = () => {
     updateRoom.mutate(
       { id: room.id, camera_recording: next },
       {
-        onError: (err) => toast.error("Save failed: " + err.message),
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          const hint = roomsCameraRecordingMigrationHint(msg);
+          toast.error(hint ?? "Save failed: " + msg, hint ? { duration: 12_000 } : undefined);
+        },
       },
     );
   };
@@ -282,7 +297,11 @@ const RoomsAdminPage = () => {
           setAddOpen(false);
           setNewRoom(emptyInsertDefaults());
         },
-        onError: (err) => toast.error(err instanceof Error ? err.message : "Could not create room"),
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          const hint = roomsCameraRecordingMigrationHint(msg);
+          toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
+        },
       },
     );
   };
