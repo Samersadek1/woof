@@ -7,6 +7,12 @@
 //   1. Add an entry to CATALOG with description, schema, and config.
 //   2. Add a handler in HANDLERS keyed on the tool name.
 //   3. INSERT a row into tenant_tools for each tenant that should get it.
+//
+// New WRITE capabilities should NOT be added as JS tools -- create a
+// public.agent_<action>(...) Postgres function instead. agent_introspect()
+// auto-discovers it and the model can call it via call_rpc.
+
+import { buildStaffEscalationMessage } from "./escalation-summary.js";
 
 const CATALOG = {
   query_database: {
@@ -228,9 +234,26 @@ export function summarizeToolResult(result) {
 
 const FILTER_OPERATORS = ["eq", "neq", "lt", "lte", "gt", "gte"];
 
-async function runQueryDatabase({ supabase, getSchemaCache }, input) {
+async function logCapabilityRequest({ supabase, getTenantId }, ctx, kind, name, payload) {
+  try {
+    await supabase.from("agent_capability_requests").insert({
+      tenant_id: getTenantId?.() ?? null,
+      chat_id: ctx?.phone ?? null,
+      attempted_capability: name,
+      attempted_kind: kind,
+      attempted_payload: payload ?? null,
+      trigger_message: ctx?.lastUserMessage ?? null,
+    });
+  } catch (err) {
+    console.error("logCapabilityRequest failed:", err?.message ?? err);
+  }
+}
+
+async function runQueryDatabase(services, input, ctx) {
+  const { supabase, getSchemaCache } = services;
   const cache = getSchemaCache();
   if (!cache?.allowedTables.has(input.table)) {
+    await logCapabilityRequest(services, ctx, "table", input.table, input);
     return { error: `Table not allowed or unknown: ${input.table}` };
   }
 
@@ -256,9 +279,11 @@ async function runQueryDatabase({ supabase, getSchemaCache }, input) {
   return data;
 }
 
-async function runCallRpc({ supabase, getSchemaCache }, input) {
+async function runCallRpc(services, input, ctx) {
+  const { supabase, getSchemaCache } = services;
   const cache = getSchemaCache();
   if (!cache?.allowedRpcs.has(input.function_name)) {
+    await logCapabilityRequest(services, ctx, "rpc", input.function_name, input.params ?? null);
     return { error: `RPC not allowed or unknown: ${input.function_name}` };
   }
   const { data, error } = await supabase.rpc(input.function_name, input.params ?? {});
@@ -505,18 +530,25 @@ async function runSaveMemory({ supabase, logEvent, getTenantId }, input, ctx) {
   return { saved: true, key };
 }
 
-async function runEscalateToHuman({ notifyStaff, setAwaitingStaffDirection }, input, ctx) {
+async function runEscalateToHuman(services, input, ctx) {
+  const { notifyStaff, setAwaitingStaffDirection, anthropic, getNarrativeModel } = services;
   console.warn("Escalation requested by agent:", { phone: ctx.phone, reason: input.reason });
   await setAwaitingStaffDirection(ctx.phone, input.reason, input.summary);
-  await notifyStaff(
-    `🔔 WhatsApp conversation needs attention\n` +
-      `Phone: ${ctx.phone}\n` +
-      `Reason: ${input.reason}\n` +
-      `Summary: ${input.summary}\n\n` +
-      `Reply directly to this message with guidance for the bot.\n` +
-      `[#route phone=${ctx.phone} state=awaiting_staff]`,
-  );
-  return { escalated: true };
+
+  const built = await buildStaffEscalationMessage({
+    phone: ctx.phone,
+    ownerProfile: ctx.ownerProfile,
+    lastUserMessage: ctx.lastUserMessage,
+    toolTrace: ctx.toolTrace ?? [],
+    reason: input.reason || "agent_blocked",
+    modelReason: input.reason,
+    modelSummary: input.summary,
+    anthropic,
+    narrativeModel: getNarrativeModel?.() ?? null,
+  });
+
+  await notifyStaff(built.text);
+  return { escalated: true, staff_notification: built.text };
 }
 
 const HANDLERS = {
@@ -529,9 +561,13 @@ const HANDLERS = {
   escalate_to_human: runEscalateToHuman,
 };
 
-// Factory. Returns an executeTool(name, input, phone) bound to the supplied
-// dependencies. The agent runner does not reach into Supabase or the channel
-// directly -- it goes through here.
+// Factory. Returns an executeTool(name, input, phone, turnCtx?) bound to the
+// supplied dependencies. The agent runner does not reach into Supabase or the
+// channel directly -- it goes through here.
+//
+// turnCtx (optional) is forwarded to handlers as part of ctx and carries
+// per-turn data (ownerProfile, toolTrace, lastUserMessage). Today only
+// escalate_to_human and the capability-gap log read it; other handlers ignore.
 export function createToolExecutor({
   supabase,
   notifyStaff,
@@ -540,6 +576,8 @@ export function createToolExecutor({
   getToolConfig,
   getSchemaCache = () => null,
   getTenantId = () => null,
+  anthropic = null,
+  getNarrativeModel = () => null,
 }) {
   const services = {
     supabase,
@@ -548,17 +586,23 @@ export function createToolExecutor({
     setAwaitingStaffDirection,
     getSchemaCache,
     getTenantId,
+    anthropic,
+    getNarrativeModel,
   };
 
-  return async function executeTool(name, input, phone) {
+  return async function executeTool(name, input, phone, turnCtx = null) {
     try {
       const toolCfg = getToolConfig(name);
-      if (!toolCfg) return { error: `Tool not enabled for tenant: ${name}` };
+      if (!toolCfg) {
+        await logCapabilityRequest(services, { ...(turnCtx ?? {}), phone }, "tool", name, input);
+        return { error: `Tool not enabled for tenant: ${name}` };
+      }
 
       const handler = HANDLERS[name];
       if (!handler) return { error: `Unknown tool: ${name}` };
 
-      return await handler(services, input, { phone }, toolCfg);
+      const ctx = { ...(turnCtx ?? {}), phone };
+      return await handler(services, input, ctx, toolCfg);
     } catch (e) {
       return { error: String(e) };
     }

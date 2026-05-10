@@ -262,6 +262,12 @@ export function createAgentRunner({
     let blockedReason = null;
     let inputTokens = 0;
     let outputTokens = 0;
+    let staffNotification = null;
+    const turnCtx = () => ({
+      ownerProfile,
+      toolTrace: [...toolTrace],
+      lastUserMessage: typeof message === "string" ? message : null,
+    });
 
     while (true) {
       const response = await anthropic.messages.create({
@@ -296,9 +302,10 @@ export function createAgentRunner({
 
         const toolResults = await Promise.all(
           toolBlocks.map(async (block) => {
-            const out = await executeTool(block.name, block.input, phone);
+            const out = await executeTool(block.name, block.input, phone, turnCtx());
             const summary = summarizeToolResult(out);
             toolTrace.push(`${block.name}: ${summary}`);
+            if (out?.staff_notification) staffNotification = out.staff_notification;
             await logAgentEvent(supabase, {
               tenant_id: tenant?.id ?? null,
               chat_id: phone,
@@ -342,17 +349,16 @@ export function createAgentRunner({
         reason: blockedReason,
         toolTrace: toolTrace.slice(-4),
       });
-      await executeTool(
+      const result = await executeTool(
         "escalate_to_human",
         {
           reason: blockedReason,
-          summary:
-            `Owner message: ${String(message).slice(0, 200)}\n` +
-            `Phone: ${phone}\n` +
-            `Tool trace: ${toolTrace.join(" | ").slice(0, 400) || "none"}`,
+          summary: typeof message === "string" ? message.slice(0, 200) : "",
         },
         phone,
+        turnCtx(),
       );
+      if (result?.staff_notification) staffNotification = result.staff_notification;
     }
 
     const updatedHistory = [
@@ -381,8 +387,9 @@ export function createAgentRunner({
       blocked_reason: blockedReason,
       message_in: typeof message === "string" ? message : null,
       message_out: typeof finalText === "string" ? finalText : null,
-      escalated: Boolean(blockedReason),
+      escalated: Boolean(blockedReason) || Boolean(staffNotification),
       metadata: { tool_rounds: toolRounds, summary_rolled: rollup.rolled },
+      staff_notification: staffNotification,
     });
 
     if (tenant?.daily_token_cap) invalidateBudgetCache(tenant.id);

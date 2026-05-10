@@ -24,6 +24,7 @@ export async function recordAgentTurn(supabase, payload) {
       message_out: clipText(payload.message_out),
       escalated: Boolean(payload.escalated),
       metadata: payload.metadata ?? {},
+      staff_notification: clipText(payload.staff_notification, 6000),
     });
   } catch (err) {
     console.error("recordAgentTurn failed:", err?.message ?? err);

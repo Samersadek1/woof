@@ -54,9 +54,32 @@ function isAllowedTable(name) {
   return true;
 }
 
-function summarizeColumns(cols, max = 18) {
-  const items = (cols ?? []).slice(0, max).map((c) => c.name);
-  if ((cols?.length ?? 0) > max) items.push(`…+${cols.length - max} more`);
+function formatColumn(c) {
+  const parts = [c.name];
+  if (Array.isArray(c.enum) && c.enum.length) {
+    parts.push(`ENUM(${c.enum.join(",")})`);
+  }
+  if (typeof c.ref === "string" && c.ref) {
+    parts.push(`->${c.ref}`);
+  }
+  return parts.join(" ");
+}
+
+// Render columns with priority for enum-bearing and FK columns: those always
+// appear so the model never has to guess an enum value or a foreign-key target.
+function summarizeColumns(cols, max = 24) {
+  const list = cols ?? [];
+  if (!list.length) return "";
+
+  const head = list.slice(0, max);
+  const tail = list.slice(max);
+  const tailHighlights = tail.filter(
+    (c) => (Array.isArray(c.enum) && c.enum.length) || c.ref,
+  );
+
+  const items = [...head, ...tailHighlights].map(formatColumn);
+  const omitted = tail.length - tailHighlights.length;
+  if (omitted > 0) items.push(`…+${omitted} more`);
   return items.join(", ");
 }
 

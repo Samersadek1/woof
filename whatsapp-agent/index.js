@@ -53,6 +53,10 @@ if (!ANTHROPIC_API_KEY) {
 const MODEL = process.env.AGENT_MODEL || "claude-sonnet-4-6";
 const MAX_TOK = Number(process.env.AGENT_MAX_TOKENS ?? 1024);
 const MAX_TOOL_ROUNDS = Number(process.env.AGENT_MAX_TOOL_ROUNDS ?? 4);
+// Used for the small one-shot summarizer that turns escalations into
+// receptionist-friendly English. Cheaper/faster than the main MODEL on purpose.
+const NARRATIVE_MODEL =
+  process.env.AGENT_NARRATIVE_MODEL || "claude-3-5-haiku-latest";
 const MAX_CONSECUTIVE_AGENT_ERRORS = 3;
 const SESSION_BUCKET = "whatsapp-sessions";
 
@@ -230,6 +234,8 @@ const executeTool = createToolExecutor({
   getToolConfig: (name) => tenantCtx.toolConfig.get(name) ?? null,
   getSchemaCache: () => tenantCtx.schemaCache,
   getTenantId: () => tenantCtx.tenant?.id ?? null,
+  anthropic,
+  getNarrativeModel: () => NARRATIVE_MODEL,
 });
 
 const agent = createAgentRunner({
@@ -266,31 +272,85 @@ const activation = createActivation({
 // Staff group commands
 // ---------------------------------------------------------------------------
 async function setHumanModeForTarget(targetPhone, ownerId, reasonLabel) {
-  if (ownerId) {
-    await supabase
+  // Collect every conversation row that "is" this target -- the literal phone,
+  // any row that lists it in facts.aliases, any row whose facts.active_jid is
+  // it, and (when we have one) every row sharing the owner_id. Then flip mode
+  // + agent_assigned on all of them. This was missing before: !human only
+  // touched the literal phone row, leaving @lid alias rows in agent mode.
+  const phones = new Set([targetPhone]);
+  const ownerIds = new Set();
+  if (ownerId) ownerIds.add(ownerId);
+
+  const { data: literalRow } = await supabase
+    .from("agent_conversations")
+    .select("phone_number, owner_id, facts")
+    .eq("phone_number", targetPhone)
+    .maybeSingle();
+  if (literalRow?.owner_id) ownerIds.add(literalRow.owner_id);
+
+  const { data: activeJidRows } = await supabase
+    .from("agent_conversations")
+    .select("phone_number, owner_id, facts")
+    .eq("facts->>active_jid", targetPhone);
+  for (const row of activeJidRows ?? []) {
+    if (row?.phone_number) phones.add(row.phone_number);
+    if (row?.owner_id) ownerIds.add(row.owner_id);
+  }
+
+  const { data: aliasRows } = await supabase
+    .from("agent_conversations")
+    .select("phone_number, owner_id, facts")
+    .contains("facts", { aliases: [targetPhone] });
+  for (const row of aliasRows ?? []) {
+    if (row?.phone_number) phones.add(row.phone_number);
+    if (row?.owner_id) ownerIds.add(row.owner_id);
+  }
+
+  if (ownerIds.size) {
+    const { data: ownerRows } = await supabase
       .from("agent_conversations")
-      .update({ mode: "human", state: STATES.HUMAN })
-      .eq("owner_id", ownerId);
-    await conversation.setOwnerAgentAssignment(ownerId, false);
-  } else {
-    const { data: conv } = await supabase
-      .from("agent_conversations")
-      .select("facts")
-      .eq("phone_number", targetPhone)
-      .maybeSingle();
+      .select("phone_number, facts")
+      .in("owner_id", [...ownerIds]);
+    for (const row of ownerRows ?? []) {
+      if (row?.phone_number) phones.add(row.phone_number);
+    }
+  }
+
+  // #region debug log H3
+  const _h3discovered = {targetPhone,ownerIdHint:ownerId,phones:[...phones],ownerIds:[...ownerIds],reason:reasonLabel};
+  console.log("[DEBUG H3] setHumanModeForTarget discovered:", JSON.stringify(_h3discovered));
+  fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'299bd9'},body:JSON.stringify({sessionId:'299bd9',hypothesisId:'H3',location:'index.js:setHumanModeForTarget',message:'discovered targets',data:_h3discovered,timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
+  // Read the current facts blob for each row so the agent_assigned flip
+  // doesn't blow away unrelated keys.
+  const { data: currentRows } = await supabase
+    .from("agent_conversations")
+    .select("phone_number, facts")
+    .in("phone_number", [...phones]);
+
+  const stamp = new Date().toISOString();
+  for (const row of currentRows ?? []) {
     await supabase
       .from("agent_conversations")
       .update({
         mode: "human",
         state: STATES.HUMAN,
         facts: {
-          ...(conv?.facts ?? {}),
+          ...(row?.facts ?? {}),
           agent_assigned: false,
-          agent_assignment_updated_at: new Date().toISOString(),
+          agent_assignment_updated_at: stamp,
         },
       })
-      .eq("phone_number", targetPhone);
+      .eq("phone_number", row.phone_number);
   }
+
+  // Also clear the cached agent_assigned flag for any owner rows we touched
+  // that didn't have an existing conv row (defensive, no-op if nothing found).
+  for (const id of ownerIds) {
+    await conversation.setOwnerAgentAssignment(id, false);
+  }
+
   await recordStateTransition(supabase, {
     tenantId: tenantCtx.tenant?.id ?? null,
     chatId: targetPhone,
@@ -298,6 +358,12 @@ async function setHumanModeForTarget(targetPhone, ownerId, reasonLabel) {
     toState: STATES.HUMAN,
     reason: reasonLabel,
   });
+
+  // #region debug log H3
+  const _h3done = {targetPhone,phones:[...phones],ownerIds:[...ownerIds],rowsUpdated:currentRows?.length ?? 0};
+  console.log("[DEBUG H3] setHumanModeForTarget done:", JSON.stringify(_h3done));
+  fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'299bd9'},body:JSON.stringify({sessionId:'299bd9',hypothesisId:'H3',location:'index.js:setHumanModeForTarget:done',message:'flipped to human',data:_h3done,timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 }
 
 async function notifyOwnerByOwnerId(ownerId, message) {
@@ -454,18 +520,29 @@ async function handleOwnerInboundMessage(msg) {
     if (!ownerConv) ownerConv = await conversation.getOwnerConversation(resolvedOwnerId);
     if (!ownerConv) {
       const defaultKey = routing.conversationPhone || routing.replyTarget;
+      // Known owner, no existing conv row: default to HUMAN mode. Staff must
+      // explicitly !bot to activate the agent. Previously this hardcoded
+      // mode:'agent', which made the bot auto-reply to any known owner the
+      // first time they messaged from a new JID -- bypassing the activation
+      // requirement entirely.
       await supabase.from("agent_conversations").upsert(
         {
           phone_number: defaultKey,
           owner_id: resolvedOwnerId,
-          mode: "agent",
+          mode: "human",
+          state: STATES.HUMAN,
           history: [],
           facts: {},
         },
         { onConflict: "phone_number" },
       );
       ownerConv = await conversation.getOwnerConversation(resolvedOwnerId);
-      resolutionSource = `${resolutionSource}+owner_row_created`;
+      resolutionSource = `${resolutionSource}+owner_row_created_human`;
+      // #region debug log H6
+      const _h6 = {from:msg.from,defaultKey,ownerId:resolvedOwnerId,resolutionSource};
+      console.log("[DEBUG H6] auto-created conv row in HUMAN mode for known owner:", JSON.stringify(_h6));
+      fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'299bd9'},body:JSON.stringify({sessionId:'299bd9',hypothesisId:'H6',location:'index.js:owner_row_created',message:'auto-created conv row defaulted to human',data:_h6,timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     }
     ownerConv = await conversation.recordActiveJidForOwner({
       ownerId: resolvedOwnerId,
@@ -486,6 +563,11 @@ async function handleOwnerInboundMessage(msg) {
     if (ownerConv?.facts?.agent_assigned === true && mode !== "agent") {
       mode = "agent";
       resolutionSource = `${resolutionSource}+agent_assigned_override`;
+      // #region debug log H3
+      const _h3ovr = {from:msg.from,phone:ownerConv.phone_number,storedMode:ownerConv?.mode,agentAssigned:ownerConv?.facts?.agent_assigned,assignmentUpdatedAt:ownerConv?.facts?.agent_assignment_updated_at};
+      console.warn("[DEBUG H3] agent_assigned_override fired:", JSON.stringify(_h3ovr));
+      fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'299bd9'},body:JSON.stringify({sessionId:'299bd9',hypothesisId:'H3',location:'index.js:agent_assigned_override',message:'override forced agent mode',data:_h3ovr,timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     }
   } else {
     // Check for a conversation row keyed on any candidate from routing -- this
