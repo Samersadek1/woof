@@ -134,6 +134,21 @@ const ROOM_TYPE_VALUES: RoomType[] = [
 
 const CAPACITY_VALUES: CapacityType[] = ["single", "twin", "twin_plus", "multiple"];
 
+const MIN_MAX_PETS = 1;
+const MAX_MAX_PETS = 100;
+
+function clampMaxPets(n: number): number {
+  if (!Number.isFinite(n)) return MIN_MAX_PETS;
+  return Math.min(MAX_MAX_PETS, Math.max(MIN_MAX_PETS, Math.round(n)));
+}
+
+/** Display / edit seed for max_pets — integers only, clamped (fixes legacy decimals in DB). */
+function formatMaxPetsForUi(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "";
+  const n = typeof value === "number" ? value : Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? String(clampMaxPets(n)) : "";
+}
+
 // ── Editable cell helpers ─────────────────────────────────────────────────────
 
 type EditingCell = { id: string; field: string } | null;
@@ -234,8 +249,6 @@ const RoomsAdminPage = () => {
 
   const [editingCell, setEditingCell] = useState<EditingCell>(null);
   const [editValue, setEditValue] = useState("");
-  /** Synced on every keystroke so blur always commits the latest text (avoids stale React state vs native input). */
-  const latestEditDraftRef = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -249,22 +262,34 @@ const RoomsAdminPage = () => {
   const startEdit = (room: Room, field: keyof Room, currentVal: string) => {
     setEditingCell({ id: room.id, field: field as string });
     setEditValue(currentVal);
-    latestEditDraftRef.current = currentVal;
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const commitEdit = (id: string, field: string, raw: string) => {
+  const commitEdit = (id: string, field: string, raw: string, previous: Room) => {
     setEditingCell(null);
 
     let value: string | number | boolean | null = raw.trim() === "" ? null : raw.trim();
 
     if (field === "max_pets") {
-      const n = parseInt(raw, 10);
-      value = isNaN(n) ? 1 : Math.max(1, n);
+      const digits = raw.replace(/\D/g, "");
+      const n = digits === "" ? NaN : parseInt(digits, 10);
+      value = clampMaxPets(Number.isNaN(n) ? MIN_MAX_PETS : n);
+      if (value === previous.max_pets) return;
     }
     if (field === "nightly_rate") {
-      const n = parseFloat(raw);
-      value = isNaN(n) ? null : Math.max(0, n);
+      const normalized = raw.trim().replace(/,/g, "");
+      const n = parseFloat(normalized);
+      value = Number.isNaN(n) ? null : Math.max(0, n);
+      const prev = previous.nightly_rate;
+      if (value === null && (prev === null || prev === undefined)) return;
+      if (
+        typeof value === "number" &&
+        prev !== null &&
+        prev !== undefined &&
+        Math.abs(value - prev) < 1e-9
+      ) {
+        return;
+      }
     }
 
     updateRoom.mutate(
@@ -357,6 +382,7 @@ const RoomsAdminPage = () => {
     field,
     value,
     type = "text",
+    numberMode = "decimal",
     placeholder = "—",
     className,
   }: {
@@ -364,27 +390,45 @@ const RoomsAdminPage = () => {
     field: keyof Room;
     value: string | number | null;
     type?: "text" | "number";
+    /** Integer fields use step 1 and digit-only input; decimals use 0.01 for currency. */
+    numberMode?: "integer" | "decimal";
     placeholder?: string;
     className?: string;
   }) => {
-    const displayVal = value != null && value !== "" ? String(value) : null;
+    const displayVal =
+      field === "max_pets"
+        ? formatMaxPetsForUi(value) || null
+        : value != null && value !== ""
+          ? String(value)
+          : null;
 
     if (isEditing(room.id, field as string)) {
+      const isIntegerNumber = type === "number" && numberMode === "integer";
       return (
         <input
           ref={inputRef}
           type={type}
           className={`w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring ${className ?? ""}`}
           value={editValue}
+          inputMode={isIntegerNumber ? "numeric" : undefined}
           onChange={(e) => {
-            const v = e.target.value;
-            latestEditDraftRef.current = v;
+            let v = e.target.value;
+            if (isIntegerNumber) {
+              v = v.replace(/\D/g, "");
+              if (v.length > 3) v = v.slice(0, 3);
+              if (v !== "") {
+                let n = parseInt(v, 10);
+                if (n > MAX_MAX_PETS) n = MAX_MAX_PETS;
+                v = String(n);
+              }
+            }
             setEditValue(v);
           }}
-          onBlur={() => commitEdit(room.id, field as string, latestEditDraftRef.current)}
+          onBlur={(e) => commitEdit(room.id, field as string, e.currentTarget.value, room)}
           onKeyDown={(e) => handleKeyDown(e, room.id, field as string)}
-          step={type === "number" ? "0.01" : undefined}
-          min={type === "number" ? "0" : undefined}
+          step={type === "number" ? (isIntegerNumber ? "1" : "0.01") : undefined}
+          min={type === "number" ? (isIntegerNumber ? String(MIN_MAX_PETS) : "0") : undefined}
+          max={type === "number" && isIntegerNumber ? String(MAX_MAX_PETS) : undefined}
         />
       );
     }
@@ -392,10 +436,16 @@ const RoomsAdminPage = () => {
     return (
       <span
         className={`block cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-muted/60 transition-colors min-w-[60px] ${className ?? ""}`}
-        onClick={() => startEdit(room, field, displayVal ?? "")}
+        onClick={() =>
+          startEdit(
+            room,
+            field,
+            field === "max_pets" ? formatMaxPetsForUi(value) : displayVal ?? "",
+          )
+        }
         title="Click to edit"
       >
-        {displayVal ?? <span className="text-muted-foreground">—</span>}
+        {displayVal ?? <span className="text-muted-foreground">{placeholder}</span>}
       </span>
     );
   };
@@ -543,7 +593,13 @@ const RoomsAdminPage = () => {
                     </TableCell>
 
                     <TableCell className="text-right">
-                      <TextCell room={room} field="max_pets" value={room.max_pets} type="number" />
+                      <TextCell
+                        room={room}
+                        field="max_pets"
+                        value={room.max_pets}
+                        type="number"
+                        numberMode="integer"
+                      />
                     </TableCell>
 
                     <TableCell className="text-right">
@@ -552,6 +608,7 @@ const RoomsAdminPage = () => {
                         field="nightly_rate"
                         value={room.nightly_rate}
                         type="number"
+                        numberMode="decimal"
                         placeholder="—"
                       />
                     </TableCell>
@@ -695,12 +752,15 @@ const RoomsAdminPage = () => {
                 <Input
                   id="nr-max"
                   type="number"
-                  min={1}
-                  value={newRoom.max_pets ?? 1}
+                  inputMode="numeric"
+                  min={MIN_MAX_PETS}
+                  max={MAX_MAX_PETS}
+                  step={1}
+                  value={newRoom.max_pets ?? MIN_MAX_PETS}
                   onChange={(e) =>
                     setNewRoom((f) => ({
                       ...f,
-                      max_pets: Math.max(1, parseInt(e.target.value, 10) || 1),
+                      max_pets: clampMaxPets(parseInt(e.target.value, 10) || MIN_MAX_PETS),
                     }))
                   }
                 />
