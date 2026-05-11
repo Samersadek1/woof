@@ -20,6 +20,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Trash2 } from "lucide-react";
+import type { InvoiceSummary } from "@/hooks/useInvoices";
+import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 
 type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
 
@@ -58,6 +61,7 @@ export default function InvoiceListPage() {
   const [ownerSearch, setOwnerSearch] = useState("");
   const [ownerId, setOwnerId] = useState<string | undefined>(undefined);
   const [ownerLabel, setOwnerLabel] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<InvoiceSummary | null>(null);
 
   const { data: ownerHits = [] } = useOwners(ownerSearch.trim().length >= 2 ? ownerSearch : undefined);
   const { data: invoices = [], isLoading } = useInvoices({
@@ -225,12 +229,13 @@ export default function InvoiceListPage() {
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead className="text-right">Age</TableHead>
+                    <TableHead className="w-[52px] text-right"> </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {invoices.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">No invoices found.</TableCell>
+                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No invoices found.</TableCell>
                     </TableRow>
                   ) : (
                     invoices.map((inv) => (
@@ -252,6 +257,21 @@ export default function InvoiceListPage() {
                         <TableCell className="text-right tabular-nums">
                           {inv.days_overdue > 0 ? <span className="text-red-600">{inv.days_overdue}d</span> : "0d"}
                         </TableCell>
+                        <TableCell className="text-right p-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            aria-label="Delete invoice"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget(inv);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))
                   )}
@@ -261,6 +281,19 @@ export default function InvoiceListPage() {
           </CardContent>
         </Card>
       </main>
+
+      {deleteTarget ? (
+        <DeleteInvoiceDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
+          }}
+          invoiceUuid={deleteTarget.id}
+          invoiceNumberDisplay={deleteTarget.invoice_number?.trim() || deleteTarget.id.slice(0, 8)}
+          ownerName={deleteTarget.owner_name}
+          totalAmount={deleteTarget.total_aed}
+        />
+      ) : null}
     </>
   );
 }

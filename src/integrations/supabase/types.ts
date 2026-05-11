@@ -997,6 +997,36 @@ export type Database = {
           },
         ]
       }
+      invoice_deletion_log: {
+        Row: {
+          deleted_at: string
+          deleted_by: string | null
+          id: string
+          invoice_id: string | null
+          owner_name: string | null
+          reason: string | null
+          total_amount: number | null
+        }
+        Insert: {
+          deleted_at?: string
+          deleted_by?: string | null
+          id?: string
+          invoice_id?: string | null
+          owner_name?: string | null
+          reason?: string | null
+          total_amount?: number | null
+        }
+        Update: {
+          deleted_at?: string
+          deleted_by?: string | null
+          id?: string
+          invoice_id?: string | null
+          owner_name?: string | null
+          reason?: string | null
+          total_amount?: number | null
+        }
+        Relationships: []
+      }
       invoices: {
         Row: {
           amount_paid: number

@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700 border-slate-300",
@@ -67,6 +68,7 @@ export default function InvoiceDetailPage() {
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustApprover, setAdjustApprover] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const refundPreview = useCancellationRefundPreview(
     data?.invoice?.owner_id,
@@ -380,6 +382,9 @@ export default function InvoiceDetailPage() {
               </>
             )}
             {status === "voided" && <p className="text-sm text-muted-foreground">Voided invoice is read-only.</p>}
+            <Button type="button" variant="destructive" onClick={() => setDeleteOpen(true)}>
+              Delete invoice
+            </Button>
           </CardContent>
         </Card>
       </main>
@@ -450,6 +455,16 @@ export default function InvoiceDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DeleteInvoiceDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        invoiceUuid={inv.id}
+        invoiceNumberDisplay={inv.invoice_number?.trim() || inv.id.slice(0, 8)}
+        ownerName={ownerName}
+        totalAmount={computed.grandTotal}
+        onDeleted={() => navigate("/billing/invoices")}
+      />
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent>
