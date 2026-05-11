@@ -50,7 +50,7 @@ function formatAed(v: number) {
 
 export default function InvoiceListPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<InvoiceStatus[]>([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -175,6 +175,15 @@ export default function InvoiceListPage() {
                       setOwnerId(undefined);
                       setOwnerLabel("");
                       setOwnerSearch("");
+                      // Clear `?status=` from URL or the effect below re-applies status from the query string.
+                      setSearchParams(
+                        (prev) => {
+                          const next = new URLSearchParams(prev);
+                          next.delete("status");
+                          return next;
+                        },
+                        { replace: true },
+                      );
                     }}
                   >
                     Reset
