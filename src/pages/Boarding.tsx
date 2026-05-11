@@ -1,7 +1,15 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { format, addDays, startOfWeek, differenceInCalendarDays, isToday, parseISO } from "date-fns";
+import {
+  format,
+  addDays,
+  startOfWeek,
+  differenceInCalendarDays,
+  isToday,
+  parseISO,
+  eachDayOfInterval,
+} from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import {
   useBookings,
@@ -607,6 +615,208 @@ async function printKennelCards(bookings: BookingWithDetails[], printTitle: stri
 async function printKennelCard(booking: BookingWithDetails) {
   const bookingRef = booking.booking_ref ?? booking.id.slice(0, 8);
   await printKennelCards([booking], `Kennel Card ${bookingRef}`);
+}
+
+const BOARDING_OPERATIONS_PRINT_TIME = "12:00 PM (My Second Home DIP-2)";
+
+async function hydrateBookingsForComingGoingPrint(
+  bookings: BookingWithDetails[],
+): Promise<BookingWithDetails[]> {
+  if (bookings.length === 0) return bookings;
+  const ids = bookings.map((b) => b.id);
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(
+      "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, breed, other_notes, feeding_instructions, medications))",
+    )
+    .in("id", ids);
+
+  if (error || !data) return bookings;
+  const byId = new Map<string, BookingWithDetails>();
+  for (const row of data as unknown as BookingWithDetails[]) byId.set(row.id, row);
+  return bookings.map((b) => byId.get(b.id) ?? b);
+}
+
+function sortBookingsByRef(a: BookingWithDetails, b: BookingWithDetails): number {
+  return (a.booking_ref ?? a.id).localeCompare(b.booking_ref ?? b.id);
+}
+
+function boardingOperationsBoardingType(booking: BookingWithDetails): string {
+  const r = booking.rooms;
+  if (!r) return "—";
+  const dn = r.display_name?.trim();
+  if (dn) return dn;
+  return r.room_type.replace(/_/g, " ");
+}
+
+function boardingOperationsKennelCell(booking: BookingWithDetails): string {
+  const n = booking.rooms?.room_number?.trim();
+  return n ?? "";
+}
+
+function boardingOperationsPetsCell(booking: BookingWithDetails): string {
+  return booking.booking_pets
+    .map((bp) => {
+      const p = bp.pets as { name?: string | null; breed?: string | null } | null;
+      const name = p?.name?.trim() || "Pet";
+      const breed = p?.breed?.trim() || "—";
+      return `${name} - ${breed}`;
+    })
+    .join(", ");
+}
+
+/** Operations list “Print full list” — Boarding coming & going report (A4-friendly). */
+async function printBoardingComingGoingList(
+  filtered: BookingWithDetails[],
+  rangeStart: string,
+  rangeEnd: string,
+  focus: "all" | "check-ins" | "check-outs",
+) {
+  if (filtered.length === 0) return;
+  const hydrated = await hydrateBookingsForComingGoingPrint(filtered);
+
+  const rangeLabel = `${format(parseISO(rangeStart), "MMM d, yyyy")} to ${format(parseISO(rangeEnd), "MMM d, yyyy")}`;
+  const docTitle = `Boarding Coming and Going - ${rangeLabel}`;
+
+  const days = eachDayOfInterval({
+    start: parseISO(rangeStart),
+    end: parseISO(rangeEnd),
+  }).map((d) => toDateStr(d));
+
+  const tableHead = `<thead><tr>
+    <th>Time</th>
+    <th>Type</th>
+    <th>Boarding ID</th>
+    <th>Owner</th>
+    <th>Boarding Type(s)</th>
+    <th>Kennels</th>
+    <th>Pets</th>
+  </tr></thead>`;
+
+  let bodySections = "";
+  for (const day of days) {
+    const arrivals =
+      focus === "check-outs"
+        ? []
+        : hydrated.filter((b) => b.check_in_date === day).sort(sortBookingsByRef);
+    const departures =
+      focus === "check-ins"
+        ? []
+        : hydrated.filter((b) => b.check_out_date === day).sort(sortBookingsByRef);
+
+    if (arrivals.length === 0 && departures.length === 0) continue;
+
+    const daySubheader = format(parseISO(`${day}T12:00:00`), "EEEE, MMMM d, yyyy");
+    let rowsHtml = "";
+    for (const b of arrivals) {
+      rowsHtml += `<tr>
+        <td>${escapeHtml(BOARDING_OPERATIONS_PRINT_TIME)}</td>
+        <td>Arrival</td>
+        <td>${escapeHtml(b.booking_ref ?? b.id.slice(0, 8))}</td>
+        <td>${escapeHtml(ownerDisplayName(b.owners?.first_name, b.owners?.last_name))}</td>
+        <td>${escapeHtml(boardingOperationsBoardingType(b))}</td>
+        <td>${escapeHtml(boardingOperationsKennelCell(b))}</td>
+        <td>${escapeHtml(boardingOperationsPetsCell(b))}</td>
+      </tr>`;
+    }
+    for (const b of departures) {
+      rowsHtml += `<tr>
+        <td>${escapeHtml(BOARDING_OPERATIONS_PRINT_TIME)}</td>
+        <td>Departure</td>
+        <td>${escapeHtml(b.booking_ref ?? b.id.slice(0, 8))}</td>
+        <td>${escapeHtml(ownerDisplayName(b.owners?.first_name, b.owners?.last_name))}</td>
+        <td>${escapeHtml(boardingOperationsBoardingType(b))}</td>
+        <td>${escapeHtml(boardingOperationsKennelCell(b))}</td>
+        <td>${escapeHtml(boardingOperationsPetsCell(b))}</td>
+      </tr>`;
+    }
+
+    bodySections += `<section class="day-section">
+      <h2 class="day-sub">${escapeHtml(daySubheader)}</h2>
+      <table class="report">${tableHead}<tbody>${rowsHtml}</tbody></table>
+    </section>`;
+  }
+
+  if (!bodySections) {
+    bodySections = `<p class="empty">No arrivals or departures in this range for the current filters.</p>`;
+  }
+
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(docTitle)}</title><style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11pt;
+      line-height: 1.35;
+      color: #000;
+      background: #fff;
+      margin: 0;
+      padding: 12mm 10mm 18mm 10mm;
+    }
+    h1 {
+      text-align: center;
+      font-size: 14pt;
+      font-weight: 700;
+      margin: 0 0 8px;
+      color: #000;
+    }
+    .day-sub {
+      font-size: 12pt;
+      font-weight: 600;
+      margin: 14px 0 8px;
+      color: #000;
+    }
+    .day-section:first-child .day-sub { margin-top: 6px; }
+    table.report {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      color: #000;
+      background: #fff;
+    }
+    table.report th,
+    table.report td {
+      border: 1px solid #000;
+      padding: 5px 6px;
+      vertical-align: top;
+      word-wrap: break-word;
+    }
+    table.report th {
+      font-weight: 700;
+      background: #fff;
+      text-align: left;
+    }
+    table.report td:nth-child(1) { width: 14%; }
+    table.report td:nth-child(2) { width: 9%; }
+    table.report td:nth-child(3) { width: 11%; }
+    table.report td:nth-child(4) { width: 14%; }
+    table.report td:nth-child(5) { width: 22%; }
+    table.report td:nth-child(6) { width: 12%; }
+    table.report td:nth-child(7) { width: 18%; }
+    .empty { font-size: 11pt; margin-top: 12px; }
+    @page {
+      size: A4;
+      margin: 12mm 10mm 16mm 10mm;
+      @bottom-center {
+        content: "Page " counter(page);
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 10pt;
+        color: #000;
+      }
+    }
+    @media print {
+      body { padding: 0; }
+      table.report { font-size: 10pt; }
+      table.report th, table.report td { padding: 4px 5px; }
+    }
+  </style></head><body>
+    <h1>${escapeHtml(docTitle)}</h1>
+    ${bodySections}
+  </body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
 }
 
 // ─── initial form state ───────────────────────────────────────────────────────
@@ -3432,7 +3642,7 @@ function BoardingOperationsList({
           variant="outline"
           size="sm"
           disabled={filtered.length === 0}
-          onClick={() => void printKennelCards(filtered, `Kennel Cards ${species} ${rangeStart}${rangeEnd !== rangeStart ? ` to ${rangeEnd}` : ""}`)}
+          onClick={() => void printBoardingComingGoingList(filtered, rangeStart, rangeEnd, focus)}
         >
           <Printer className="mr-1.5 h-4 w-4" />
           Print full list
