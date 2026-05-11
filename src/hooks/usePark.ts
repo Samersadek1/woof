@@ -41,7 +41,9 @@ export function useParkBookings(date: string) {
       const { data, error } = await supabase
         .from("park_bookings")
         .select(PARK_JOIN_SELECT)
-        .eq("visit_date", date);
+        .eq("visit_date", date)
+        .order("slot_start", { ascending: true })
+        .order("created_at", { ascending: true });
 
       if (error) throw error;
       return data as ParkBookingWithJoins[];

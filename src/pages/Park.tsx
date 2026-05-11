@@ -120,20 +120,14 @@ function bookingsForSlot(
   });
 }
 
-function primaryBooking(
-  list: ParkBookingWithJoins[],
-): ParkBookingWithJoins | undefined {
-  return list[0];
+function bookingCustomerLabel(b: ParkBookingWithJoins): string {
+  return b.owners
+    ? ownerDisplayName(b.owners.first_name, b.owners.last_name)
+    : b.owner_name_raw ?? "—";
 }
 
-function bookingDisplayLine(b: ParkBookingWithJoins): string {
-  const pet =
-    b.pets?.name?.toUpperCase() ?? b.pet_name_raw?.toUpperCase() ?? "PET";
-  const own =
-    b.owners
-      ? ownerDisplayName(b.owners.first_name, b.owners.last_name).toUpperCase()
-      : b.owner_name_raw?.toUpperCase() ?? "OWNER";
-  return `${b.is_assessment ? "ASS · " : ""}${pet} – ${own}`;
+function bookingPetLabel(b: ParkBookingWithJoins): string {
+  return b.pets?.name ?? b.pet_name_raw ?? "—";
 }
 
 function bookingTimeRangeLabel(b: ParkBookingWithJoins): string {
@@ -726,8 +720,11 @@ const ParkPage = () => {
             {PARK_SLOTS.map((slot) => {
               const key = normalizeSlotTime(slot.slot_start);
               const cellBookings = bookingsBySlot.get(key) ?? [];
-              const primary = primaryBooking(cellBookings);
-              const isBooked = !!primary;
+              const sortedBookings = [...cellBookings].sort((a, b) => {
+                const byStart = a.slot_start.localeCompare(b.slot_start);
+                if (byStart !== 0) return byStart;
+                return (a.created_at ?? "").localeCompare(b.created_at ?? "");
+              });
 
               return (
                 <Fragment key={slot.slot_start}>
@@ -735,42 +732,43 @@ const ParkPage = () => {
                     {slotDisplayLabel(slot.slot_start, slot.slot_end)}
                   </div>
 
-                  {isBooked && primary ? (
-                    <div className="bg-background p-1 min-h-[3.5rem]">
+                  <div className="bg-background p-1 flex flex-col gap-1 min-h-[3.5rem]">
+                    {sortedBookings.map((b) => (
                       <button
+                        key={b.id}
                         type="button"
-                        onClick={() => setBookingDetail(primary)}
-                        className={`h-full min-h-[3.25rem] w-full rounded-md px-2 py-2 text-left text-xs font-semibold uppercase tracking-tight border transition-colors ${
-                          primary.is_assessment
+                        onClick={() => setBookingDetail(b)}
+                        className={`w-full rounded-md px-2 py-2 text-left border transition-colors shrink-0 ${
+                          b.is_assessment
                             ? "bg-amber-100 text-amber-950 border-amber-300 hover:bg-amber-200/80"
                             : "bg-sky-100 text-sky-900 border-sky-300 hover:bg-sky-200/80"
                         }`}
                       >
-                        <div className="mb-1 text-[10px] font-medium normal-case opacity-80">
-                          {bookingTimeRangeLabel(primary)}
+                        <div className="text-[11px] font-semibold leading-snug truncate">
+                          {bookingCustomerLabel(b)}
                         </div>
-                        <span className="line-clamp-2">
-                          {bookingDisplayLine(primary)}
-                          {cellBookings.length > 1
-                            ? ` +${cellBookings.length - 1}`
-                            : ""}
-                        </span>
+                        <div className="text-[10px] font-medium truncate opacity-90">
+                          {b.is_assessment ? "Assessment · " : ""}
+                          {bookingPetLabel(b)}
+                        </div>
+                        <div className="text-[10px] font-normal tabular-nums opacity-80 mt-0.5">
+                          {bookingTimeRangeLabel(b)}
+                        </div>
                       </button>
-                    </div>
-                  ) : (
-                    <div className="bg-background p-1 min-h-[3.5rem]">
-                      <button
-                        type="button"
-                        disabled={effectiveStatus === "closed"}
-                        onClick={() =>
-                          openNewBooking(slot.slot_start, slot.slot_end)
-                        }
-                        className="flex h-full min-h-[3.25rem] w-full flex-col items-center justify-center rounded-md bg-muted/40 text-muted-foreground hover:bg-muted/70 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-                      >
-                        <Plus className="h-5 w-5" />
-                      </button>
-                    </div>
-                  )}
+                    ))}
+                    <button
+                      type="button"
+                      disabled={effectiveStatus === "closed"}
+                      onClick={() =>
+                        openNewBooking(slot.slot_start, slot.slot_end)
+                      }
+                      aria-label={`Add park booking ${slotDisplayLabel(slot.slot_start, slot.slot_end)}`}
+                      className="flex w-full shrink-0 items-center justify-center gap-1.5 rounded-md border border-dashed border-muted-foreground/35 bg-muted/30 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/55 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                    >
+                      <Plus className="h-4 w-4 shrink-0" />
+                      Add booking
+                    </button>
+                  </div>
                 </Fragment>
               );
             })}
