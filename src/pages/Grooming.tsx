@@ -131,6 +131,7 @@ type GroomingServiceCheckbox =
   | "full_groom"
   | "deshedding"
   | "bath_only"
+  | "full_bath_full"
   | "fur_brushing"
   | "teeth_brushing"
   | "nail_clip"
@@ -150,6 +151,7 @@ const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
   { value: "full_groom", label: "Full groom", mapsTo: "full_groom" },
   { value: "deshedding", label: "Deshedding", mapsTo: "deshedding" },
   { value: "bath_only", label: "Bath only", mapsTo: "full_bath" },
+  { value: "full_bath_full", label: "Full bath", mapsTo: "full_bath" },
   { value: "fur_brushing", label: "Fur brushing", mapsTo: "brushing" },
   { value: "teeth_brushing", label: "Teeth brushing", mapsTo: "brushing" },
   { value: "nail_clip", label: "Nail clip", mapsTo: "nail_clip" },
@@ -236,10 +238,23 @@ function workflowUndoTarget(raw: string): string | null {
 function serviceCheckboxValuesFromAppointment(
   a: GroomingAppointmentWithJoins,
 ): GroomingServiceCheckbox[] {
-  const primaryOpt = GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.mapsTo === a.service);
-  const primary = primaryOpt?.value;
   const { services } = parseGroomingMeta(a.notes);
-  const labelSet = new Set(services.map((s) => s.toLowerCase()));
+  const labelSet = new Set(services.map((s) => s.trim().toLowerCase()).filter(Boolean));
+
+  /** Prefer first saved service label so distinct checkboxes that share one enum (e.g. Bath only vs Full bath) round-trip correctly. */
+  let primary: GroomingServiceCheckbox | undefined;
+  if (services.length > 0) {
+    const first = services[0].trim();
+    const byLabel = GROOMING_SERVICE_CHECKBOX_OPTIONS.find(
+      (o) => o.label.toLowerCase() === first.toLowerCase(),
+    );
+    if (byLabel) primary = byLabel.value;
+  }
+  if (!primary) {
+    const primaryOpt = GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.mapsTo === a.service);
+    primary = primaryOpt?.value;
+  }
+
   const extras = GROOMING_SERVICE_CHECKBOX_OPTIONS.filter((o) =>
     labelSet.has(o.label.toLowerCase()),
   ).map((o) => o.value);

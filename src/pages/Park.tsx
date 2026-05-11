@@ -136,6 +136,22 @@ function bookingTimeRangeLabel(b: ParkBookingWithJoins): string {
   return `${format(start, "h:mm a")} - ${format(end, "h:mm a")}`;
 }
 
+/** Maps Supabase/Postgres errors from park_bookings INSERT to a readable toast (incl. duplicate slot / unique). */
+function parkVisitationSaveErrorMessage(err: unknown): string {
+  const fallback = "Could not save booking.";
+  if (err == null || typeof err !== "object") return fallback;
+  const o = err as { message?: unknown; code?: unknown };
+  const msg = typeof o.message === "string" && o.message.trim() ? o.message.trim() : fallback;
+  const code = typeof o.code === "string" ? o.code : "";
+  if (
+    code === "23505" ||
+    /duplicate key|unique constraint/i.test(msg)
+  ) {
+    return `${msg} If multiple bookings per slot should be allowed, remove the unique index on park_bookings (Supabase → Table Editor → park_bookings → Indexes).`;
+  }
+  return msg;
+}
+
 // ── Owner search (typeahead) ─────────────────────────────────────────────────
 
 function ParkOwnerSearch({
@@ -557,8 +573,7 @@ const ParkPage = () => {
           });
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Could not save booking.";
-      toast.error(msg);
+      toast.error(parkVisitationSaveErrorMessage(e));
     }
   };
 

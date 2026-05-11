@@ -111,6 +111,10 @@ export function useCreateParkBooking() {
 
   return useMutation({
     mutationFn: async (row: ParkBookingInsert) => {
+      // Always INSERT a new row — never upsert — so multiple bookings can share the same slot.
+      //
+      // TODO: Remove unique constraint on time slot in Supabase dashboard if error persists —
+      // go to Table Editor > park_bookings > indexes and remove any unique index on time slot/start time columns.
       const { data, error } = await supabase
         .from("park_bookings")
         .insert(row)
