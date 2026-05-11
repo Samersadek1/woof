@@ -6,7 +6,7 @@
  * change. Active and Camera recording toggles save immediately.
  */
 
-import { useState, useRef, useMemo, KeyboardEvent } from "react";
+import { useState, useRef, useMemo, useLayoutEffect, KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import {
@@ -149,6 +149,104 @@ function formatMaxPetsForUi(value: string | number | null | undefined): string {
   return Number.isFinite(n) ? String(clampMaxPets(n)) : "";
 }
 
+/**
+ * Dedicated editor for max_pets so blur/save does not share global editValue/ref with other cells
+ * (which caused lost updates). Persists to DB on blur via onSave.
+ */
+function MaxPetsCell({
+  room,
+  isEditing,
+  onOpen,
+  onClose,
+  onSave,
+}: {
+  room: Room;
+  isEditing: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onSave: (roomId: string, maxPets: number) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const draftRef = useRef("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const skipBlurCommitRef = useRef(false);
+  const wasEditingRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (isEditing && !wasEditingRef.current) {
+      const seed = formatMaxPetsForUi(room.max_pets);
+      setDraft(seed);
+      draftRef.current = seed;
+      queueMicrotask(() => inputRef.current?.focus());
+    }
+    wasEditingRef.current = isEditing;
+  }, [isEditing, room]);
+
+  const commitFromBlur = () => {
+    if (skipBlurCommitRef.current) {
+      skipBlurCommitRef.current = false;
+      return;
+    }
+    const raw = draftRef.current;
+    const digits = raw.replace(/\D/g, "");
+    const n = digits === "" ? NaN : parseInt(digits, 10);
+    const value = clampMaxPets(Number.isNaN(n) ? MIN_MAX_PETS : n);
+    const prevMax = clampMaxPets(Number(room.max_pets));
+    onClose();
+    if (value !== prevMax) {
+      onSave(room.id, value);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        aria-label={`Max pets for ${room.display_name}`}
+        className="w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring text-right tabular-nums"
+        value={draft}
+        onChange={(e) => {
+          let v = e.target.value.replace(/\D/g, "");
+          if (v.length > 3) v = v.slice(0, 3);
+          if (v !== "") {
+            let num = parseInt(v, 10);
+            if (num > MAX_MAX_PETS) num = MAX_MAX_PETS;
+            v = String(num);
+          }
+          draftRef.current = v;
+          setDraft(v);
+        }}
+        onBlur={commitFromBlur}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            (e.currentTarget as HTMLInputElement).blur();
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            skipBlurCommitRef.current = true;
+            onClose();
+          }
+        }}
+      />
+    );
+  }
+
+  const displayVal = formatMaxPetsForUi(room.max_pets) || null;
+  return (
+    <span
+      className="block cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-muted/60 transition-colors min-w-[60px] text-right tabular-nums"
+      onClick={() => onOpen()}
+      title="Click to edit"
+    >
+      {displayVal ?? <span className="text-muted-foreground">—</span>}
+    </span>
+  );
+}
+
 // ── Editable cell helpers ─────────────────────────────────────────────────────
 
 type EditingCell = { id: string; field: string } | null;
@@ -249,6 +347,11 @@ const RoomsAdminPage = () => {
 
   const [editingCell, setEditingCell] = useState<EditingCell>(null);
   const [editValue, setEditValue] = useState("");
+  /**
+   * Must mirror the input on every onChange. On blur, `e.currentTarget.value` can still reflect
+   * the pre-commit DOM when the last keystroke and blur happen in the same frame (controlled input).
+   */
+  const latestEditDraftRef = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -262,6 +365,7 @@ const RoomsAdminPage = () => {
   const startEdit = (room: Room, field: keyof Room, currentVal: string) => {
     setEditingCell({ id: room.id, field: field as string });
     setEditValue(currentVal);
+    latestEditDraftRef.current = currentVal;
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -270,12 +374,6 @@ const RoomsAdminPage = () => {
 
     let value: string | number | boolean | null = raw.trim() === "" ? null : raw.trim();
 
-    if (field === "max_pets") {
-      const digits = raw.replace(/\D/g, "");
-      const n = digits === "" ? NaN : parseInt(digits, 10);
-      value = clampMaxPets(Number.isNaN(n) ? MIN_MAX_PETS : n);
-      if (value === previous.max_pets) return;
-    }
     if (field === "nightly_rate") {
       const normalized = raw.trim().replace(/,/g, "");
       const n = parseFloat(normalized);
@@ -382,7 +480,6 @@ const RoomsAdminPage = () => {
     field,
     value,
     type = "text",
-    numberMode = "decimal",
     placeholder = "—",
     className,
   }: {
@@ -390,45 +487,28 @@ const RoomsAdminPage = () => {
     field: keyof Room;
     value: string | number | null;
     type?: "text" | "number";
-    /** Integer fields use step 1 and digit-only input; decimals use 0.01 for currency. */
-    numberMode?: "integer" | "decimal";
     placeholder?: string;
     className?: string;
   }) => {
-    const displayVal =
-      field === "max_pets"
-        ? formatMaxPetsForUi(value) || null
-        : value != null && value !== ""
-          ? String(value)
-          : null;
+    const displayVal = value != null && value !== "" ? String(value) : null;
 
     if (isEditing(room.id, field as string)) {
-      const isIntegerNumber = type === "number" && numberMode === "integer";
       return (
         <input
           ref={inputRef}
           type={type}
           className={`w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring ${className ?? ""}`}
           value={editValue}
-          inputMode={isIntegerNumber ? "numeric" : undefined}
+          autoComplete="off"
           onChange={(e) => {
-            let v = e.target.value;
-            if (isIntegerNumber) {
-              v = v.replace(/\D/g, "");
-              if (v.length > 3) v = v.slice(0, 3);
-              if (v !== "") {
-                let n = parseInt(v, 10);
-                if (n > MAX_MAX_PETS) n = MAX_MAX_PETS;
-                v = String(n);
-              }
-            }
+            const v = e.target.value;
+            latestEditDraftRef.current = v;
             setEditValue(v);
           }}
-          onBlur={(e) => commitEdit(room.id, field as string, e.currentTarget.value, room)}
+          onBlur={() => commitEdit(room.id, field as string, latestEditDraftRef.current, room)}
           onKeyDown={(e) => handleKeyDown(e, room.id, field as string)}
-          step={type === "number" ? (isIntegerNumber ? "1" : "0.01") : undefined}
-          min={type === "number" ? (isIntegerNumber ? String(MIN_MAX_PETS) : "0") : undefined}
-          max={type === "number" && isIntegerNumber ? String(MAX_MAX_PETS) : undefined}
+          step={type === "number" ? "0.01" : undefined}
+          min={type === "number" ? "0" : undefined}
         />
       );
     }
@@ -436,13 +516,7 @@ const RoomsAdminPage = () => {
     return (
       <span
         className={`block cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-muted/60 transition-colors min-w-[60px] ${className ?? ""}`}
-        onClick={() =>
-          startEdit(
-            room,
-            field,
-            field === "max_pets" ? formatMaxPetsForUi(value) : displayVal ?? "",
-          )
-        }
+        onClick={() => startEdit(room, field, displayVal ?? "")}
         title="Click to edit"
       >
         {displayVal ?? <span className="text-muted-foreground">{placeholder}</span>}
@@ -593,12 +667,14 @@ const RoomsAdminPage = () => {
                     </TableCell>
 
                     <TableCell className="text-right">
-                      <TextCell
+                      <MaxPetsCell
                         room={room}
-                        field="max_pets"
-                        value={room.max_pets}
-                        type="number"
-                        numberMode="integer"
+                        isEditing={isEditing(room.id, "max_pets")}
+                        onOpen={() => setEditingCell({ id: room.id, field: "max_pets" })}
+                        onClose={() => setEditingCell(null)}
+                        onSave={(roomId, max_pets) =>
+                          updateRoom.mutate({ id: roomId, max_pets }, { onError: toastRoomSaveFailed })
+                        }
                       />
                     </TableCell>
 
@@ -608,7 +684,6 @@ const RoomsAdminPage = () => {
                         field="nightly_rate"
                         value={room.nightly_rate}
                         type="number"
-                        numberMode="decimal"
                         placeholder="—"
                       />
                     </TableCell>
