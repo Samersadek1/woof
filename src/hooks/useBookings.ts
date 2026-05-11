@@ -222,8 +222,11 @@ export function useUpdateRoom() {
       if (error) throw error;
       return data as Room;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["rooms"] });
+    onSuccess: (data) => {
+      queryClient.setQueryData<Room[]>(["rooms", "all"], (old) =>
+        old ? old.map((r) => (r.id === data.id ? data : r)) : old,
+      );
+      queryClient.invalidateQueries({ queryKey: queryKeys.rooms() });
     },
   });
 }

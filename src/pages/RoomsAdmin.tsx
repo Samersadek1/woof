@@ -234,6 +234,8 @@ const RoomsAdminPage = () => {
 
   const [editingCell, setEditingCell] = useState<EditingCell>(null);
   const [editValue, setEditValue] = useState("");
+  /** Synced on every keystroke so blur always commits the latest text (avoids stale React state vs native input). */
+  const latestEditDraftRef = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -247,6 +249,7 @@ const RoomsAdminPage = () => {
   const startEdit = (room: Room, field: keyof Room, currentVal: string) => {
     setEditingCell({ id: room.id, field: field as string });
     setEditValue(currentVal);
+    latestEditDraftRef.current = currentVal;
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -373,8 +376,12 @@ const RoomsAdminPage = () => {
           type={type}
           className={`w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring ${className ?? ""}`}
           value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={() => commitEdit(room.id, field as string, editValue)}
+          onChange={(e) => {
+            const v = e.target.value;
+            latestEditDraftRef.current = v;
+            setEditValue(v);
+          }}
+          onBlur={() => commitEdit(room.id, field as string, latestEditDraftRef.current)}
           onKeyDown={(e) => handleKeyDown(e, room.id, field as string)}
           step={type === "number" ? "0.01" : undefined}
           min={type === "number" ? "0" : undefined}
