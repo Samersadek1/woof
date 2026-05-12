@@ -1,5 +1,16 @@
 import { useMemo, useState } from "react";
-import { format, parseISO } from "date-fns";
+import {
+  endOfDay,
+  endOfMonth,
+  endOfWeek,
+  format,
+  parseISO,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+  subDays,
+  subMonths,
+} from "date-fns";
 import { Link } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { useDashboardMetrics } from "@/hooks/useDashboardMetrics";
@@ -20,13 +31,25 @@ import {
   ClipboardCheck,
   LogIn,
   LogOut,
+  Minus,
   RefreshCw,
   Scissors,
   Sun,
   TreePine,
+  TrendingDown,
+  TrendingUp,
   Printer,
   Wallet,
 } from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 function formatAed(amount: number) {
   return new Intl.NumberFormat("en-AE", {
@@ -50,6 +73,323 @@ function occupancyTone(value: number) {
 function rowHref(ownerId: string, petId: string | null) {
   if (!petId) return `/customers/${ownerId}`;
   return `/customers/${ownerId}/pets/${petId}`;
+}
+
+type InvSumRow = { total: number; total_aed: number | null; vat_aed: number | null };
+
+function invoiceGrand(r: InvSumRow) {
+  return invoiceDisplayTotals({
+    total: r.total,
+    total_aed: r.total_aed,
+    vat_aed: r.vat_aed,
+  }).grandTotal;
+}
+
+async function sumPaidFinalWindow(
+  paidStart: Date,
+  paidEnd: Date,
+  issueStartStr: string,
+  issueEndStr: string,
+): Promise<number> {
+  const [paidRes, finRes] = await Promise.all([
+    supabase
+      .from("invoices")
+      .select("total, total_aed, vat_aed")
+      .eq("status", "paid")
+      .gte("paid_at", paidStart.toISOString())
+      .lte("paid_at", paidEnd.toISOString()),
+    supabase
+      .from("invoices")
+      .select("total, total_aed, vat_aed")
+      .eq("status", "finalised")
+      .gte("issue_date", issueStartStr)
+      .lte("issue_date", issueEndStr),
+  ]);
+  if (paidRes.error) throw paidRes.error;
+  if (finRes.error) throw finRes.error;
+  let s = 0;
+  for (const r of paidRes.data ?? []) s += invoiceGrand(r);
+  for (const r of finRes.data ?? []) s += invoiceGrand(r);
+  return s;
+}
+
+type TrendKind = "up" | "down" | "flat";
+
+function trendFromDelta(current: number, previous: number): { kind: TrendKind; label: string } {
+  if (previous <= 0 && current <= 0) return { kind: "flat", label: "vs prior period" };
+  if (previous <= 0) return { kind: "up", label: "vs prior — new" };
+  const pct = ((current - previous) / previous) * 100;
+  if (Math.abs(pct) < 0.5) return { kind: "flat", label: `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}% vs prior` };
+  if (pct > 0) return { kind: "up", label: `+${pct.toFixed(0)}% vs prior` };
+  return { kind: "down", label: `${pct.toFixed(0)}% vs prior` };
+}
+
+const OTHER_GROOMING = new Set(["nail_clip", "deshedding", "brushing", "pawdicure"]);
+
+type DashboardInsights = {
+  revenue: {
+    today: number;
+    todayTrend: { kind: TrendKind; label: string };
+    week: number;
+    weekTrend: { kind: TrendKind; label: string };
+    month: number;
+    monthTrend: { kind: TrendKind; label: string };
+  };
+  serviceChart: { name: string; count: number }[];
+  topClients: { ownerId: string; name: string; visits: number; spentAed: number }[];
+  quickStats: {
+    activeBoardings: number;
+    groomingToday: number;
+    daycareToday: number;
+    parkVisitsToday: number;
+    overdueInvoices: number;
+  };
+};
+
+async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
+  const todayStr = format(now, "yyyy-MM-dd");
+  const dayStart = startOfDay(now);
+  const dayEnd = endOfDay(now);
+  const yStart = startOfDay(subDays(now, 1));
+  const yEnd = endOfDay(subDays(now, 1));
+  const yStr = format(subDays(now, 1), "yyyy-MM-dd");
+
+  const thisWeekStart = startOfWeek(now, { weekStartsOn: 1 });
+  const thisWeekEnd = endOfWeek(now, { weekStartsOn: 1 });
+  const prevWeekStart = startOfWeek(subDays(thisWeekStart, 7), { weekStartsOn: 1 });
+  const prevWeekEnd = endOfWeek(subDays(thisWeekStart, 7), { weekStartsOn: 1 });
+
+  const monthStart = startOfMonth(now);
+  const monthEnd = endOfMonth(now);
+  const prevMonthStart = startOfMonth(subMonths(now, 1));
+  const prevMonthEnd = endOfMonth(subMonths(now, 1));
+
+  const fmt = (d: Date) => format(d, "yyyy-MM-dd");
+
+  const [
+    todayRev,
+    yRev,
+    weekRev,
+    prevWeekRev,
+    monthRev,
+    prevMonthRev,
+    groomingRows,
+    boardingCount,
+    daycareCount,
+    parkCount,
+    paidMonthByOwner,
+    finMonthByOwner,
+    activeBoardings,
+    groomingToday,
+    daycareToday,
+    parkToday,
+    overdueInvoices,
+  ] = await Promise.all([
+    sumPaidFinalWindow(dayStart, dayEnd, todayStr, todayStr),
+    sumPaidFinalWindow(yStart, yEnd, yStr, yStr),
+    sumPaidFinalWindow(thisWeekStart, thisWeekEnd, fmt(thisWeekStart), fmt(thisWeekEnd)),
+    sumPaidFinalWindow(prevWeekStart, prevWeekEnd, fmt(prevWeekStart), fmt(prevWeekEnd)),
+    sumPaidFinalWindow(monthStart, monthEnd, fmt(monthStart), fmt(monthEnd)),
+    sumPaidFinalWindow(prevMonthStart, prevMonthEnd, fmt(prevMonthStart), fmt(prevMonthEnd)),
+    supabase
+      .from("grooming_appointments")
+      .select("service, owner_id")
+      .gte("appointment_date", fmt(monthStart))
+      .lte("appointment_date", fmt(monthEnd))
+      .or("no_show.eq.false,no_show.is.null"),
+    supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("booking_type", "boarding")
+      .neq("status", "cancelled")
+      .gte("check_in_date", fmt(monthStart))
+      .lte("check_in_date", fmt(monthEnd)),
+    supabase
+      .from("daycare_sessions")
+      .select("id", { count: "exact", head: true })
+      .gte("session_date", fmt(monthStart))
+      .lte("session_date", fmt(monthEnd)),
+    supabase
+      .from("park_bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("is_assessment", false)
+      .gte("visit_date", fmt(monthStart))
+      .lte("visit_date", fmt(monthEnd)),
+    supabase
+      .from("invoices")
+      .select("owner_id, total, total_aed, vat_aed")
+      .eq("status", "paid")
+      .gte("paid_at", monthStart.toISOString())
+      .lte("paid_at", monthEnd.toISOString()),
+    supabase
+      .from("invoices")
+      .select("owner_id, total, total_aed, vat_aed")
+      .eq("status", "finalised")
+      .gte("issue_date", fmt(monthStart))
+      .lte("issue_date", fmt(monthEnd)),
+    supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("booking_type", "boarding")
+      .eq("status", "checked_in"),
+    supabase
+      .from("grooming_appointments")
+      .select("id", { count: "exact", head: true })
+      .eq("appointment_date", todayStr)
+      .or("no_show.eq.false,no_show.is.null"),
+    supabase
+      .from("daycare_sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("session_date", todayStr),
+    supabase
+      .from("park_bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("is_assessment", false)
+      .eq("visit_date", todayStr),
+    supabase
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "overdue"),
+  ]);
+
+  if (groomingRows.error) throw groomingRows.error;
+  if (boardingCount.error) throw boardingCount.error;
+  if (daycareCount.error) throw daycareCount.error;
+  if (parkCount.error) throw parkCount.error;
+  if (paidMonthByOwner.error) throw paidMonthByOwner.error;
+  if (finMonthByOwner.error) throw finMonthByOwner.error;
+  if (activeBoardings.error) throw activeBoardings.error;
+  if (groomingToday.error) throw groomingToday.error;
+  if (daycareToday.error) throw daycareToday.error;
+  if (parkToday.error) throw parkToday.error;
+  if (overdueInvoices.error) throw overdueInvoices.error;
+
+  let fullGroom = 0;
+  let bathOnly = 0;
+  let otherGroom = 0;
+  const visitByOwner = new Map<string, number>();
+
+  for (const row of groomingRows.data ?? []) {
+    const svc = row.service as string;
+    if (svc === "full_groom") fullGroom += 1;
+    else if (svc === "full_bath") bathOnly += 1;
+    else if (OTHER_GROOMING.has(svc)) otherGroom += 1;
+    else otherGroom += 1;
+    if (row.owner_id) visitByOwner.set(row.owner_id, (visitByOwner.get(row.owner_id) ?? 0) + 1);
+  }
+
+  const { data: boardOwners, error: boErr } = await supabase
+    .from("bookings")
+    .select("owner_id")
+    .eq("booking_type", "boarding")
+    .neq("status", "cancelled")
+    .gte("check_in_date", fmt(monthStart))
+    .lte("check_in_date", fmt(monthEnd));
+  if (boErr) throw boErr;
+  for (const r of boardOwners ?? []) {
+    if (r.owner_id) visitByOwner.set(r.owner_id, (visitByOwner.get(r.owner_id) ?? 0) + 1);
+  }
+
+  const { data: dcOwners, error: dcErr } = await supabase
+    .from("daycare_sessions")
+    .select("owner_id")
+    .gte("session_date", fmt(monthStart))
+    .lte("session_date", fmt(monthEnd));
+  if (dcErr) throw dcErr;
+  for (const r of dcOwners ?? []) {
+    visitByOwner.set(r.owner_id, (visitByOwner.get(r.owner_id) ?? 0) + 1);
+  }
+
+  const { data: parkOwners, error: pkErr } = await supabase
+    .from("park_bookings")
+    .select("owner_id")
+    .eq("is_assessment", false)
+    .gte("visit_date", fmt(monthStart))
+    .lte("visit_date", fmt(monthEnd));
+  if (pkErr) throw pkErr;
+  for (const r of parkOwners ?? []) {
+    if (r.owner_id)
+      visitByOwner.set(r.owner_id, (visitByOwner.get(r.owner_id) ?? 0) + 1);
+  }
+
+  const spentByOwner = new Map<string, number>();
+  for (const r of paidMonthByOwner.data ?? []) {
+    const g = invoiceGrand(r);
+    spentByOwner.set(r.owner_id, (spentByOwner.get(r.owner_id) ?? 0) + g);
+  }
+  for (const r of finMonthByOwner.data ?? []) {
+    const g = invoiceGrand(r);
+    spentByOwner.set(r.owner_id, (spentByOwner.get(r.owner_id) ?? 0) + g);
+  }
+
+  const ownerIds = Array.from(
+    new Set([...visitByOwner.keys(), ...spentByOwner.keys()]),
+  ).filter(Boolean);
+  const ranked = ownerIds
+    .map((id) => ({
+      ownerId: id,
+      name: "",
+      visits: visitByOwner.get(id) ?? 0,
+      spentAed: spentByOwner.get(id) ?? 0,
+    }))
+    .sort((a, b) => b.visits - a.visits || b.spentAed - a.spentAed)
+    .slice(0, 5);
+
+  if (ranked.length > 0) {
+    const { data: owners, error: ownErr } = await supabase
+      .from("owners")
+      .select("id, first_name, last_name")
+      .in(
+        "id",
+        ranked.map((r) => r.ownerId),
+      );
+    if (ownErr) throw ownErr;
+    const nameMap = new Map(
+      (owners ?? []).map((o) => [
+        o.id,
+        ownerDisplayName(o.first_name, o.last_name),
+      ]),
+    );
+    for (const r of ranked) {
+      r.name = nameMap.get(r.ownerId) ?? "Unknown";
+    }
+  }
+
+  const chartRaw = [
+    { name: "Full groom", count: fullGroom },
+    { name: "Bath only", count: bathOnly },
+    { name: "Boarding", count: boardingCount.count ?? 0 },
+    { name: "Daycare", count: daycareCount.count ?? 0 },
+    { name: "Park visitation", count: parkCount.count ?? 0 },
+    { name: "Other grooming", count: otherGroom },
+  ];
+  const serviceChart = [...chartRaw].sort((a, b) => b.count - a.count);
+
+  return {
+    revenue: {
+      today: todayRev,
+      todayTrend: trendFromDelta(todayRev, yRev),
+      week: weekRev,
+      weekTrend: trendFromDelta(weekRev, prevWeekRev),
+      month: monthRev,
+      monthTrend: trendFromDelta(monthRev, prevMonthRev),
+    },
+    serviceChart,
+    topClients: ranked,
+    quickStats: {
+      activeBoardings: activeBoardings.count ?? 0,
+      groomingToday: groomingToday.count ?? 0,
+      daycareToday: daycareToday.count ?? 0,
+      parkVisitsToday: parkToday.count ?? 0,
+      overdueInvoices: overdueInvoices.count ?? 0,
+    },
+  };
+}
+
+function TrendGlyph({ kind }: { kind: TrendKind }) {
+  if (kind === "up") return <TrendingUp className="h-3.5 w-3.5 text-emerald-600" aria-hidden />;
+  if (kind === "down") return <TrendingDown className="h-3.5 w-3.5 text-red-600" aria-hidden />;
+  return <Minus className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />;
 }
 
 const SLOT_TIMES = [
@@ -77,6 +417,11 @@ const DashboardPage = () => {
     dataUpdatedAt,
   } = useDashboardMetrics(asOf);
   const { data: schedule, isLoading: scheduleLoading } = useTodaySchedule(asOf);
+  const { data: insights, isLoading: insightsLoading, isFetching: insightsFetching } = useQuery({
+    queryKey: ["dashboard-insights", format(new Date(), "yyyy-MM-dd")],
+    queryFn: () => loadDashboardInsights(new Date()),
+    staleTime: 60_000,
+  });
   const { data: dueTodayOverdue = [], isLoading: dueTodayLoading } = useQuery({
     queryKey: ["dashboard-due-today-overdue", asOf],
     queryFn: async () => {
@@ -224,6 +569,7 @@ const DashboardPage = () => {
 
   const lastRefreshed = dataUpdatedAt ? format(new Date(dataUpdatedAt), "d MMM, h:mm:ss a") : "—";
   const isLoading = metricsLoading || scheduleLoading;
+  const insightsChartData = insights ? [...insights.serviceChart].reverse() : [];
 
   return (
     <>
@@ -265,6 +611,182 @@ const DashboardPage = () => {
             />
           </div>
         </div>
+
+        {insightsLoading || !insights ? (
+          <div className="mb-6 space-y-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {[1, 2, 3].map((i) => (
+                <Card key={i}>
+                  <CardContent className="p-4">
+                    <Skeleton className="h-20 w-full" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+            <Skeleton className="h-14 w-full" />
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+              <Card className="lg:col-span-7">
+                <CardContent className="p-4">
+                  <Skeleton className="h-64 w-full" />
+                </CardContent>
+              </Card>
+              <Card className="lg:col-span-5">
+                <CardContent className="p-4">
+                  <Skeleton className="h-64 w-full" />
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-6 space-y-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Today&apos;s revenue
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="text-2xl font-semibold tabular-nums">{formatAed(insights.revenue.today)}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <TrendGlyph kind={insights.revenue.todayTrend.kind} />
+                    <span>{insights.revenue.todayTrend.label}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    This week&apos;s revenue
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="text-2xl font-semibold tabular-nums">{formatAed(insights.revenue.week)}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <TrendGlyph kind={insights.revenue.weekTrend.kind} />
+                    <span>{insights.revenue.weekTrend.label}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    This month&apos;s revenue
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="text-2xl font-semibold tabular-nums">{formatAed(insights.revenue.month)}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <TrendGlyph kind={insights.revenue.monthTrend.kind} />
+                    <span>{insights.revenue.monthTrend.label}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Quick stats (today)</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Calendar today · Boarding = checked-in stays · Park excludes assessments
+                </p>
+              </CardHeader>
+              <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Active boardings</p>
+                  <p className="text-xl font-semibold tabular-nums">{insights.quickStats.activeBoardings}</p>
+                </div>
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Grooming appts</p>
+                  <p className="text-xl font-semibold tabular-nums">{insights.quickStats.groomingToday}</p>
+                </div>
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Daycare sessions</p>
+                  <p className="text-xl font-semibold tabular-nums">{insights.quickStats.daycareToday}</p>
+                </div>
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Park visits</p>
+                  <p className="text-xl font-semibold tabular-nums">{insights.quickStats.parkVisitsToday}</p>
+                </div>
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Overdue invoices</p>
+                  <p className="text-xl font-semibold tabular-nums text-red-600">
+                    {insights.quickStats.overdueInvoices}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+              <Card className="lg:col-span-7">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Top services this month</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Booking counts for {format(startOfMonth(new Date()), "d MMM")} –{" "}
+                    {format(endOfMonth(new Date()), "d MMM yyyy")} (sorted high → low)
+                  </p>
+                </CardHeader>
+                <CardContent className="h-[280px] w-full pt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      layout="vertical"
+                      data={insightsChartData}
+                      margin={{ top: 4, right: 16, left: 8, bottom: 4 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" horizontal={false} />
+                      <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        width={118}
+                        tick={{ fontSize: 11 }}
+                        interval={0}
+                      />
+                      <Tooltip
+                        formatter={(v: number) => [`${v} bookings`, "Count"]}
+                        contentStyle={{ borderRadius: 8, fontSize: 12 }}
+                      />
+                      <Bar dataKey="count" radius={[0, 4, 4, 0]} fill="hsl(var(--primary))" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              <Card className="lg:col-span-5">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Top clients this month</CardTitle>
+                  <p className="text-xs text-muted-foreground">By visit count, then amount spent (paid &amp; finalised)</p>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {insights.topClients.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No activity recorded yet this month.</p>
+                  ) : (
+                    insights.topClients.map((c, idx) => (
+                      <Link
+                        key={c.ownerId}
+                        to={`/customers/${c.ownerId}`}
+                        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-muted/40"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            <span className="text-muted-foreground tabular-nums mr-2">{idx + 1}.</span>
+                            {c.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground tabular-nums">
+                            {c.visits} visit{c.visits === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold tabular-nums shrink-0">
+                          {formatAed(c.spentAed)}
+                        </span>
+                      </Link>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
@@ -580,10 +1102,11 @@ const DashboardPage = () => {
             onClick={() => {
               void queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
               void queryClient.invalidateQueries({ queryKey: ["today-schedule"] });
+              void queryClient.invalidateQueries({ queryKey: ["dashboard-insights"] });
             }}
-            disabled={metricsFetching}
+            disabled={metricsFetching || insightsFetching}
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${metricsFetching ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${metricsFetching || insightsFetching ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         </div>
