@@ -54,6 +54,8 @@ function invalidateGrooming(
     qc.invalidateQueries({ queryKey: queryKeys.ownerGrooming(opts.ownerId) });
   }
   qc.invalidateQueries({ queryKey: ["grooming", "search"] });
+  qc.invalidateQueries({ queryKey: ["grooming", "lastCompletedByPets"] });
+  qc.invalidateQueries({ queryKey: ["grooming", "dayInvoices"] });
 }
 
 export function useGroomingAppointments(date: string) {
@@ -407,6 +409,111 @@ export function useBookingsForGroomingLink(searchTerm: string) {
       }
 
       return merged.slice(0, 20);
+    },
+  });
+}
+
+export type GroomingDayInvoiceRow = {
+  id: string;
+  service_id: string;
+  status: string;
+  total: number | null;
+  total_aed: number | null;
+};
+
+/** Invoices linked to grooming appointments (`service_id` = appointment id). */
+export function useGroomingDayInvoices(
+  appointmentIds: readonly string[],
+  options?: { enabled?: boolean },
+) {
+  const sortedKey = [...appointmentIds].sort().join(",");
+  const extraEnabled = options?.enabled !== false;
+  return useQuery({
+    queryKey: ["grooming", "dayInvoices", sortedKey] as const,
+    enabled: extraEnabled && appointmentIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("invoices")
+        .select("id, service_id, status, total, total_aed")
+        .eq("service_type", "grooming")
+        .in("service_id", [...appointmentIds]);
+      if (error) throw error;
+      return (data ?? []) as GroomingDayInvoiceRow[];
+    },
+  });
+}
+
+function invoiceAmountAed(row: Pick<GroomingDayInvoiceRow, "total_aed" | "total">): number {
+  const n = row.total_aed ?? row.total;
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+}
+
+const INVOICE_PENDING_REVENUE_STATUSES = [
+  "draft",
+  "finalised",
+  "issued",
+  "outstanding",
+  "overdue",
+  "partially_paid",
+] as const;
+
+export function sumGroomingInvoicePaidAed(rows: readonly GroomingDayInvoiceRow[]): number {
+  let s = 0;
+  for (const r of rows) {
+    if (r.status === "paid") s += invoiceAmountAed(r);
+  }
+  return Number(s.toFixed(2));
+}
+
+export function sumGroomingInvoicePendingAed(rows: readonly GroomingDayInvoiceRow[]): number {
+  let s = 0;
+  for (const r of rows) {
+    if ((INVOICE_PENDING_REVENUE_STATUSES as readonly string[]).includes(r.status)) {
+      s += invoiceAmountAed(r);
+    }
+  }
+  return Number(s.toFixed(2));
+}
+
+function apptTimeSortKey(t: string | null): string {
+  if (!t || t.length < 8) return "00:00:00";
+  return t.slice(0, 8);
+}
+
+/** Latest `appointment_date` per pet among `completed` / `paid` grooms. */
+export function useLastGroomingDateByPetIds(
+  petIds: readonly string[],
+  options?: { enabled?: boolean },
+) {
+  const sortedKey = [...petIds].sort().join(",");
+  const extraEnabled = options?.enabled !== false;
+  return useQuery({
+    queryKey: ["grooming", "lastCompletedByPets", sortedKey] as const,
+    enabled: extraEnabled && petIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("grooming_appointments")
+        .select("pet_id, appointment_date, appointment_time")
+        .in("pet_id", [...petIds])
+        .in("status", ["completed", "paid"]);
+      if (error) throw error;
+      const rows = data ?? [];
+      const best = new Map<string, { date: string; time: string }>();
+      for (const r of rows) {
+        const tk = apptTimeSortKey(r.appointment_time);
+        const prev = best.get(r.pet_id);
+        if (!prev) {
+          best.set(r.pet_id, { date: r.appointment_date, time: tk });
+          continue;
+        }
+        const newer =
+          r.appointment_date > prev.date ||
+          (r.appointment_date === prev.date && tk > prev.time);
+        if (newer) best.set(r.pet_id, { date: r.appointment_date, time: tk });
+      }
+      const out = new Map<string, string>();
+      for (const [pid, v] of best) out.set(pid, v.date);
+      return out;
     },
   });
 }

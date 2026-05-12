@@ -12,8 +12,6 @@ import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import {
   useGroomingAppointments,
   useGroomingGlobalSearch,
@@ -22,6 +20,10 @@ import {
   useGroomingStatusTransition,
   useInvoiceForGroomingAppointment,
   useBookingsForGroomingLink,
+  useGroomingDayInvoices,
+  sumGroomingInvoicePaidAed,
+  sumGroomingInvoicePendingAed,
+  useLastGroomingDateByPetIds,
   type GroomingAppointmentWithJoins,
   type BookingLinkRow,
 } from "@/hooks/useGrooming";
@@ -49,6 +51,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -114,6 +123,7 @@ import {
   Undo2,
   X,
   CalendarIcon,
+  ClipboardList,
   FileText,
   CreditCard,
 } from "lucide-react";
@@ -234,6 +244,84 @@ function chipMatchesServiceFilter(label: string, filter: string): boolean {
   if (ll.startsWith(`${fl} (`)) return true;
   if (ll.startsWith(`${fl} —`) || ll.startsWith(`${fl} -`)) return true;
   return false;
+}
+
+const PET_NOTE_SAFETY_KEYWORDS = [
+  "aggressive",
+  "reactive",
+  "anxious",
+  "medical",
+  "medication",
+  "nervous",
+  "bite",
+] as const;
+
+function petProfileTextForSafetyScan(pet: {
+  grooming_notes?: string | null;
+  other_notes?: string | null;
+  special_alerts?: unknown;
+}): string {
+  const parts: string[] = [];
+  if (pet.grooming_notes?.trim()) parts.push(pet.grooming_notes.trim());
+  if (pet.other_notes?.trim()) parts.push(pet.other_notes.trim());
+  if (pet.special_alerts != null) {
+    try {
+      parts.push(
+        typeof pet.special_alerts === "string"
+          ? pet.special_alerts
+          : JSON.stringify(pet.special_alerts),
+      );
+    } catch {
+      parts.push(String(pet.special_alerts));
+    }
+  }
+  return parts.join("\n\n");
+}
+
+function petSafetyKeywordHit(fullText: string): boolean {
+  if (!fullText.trim()) return false;
+  const lower = fullText.toLowerCase();
+  return PET_NOTE_SAFETY_KEYWORDS.some((k) => lower.includes(k));
+}
+
+function formatLastGroomedDisplayLine(isoDate: string | undefined): string {
+  if (!isoDate) return "Last groomed: No record found";
+  try {
+    return `Last groomed: ${format(parseISO(isoDate), "d MMM yyyy")}`;
+  } catch {
+    return "Last groomed: No record found";
+  }
+}
+
+function PetSafetyNotesBanner({
+  petLabel,
+  notesText,
+}: {
+  petLabel?: string;
+  notesText: string;
+}) {
+  return (
+    <div
+      role="alert"
+      className="rounded-md border border-amber-400/90 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+    >
+      <p className="leading-snug">
+        <span aria-hidden>⚠️ </span>
+        This pet has special notes — please review before proceeding:
+        {petLabel ? <span className="mt-1 block font-semibold">{petLabel}</span> : null}
+      </p>
+      <p className="mt-2 whitespace-pre-wrap rounded border border-amber-200/80 bg-white/60 p-2 text-xs leading-relaxed">
+        {notesText}
+      </p>
+    </div>
+  );
+}
+
+function eodAppointmentStatusBucket(status: string): "completed" | "pending" | "cancelled" {
+  const n = normalizeGroomingWorkflowStatus(status);
+  if (n === "cancelled") return "cancelled";
+  if (n === "completed" || n === "paid") return "completed";
+  return "pending";
 }
 
 function appointmentServiceLabels(a: GroomingAppointmentWithJoins): string[] {
@@ -688,6 +776,7 @@ const GroomingPage = () => {
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [serviceFilter, setServiceFilter] = useState<string>("all");
   const [serviceSearch, setServiceSearch] = useState("");
+  const [eodReportOpen, setEodReportOpen] = useState(false);
 
   const navigate = useNavigate();
   const statusTransition = useGroomingStatusTransition();
@@ -712,6 +801,11 @@ const GroomingPage = () => {
   const [editVisitNotes, setEditVisitNotes] = useState("");
 
   const { data: pets = [] } = usePets(ownerId ?? "");
+  const eodApptIds = useMemo(() => dayAppointments.map((a) => a.id), [dayAppointments]);
+  const { data: eodInvoices = [], isFetching: eodInvoicesLoading } = useGroomingDayInvoices(
+    eodApptIds,
+    { enabled: eodReportOpen },
+  );
   const { data: ownerForGroomingPref } = useOwner(ownerId ?? "");
   const { data: bookingHits = [] } = useBookingsForGroomingLink(
     linkBoarding ? bookingSearch : "",
@@ -765,6 +859,39 @@ const GroomingPage = () => {
     () => pets.filter((p) => selectedPetIds.includes(p.id)),
     [pets, selectedPetIds],
   );
+
+  const petIdsForLastGroom = useMemo(() => {
+    if (selectedPetIds.length > 0) return selectedPetIds;
+    if (sheetOpen && pets.length === 1) return [pets[0].id];
+    return [];
+  }, [selectedPetIds, sheetOpen, pets]);
+
+  const { data: lastGroomDateByPet } = useLastGroomingDateByPetIds(petIdsForLastGroom, {
+    enabled: sheetOpen && petIdsForLastGroom.length > 0,
+  });
+  const lastGroomMap = lastGroomDateByPet ?? new Map<string, string>();
+
+  const petsForSafetyScan = useMemo(() => {
+    if (selectedPetsOrdered.length > 0) return selectedPetsOrdered;
+    if (ownerId && pets.length === 1) return pets;
+    return [];
+  }, [selectedPetsOrdered, ownerId, pets]);
+
+  const eodStatusCounts = useMemo(() => {
+    let completed = 0;
+    let pending = 0;
+    let cancelled = 0;
+    for (const a of dayAppointments) {
+      const b = eodAppointmentStatusBucket(a.status);
+      if (b === "cancelled") cancelled++;
+      else if (b === "completed") completed++;
+      else pending++;
+    }
+    return { completed, pending, cancelled, total: dayAppointments.length };
+  }, [dayAppointments]);
+
+  const eodPaidTotal = useMemo(() => sumGroomingInvoicePaidAed(eodInvoices), [eodInvoices]);
+  const eodPendingTotal = useMemo(() => sumGroomingInvoicePendingAed(eodInvoices), [eodInvoices]);
 
   /** Single-pet owners: keep the only pet selected automatically (same UX as before). */
   useEffect(() => {
@@ -1140,6 +1267,121 @@ const GroomingPage = () => {
   return (
     <>
       <TopBar title="Grooming" />
+      <Dialog open={eodReportOpen} onOpenChange={setEodReportOpen}>
+        <DialogContent className="flex max-h-[90vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+          <DialogHeader className="border-b px-6 py-4 text-left">
+            <DialogTitle className="pr-8">End of Day Report — Grooming</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              {format(day, "EEEE, d MMMM yyyy")} · {eodStatusCounts.total} appointment
+              {eodStatusCounts.total === 1 ? "" : "s"}
+            </p>
+          </DialogHeader>
+          <div
+            id="grooming-eod-report-root"
+            className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4"
+          >
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Completed</p>
+                <p className="text-2xl font-semibold tabular-nums">{eodStatusCounts.completed}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Pending</p>
+                <p className="text-2xl font-semibold tabular-nums">{eodStatusCounts.pending}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Cancelled</p>
+                <p className="text-2xl font-semibold tabular-nums">{eodStatusCounts.cancelled}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Total</p>
+                <p className="text-2xl font-semibold tabular-nums">{eodStatusCounts.total}</p>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/90 px-3 py-3">
+                <p className="text-xs font-medium text-emerald-900">
+                  Revenue collected (paid invoices)
+                </p>
+                <p className="mt-1 text-xl font-semibold tabular-nums text-emerald-950">
+                  {eodInvoicesLoading ? "…" : formatAed(eodPaidTotal)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-3">
+                <p className="text-xs font-medium text-amber-950">
+                  Revenue pending (unpaid / draft invoices)
+                </p>
+                <p className="mt-1 text-xl font-semibold tabular-nums text-amber-950">
+                  {eodInvoicesLoading ? "…" : formatAed(eodPendingTotal)}
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Appointments</h3>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Pet</TableHead>
+                      <TableHead>Owner</TableHead>
+                      <TableHead>Service</TableHead>
+                      <TableHead>Dog size</TableHead>
+                      <TableHead className="text-right">Price</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dayAppointments.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                          No appointments for this date.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      dayAppointments.map((a) => (
+                        <TableRow key={a.id}>
+                          <TableCell className="font-medium">{a.pets?.name ?? "—"}</TableCell>
+                          <TableCell>
+                            {a.owners
+                              ? ownerDisplayName(a.owners.first_name, a.owners.last_name)
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="max-w-[200px] truncate text-xs">
+                            {appointmentServiceLabels(a).join(" · ")}
+                          </TableCell>
+                          <TableCell>{a.dog_size ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {a.price != null ? formatAed(a.price) : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={cn(
+                                "inline-flex rounded border px-2 py-0.5 text-xs font-medium",
+                                workflowStatusBadgeClass(a.status),
+                              )}
+                            >
+                              {workflowStatusLabel(a.status)}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="border-t px-6 py-3 print:hidden">
+            <Button type="button" variant="outline" onClick={() => setEodReportOpen(false)}>
+              Close
+            </Button>
+            <Button type="button" onClick={() => window.print()}>
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <main className="flex-1 overflow-auto p-8 space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-2">
@@ -1172,20 +1414,30 @@ const GroomingPage = () => {
               Today
             </Button>
           </div>
-          <Button type="button" onClick={openNewSheet}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Appointment
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              window.open(`/print/grooming-cards?date=${dateStr}`, "_blank", "noopener,noreferrer")
-            }
-          >
-            <Printer className="mr-2 h-4 w-4" />
-            Print today's cards
-          </Button>
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEodReportOpen(true)}
+            >
+              <ClipboardList className="mr-2 h-4 w-4" />
+              End of Day Report
+            </Button>
+            <Button type="button" onClick={openNewSheet}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Appointment
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                window.open(`/print/grooming-cards?date=${dateStr}`, "_blank", "noopener,noreferrer")
+              }
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print today's cards
+            </Button>
+          </div>
         </div>
 
         <Tabs defaultValue="day" className="space-y-4">
@@ -1988,15 +2240,34 @@ const GroomingPage = () => {
                 <div className="space-y-2">
                   <Label>Pet</Label>
                   <p className="text-sm font-medium">{pets[0].name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatLastGroomedDisplayLine(lastGroomMap.get(pets[0].id))}
+                  </p>
                   <PetSpecialAlertsBanner specialAlerts={pets[0].special_alerts} />
                 </div>
               )}
+              {petsForSafetyScan.map((pet) => {
+                const scan = petProfileTextForSafetyScan(pet);
+                if (!petSafetyKeywordHit(scan)) return null;
+                return (
+                  <PetSafetyNotesBanner
+                    key={`kw-safety-${pet.id}`}
+                    petLabel={pets.length > 1 ? pet.name : undefined}
+                    notesText={scan}
+                  />
+                );
+              })}
               {selectedPetsOrdered.length > 0 && (
                 <div className="space-y-3">
                   {selectedPetsOrdered.map((pet) => (
                     <Card key={pet.id} className="border bg-muted/10">
                       <CardContent className="space-y-1 p-3 text-sm pt-4">
                         <p className="font-semibold border-b pb-2 mb-2">{pet.name}</p>
+                        {pets.length > 1 ? (
+                          <p className="text-xs text-muted-foreground -mt-1 mb-2">
+                            {formatLastGroomedDisplayLine(lastGroomMap.get(pet.id))}
+                          </p>
+                        ) : null}
                         <PetSpecialAlertsBanner specialAlerts={pet.special_alerts} />
                         <p>
                           <span className="text-muted-foreground">Breed: </span>
