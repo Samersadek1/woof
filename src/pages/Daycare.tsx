@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { addDays, format, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
+import { memberTierBadgeClassName, memberTierBadgeLabel } from "@/lib/memberTier";
 import { buildDaycareTags, tagToneClass } from "@/lib/operationsTags";
 import {
   TRANSPORT_PRICING_KEYS,
@@ -1051,21 +1052,35 @@ function PlannerTab() {
         <CardContent className="space-y-4">
           <div className="space-y-1">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Search owner or dog</Label>
-            <OwnerCombobox
-              selectedId={
-                ownerId && (resolvedOwnerLabel || ownerDetailLoading)
-                  ? ownerId
-                  : null
-              }
-              selectedLabel={
-                ownerDetailLoading
-                  ? "Loading…"
-                  : resolvedOwnerLabel
-              }
-              onSelect={handleOwnerSelect}
-              onClear={handleOwnerClear}
-              placeholder="Search by client name, pet name, or phone…"
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-[12rem] flex-1">
+                <OwnerCombobox
+                  selectedId={
+                    ownerId && (resolvedOwnerLabel || ownerDetailLoading)
+                      ? ownerId
+                      : null
+                  }
+                  selectedLabel={
+                    ownerDetailLoading
+                      ? "Loading…"
+                      : resolvedOwnerLabel
+                  }
+                  onSelect={handleOwnerSelect}
+                  onClear={handleOwnerClear}
+                  placeholder="Search by client name, pet name, or phone…"
+                />
+              </div>
+              {ownerFromUrl &&
+              ownerFromUrl.id === ownerId &&
+              memberTierBadgeLabel(ownerFromUrl.member_type) ? (
+                <Badge
+                  variant="outline"
+                  className={memberTierBadgeClassName(ownerFromUrl.member_type)}
+                >
+                  {memberTierBadgeLabel(ownerFromUrl.member_type)}
+                </Badge>
+              ) : null}
+            </div>
           </div>
 
           {!!ownerId && (

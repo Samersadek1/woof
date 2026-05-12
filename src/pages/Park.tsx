@@ -10,7 +10,7 @@ import {
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { buildPriceMap, parkGroupPricing } from "@/lib/servicePricing";
-import { useOwners } from "@/hooks/useOwners";
+import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -55,6 +55,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
+import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
+import { memberTierBadgeClassName, memberTierBadgeLabel } from "@/lib/memberTier";
 
 type ParkDayStatus = Database["public"]["Enums"]["park_day_status"];
 type AssessmentStatus = Database["public"]["Enums"]["assessment_status"];
@@ -359,6 +361,52 @@ const ParkPage = () => {
       ["not_assessed", "scheduled"].includes((p.assessment_status as AssessmentStatus) ?? "not_assessed"),
     );
   }, [pets, bookingType]);
+
+  const selectedPetIdsKey = useMemo(
+    () => Array.from(selectedPetIds).sort().join(","),
+    [selectedPetIds],
+  );
+
+  const parkSheetPriceSubtotal = useMemo(() => {
+    if (!sheetOpen || !ownerId || selectedPetIds.size === 0 || bookingType === "assessment") return 0;
+    return parkGroupPricing(selectedPetIds.size, parkPriceMap).total;
+  }, [sheetOpen, ownerId, selectedPetIdsKey, bookingType, parkPriceMap, selectedPetIds.size]);
+
+  const { data: parkOwnerProfile } = useOwner(ownerId ?? "");
+
+  const { data: parkMemberDiscountPreview } = useQuery<{
+    discount_pct: number;
+    discount_aed: number;
+    final_aed: number;
+  }>({
+    queryKey: ["park", "new-booking-member-discount", ownerId, parkSheetPriceSubtotal],
+    enabled: Boolean(sheetOpen && ownerId && parkSheetPriceSubtotal > 0),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("apply_member_discount", {
+        p_owner_id: ownerId!,
+        p_subtotal: parkSheetPriceSubtotal,
+      });
+      if (error) {
+        return {
+          discount_pct: 0,
+          discount_aed: 0,
+          final_aed: parkSheetPriceSubtotal,
+        };
+      }
+      const first = (data as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
+      return (
+        first ?? {
+          discount_pct: 0,
+          discount_aed: 0,
+          final_aed: parkSheetPriceSubtotal,
+        }
+      );
+    },
+  });
+
+  const parkNetAfterMember = parkMemberDiscountPreview?.final_aed ?? parkSheetPriceSubtotal;
+  const parkVatPreview = vatAmountFromNet(parkNetAfterMember);
+  const parkGrossPreview = grandTotalFromNet(parkNetAfterMember);
 
   const [bookingDetail, setBookingDetail] = useState<ParkBookingWithJoins | null>(
     null,
@@ -930,20 +978,32 @@ const ParkPage = () => {
             </div>
             <div className="grid gap-2">
               <Label>Owner</Label>
-              <ParkOwnerSearch
-                selectedOwnerId={ownerId}
-                selectedLabel={ownerLabel}
-                onSelect={(id, label) => {
-                  setOwnerId(id);
-                  setOwnerLabel(label);
-                  setSelectedPetIds(new Set());
-                }}
-                onClear={() => {
-                  setOwnerId(null);
-                  setOwnerLabel(null);
-                  setSelectedPetIds(new Set());
-                }}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <ParkOwnerSearch
+                  selectedOwnerId={ownerId}
+                  selectedLabel={ownerLabel}
+                  onSelect={(id, label) => {
+                    setOwnerId(id);
+                    setOwnerLabel(label);
+                    setSelectedPetIds(new Set());
+                  }}
+                  onClear={() => {
+                    setOwnerId(null);
+                    setOwnerLabel(null);
+                    setSelectedPetIds(new Set());
+                  }}
+                />
+                {parkOwnerProfile &&
+                parkOwnerProfile.id === ownerId &&
+                memberTierBadgeLabel(parkOwnerProfile.member_type) ? (
+                  <Badge
+                    variant="outline"
+                    className={memberTierBadgeClassName(parkOwnerProfile.member_type)}
+                  >
+                    {memberTierBadgeLabel(parkOwnerProfile.member_type)}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
 
             <div className="grid gap-2">
@@ -998,6 +1058,39 @@ const ParkPage = () => {
                 </p>
               )}
             </div>
+
+            {bookingType === "park" && sheetOpen && ownerId && selectedPetIds.size > 0 && parkSheetPriceSubtotal > 0 && (
+              <div className="space-y-2 rounded-lg border bg-muted/20 px-3 py-3 text-sm">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Pricing preview (member rates)
+                </p>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Visit subtotal (ex VAT)</span>
+                  <span className="tabular-nums font-medium">AED {parkSheetPriceSubtotal.toFixed(2)}</span>
+                </div>
+                {(parkMemberDiscountPreview?.discount_aed ?? 0) > 0 && (
+                  <div className="flex justify-between gap-3 text-emerald-700">
+                    <span>
+                      Member discount
+                      {parkMemberDiscountPreview?.discount_pct
+                        ? ` (${Number(parkMemberDiscountPreview.discount_pct).toFixed(2)}%)`
+                        : ""}
+                    </span>
+                    <span className="tabular-nums">
+                      − AED {parkMemberDiscountPreview!.discount_aed.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between gap-3 border-t pt-2">
+                  <span className="text-muted-foreground">{vatLineLabel()}</span>
+                  <span className="tabular-nums">AED {parkVatPreview.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between gap-3 font-semibold">
+                  <span>Total incl. VAT (est.)</span>
+                  <span className="tabular-nums">AED {parkGrossPreview.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
 
             {bookingType === "park" && (
               <div className="space-y-2 rounded-lg border px-3 py-3">

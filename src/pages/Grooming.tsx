@@ -36,6 +36,7 @@ import {
   type GroomingWorkflowStatus,
 } from "@/lib/groomingWorkflow";
 import { grandTotalFromNet, invoiceDisplayTotals, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
+import { memberTierBadgeClassName, memberTierBadgeLabel, memberTierDiscountPct } from "@/lib/memberTier";
 import {
   GROOMING_PAYMENT_METHOD_OPTIONS,
   groomingPaymentMethodLabel,
@@ -769,6 +770,8 @@ const GroomingPage = () => {
   const [price, setPrice] = useState("");
   /** Empty or 0% = no discount; quick buttons and manual input share this value */
   const [discountPct, setDiscountPct] = useState("");
+  const discountAutoFromMemberRef = useRef(true);
+  const prevOwnerIdForMemberDiscountRef = useRef<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<GroomingPaymentMethod>("cash");
   const [visitNotes, setVisitNotes] = useState("");
   const [linkBoarding, setLinkBoarding] = useState(false);
@@ -810,6 +813,20 @@ const GroomingPage = () => {
   const { data: bookingHits = [] } = useBookingsForGroomingLink(
     linkBoarding ? bookingSearch : "",
   );
+
+  useEffect(() => {
+    if (ownerId !== prevOwnerIdForMemberDiscountRef.current) {
+      discountAutoFromMemberRef.current = true;
+      prevOwnerIdForMemberDiscountRef.current = ownerId;
+    }
+  }, [ownerId]);
+
+  useEffect(() => {
+    if (!sheetOpen || !ownerId || !ownerForGroomingPref || ownerForGroomingPref.id !== ownerId) return;
+    if (!discountAutoFromMemberRef.current) return;
+    const pct = memberTierDiscountPct(ownerForGroomingPref.member_type);
+    setDiscountPct(pct > 0 ? String(pct) : "");
+  }, [sheetOpen, ownerId, ownerForGroomingPref?.id, ownerForGroomingPref?.member_type]);
 
   useEffect(() => {
     if (!ownerId) {
@@ -2200,6 +2217,16 @@ const GroomingPage = () => {
                     setSelectedPetIds([]);
                   }}
                 />
+                {ownerForGroomingPref &&
+                ownerForGroomingPref.id === ownerId &&
+                memberTierBadgeLabel(ownerForGroomingPref.member_type) ? (
+                  <Badge
+                    variant="outline"
+                    className={`w-fit ${memberTierBadgeClassName(ownerForGroomingPref.member_type)}`}
+                  >
+                    {memberTierBadgeLabel(ownerForGroomingPref.member_type)}
+                  </Badge>
+                ) : null}
               </div>
               {ownerId && pets.length === 0 && (
                 <p className="text-sm text-muted-foreground">Loading pets…</p>
@@ -2482,7 +2509,10 @@ const GroomingPage = () => {
                         size="sm"
                         variant={active ? "default" : "outline"}
                         className="min-w-[3.25rem]"
-                        onClick={() => setDiscountPct(String(pct))}
+                        onClick={() => {
+                          discountAutoFromMemberRef.current = false;
+                          setDiscountPct(String(pct));
+                        }}
                       >
                         {pct}%
                       </Button>
@@ -2499,7 +2529,10 @@ const GroomingPage = () => {
                     step={0.5}
                     placeholder="0"
                     value={discountPct}
-                    onChange={(e) => setDiscountPct(e.target.value)}
+                    onChange={(e) => {
+                      discountAutoFromMemberRef.current = false;
+                      setDiscountPct(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2">

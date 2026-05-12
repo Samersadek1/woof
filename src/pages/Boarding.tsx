@@ -19,7 +19,7 @@ import {
   isAssessmentRequiredError,
 } from "@/hooks/useBookings";
 import type { BookingWithDetails, CreateBookingPayload } from "@/hooks/useBookings";
-import { useOwners } from "@/hooks/useOwners";
+import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +71,7 @@ import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
+import { memberTierBadgeClassName, memberTierBadgeLabel } from "@/lib/memberTier";
 import {
   BOARDING_TRANSPORT_REGION_OPTIONS,
   TRANSPORT_PRICING_KEYS,
@@ -935,6 +936,7 @@ export function DogBoardingCalendar({
 
   // pets for selected owner (dog boarding: exclude cats)
   const { data: ownerPets = [] } = usePets(form.owner_id);
+  const { data: dogBoardingOwnerProfile } = useOwner(form.owner_id);
   const dogBoardingPets = useMemo(
     () => ownerPets.filter((p) => p.species !== "cat"),
     [ownerPets],
@@ -1092,13 +1094,41 @@ export function DogBoardingCalendar({
     dogManualAddonTotal,
   ]);
 
-  const dogBookingVatEstimate = useMemo(
-    () => vatAmountFromNet(dogBookingEstimateTotal),
-    [dogBookingEstimateTotal],
-  );
+  const { data: dogMemberDiscountPreview } = useQuery<{
+    discount_pct: number;
+    discount_aed: number;
+    final_aed: number;
+  }>({
+    queryKey: ["boarding", "dog", "member-discount-preview", form.owner_id, dogBookingEstimateTotal],
+    enabled: Boolean(newBookingOpen && form.owner_id && dogBookingEstimateTotal > 0),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("apply_member_discount", {
+        p_owner_id: form.owner_id,
+        p_subtotal: dogBookingEstimateTotal,
+      });
+      if (error) {
+        return {
+          discount_pct: 0,
+          discount_aed: 0,
+          final_aed: dogBookingEstimateTotal,
+        };
+      }
+      const first = (data as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
+      return (
+        first ?? {
+          discount_pct: 0,
+          discount_aed: 0,
+          final_aed: dogBookingEstimateTotal,
+        }
+      );
+    },
+  });
+
+  const dogNetAfterMember = dogMemberDiscountPreview?.final_aed ?? dogBookingEstimateTotal;
+  const dogBookingVatEstimate = useMemo(() => vatAmountFromNet(dogNetAfterMember), [dogNetAfterMember]);
   const dogBookingGrossEstimate = useMemo(
-    () => grandTotalFromNet(dogBookingEstimateTotal),
-    [dogBookingEstimateTotal],
+    () => grandTotalFromNet(dogNetAfterMember),
+    [dogNetAfterMember],
   );
 
   const handleBelongingsFlowFinished = () => {
@@ -1558,43 +1588,52 @@ export function DogBoardingCalendar({
             {/* Owner search */}
             <div className="space-y-2">
               <Label>Owner <span className="text-destructive">*</span></Label>
-              <Popover open={ownerPopOpen} onOpenChange={setOwnerPopOpen}>
-                <PopoverTrigger asChild>
-                  <div className="relative">
-                    <Input
-                      placeholder="Search by name or phone…"
-                      value={ownerSearch}
-                      onChange={(e) => {
-                        setOwnerSearch(e.target.value);
-                        setOwnerPopOpen(true);
-                      }}
-                      onFocus={() => ownerSearch.length >= 2 && setOwnerPopOpen(true)}
-                    />
-                  </div>
-                </PopoverTrigger>
-                {ownerResults.length > 0 && (
-                  <PopoverContent align="start" className="p-1 w-80 z-[120] pointer-events-auto">
-                    {ownerResults.map((o) => (
-                      <button
-                        key={o.id}
-                        type="button"
-                        className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent"
-                        onClick={() => {
-                          // #region agent log
-                          fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'post-fix',hypothesisId:'H6',location:'src/pages/Boarding.tsx:newBookingOwnerSelect',message:'boarding owner selected from popover',data:{ownerId:o.id},timestamp:Date.now()})}).catch(()=>{});
-                          // #endregion
-                          setForm((f) => ({ ...f, owner_id: o.id }));
-                          setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`);
-                          setOwnerPopOpen(false);
+              <div className="flex flex-wrap items-center gap-2">
+                <Popover open={ownerPopOpen} onOpenChange={setOwnerPopOpen}>
+                  <PopoverTrigger asChild>
+                    <div className="relative">
+                      <Input
+                        placeholder="Search by name or phone…"
+                        value={ownerSearch}
+                        onChange={(e) => {
+                          setOwnerSearch(e.target.value);
+                          setOwnerPopOpen(true);
                         }}
-                      >
-                        <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
-                        <span className="ml-2 text-muted-foreground">{o.phone}</span>
-                      </button>
-                    ))}
-                  </PopoverContent>
-                )}
-              </Popover>
+                        onFocus={() => ownerSearch.length >= 2 && setOwnerPopOpen(true)}
+                      />
+                    </div>
+                  </PopoverTrigger>
+                  {ownerResults.length > 0 && (
+                    <PopoverContent align="start" className="p-1 w-80 z-[120] pointer-events-auto">
+                      {ownerResults.map((o) => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent"
+                          onClick={() => {
+                            setForm((f) => ({ ...f, owner_id: o.id }));
+                            setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`);
+                            setOwnerPopOpen(false);
+                          }}
+                        >
+                          <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
+                          <span className="ml-2 text-muted-foreground">{o.phone}</span>
+                        </button>
+                      ))}
+                    </PopoverContent>
+                  )}
+                </Popover>
+                {dogBoardingOwnerProfile &&
+                dogBoardingOwnerProfile.id === form.owner_id &&
+                memberTierBadgeLabel(dogBoardingOwnerProfile.member_type) ? (
+                  <Badge
+                    variant="outline"
+                    className={`w-fit shrink-0 ${memberTierBadgeClassName(dogBoardingOwnerProfile.member_type)}`}
+                  >
+                    {memberTierBadgeLabel(dogBoardingOwnerProfile.member_type)}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
 
             {/* Pet selector — dog boarding only */}
@@ -2052,6 +2091,19 @@ export function DogBoardingCalendar({
                         <span className="text-muted-foreground">Grooming add-ons</span>
                         <span className="tabular-nums font-medium">
                           {formatAed(dogManualAddonTotal)}
+                        </span>
+                      </div>
+                    )}
+                    {(dogMemberDiscountPreview?.discount_aed ?? 0) > 0 && (
+                      <div className="flex justify-between gap-4 text-emerald-700">
+                        <span>
+                          Member discount
+                          {dogMemberDiscountPreview?.discount_pct != null
+                            ? ` (${Number(dogMemberDiscountPreview.discount_pct).toFixed(2)}%)`
+                            : ""}
+                        </span>
+                        <span className="tabular-nums font-medium">
+                          −{formatAed(dogMemberDiscountPreview!.discount_aed)}
                         </span>
                       </div>
                     )}
@@ -2521,6 +2573,7 @@ function CatBoardingCalendar({
   );
 
   const { data: ownerPets = [] } = usePets(form.owner_id);
+  const { data: catBoardingOwnerProfile } = useOwner(form.owner_id);
   const catPets = useMemo(
     () => ownerPets.filter((p) => p.species === "cat"),
     [ownerPets],
@@ -2668,13 +2721,41 @@ function CatBoardingCalendar({
     catManualAddonTotal,
   ]);
 
-  const catBookingVatEstimate = useMemo(
-    () => vatAmountFromNet(catBookingEstimateTotal),
-    [catBookingEstimateTotal],
-  );
+  const { data: catMemberDiscountPreview } = useQuery<{
+    discount_pct: number;
+    discount_aed: number;
+    final_aed: number;
+  }>({
+    queryKey: ["boarding", "cat", "member-discount-preview", form.owner_id, catBookingEstimateTotal],
+    enabled: Boolean(newBookingOpen && form.owner_id && catBookingEstimateTotal > 0),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("apply_member_discount", {
+        p_owner_id: form.owner_id,
+        p_subtotal: catBookingEstimateTotal,
+      });
+      if (error) {
+        return {
+          discount_pct: 0,
+          discount_aed: 0,
+          final_aed: catBookingEstimateTotal,
+        };
+      }
+      const first = (data as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
+      return (
+        first ?? {
+          discount_pct: 0,
+          discount_aed: 0,
+          final_aed: catBookingEstimateTotal,
+        }
+      );
+    },
+  });
+
+  const catNetAfterMember = catMemberDiscountPreview?.final_aed ?? catBookingEstimateTotal;
+  const catBookingVatEstimate = useMemo(() => vatAmountFromNet(catNetAfterMember), [catNetAfterMember]);
   const catBookingGrossEstimate = useMemo(
-    () => grandTotalFromNet(catBookingEstimateTotal),
-    [catBookingEstimateTotal],
+    () => grandTotalFromNet(catNetAfterMember),
+    [catNetAfterMember],
   );
 
   const handleBelongingsFlowFinished = () => {
@@ -3043,23 +3124,52 @@ function CatBoardingCalendar({
           <form onSubmit={handleCreateBooking} className="mt-6 space-y-5">
             <div className="space-y-2">
               <Label>Owner <span className="text-destructive">*</span></Label>
-              <Popover open={ownerPopOpen} onOpenChange={setOwnerPopOpen}>
-                <PopoverTrigger asChild>
-                  <div className="relative">
-                    <Input placeholder="Search by name or phone…" value={ownerSearch} onChange={(e) => { setOwnerSearch(e.target.value); setOwnerPopOpen(true); }} onFocus={() => ownerSearch.length >= 2 && setOwnerPopOpen(true)} />
-                  </div>
-                </PopoverTrigger>
-                {ownerResults.length > 0 && (
-                  <PopoverContent align="start" className="p-1 w-80 z-[120] pointer-events-auto">
-                    {ownerResults.map((o) => (
-                      <button key={o.id} type="button" className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent" onClick={() => { fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'post-fix',hypothesisId:'H6',location:'src/pages/Boarding.tsx:catBookingOwnerSelect',message:'cat boarding owner selected from popover',data:{ownerId:o.id},timestamp:Date.now()})}).catch(()=>{}); setForm((f) => ({ ...f, owner_id: o.id })); setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`); setOwnerPopOpen(false); }}>
-                        <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
-                        <span className="ml-2 text-muted-foreground">{o.phone}</span>
-                      </button>
-                    ))}
-                  </PopoverContent>
-                )}
-              </Popover>
+              <div className="flex flex-wrap items-center gap-2">
+                <Popover open={ownerPopOpen} onOpenChange={setOwnerPopOpen}>
+                  <PopoverTrigger asChild>
+                    <div className="relative">
+                      <Input
+                        placeholder="Search by name or phone…"
+                        value={ownerSearch}
+                        onChange={(e) => {
+                          setOwnerSearch(e.target.value);
+                          setOwnerPopOpen(true);
+                        }}
+                        onFocus={() => ownerSearch.length >= 2 && setOwnerPopOpen(true)}
+                      />
+                    </div>
+                  </PopoverTrigger>
+                  {ownerResults.length > 0 && (
+                    <PopoverContent align="start" className="p-1 w-80 z-[120] pointer-events-auto">
+                      {ownerResults.map((o) => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent"
+                          onClick={() => {
+                            setForm((f) => ({ ...f, owner_id: o.id }));
+                            setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`);
+                            setOwnerPopOpen(false);
+                          }}
+                        >
+                          <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
+                          <span className="ml-2 text-muted-foreground">{o.phone}</span>
+                        </button>
+                      ))}
+                    </PopoverContent>
+                  )}
+                </Popover>
+                {catBoardingOwnerProfile &&
+                catBoardingOwnerProfile.id === form.owner_id &&
+                memberTierBadgeLabel(catBoardingOwnerProfile.member_type) ? (
+                  <Badge
+                    variant="outline"
+                    className={`w-fit shrink-0 ${memberTierBadgeClassName(catBoardingOwnerProfile.member_type)}`}
+                  >
+                    {memberTierBadgeLabel(catBoardingOwnerProfile.member_type)}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
 
             {form.owner_id && (
@@ -3455,6 +3565,19 @@ function CatBoardingCalendar({
                         <span className="text-muted-foreground">Grooming add-ons</span>
                         <span className="tabular-nums font-medium">
                           {formatAed(catManualAddonTotal)}
+                        </span>
+                      </div>
+                    )}
+                    {(catMemberDiscountPreview?.discount_aed ?? 0) > 0 && (
+                      <div className="flex justify-between gap-4 text-emerald-700">
+                        <span>
+                          Member discount
+                          {catMemberDiscountPreview?.discount_pct != null
+                            ? ` (${Number(catMemberDiscountPreview.discount_pct).toFixed(2)}%)`
+                            : ""}
+                        </span>
+                        <span className="tabular-nums font-medium">
+                          −{formatAed(catMemberDiscountPreview!.discount_aed)}
                         </span>
                       </div>
                     )}

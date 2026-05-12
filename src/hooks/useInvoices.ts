@@ -20,6 +20,7 @@ export interface InvoiceSummary {
   invoice_number: string | null;
   owner_id: string;
   owner_name: string;
+  owner_phone: string | null;
   service_type: string | null;
   status: InvoiceStatus;
   total_aed: number;
@@ -44,7 +45,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
       let q = supabase
         .from("invoices")
         .select(
-          "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name)",
+          "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name, phone)",
         )
         .order("created_at", { ascending: false });
 
@@ -73,7 +74,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         vat_aed: number | null;
         due_date: string | null;
         created_at: string;
-        owners: { first_name: string | null; last_name: string | null } | null;
+        owners: { first_name: string | null; last_name: string | null; phone: string | null } | null;
       };
 
       return ((data ?? []) as InvoiceListRow[]).map((row) => {
@@ -95,6 +96,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
           invoice_number: row.invoice_number,
           owner_id: row.owner_id,
           owner_name: ownerDisplayName(owner?.first_name, owner?.last_name),
+          owner_phone: owner?.phone ?? null,
           service_type: row.service_type,
           status: row.status,
           total_aed: grand,
@@ -133,4 +135,23 @@ export function useInvoiceKpis(invoices: InvoiceSummary[]) {
 
     return { outstandingTotal, overdueCount, dueSoonCount, collectedThisMonth };
   }, [invoices]);
+}
+
+export type InvoiceDeletionLogRow = Database["public"]["Tables"]["invoice_deletion_log"]["Row"];
+
+export function useInvoiceDeletionLog() {
+  return useQuery({
+    queryKey: ["invoices", "deletion-log"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("invoice_deletion_log")
+        .select("id, invoice_id, owner_name, total_amount, deleted_by, deleted_at, reason")
+        .order("deleted_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Pick<
+        InvoiceDeletionLogRow,
+        "id" | "invoice_id" | "owner_name" | "total_amount" | "deleted_by" | "deleted_at" | "reason"
+      >[];
+    },
+  });
 }

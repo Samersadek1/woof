@@ -79,10 +79,12 @@ import {
   Save,
   Printer,
   Eye,
+  ScrollText,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
+import { useInvoiceDeletionLog } from "@/hooks/useInvoices";
 
 type MemberType = Database["public"]["Enums"]["member_type"];
 type PaymentMethod = Database["public"]["Enums"]["payment_method"];
@@ -1476,6 +1478,67 @@ function PricingTab() {
   );
 }
 
+function InvoiceDeletionLogPanel() {
+  const { data: rows = [], isLoading, error } = useInvoiceDeletionLog();
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Invoice deletion log</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Audit trail when an invoice is deleted from the system.
+        </p>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <div className="p-6 space-y-2">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        ) : error ? (
+          <p className="p-6 text-sm text-destructive">Could not load deletion log.</p>
+        ) : rows.length === 0 ? (
+          <p className="p-6 text-sm text-muted-foreground">No deletions recorded.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead>Invoice ID</TableHead>
+                <TableHead>Owner name</TableHead>
+                <TableHead className="text-right">Total amount</TableHead>
+                <TableHead>Deleted by</TableHead>
+                <TableHead>Deleted at</TableHead>
+                <TableHead>Reason</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="font-mono text-xs">{r.invoice_id ?? "—"}</TableCell>
+                  <TableCell>{r.owner_name ?? "—"}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {r.total_amount != null ? formatAed(r.total_amount) : "—"}
+                  </TableCell>
+                  <TableCell className="max-w-[10rem] truncate text-xs" title={r.deleted_by ?? undefined}>
+                    {r.deleted_by ?? "—"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-sm">
+                    {r.deleted_at ? format(parseISO(r.deleted_at), "d MMM yyyy HH:mm") : "—"}
+                  </TableCell>
+                  <TableCell className="max-w-md text-sm text-muted-foreground">
+                    {r.reason?.trim() ? r.reason : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main page ────────────────────────────────────────────────────────────────
 
 const BillingPage = () => {
@@ -1504,6 +1567,7 @@ const BillingPage = () => {
               <TabsList>
                 <TabsTrigger value="wallet"><Wallet className="mr-1.5 h-4 w-4" /> Wallet</TabsTrigger>
                 <TabsTrigger value="pricing"><Receipt className="mr-1.5 h-4 w-4" /> Pricing</TabsTrigger>
+                <TabsTrigger value="deletion-log"><ScrollText className="mr-1.5 h-4 w-4" /> Deletion log</TabsTrigger>
               </TabsList>
               <Button size="sm" variant="outline" onClick={() => navigate("/billing/invoices")}>
                 <FileText className="mr-1.5 h-4 w-4" /> Invoices list
@@ -1519,6 +1583,9 @@ const BillingPage = () => {
             <TabsContent value="pricing" className="mt-6">
               <PricingTab />
             </TabsContent>
+            <TabsContent value="deletion-log" className="mt-6">
+              <InvoiceDeletionLogPanel />
+            </TabsContent>
           </Tabs>
         )}
 
@@ -1533,6 +1600,7 @@ const BillingPage = () => {
                     <TabsTrigger value="wallet"><Wallet className="mr-1.5 h-4 w-4" /> Wallet</TabsTrigger>
                     <TabsTrigger value="invoices"><FileText className="mr-1.5 h-4 w-4" /> Invoices</TabsTrigger>
                     <TabsTrigger value="pricing"><Receipt className="mr-1.5 h-4 w-4" /> Pricing</TabsTrigger>
+                    <TabsTrigger value="deletion-log"><ScrollText className="mr-1.5 h-4 w-4" /> Deletion log</TabsTrigger>
                   </TabsList>
                   <Button size="sm" variant="outline" onClick={() => navigate("/billing/invoices")}>
                     Open invoices list
@@ -1546,6 +1614,9 @@ const BillingPage = () => {
                 </TabsContent>
                 <TabsContent value="pricing" className="mt-6">
                   <PricingTab />
+                </TabsContent>
+                <TabsContent value="deletion-log" className="mt-6">
+                  <InvoiceDeletionLogPanel />
                 </TabsContent>
               </Tabs>
             ) : (

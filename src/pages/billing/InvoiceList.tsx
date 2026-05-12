@@ -20,7 +20,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Trash2 } from "lucide-react";
+import { MessageCircle, Trash2 } from "lucide-react";
+import { buildOverdueInvoiceWhatsAppUrl } from "@/lib/whatsappInvoiceReminder";
 import type { InvoiceSummary } from "@/hooks/useInvoices";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 
@@ -34,6 +35,22 @@ const STATUSES: InvoiceStatus[] = [
   "paid",
   "voided",
 ];
+
+const WHATSAPP_REMINDER_STATUSES: InvoiceStatus[] = [
+  "draft",
+  "issued",
+  "finalised",
+  "partially_paid",
+  "outstanding",
+  "overdue",
+];
+
+function showOverdueWhatsAppReminder(inv: InvoiceSummary): boolean {
+  return (
+    WHATSAPP_REMINDER_STATUSES.includes(inv.status) &&
+    (inv.status === "overdue" || inv.days_overdue > 0)
+  );
+}
 
 const STATUS_BADGE: Record<string, string> = {
   draft: "border-slate-300 text-slate-700 bg-slate-50",
@@ -229,16 +246,26 @@ export default function InvoiceListPage() {
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead className="text-right">Age</TableHead>
+                    <TableHead className="w-[44px] text-center" aria-label="WhatsApp reminder" />
                     <TableHead className="w-[52px] text-right"> </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {invoices.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No invoices found.</TableCell>
+                      <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">No invoices found.</TableCell>
                     </TableRow>
                   ) : (
-                    invoices.map((inv) => (
+                    invoices.map((inv) => {
+                      const waUrl = showOverdueWhatsAppReminder(inv)
+                        ? buildOverdueInvoiceWhatsAppUrl({
+                            phone: inv.owner_phone,
+                            ownerName: inv.owner_name,
+                            invoiceNumberDisplay: inv.invoice_number?.trim() || inv.id.slice(0, 8),
+                            amountAed: inv.total_aed,
+                          })
+                        : null;
+                      return (
                       <TableRow
                         key={inv.id}
                         className="cursor-pointer hover:bg-muted/40"
@@ -257,6 +284,27 @@ export default function InvoiceListPage() {
                         <TableCell className="text-right tabular-nums">
                           {inv.days_overdue > 0 ? <span className="text-red-600">{inv.days_overdue}d</span> : "0d"}
                         </TableCell>
+                        <TableCell className="p-1 text-center">
+                          {showOverdueWhatsAppReminder(inv) ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-emerald-600 hover:text-emerald-700"
+                              disabled={!waUrl}
+                              title={waUrl ? "Send WhatsApp reminder" : "No phone number on file"}
+                              aria-label="Open WhatsApp overdue reminder"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (waUrl) window.open(waUrl, "_blank", "noopener,noreferrer");
+                              }}
+                            >
+                              <MessageCircle className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <span className="inline-block w-8" />
+                          )}
+                        </TableCell>
                         <TableCell className="text-right p-2">
                           <Button
                             type="button"
@@ -273,7 +321,8 @@ export default function InvoiceListPage() {
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))
+                    );
+                    })
                   )}
                 </TableBody>
               </Table>

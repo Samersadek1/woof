@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { addDays, format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
@@ -7,12 +7,14 @@ import type { Database } from "@/integrations/supabase/types";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
+import { memberTierBadgeClassName, memberTierBadgeLabel } from "@/lib/memberTier";
 
 type PricingRow = Database["public"]["Tables"]["pricing"]["Row"];
 type InvoiceInsert = Database["public"]["Tables"]["invoices"]["Insert"];
@@ -72,6 +74,8 @@ export default function CreateInvoicePage() {
 
   const { data: ownerHits = [] } = useOwners(ownerSearch.trim().length >= 2 ? ownerSearch : undefined);
   const { data: owner } = useOwner(ownerId || "");
+  const linesRef = useRef(lines);
+  linesRef.current = lines;
   const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
 
   useMemo(() => {
@@ -134,6 +138,43 @@ export default function CreateInvoicePage() {
       vat: row.vat,
     });
   };
+
+  useEffect(() => {
+    if (!ownerId || !owner) return;
+    const tier = owner.member_type ?? "standard";
+    let cancelled = false;
+    (async () => {
+      for (const line of linesRef.current) {
+        if (cancelled) return;
+        if (line.customMode || !line.pricingKey || !line.quantity) continue;
+        const { data, error } = await supabase.rpc("resolve_line_price", {
+          p_pricing_key: line.pricingKey,
+          p_quantity: line.quantity,
+          p_tier: tier,
+        });
+        if (error || cancelled) continue;
+        const row = (data as Database["public"]["Functions"]["resolve_line_price"]["Returns"])[0];
+        if (!row) continue;
+        if (cancelled) return;
+        setLines((prev) =>
+          prev.map((l) =>
+            l.id === line.id
+              ? {
+                  ...l,
+                  unitPrice: row.unit_price,
+                  total: row.total,
+                  discount: row.discount_amount,
+                  vat: row.vat,
+                }
+              : l,
+          ),
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerId, owner?.member_type]);
 
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
   const lineDiscount = lines.reduce((s, l) => s + l.discount, 0);
@@ -251,6 +292,21 @@ export default function CreateInvoicePage() {
               )}
             </div>
 
+            {ownerId && owner?.id === ownerId && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-muted-foreground">Selected client</span>
+                <span className="text-sm font-semibold">{ownerLabel}</span>
+                {memberTierBadgeLabel(owner.member_type) ? (
+                  <Badge
+                    variant="outline"
+                    className={memberTierBadgeClassName(owner.member_type)}
+                  >
+                    {memberTierBadgeLabel(owner.member_type)}
+                  </Badge>
+                ) : null}
+              </div>
+            )}
+
             <div className="grid gap-3 md:grid-cols-3">
               <div className="space-y-1">
                 <Label>Service type</Label>
@@ -266,7 +322,17 @@ export default function CreateInvoicePage() {
               </div>
               <div className="space-y-1">
                 <Label>Owner tier</Label>
-                <Input value={owner?.member_type ?? "standard"} disabled />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input className="max-w-[10rem]" value={owner?.member_type ?? "standard"} disabled />
+                  {owner && memberTierBadgeLabel(owner.member_type) ? (
+                    <Badge
+                      variant="outline"
+                      className={memberTierBadgeClassName(owner.member_type)}
+                    >
+                      {memberTierBadgeLabel(owner.member_type)}
+                    </Badge>
+                  ) : null}
+                </div>
               </div>
             </div>
           </CardContent>
