@@ -67,6 +67,10 @@ import { parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
 import type { DogSizeFormValue } from "@/lib/dogSizeForm";
 import {
   computeNewGroomingAppointmentOriginalAed,
+  clampMattingFeeAed,
+  clampHeavyDogFeeAed,
+  MATTING_FEE_AED_MIN,
+  HEAVY_DOG_FEE_AED_MIN,
   groomingPricingCheckboxToDbService,
   isGroomingPricingCheckbox,
   resolvePrimaryGroomingCheckbox,
@@ -142,7 +146,9 @@ type GroomingServiceCheckbox =
   | "ear_cleaning"
   | "pawdicure"
   | "paw_wash"
-  | "malaseb_bath";
+  | "malaseb_bath"
+  | "matting_fee"
+  | "heavy_dog_fee";
 
 const DISCOUNT_QUICK_PCTS = [5, 10, 15, 20, 25, 30, 50, 100] as const;
 
@@ -150,6 +156,8 @@ const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
   value: GroomingServiceCheckbox;
   label: string;
   mapsTo: GroomingService;
+  /** Optional AED range for staff-entered add-on amounts */
+  manualPriceRange?: { min: number; max: number; default: number };
 }> = [
   { value: "full_groom", label: "Full groom", mapsTo: "full_groom" },
   { value: "deshedding", label: "Deshedding", mapsTo: "deshedding" },
@@ -163,6 +171,18 @@ const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
   { value: "pawdicure", label: "Pawdicure", mapsTo: "pawdicure" },
   { value: "paw_wash", label: "Paw wash", mapsTo: "pawdicure" },
   { value: "malaseb_bath", label: "Malaseb bath", mapsTo: "full_bath" },
+  {
+    value: "matting_fee",
+    label: "Matting fee",
+    mapsTo: "brushing",
+    manualPriceRange: { min: 63, max: 126, default: 63 },
+  },
+  {
+    value: "heavy_dog_fee",
+    label: "Heavy dog fee",
+    mapsTo: "brushing",
+    manualPriceRange: { min: 47, max: 126, default: 47 },
+  },
 ];
 
 function parseGroomingMeta(
@@ -194,6 +214,26 @@ function parseGroomingMeta(
     ? estimatedPickupLine.slice("estimated pickup:".length).trim() || null
     : null;
   return { services, groomingDate, estimatedPickup };
+}
+
+/** Matches saved `Services:` tokens like `Matting fee (AED 80)` to a checkbox/filter label. */
+function serviceTokenMatchesSavedOption(savedToken: string, optionLabel: string): boolean {
+  const t = savedToken.trim().toLowerCase();
+  const l = optionLabel.toLowerCase();
+  if (t === l) return true;
+  if (t.startsWith(`${l} (`)) return true;
+  if (t.startsWith(`${l} —`) || t.startsWith(`${l} -`)) return true;
+  return false;
+}
+
+function chipMatchesServiceFilter(label: string, filter: string): boolean {
+  if (filter === "all") return true;
+  const fl = filter.toLowerCase().trim();
+  const ll = label.trim().toLowerCase();
+  if (ll === fl) return true;
+  if (ll.startsWith(`${fl} (`)) return true;
+  if (ll.startsWith(`${fl} —`) || ll.startsWith(`${fl} -`)) return true;
+  return false;
 }
 
 function appointmentServiceLabels(a: GroomingAppointmentWithJoins): string[] {
@@ -242,14 +282,13 @@ function serviceCheckboxValuesFromAppointment(
   a: GroomingAppointmentWithJoins,
 ): GroomingServiceCheckbox[] {
   const { services } = parseGroomingMeta(a.notes);
-  const labelSet = new Set(services.map((s) => s.trim().toLowerCase()).filter(Boolean));
 
   /** Prefer first saved service label so distinct checkboxes that share one enum (e.g. Bath only vs Full bath) round-trip correctly. */
   let primary: GroomingServiceCheckbox | undefined;
   if (services.length > 0) {
     const first = services[0].trim();
-    const byLabel = GROOMING_SERVICE_CHECKBOX_OPTIONS.find(
-      (o) => o.label.toLowerCase() === first.toLowerCase(),
+    const byLabel = GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) =>
+      serviceTokenMatchesSavedOption(first, o.label),
     );
     if (byLabel) primary = byLabel.value;
   }
@@ -259,7 +298,7 @@ function serviceCheckboxValuesFromAppointment(
   }
 
   const extras = GROOMING_SERVICE_CHECKBOX_OPTIONS.filter((o) =>
-    labelSet.has(o.label.toLowerCase()),
+    services.some((token) => serviceTokenMatchesSavedOption(token, o.label)),
   ).map((o) => o.value);
   const set = new Set<GroomingServiceCheckbox>();
   if (primary) set.add(primary);
@@ -625,6 +664,8 @@ const GroomingPage = () => {
   const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
   ]);
+  const [mattingFeeAed, setMattingFeeAed] = useState(String(MATTING_FEE_AED_MIN));
+  const [heavyDogFeeAed, setHeavyDogFeeAed] = useState(String(HEAVY_DOG_FEE_AED_MIN));
   const [dogSize, setDogSize] = useState<DogSizeFormValue | null>(null);
   const [apptDate, setApptDate] = useState<Date>(new Date());
   const [groomingDate, setGroomingDate] = useState<Date>(new Date());
@@ -733,9 +774,20 @@ const GroomingPage = () => {
     }
   }, [sheetOpen, ownerId, petsIdFingerprint, pets.length]);
 
+  const newApptManualAddonAed = useMemo(() => {
+    const out: { matting_fee?: number; heavy_dog_fee?: number } = {};
+    if (selectedServices.includes("matting_fee")) {
+      out.matting_fee = clampMattingFeeAed(parseFloat(mattingFeeAed) || MATTING_FEE_AED_MIN);
+    }
+    if (selectedServices.includes("heavy_dog_fee")) {
+      out.heavy_dog_fee = clampHeavyDogFeeAed(parseFloat(heavyDogFeeAed) || HEAVY_DOG_FEE_AED_MIN);
+    }
+    return Object.keys(out).length ? out : null;
+  }, [selectedServices, mattingFeeAed, heavyDogFeeAed]);
+
   const newApptComputedOriginalAed = useMemo(
-    () => computeNewGroomingAppointmentOriginalAed(selectedServices, dogSize),
-    [selectedServices, dogSize],
+    () => computeNewGroomingAppointmentOriginalAed(selectedServices, dogSize, newApptManualAddonAed),
+    [selectedServices, dogSize, newApptManualAddonAed],
   );
 
   const newApptPriceManualRef = useRef(false);
@@ -796,6 +848,8 @@ const GroomingPage = () => {
     setApptTime("10:00");
     setDurationMin(60);
     setSelectedServices(["full_groom"]);
+    setMattingFeeAed(String(MATTING_FEE_AED_MIN));
+    setHeavyDogFeeAed(String(HEAVY_DOG_FEE_AED_MIN));
     setDogSize(null);
     setGroomerName("");
     setShowPreferredGroomerHint(false);
@@ -952,9 +1006,19 @@ const GroomingPage = () => {
     }
 
     const selectedServiceLabels = selectedServices
-      .map((svc) =>
-        GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.label ?? svc,
-      )
+      .map((svc) => {
+        const opt = GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc);
+        if (!opt) return svc;
+        if (svc === "matting_fee") {
+          const v = clampMattingFeeAed(parseFloat(mattingFeeAed) || MATTING_FEE_AED_MIN);
+          return `${opt.label} (AED ${v})`;
+        }
+        if (svc === "heavy_dog_fee") {
+          const v = clampHeavyDogFeeAed(parseFloat(heavyDogFeeAed) || HEAVY_DOG_FEE_AED_MIN);
+          return `${opt.label} (AED ${v})`;
+        }
+        return opt.label;
+      })
       .join(", ");
     const originalForNote =
       baseForCharge != null ? baseForCharge.toFixed(2) : String(serviceRate ?? "0");
@@ -1053,7 +1117,7 @@ const GroomingPage = () => {
     const labels = appointmentServiceLabels(a);
     const byChip =
       exactFilter === "all" ||
-      labels.some((label) => label.toLowerCase() === exactFilter.toLowerCase());
+      labels.some((label) => chipMatchesServiceFilter(label, exactFilter));
     const q = textFilter.trim().toLowerCase();
     const byText = !q || labels.some((label) => label.toLowerCase().includes(q));
     return byChip && byText;
@@ -1966,26 +2030,59 @@ const GroomingPage = () => {
                 <div className="grid grid-cols-2 gap-2 rounded-lg border p-3">
                   {GROOMING_SERVICE_CHECKBOX_OPTIONS.map((o) => {
                     const checked = selectedServices.includes(o.value);
+                    const r = o.manualPriceRange;
                     return (
                       <label
                         key={o.value}
-                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
+                        className={cn(
+                          "flex gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60",
+                          r ? "col-span-2 flex-col sm:flex-row sm:items-center" : "items-center",
+                        )}
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const shouldCheck = e.target.checked;
-                            setSelectedServices((prev) => {
-                              if (shouldCheck) {
-                                if (prev.includes(o.value)) return prev;
-                                return [...prev, o.value];
+                        <span className="flex min-w-0 items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const shouldCheck = e.target.checked;
+                              if (shouldCheck && r) {
+                                if (o.value === "matting_fee") {
+                                  setMattingFeeAed(String(r.default));
+                                }
+                                if (o.value === "heavy_dog_fee") {
+                                  setHeavyDogFeeAed(String(r.default));
+                                }
                               }
-                              return prev.filter((v) => v !== o.value);
-                            });
-                          }}
-                        />
-                        <span>{o.label}</span>
+                              setSelectedServices((prev) => {
+                                if (shouldCheck) {
+                                  if (prev.includes(o.value)) return prev;
+                                  return [...prev, o.value];
+                                }
+                                return prev.filter((v) => v !== o.value);
+                              });
+                            }}
+                          />
+                          <span>{o.label}</span>
+                        </span>
+                        {r && checked ? (
+                          <div className="flex shrink-0 items-center gap-1.5 pl-6 sm:pl-0">
+                            <span className="text-xs text-muted-foreground">AED</span>
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              min={r.min}
+                              max={r.max}
+                              step={1}
+                              className="h-8 w-[5.5rem] text-right text-sm"
+                              value={o.value === "matting_fee" ? mattingFeeAed : heavyDogFeeAed}
+                              onChange={(e) => {
+                                const next = e.target.value;
+                                if (o.value === "matting_fee") setMattingFeeAed(next);
+                                else setHeavyDogFeeAed(next);
+                              }}
+                            />
+                          </div>
+                        ) : null}
                       </label>
                     );
                   })}

@@ -14,7 +14,9 @@ export type GroomingPricingCheckbox =
   | "ear_cleaning"
   | "pawdicure"
   | "paw_wash"
-  | "malaseb_bath";
+  | "malaseb_bath"
+  | "matting_fee"
+  | "heavy_dog_fee";
 
 const ALL_PRICING_CHECKBOXES: readonly GroomingPricingCheckbox[] = [
   "full_groom",
@@ -29,7 +31,27 @@ const ALL_PRICING_CHECKBOXES: readonly GroomingPricingCheckbox[] = [
   "pawdicure",
   "paw_wash",
   "malaseb_bath",
+  "matting_fee",
+  "heavy_dog_fee",
 ] as const;
+
+export const MATTING_FEE_AED_MIN = 63;
+export const MATTING_FEE_AED_MAX = 126;
+export const HEAVY_DOG_FEE_AED_MIN = 47;
+export const HEAVY_DOG_FEE_AED_MAX = 126;
+
+export type ManualGroomingAddonAed = {
+  matting_fee?: number;
+  heavy_dog_fee?: number;
+};
+
+export function clampMattingFeeAed(n: number): number {
+  return Math.min(MATTING_FEE_AED_MAX, Math.max(MATTING_FEE_AED_MIN, n));
+}
+
+export function clampHeavyDogFeeAed(n: number): number {
+  return Math.min(HEAVY_DOG_FEE_AED_MAX, Math.max(HEAVY_DOG_FEE_AED_MIN, n));
+}
 
 export function isGroomingPricingCheckbox(v: string): v is GroomingPricingCheckbox {
   return (ALL_PRICING_CHECKBOXES as readonly string[]).includes(v);
@@ -114,6 +136,9 @@ export function groomingPricingCheckboxToDbService(cb: GroomingPricingCheckbox):
     case "pawdicure":
     case "paw_wash":
       return "pawdicure";
+    case "matting_fee":
+    case "heavy_dog_fee":
+      return "brushing";
     default:
       return "full_groom";
   }
@@ -126,6 +151,7 @@ export function groomingPricingCheckboxToDbService(cb: GroomingPricingCheckbox):
 export function computeNewGroomingAppointmentOriginalAed(
   selectedServices: readonly string[],
   dogSize: DogSizeFormValue | null,
+  manualAddons?: ManualGroomingAddonAed | null,
 ): number | null {
   const selected = selectedServices.filter(isGroomingPricingCheckbox);
   if (selected.length === 0) return null;
@@ -154,6 +180,20 @@ export function computeNewGroomingAppointmentOriginalAed(
   let addonSum = 0;
   for (const key of selected) {
     if (bathAndBlow && key === "blow_dry") continue;
+    if (key === "matting_fee") {
+      const raw = manualAddons?.matting_fee;
+      if (typeof raw === "number" && Number.isFinite(raw)) {
+        addonSum += clampMattingFeeAed(raw);
+      }
+      continue;
+    }
+    if (key === "heavy_dog_fee") {
+      const raw = manualAddons?.heavy_dog_fee;
+      if (typeof raw === "number" && Number.isFinite(raw)) {
+        addonSum += clampHeavyDogFeeAed(raw);
+      }
+      continue;
+    }
     const add = ADDON_AED[key];
     if (typeof add === "number") addonSum += add;
   }
