@@ -72,6 +72,7 @@ import {
 } from "@/lib/transportPricing";
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
 import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErrors";
+import { DEFAULT_DOG_SIZE, type DogSizeFormValue } from "@/lib/dogSizeForm";
 import {
   ChevronLeft,
   ChevronRight,
@@ -84,6 +85,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
+import { DogSizeField } from "@/components/DogSizeField";
 import { bookingAnyPetHasAlerts, parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
@@ -850,6 +852,8 @@ type NewBookingForm = {
       special_instructions: string;
     }
   >;
+  /** Client-selected size (Small / Medium / Large / Extra Large). */
+  dog_size: DogSizeFormValue;
 };
 
 const BLANK_FORM: NewBookingForm = {
@@ -871,6 +875,7 @@ const BLANK_FORM: NewBookingForm = {
   addon_price_aed: {},
   room_rate_type: "off_peak",
   pet_care_by_pet_id: {},
+  dog_size: DEFAULT_DOG_SIZE,
 };
 
 export type DogBoardingCalendarProps = {
@@ -1223,6 +1228,7 @@ export function DogBoardingCalendar({
       staff_id: null,
       status: "confirmed",
       booking_type: "boarding",
+      dog_size: form.dog_size,
     };
 
     createBooking.mutate(payload, {
@@ -1754,6 +1760,74 @@ export function DogBoardingCalendar({
               </Select>
             </div>
 
+            <Separator />
+
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Add-ons</Label>
+              {form.pet_ids.length > 0 && (
+                <p className="text-xs text-muted-foreground leading-snug">
+                  <span className="font-medium text-foreground">Pets:</span>{" "}
+                  {selectedPetsSizeSummary(ownerPets, form.pet_ids)}
+                </p>
+              )}
+              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Grooming add-ons ({selectedDogSpecies === "cat" ? "cat-safe services" : "all dog services"})
+                </p>
+                <div className="space-y-2">
+                  {visibleDogAddonOptions.map((addon) => {
+                    const checked = !!form.addon_enabled[addon.id];
+                    const value = form.addon_price_aed[addon.id] ?? "0";
+                    return (
+                      <div key={addon.id} className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={`addon_${addon.id}`}
+                            checked={checked}
+                            onCheckedChange={(v) =>
+                              setForm((f) => ({
+                                ...f,
+                                addon_enabled: { ...f.addon_enabled, [addon.id]: !!v },
+                              }))
+                            }
+                          />
+                          <Label htmlFor={`addon_${addon.id}`} className="cursor-pointer font-normal">
+                            {addon.label}
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">AED</span>
+                          <Input
+                            id={`addon_${addon.id}_price`}
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            className="h-8 w-[7rem]"
+                            value={value}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                addon_price_aed: { ...f.addon_price_aed, [addon.id]: e.target.value },
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Only checked add-ons with price above AED 0 are added to the invoice.
+                </p>
+              </div>
+
+              <DogSizeField
+                name="boarding-dog-new-booking"
+                value={form.dog_size}
+                onChange={(v) => setForm((f) => ({ ...f, dog_size: v }))}
+              />
+            </div>
+
             {/* Dates */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1920,66 +1994,7 @@ export function DogBoardingCalendar({
 
             <Separator />
 
-            {/* Add-ons */}
             <div className="space-y-3">
-              <Label className="text-sm font-medium">Add-ons</Label>
-              {form.pet_ids.length > 0 && (
-                <p className="text-xs text-muted-foreground leading-snug">
-                  <span className="font-medium text-foreground">Pets:</span>{" "}
-                  {selectedPetsSizeSummary(ownerPets, form.pet_ids)}
-                </p>
-              )}
-              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Grooming add-ons ({selectedDogSpecies === "cat" ? "cat-safe services" : "all dog services"})
-                </p>
-                <div className="space-y-2">
-                  {visibleDogAddonOptions.map((addon) => {
-                    const checked = !!form.addon_enabled[addon.id];
-                    const value = form.addon_price_aed[addon.id] ?? "0";
-                    return (
-                      <div key={addon.id} className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id={`addon_${addon.id}`}
-                            checked={checked}
-                            onCheckedChange={(v) =>
-                              setForm((f) => ({
-                                ...f,
-                                addon_enabled: { ...f.addon_enabled, [addon.id]: !!v },
-                              }))
-                            }
-                          />
-                          <Label htmlFor={`addon_${addon.id}`} className="cursor-pointer font-normal">
-                            {addon.label}
-                          </Label>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">AED</span>
-                          <Input
-                            id={`addon_${addon.id}_price`}
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            className="h-8 w-[7rem]"
-                            value={value}
-                            onChange={(e) =>
-                              setForm((f) => ({
-                                ...f,
-                                addon_price_aed: { ...f.addon_price_aed, [addon.id]: e.target.value },
-                              }))
-                            }
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-snug">
-                  Only checked add-ons with price above AED 0 are added to the invoice.
-                </p>
-              </div>
-
               {form.pet_ids.length > 0 && (
                 <div className="rounded-lg border-2 border-primary/25 bg-primary/5 p-4 space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

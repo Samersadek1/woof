@@ -67,7 +67,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
+import { DogSizeField } from "@/components/DogSizeField";
 import { parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
+import { DEFAULT_DOG_SIZE, type DogSizeFormValue } from "@/lib/dogSizeForm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -622,6 +624,7 @@ const GroomingPage = () => {
   const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
   ]);
+  const [dogSize, setDogSize] = useState<DogSizeFormValue>(DEFAULT_DOG_SIZE);
   const [apptDate, setApptDate] = useState<Date>(new Date());
   const [groomingDate, setGroomingDate] = useState<Date>(new Date());
   const [apptTime, setApptTime] = useState("10:00");
@@ -833,6 +836,7 @@ const GroomingPage = () => {
     setApptTime("10:00");
     setDurationMin(60);
     setSelectedServices(["full_groom"]);
+    setDogSize(DEFAULT_DOG_SIZE);
     setGroomerName("");
     setShowPreferredGroomerHint(false);
     lastPrefilledOwnerIdForGroomer.current = null;
@@ -1019,6 +1023,7 @@ const GroomingPage = () => {
       notes: composedNotes || null,
       booking_id: linkBoarding ? bookingId : null,
       payment_method: paymentMethod,
+      dog_size: dogSize,
     };
 
     try {
@@ -2027,6 +2032,13 @@ const GroomingPage = () => {
                   })}
                 </div>
               </div>
+
+              <DogSizeField
+                name="grooming-new-appt-dog-size"
+                value={dogSize}
+                onChange={setDogSize}
+              />
+
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-2">
                   <Label>Appointment Date</Label>

@@ -258,6 +258,7 @@ export type Database = {
           check_out_date: string
           created_at: string
           do_not_move: boolean
+          dog_size: string | null
           dropoff_required: boolean
           extended_from_booking_id: string | null
           id: string
@@ -284,6 +285,7 @@ export type Database = {
           check_out_date: string
           created_at?: string
           do_not_move?: boolean
+          dog_size?: string | null
           dropoff_required?: boolean
           extended_from_booking_id?: string | null
           id?: string
@@ -312,6 +314,7 @@ export type Database = {
           check_out_date?: string
           created_at?: string
           do_not_move?: boolean
+          dog_size?: string | null
           dropoff_required?: boolean
           extended_from_booking_id?: string | null
           id?: string
@@ -543,6 +546,7 @@ export type Database = {
           checked_in_at: string | null
           checked_out_at: string | null
           created_at: string
+          dog_size: string | null
           dropoff_used: boolean
           id: string
           logged_by: string | null
@@ -560,6 +564,7 @@ export type Database = {
           checked_in_at?: string | null
           checked_out_at?: string | null
           created_at?: string
+          dog_size?: string | null
           dropoff_used?: boolean
           id?: string
           logged_by?: string | null
@@ -577,6 +582,7 @@ export type Database = {
           checked_in_at?: string | null
           checked_out_at?: string | null
           created_at?: string
+          dog_size?: string | null
           dropoff_used?: boolean
           id?: string
           logged_by?: string | null
@@ -725,6 +731,7 @@ export type Database = {
           coat_type: string | null
           completed_at: string | null
           created_at: string
+          dog_size: string | null
           duration_minutes: number | null
           groomer_id: string | null
           grooming_notes: string | null
@@ -749,6 +756,7 @@ export type Database = {
           coat_type?: string | null
           completed_at?: string | null
           created_at?: string
+          dog_size?: string | null
           duration_minutes?: number | null
           groomer_id?: string | null
           grooming_notes?: string | null
@@ -773,6 +781,7 @@ export type Database = {
           coat_type?: string | null
           completed_at?: string | null
           created_at?: string
+          dog_size?: string | null
           duration_minutes?: number | null
           groomer_id?: string | null
           grooming_notes?: string | null

@@ -48,6 +48,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { DogSizeField } from "@/components/DogSizeField";
+import { DEFAULT_DOG_SIZE, type DogSizeFormValue } from "@/lib/dogSizeForm";
 import {
   Select,
   SelectContent,
@@ -596,6 +598,7 @@ function PlannerTab() {
     transport_zone: "dubai_shared" as TransportZone,
     logged_by: "",
     remark: "",
+    dog_size: DEFAULT_DOG_SIZE as DogSizeFormValue,
   });
   const [isSubmittingCheckIn, setIsSubmittingCheckIn] = useState(false);
 
@@ -899,6 +902,7 @@ function PlannerTab() {
           dropoff_used: checkInDraft.dropoff_used,
           logged_by: checkInDraft.logged_by || null,
           remark: checkInDraft.remark || null,
+          dog_size: checkInDraft.dog_size,
         });
 
         sessionsCreated[petId] = session.id;
@@ -1028,6 +1032,7 @@ function PlannerTab() {
         dropoff_used: false,
         logged_by: "",
         remark: "",
+        dog_size: DEFAULT_DOG_SIZE,
       }));
     }
 
@@ -1183,6 +1188,12 @@ function PlannerTab() {
                   </div>
                 </div>
               )}
+
+              <DogSizeField
+                name="daycare-checkin-dog-size"
+                value={checkInDraft.dog_size}
+                onChange={(v) => setCheckInDraft((prev) => ({ ...prev, dog_size: v }))}
+              />
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">

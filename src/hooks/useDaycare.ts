@@ -188,6 +188,8 @@ export type AddDaycareDayPayload = AttendancePayload & {
   pet_id:       string;
   owner_id:     string;
   package_id?:  string | null;
+  /** Client-selected size label (Small / Medium / Large / Extra Large). */
+  dog_size?: string | null;
 };
 
 /**
@@ -209,6 +211,7 @@ export function useAddDaycareDay() {
       pickup_used,
       dropoff_used,
       logged_by,
+      dog_size,
     }: AddDaycareDayPayload) => {
       // Prevent duplicate same-day check-ins for the same pet.
       const { data: existing, error: existingErr } = await supabase
@@ -235,6 +238,7 @@ export function useAddDaycareDay() {
         pickup_used:   pickup_used  ?? false,
         dropoff_used:  dropoff_used ?? false,
         logged_by:     logged_by    ?? null,
+        dog_size:      dog_size     ?? null,
       } as unknown as DaycareSessionInsert;
 
       const { data: session, error } = await supabase
