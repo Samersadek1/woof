@@ -43,7 +43,9 @@ export type KennelCardBooking = {
       microchip_number: string | null;
       feeding_instructions: string | null;
       medications: string | null;
+      medical_conditions: string | null;
       behavioural_notes: string | null;
+      other_notes: string | null;
       vet_name: string | null;
       vet_phone: string | null;
     } | null;
@@ -78,6 +80,82 @@ function ageFromDob(dob: string | null): string {
 function displayMedications(raw: string | null): string {
   if (!raw?.trim()) return "None listed";
   return raw.trim();
+}
+
+const KENNEL_BEHAVIORAL_KEYWORDS = ["aggressive", "reactive", "anxious", "bite"] as const;
+
+function kennelBottomFeedingInstructions(
+  primaryCare: KennelCardBooking["booking_pets"][0] | null,
+  primaryPet: KennelCardBooking["booking_pets"][0]["pets"],
+): string {
+  return (
+    primaryCare?.feeding_notes?.trim() ||
+    primaryPet?.feeding_instructions?.trim() ||
+    ""
+  );
+}
+
+function kennelBottomMedicationSpecialCare(
+  primaryCare: KennelCardBooking["booking_pets"][0] | null,
+  primaryPet: KennelCardBooking["booking_pets"][0]["pets"],
+): string {
+  const parts = [
+    primaryCare?.medication_notes?.trim(),
+    primaryPet?.medications?.trim(),
+    primaryPet?.medical_conditions?.trim(),
+  ].filter(Boolean) as string[];
+  return parts.join("\n\n");
+}
+
+function kennelBottomBehavioralNotes(primaryPet: KennelCardBooking["booking_pets"][0]["pets"]): {
+  text: string;
+  flagged: boolean;
+} {
+  const parts = [
+    primaryPet?.behavioural_notes?.trim(),
+    primaryPet?.other_notes?.trim(),
+  ].filter(Boolean) as string[];
+  const text = parts.join("\n\n");
+  const lower = text.toLowerCase();
+  const flagged = KENNEL_BEHAVIORAL_KEYWORDS.some((k) => lower.includes(k));
+  return { text, flagged };
+}
+
+function KennelCardBottomField({
+  label,
+  value,
+  compact,
+  flagged,
+  flagCaption,
+}: {
+  label: string;
+  value: string;
+  compact?: boolean;
+  flagged?: boolean;
+  flagCaption?: string;
+}) {
+  const pad = compact ? "min-h-[4.5rem]" : "min-h-[5.5rem]";
+  return (
+    <div className={`border border-black ${compact ? "p-1.5" : "p-2"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-black pb-1">
+        <p className={`print-label font-semibold uppercase ${compact ? "text-[10px]" : "text-[11px]"}`}>
+          {label}
+        </p>
+        {flagged ? (
+          <span
+            className={`print-keep-color rounded border border-red-600 bg-red-50 px-1.5 py-0.5 font-semibold text-red-800 ${compact ? "text-[9px]" : "text-[10px]"}`}
+          >
+            {flagCaption ?? "Flag"}
+          </span>
+        ) : null}
+      </div>
+      <div
+        className={`${pad} whitespace-pre-wrap ${compact ? "mt-1 text-[10px]" : "mt-1.5 text-[11px]"} print-sans`}
+      >
+        {value.trim() ? value : "\u00a0"}
+      </div>
+    </div>
+  );
 }
 
 function stayDates(checkInDate: string, checkOutDate: string): string[] {
@@ -146,6 +224,10 @@ export function KennelCardBlock({
   const ownerItems = (booking.booking_items ?? []).filter(
     (item) => item.description !== OVERVIEW_ITEM_DESCRIPTION,
   );
+
+  const bottomFeeding = kennelBottomFeedingInstructions(primaryCare, primaryPet);
+  const bottomMed = kennelBottomMedicationSpecialCare(primaryCare, primaryPet);
+  const bottomBeh = kennelBottomBehavioralNotes(primaryPet);
 
   return (
     <article
@@ -315,6 +397,33 @@ export function KennelCardBlock({
         )}
       </section>
 
+      <section className={`mt-3 space-y-2 border border-black ${compact ? "p-1.5" : "p-2"}`}>
+        <p
+          className={`print-label border-b border-black pb-1 font-semibold uppercase ${compact ? "text-[10px]" : "text-[11px]"}`}
+        >
+          Feeding &amp; care (staff)
+        </p>
+        <div className={`grid gap-2 ${compact ? "md:grid-cols-1" : "md:grid-cols-3"} grid-cols-1`}>
+          <KennelCardBottomField
+            label="Feeding Instructions"
+            value={bottomFeeding}
+            compact={compact}
+          />
+          <KennelCardBottomField
+            label="Medication / Special Care"
+            value={bottomMed}
+            compact={compact}
+          />
+          <KennelCardBottomField
+            label="Behavioral Notes"
+            value={bottomBeh.text}
+            compact={compact}
+            flagged={bottomBeh.flagged}
+            flagCaption="Review keywords"
+          />
+        </div>
+      </section>
+
       <footer className="mt-3 border-t border-black pt-2 print-sans text-[11px]">
         <div className="flex flex-wrap justify-between gap-2">
           <p>Ref: {booking.booking_ref ?? booking.id.slice(0, 8)}</p>
@@ -339,7 +448,7 @@ export async function fetchKennelCardData(bookingId: string) {
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
           id, name, photo_url, breed, size_category, date_of_birth, microchip_number,
-          feeding_instructions, medications, behavioural_notes, vet_name, vet_phone
+          feeding_instructions, medications, medical_conditions, behavioural_notes, other_notes, vet_name, vet_phone
         )
       )
     `,
@@ -364,7 +473,7 @@ export async function fetchKennelCardsAsOf(asOfDate: string) {
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
           id, name, photo_url, breed, size_category, date_of_birth, microchip_number,
-          feeding_instructions, medications, behavioural_notes, vet_name, vet_phone
+          feeding_instructions, medications, medical_conditions, behavioural_notes, other_notes, vet_name, vet_phone
         )
       )
     `,

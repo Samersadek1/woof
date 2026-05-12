@@ -37,6 +37,13 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -49,6 +56,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { CheckInSheet } from "@/components/CheckInSheet";
 import { CheckOutSheet } from "@/components/CheckOutSheet";
@@ -81,6 +96,7 @@ import {
   ExternalLink,
   Eye,
   Luggage,
+  LayoutGrid,
   Printer,
   TriangleAlert,
 } from "lucide-react";
@@ -3589,6 +3605,59 @@ type Species = "dog" | "cat";
 type BoardingListPreset = "today" | "tomorrow" | "next7";
 type BoardingListFocus = "all" | "check-ins" | "check-outs";
 
+const OCCUPANCY_BOOKING_SELECT =
+  "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts))";
+
+const OCCUPANCY_SUITE_GROUPS: readonly string[] = [
+  "Standard Suite",
+  "Deluxe Suite",
+  "Royal Suite",
+  "Presidential Suite",
+  "Little Gems Chalet",
+  "Little Gems Community Board",
+  "Family Room",
+  "Other",
+];
+
+function boardingBookingOverlapsDate(
+  b: Pick<BookingWithDetails, "check_in_date" | "check_out_date" | "status">,
+  asOf: string,
+): boolean {
+  if (b.status === "cancelled") return false;
+  return b.check_in_date <= asOf && b.check_out_date > asOf;
+}
+
+function occupancyFacilityRooms(rooms: Room[], species: Species): Room[] {
+  return rooms.filter((r) => r.is_active && (species === "cat" ? r.wing === "cattery" : r.wing !== "cattery"));
+}
+
+function occupancySuiteGroupLabel(room: Room, species: Species): string {
+  if (species === "cat") {
+    if (room.wing !== "cattery") return "Other";
+    if (room.room_type === "cattery_super_presidential") return "Presidential Suite";
+    if (room.room_type === "cattery_presidential") return "Royal Suite";
+    if (room.room_type === "cattery_deluxe") return "Deluxe Suite";
+    return "Other";
+  }
+  const pc = (room.pricing_category ?? "").trim().toLowerCase();
+  if (pc === "standard") return "Standard Suite";
+  if (pc === "deluxe") return "Deluxe Suite";
+  if (pc === "royal") return "Royal Suite";
+  if (pc === "presidential") return "Presidential Suite";
+  if (pc === "little_gems_chalet") return "Little Gems Chalet";
+  if (pc === "little_gems_community") return "Little Gems Community Board";
+  if (pc === "family") return "Family Room";
+  if (pc.startsWith("cattery")) return "Other";
+
+  if (room.wing === "bond_rooms") return "Little Gems Chalet";
+  if (room.wing === "dluxe" || room.wing === "standard_room") return "Little Gems Community Board";
+  if (room.room_type === "family_room") return "Family Room";
+  const rt = String(room.room_type ?? "");
+  if (rt.includes("presidential")) return "Presidential Suite";
+  if (rt.includes("royal") || room.room_type === "royal_annex") return "Royal Suite";
+  return "Standard Suite";
+}
+
 function BoardingOperationsList({
   species,
   initialDatePreset = "today",
@@ -3762,9 +3831,187 @@ function BoardingHubPage() {
     }
   }, [normalizedDate]);
 
+  const [occupancyOpen, setOccupancyOpen] = useState(false);
+  const [occupancyDate, setOccupancyDate] = useState(todayStr);
+
+  const { data: facilityRooms = [] } = useRooms();
+
+  const { data: occRaw = [], isFetching: occLoading } = useQuery({
+    queryKey: ["boarding", "occupancy-bookings", occupancyDate, species],
+    enabled: occupancyOpen && !!occupancyDate,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select(OCCUPANCY_BOOKING_SELECT)
+        .eq("booking_type", "boarding")
+        .lte("check_in_date", occupancyDate)
+        .gt("check_out_date", occupancyDate)
+        .neq("status", "cancelled");
+      if (error) throw error;
+      return (data ?? []) as BookingWithDetails[];
+    },
+  });
+
+  const occupancyStats = useMemo(() => {
+    const occBookingsList = occRaw as BookingWithDetails[];
+    const roomsPool = occupancyFacilityRooms(facilityRooms, species);
+    const poolIds = new Set(roomsPool.map((r) => r.id));
+    const total = roomsPool.length;
+
+    const occupiedByRoomId = new Map<string, BookingWithDetails>();
+    for (const b of occBookingsList) {
+      if (!b.room_id || !poolIds.has(b.room_id)) continue;
+      if (!boardingBookingOverlapsDate(b, occupancyDate)) continue;
+      if (!occupiedByRoomId.has(b.room_id)) occupiedByRoomId.set(b.room_id, b);
+    }
+    const occupiedCount = occupiedByRoomId.size;
+    const availableCount = Math.max(0, total - occupiedCount);
+    const pct = total > 0 ? Math.round((occupiedCount / total) * 1000) / 10 : 0;
+
+    const byGroup = new Map<string, { occupied: { room: Room; booking: BookingWithDetails }[]; available: Room[] }>();
+    for (const g of OCCUPANCY_SUITE_GROUPS) {
+      byGroup.set(g, { occupied: [], available: [] });
+    }
+
+    const sortRooms = (a: Room, b: Room) =>
+      a.room_number.localeCompare(b.room_number, undefined, { numeric: true });
+
+    for (const room of roomsPool) {
+      const g = occupancySuiteGroupLabel(room, species);
+      const bucket = byGroup.get(g);
+      if (!bucket) continue;
+      const bk = occupiedByRoomId.get(room.id);
+      if (bk) bucket.occupied.push({ room, booking: bk });
+      else bucket.available.push(room);
+    }
+    for (const b of byGroup.values()) {
+      b.occupied.sort((x, y) => sortRooms(x.room, y.room));
+      b.available.sort(sortRooms);
+    }
+
+    return { total, occupiedCount, availableCount, pct, byGroup };
+  }, [occRaw, facilityRooms, species, occupancyDate]);
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       <TopBar title="Boarding" />
+
+      <Dialog open={occupancyOpen} onOpenChange={setOccupancyOpen}>
+        <DialogContent className="flex max-h-[90vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+          <DialogHeader className="border-b px-6 py-4 text-left">
+            <DialogTitle className="pr-8">Occupancy Report</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              {species === "cat" ? "Cat boarding" : "Dog boarding"} · as of{" "}
+              {occupancyDate ? format(parseISO(occupancyDate), "EEEE, d MMMM yyyy") : "—"}
+            </p>
+            <div className="pt-2">
+              <Label htmlFor="boarding-occ-date" className="text-xs text-muted-foreground">
+                Report date
+              </Label>
+              <Input
+                id="boarding-occ-date"
+                type="date"
+                className="mt-1 max-w-[12rem]"
+                value={occupancyDate}
+                onChange={(e) => setOccupancyDate(e.target.value)}
+              />
+            </div>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Total rooms</p>
+                <p className="text-2xl font-semibold tabular-nums">{occupancyStats.total}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Occupied</p>
+                <p className="text-2xl font-semibold tabular-nums">{occupancyStats.occupiedCount}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Available</p>
+                <p className="text-2xl font-semibold tabular-nums">{occupancyStats.availableCount}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Occupancy</p>
+                <p className="text-2xl font-semibold tabular-nums">
+                  {occLoading ? "…" : `${occupancyStats.pct}%`}
+                </p>
+              </div>
+            </div>
+
+            {OCCUPANCY_SUITE_GROUPS.map((groupName) => {
+              const bucket = occupancyStats.byGroup.get(groupName);
+              if (!bucket) return null;
+              if (bucket.occupied.length === 0 && bucket.available.length === 0) return null;
+              return (
+                <section key={groupName} className="space-y-2 rounded-lg border p-3">
+                  <h3 className="text-sm font-semibold">{groupName}</h3>
+                  {bucket.occupied.length > 0 ? (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium uppercase text-muted-foreground">Occupied</p>
+                      <div className="rounded-md border overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Room</TableHead>
+                              <TableHead>Pet</TableHead>
+                              <TableHead>Owner</TableHead>
+                              <TableHead>Check in</TableHead>
+                              <TableHead>Check out</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {bucket.occupied.map(({ room, booking }) => {
+                              const petNames =
+                                booking.booking_pets
+                                  .map((bp) => bp.pets?.name)
+                                  .filter(Boolean)
+                                  .join(", ") || "—";
+                              return (
+                                <TableRow key={booking.id}>
+                                  <TableCell className="font-medium whitespace-nowrap">
+                                    {room.display_name || room.room_number}
+                                  </TableCell>
+                                  <TableCell>{petNames}</TableCell>
+                                  <TableCell>
+                                    {ownerDisplayName(
+                                      booking.owners?.first_name,
+                                      booking.owners?.last_name,
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="whitespace-nowrap text-xs">
+                                    {format(parseISO(booking.check_in_date), "d MMM yyyy")}
+                                  </TableCell>
+                                  <TableCell className="whitespace-nowrap text-xs">
+                                    {format(parseISO(booking.check_out_date), "d MMM yyyy")}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  ) : null}
+                  {bucket.available.length > 0 ? (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium uppercase text-muted-foreground">Available</p>
+                      <p className="text-sm text-muted-foreground">
+                        {bucket.available.map((r) => r.display_name || r.room_number).join(", ")}
+                      </p>
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
+          <DialogFooter className="border-t px-6 py-3">
+            <Button type="button" variant="outline" onClick={() => setOccupancyOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Toolbar: week nav + species toggle + manage rooms ── */}
       <div className="flex items-center justify-between gap-4 px-6 py-3 border-b border-border bg-card shrink-0">
@@ -3822,6 +4069,18 @@ function BoardingHubPage() {
               Cats
             </button>
           </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setOccupancyDate(normalizedDate ?? todayStr);
+              setOccupancyOpen(true);
+            }}
+          >
+            <LayoutGrid className="mr-2 h-4 w-4" />
+            Occupancy Report
+          </Button>
 
           <Button
             variant="outline"
