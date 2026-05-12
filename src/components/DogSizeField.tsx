@@ -10,7 +10,7 @@ export function DogSizeField({
   name,
   label = "Dog size",
 }: {
-  value: DogSizeFormValue;
+  value: DogSizeFormValue | null;
   onChange: (v: DogSizeFormValue) => void;
   /** Unique `name` for the radio group (required when multiple groups exist on one page). */
   name: string;

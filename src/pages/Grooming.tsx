@@ -15,11 +15,6 @@ import { usePets } from "@/hooks/usePets";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  GROOMING_PRICING_FALLBACK_KEYS,
-  GROOMING_SERVICE_TO_PRICING_KEY,
-  groomingServiceToPricingKey,
-} from "@/lib/addonPricing";
-import {
   useGroomingAppointments,
   useGroomingGlobalSearch,
   useCreateGroomingAppointment,
@@ -69,7 +64,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
 import { DogSizeField } from "@/components/DogSizeField";
 import { parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
-import { DEFAULT_DOG_SIZE, type DogSizeFormValue } from "@/lib/dogSizeForm";
+import type { DogSizeFormValue } from "@/lib/dogSizeForm";
+import {
+  computeNewGroomingAppointmentOriginalAed,
+  groomingPricingCheckboxToDbService,
+  isGroomingPricingCheckbox,
+  resolvePrimaryGroomingCheckbox,
+} from "@/lib/groomingNewAppointmentPricing";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -624,7 +625,7 @@ const GroomingPage = () => {
   const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
   ]);
-  const [dogSize, setDogSize] = useState<DogSizeFormValue>(DEFAULT_DOG_SIZE);
+  const [dogSize, setDogSize] = useState<DogSizeFormValue | null>(null);
   const [apptDate, setApptDate] = useState<Date>(new Date());
   const [groomingDate, setGroomingDate] = useState<Date>(new Date());
   const [apptTime, setApptTime] = useState("10:00");
@@ -710,50 +711,6 @@ const GroomingPage = () => {
     [payInvoice],
   );
 
-  const { data: groomingRates = [] } = useQuery({
-    queryKey: ["grooming_service_rates"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("grooming_service_rates")
-        .select("service, label, price_aed, duration_minutes")
-        .eq("is_active", true);
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
-
-  const { data: groomingPriceCard = [] } = useQuery({
-    queryKey: ["pricing", "grooming_rate_card"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("pricing")
-        .select("key, amount_aed")
-        .in("key", GROOMING_PRICING_FALLBACK_KEYS);
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
-
-  const rateMap = useMemo(() => {
-    const priceByPk = new Map(groomingPriceCard.map((r) => [r.key, r.amount_aed]));
-    const m: Record<string, { price_aed: number; duration_minutes: number | null }> = {};
-    for (const r of groomingRates) {
-      m[r.service] = { price_aed: r.price_aed, duration_minutes: r.duration_minutes };
-    }
-    for (const svc of Object.keys(GROOMING_SERVICE_TO_PRICING_KEY)) {
-      const pk = groomingServiceToPricingKey(svc);
-      const fallback = pk ? priceByPk.get(pk) : undefined;
-      const cur = m[svc];
-      if (typeof fallback === "number") {
-        m[svc] = {
-          price_aed: fallback,
-          duration_minutes: cur?.duration_minutes ?? null,
-        };
-      }
-    }
-    return m;
-  }, [groomingRates, groomingPriceCard]);
-
   const petsIdFingerprint = useMemo(
     () =>
       pets
@@ -776,24 +733,27 @@ const GroomingPage = () => {
     }
   }, [sheetOpen, ownerId, petsIdFingerprint, pets.length]);
 
-  const mappedServices = useMemo(
-    () =>
-      selectedServices.map(
-        (svc) =>
-          GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.mapsTo ??
-          "full_groom",
-      ),
-    [selectedServices],
+  const newApptComputedOriginalAed = useMemo(
+    () => computeNewGroomingAppointmentOriginalAed(selectedServices, dogSize),
+    [selectedServices, dogSize],
   );
-  const defaultOriginalPrice = useMemo(
-    () =>
-      mappedServices.reduce(
-        (sum, svc) =>
-          sum + (typeof rateMap[svc]?.price_aed === "number" ? rateMap[svc].price_aed : 0),
-        0,
-      ),
-    [mappedServices, rateMap],
-  );
+
+  const newApptPriceManualRef = useRef(false);
+
+  useEffect(() => {
+    newApptPriceManualRef.current = false;
+  }, [selectedServices, dogSize]);
+
+  useEffect(() => {
+    if (!sheetOpen) return;
+    if (newApptPriceManualRef.current) return;
+    if (newApptComputedOriginalAed == null) {
+      setPrice("");
+      return;
+    }
+    setPrice(String(newApptComputedOriginalAed));
+  }, [sheetOpen, newApptComputedOriginalAed]);
+
   const normalizedDiscountPct = useMemo(() => {
     const trimmed = discountPct.trim();
     if (trimmed === "") return 0;
@@ -836,10 +796,11 @@ const GroomingPage = () => {
     setApptTime("10:00");
     setDurationMin(60);
     setSelectedServices(["full_groom"]);
-    setDogSize(DEFAULT_DOG_SIZE);
+    setDogSize(null);
     setGroomerName("");
     setShowPreferredGroomerHint(false);
     lastPrefilledOwnerIdForGroomer.current = null;
+    newApptPriceManualRef.current = false;
     setPrice("");
     setDiscountPct("");
     setPaymentMethod("cash");
@@ -852,11 +813,6 @@ const GroomingPage = () => {
     setBookingId(null);
     setSheetOpen(true);
   };
-
-  useEffect(() => {
-    if (!sheetOpen) return;
-    setPrice(String(defaultOriginalPrice));
-  }, [defaultOriginalPrice, sheetOpen]);
 
   useEffect(() => {
     if (!editAppt) return;
@@ -971,14 +927,17 @@ const GroomingPage = () => {
       return;
     }
 
-    const primaryService = mappedServices[0];
+    const primaryCb = resolvePrimaryGroomingCheckbox(
+      selectedServices.filter(isGroomingPricingCheckbox),
+    );
+    const primaryService = primaryCb ? groomingPricingCheckboxToDbService(primaryCb) : null;
     if (!primaryService) {
       toast.error("Could not resolve a valid service. Please reselect services.");
       return;
     }
 
     const priceNum = parseFloat(price);
-    const serviceRate = defaultOriginalPrice;
+    const serviceRate = newApptComputedOriginalAed ?? 0;
     const baseForCharge = Number.isFinite(priceNum) && priceNum >= 0 ? priceNum : null;
     const fallbackBase =
       typeof serviceRate === "number" && serviceRate >= 0 ? serviceRate : null;
@@ -2122,12 +2081,18 @@ const GroomingPage = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Price (AED) - Original</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Fills from service and dog size (add-ons included). You can still edit the amount.
+                  </p>
                   <Input
                     type="number"
                     min={0}
                     step={1}
                     value={price}
-                    onChange={(e) => setPrice(e.target.value)}
+                    onChange={(e) => {
+                      newApptPriceManualRef.current = true;
+                      setPrice(e.target.value);
+                    }}
                     placeholder="0"
                   />
                 </div>
