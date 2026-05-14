@@ -351,6 +351,7 @@ const DOG_WINGS: string[] = [
   "furrari_lounge",
   "grooming_room",
   "training_room",
+  "kitchen",
   "bond_rooms",
   "dluxe",
   "standard_room",
@@ -377,6 +378,7 @@ const WING_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "furrari_lounge", label: "Furrari Lounge" },
   { value: "grooming_room", label: "Grooming Room" },
   { value: "training_room", label: "Training Room" },
+  { value: "kitchen", label: "Kitchen" },
 ];
 
 const ROOM_TYPE_FILTER_OPTIONS: { value: string; label: string; types: string[] }[] = [
