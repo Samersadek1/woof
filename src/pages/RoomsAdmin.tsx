@@ -68,7 +68,7 @@ type CapacityType = Database["public"]["Enums"]["capacity_type"];
 
 // ── Display labels ────────────────────────────────────────────────────────────
 
-const WING_LABELS: Record<RoomWing, string> = {
+const WING_LABELS: Record<string, string> = {
   oxford: "Oxford Street",
   piccadilly: "Piccadilly",
   park_lane: "Park Lane",
@@ -79,11 +79,27 @@ const WING_LABELS: Record<RoomWing, string> = {
   bond_rooms: "Bond Rooms",
   dluxe: "Dluxe",
   standard_room: "Standard Room",
+  bond_suite: "Bond Suite",
+  royal_annex: "Royal Annex",
+  royal_suite: "Royal Suite",
+  pall_mall: "Pall Mall",
+  little_gems: "Little Gems",
+  standard_suite: "Standard Suite",
+  grooming_room: "Grooming Room",
+  training_room: "Training Room",
+  deluxe_annex: "Deluxe Annex",
+  deluxe_suite: "Deluxe Suite",
+  lg_resting_nook: "LG Resting Nook",
+  lg_grooming_room: "LG Grooming Room",
+  furrari_lounge: "Furrari Lounge",
+  kitchen: "Kitchen",
 };
 
-const ROOM_TYPE_LABELS: Record<RoomType, string> = {
+const ROOM_TYPE_LABELS: Record<string, string> = {
   presidential_super: "Presidential Super",
   presidential_standard: "Presidential Standard",
+  presidential_single: "Presidential Single",
+  presidential_double: "Presidential Double",
   royal_suite_double: "Royal Suite Double",
   royal_suite_single: "Royal Suite Single",
   double_royal: "Double Royal",
@@ -96,6 +112,18 @@ const ROOM_TYPE_LABELS: Record<RoomType, string> = {
   park_lane: "Park Lane",
   pall_mall: "Pall Mall",
   kennels: "Back Kennels",
+  deluxe: "Deluxe",
+  standard: "Standard",
+  standard_glass: "Standard Glass",
+  lg_deluxe: "LG Deluxe",
+  lg_royal: "LG Royal",
+  lg_standard: "LG Standard",
+  lg_presidential: "LG Presidential",
+  lg_presidential_double: "LG Presidential Double",
+  lg_royal_double: "LG Royal Double",
+  lg_standard_luxury: "LG Standard Luxury",
+  lg_resting_nook: "LG Resting Nook",
+  kitchen: "Kitchen",
 };
 
 const CAPACITY_LABELS: Record<CapacityType, string> = {
