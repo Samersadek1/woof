@@ -301,7 +301,7 @@ function toastRoomSaveFailed(err: unknown) {
   toast.error(hint ?? `Save failed: ${msg}`, hint ? { duration: 12_000 } : undefined);
 }
 
-const DOG_WINGS: RoomWing[] = [
+const DOG_WINGS: string[] = [
   "oxford",
   "back_kennels",
   "piccadilly",
@@ -310,17 +310,21 @@ const DOG_WINGS: RoomWing[] = [
   "royal_annex",
   "royal_suite",
   "bond_suite",
-  "little_gems",
-  "deluxe_suite",
-  "standard_suite",
   "pall_mall",
+  "deluxe_suite",
+  "deluxe_annex",
+  "standard_suite",
+  "little_gems",
+  "lg_resting_nook",
+  "lg_grooming_room",
+  "furrari_lounge",
   "grooming_room",
   "training_room",
   "bond_rooms",
   "dluxe",
   "standard_room",
 ];
-const CAT_WINGS: RoomWing[] = ["cattery"];
+const CAT_WINGS: string[] = ["cattery"];
 
 const emptyInsertDefaults = (): Omit<RoomInsert, "id" | "created_at"> => ({
   display_name: "",
