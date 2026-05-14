@@ -8,6 +8,7 @@
 
 import { useState, useRef, useMemo, useLayoutEffect, KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import TopBar from "@/components/dashboard/TopBar";
 import {
   useAllRooms,
@@ -15,6 +16,7 @@ import {
   useCreateRoom,
   useDeleteRoom,
 } from "@/hooks/useBookings";
+import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,7 +56,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Download } from "lucide-react";
+import * as XLSX from "xlsx";
 import type { Database } from "@/integrations/supabase/types";
 
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
@@ -326,6 +329,45 @@ const DOG_WINGS: string[] = [
 ];
 const CAT_WINGS: string[] = ["cattery"];
 
+const WING_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: "__all__", label: "All Wings" },
+  { value: "oxford", label: "Oxford Street" },
+  { value: "back_kennels", label: "Back Kennels" },
+  { value: "piccadilly", label: "Piccadilly" },
+  { value: "park_lane", label: "Park Lane" },
+  { value: "fleet", label: "Fleet" },
+  { value: "royal_annex", label: "Royal Annex" },
+  { value: "royal_suite", label: "Royal Suite" },
+  { value: "bond_suite", label: "Bond Suite" },
+  { value: "pall_mall", label: "Pall Mall" },
+  { value: "deluxe_suite", label: "Deluxe Suite" },
+  { value: "deluxe_annex", label: "Deluxe Annex" },
+  { value: "standard_suite", label: "Standard Suite" },
+  { value: "little_gems", label: "Little Gems" },
+  { value: "lg_resting_nook", label: "LG Resting Nook" },
+  { value: "lg_grooming_room", label: "LG Grooming Room" },
+  { value: "furrari_lounge", label: "Furrari Lounge" },
+  { value: "grooming_room", label: "Grooming Room" },
+  { value: "training_room", label: "Training Room" },
+];
+
+const ROOM_TYPE_FILTER_OPTIONS: { value: string; label: string; types: string[] }[] = [
+  { value: "__all__", label: "All Types", types: [] },
+  { value: "presidential", label: "Presidential", types: ["presidential_super", "presidential_standard", "presidential_single", "presidential_double"] },
+  { value: "royal_suite", label: "Royal Suite", types: ["royal_suite_single", "royal_suite_double", "single_royal", "double_royal", "royal_annex"] },
+  { value: "deluxe", label: "Deluxe", types: ["deluxe", "cattery_deluxe"] },
+  { value: "standard", label: "Standard", types: ["standard", "standard_glass"] },
+  { value: "lg_royal", label: "LG Royal", types: ["lg_royal", "lg_royal_double"] },
+  { value: "lg_deluxe", label: "LG Deluxe", types: ["lg_deluxe"] },
+  { value: "lg_presidential", label: "LG Presidential", types: ["lg_presidential", "lg_presidential_double"] },
+  { value: "lg_standard", label: "LG Standard", types: ["lg_standard", "lg_standard_luxury"] },
+  { value: "family_room", label: "Family Room", types: ["family_room"] },
+];
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 const emptyInsertDefaults = (): Omit<RoomInsert, "id" | "created_at"> => ({
   display_name: "",
   room_number: "",
@@ -361,13 +403,43 @@ const RoomsAdminPage = () => {
   }, [allRooms, species]);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [wingFilter, setWingFilter] = useState("__all__");
+  const [typeFilter, setTypeFilter] = useState("__all__");
+
+  const { data: occupiedRoomIds } = useQuery({
+    queryKey: ["rooms", "occupied-today"],
+    queryFn: async () => {
+      const today = todayISO();
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("room_id")
+        .lte("check_in_date", today)
+        .gte("check_out_date", today)
+        .in("status", ["confirmed", "checked_in"]);
+      if (error) throw error;
+      return new Set((data ?? []).map((b) => b.room_id));
+    },
+    refetchInterval: 60_000,
+  });
 
   const filteredRooms = useMemo(() => {
     if (!rooms) return undefined;
-    if (!searchQuery.trim()) return rooms;
-    const q = searchQuery.trim().toLowerCase();
-    return rooms.filter((r) => r.display_name.toLowerCase().includes(q));
-  }, [rooms, searchQuery]);
+    let result = rooms;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter((r) => r.display_name.toLowerCase().includes(q));
+    }
+    if (wingFilter !== "__all__") {
+      result = result.filter((r) => r.wing === wingFilter);
+    }
+    if (typeFilter !== "__all__") {
+      const group = ROOM_TYPE_FILTER_OPTIONS.find((o) => o.value === typeFilter);
+      if (group && group.types.length > 0) {
+        result = result.filter((r) => group.types.includes(r.room_type));
+      }
+    }
+    return result;
+  }, [rooms, searchQuery, wingFilter, typeFilter]);
 
   const handleSpeciesChange = (s: Species) => {
     setSpecies(s);
@@ -580,6 +652,22 @@ const RoomsAdminPage = () => {
     </Select>
   );
 
+  const handleExport = () => {
+    const data = (filteredRooms ?? []).map((room) => ({
+      "Room Name": room.display_name,
+      "Room No": room.room_number,
+      "Wing": WING_LABELS[room.wing as RoomWing] ?? room.wing,
+      "Room Type": ROOM_TYPE_LABELS[room.room_type as RoomType] ?? room.room_type,
+      "Capacity": CAPACITY_LABELS[room.capacity_type as CapacityType] ?? room.capacity_type,
+      "Max Pets": room.max_pets,
+      "Status": occupiedRoomIds?.has(room.id) ? "Occupied" : "Available",
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Rooms");
+    XLSX.writeFile(wb, `rooms-export-${todayISO()}.xlsx`);
+  };
+
   return (
     <>
       <TopBar title="Rooms" />
@@ -626,7 +714,7 @@ const RoomsAdminPage = () => {
           <p className="text-muted-foreground">No rooms found.</p>
         ) : (
           <>
-          <div className="mb-4">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
             <input
               type="text"
               value={searchQuery}
@@ -634,6 +722,39 @@ const RoomsAdminPage = () => {
               placeholder="Search room name..."
               className="w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
+            <Select value={wingFilter} onValueChange={setWingFilter}>
+              <SelectTrigger className="w-[180px] h-9 text-sm">
+                <SelectValue placeholder="Filter by Wing" />
+              </SelectTrigger>
+              <SelectContent>
+                {WING_FILTER_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} className="text-sm">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-[180px] h-9 text-sm">
+                <SelectValue placeholder="Filter by Room Type" />
+              </SelectTrigger>
+              <SelectContent>
+                {ROOM_TYPE_FILTER_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} className="text-sm">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </Button>
           </div>
           <div className="rounded-lg border overflow-x-auto">
             <Table>
@@ -647,6 +768,7 @@ const RoomsAdminPage = () => {
                   <TableHead className="text-right min-w-[80px]">Max Pets</TableHead>
                   <TableHead className="min-w-[100px]">Camera No.</TableHead>
                   <TableHead className="text-center min-w-[120px]">Camera recording</TableHead>
+                  <TableHead className="text-center min-w-[100px]">Status</TableHead>
                   <TableHead className="text-center min-w-[80px]">Active</TableHead>
                   <TableHead className="w-[52px]" />
                 </TableRow>
@@ -732,6 +854,18 @@ const RoomsAdminPage = () => {
                           {room.camera_recording ? "Yes" : "No"}
                         </span>
                       </div>
+                    </TableCell>
+
+                    <TableCell className="text-center">
+                      {occupiedRoomIds?.has(room.id) ? (
+                        <Badge className="bg-green-100 text-green-800 border-green-300 hover:bg-green-100 text-[10px] px-1.5">
+                          Occupied
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] px-1.5 bg-muted text-muted-foreground border-muted-foreground/30">
+                          Available
+                        </Badge>
+                      )}
                     </TableCell>
 
                     <TableCell className="text-center">
