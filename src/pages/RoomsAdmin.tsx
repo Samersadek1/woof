@@ -421,10 +421,12 @@ const RoomsAdminPage = () => {
 
   const rooms = useMemo(() => {
     if (!allRooms) return undefined;
-    const wings = species === "cat" ? CAT_WINGS : DOG_WINGS;
-    return allRooms.filter((r) => wings.includes(r.wing));
+    return allRooms.filter((r) =>
+      species === "cat"
+        ? (r as any).pet_type === "cat"
+        : (r as any).pet_type !== "cat"
+    );
   }, [allRooms, species]);
-
   const [searchQuery, setSearchQuery] = useState("");
   const [wingFilter, setWingFilter] = useState("__all__");
   const [typeFilter, setTypeFilter] = useState("__all__");
