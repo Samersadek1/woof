@@ -16,6 +16,11 @@ export type TransportZone =
   | "dubai_shared"
   | "dubai_private"
   | "abudhabi"
+  | "sharjah"
+  | "ajman"
+  | "umm_al_quwain"
+  | "ras_al_khaimah"
+  | "fujairah"
   /** Staff-selected complimentary transport: no pricing key, zero charges. */
   | "complimentary"
   /** Free transport — AED 0, explicitly priced at zero. */
@@ -25,6 +30,11 @@ export const TRANSPORT_ZONES: TransportZone[] = [
   "dubai_shared",
   "dubai_private",
   "abudhabi",
+  "sharjah",
+  "ajman",
+  "umm_al_quwain",
+  "ras_al_khaimah",
+  "fujairah",
   "complimentary",
   "free",
 ];
@@ -46,7 +56,32 @@ export const TRANSPORT_ZONE_OPTIONS: {
   },
   {
     value: "abudhabi",
-    label: "Other Emirates",
+    label: "Abu Dhabi",
+    helper: "Per dog, one-way",
+  },
+  {
+    value: "sharjah",
+    label: "Sharjah",
+    helper: "Per dog, one-way",
+  },
+  {
+    value: "ajman",
+    label: "Ajman",
+    helper: "Per dog, one-way",
+  },
+  {
+    value: "umm_al_quwain",
+    label: "Umm Al Quwain",
+    helper: "Per dog, one-way",
+  },
+  {
+    value: "ras_al_khaimah",
+    label: "Ras Al Khaimah",
+    helper: "Per dog, one-way",
+  },
+  {
+    value: "fujairah",
+    label: "Fujairah",
     helper: "Per dog, one-way",
   },
   {
@@ -71,6 +106,11 @@ export function transportPricingKey(zone: TransportZone): string {
     case "dubai_private":
       return "transport_dubai";
     case "abudhabi":
+    case "sharjah":
+    case "ajman":
+    case "umm_al_quwain":
+    case "ras_al_khaimah":
+    case "fujairah":
       return "transport_abudhabi";
     case "complimentary":
       return "transport_complimentary";
@@ -89,7 +129,17 @@ export function transportZoneLabel(zone: TransportZone): string {
     case "dubai_private":
       return "Dubai (private)";
     case "abudhabi":
-      return "Other Emirates";
+      return "Abu Dhabi";
+    case "sharjah":
+      return "Sharjah";
+    case "ajman":
+      return "Ajman";
+    case "umm_al_quwain":
+      return "Umm Al Quwain";
+    case "ras_al_khaimah":
+      return "Ras Al Khaimah";
+    case "fujairah":
+      return "Fujairah";
     case "complimentary":
       return "Complimentary";
     case "free":
@@ -131,7 +181,12 @@ export function normalizeStoredTransportZone(
   const v = value.toLowerCase().trim();
   if (v === "dubai_shared" || v === "dubai-shared" || v === "shared") return "dubai_shared";
   if (v === "dubai_private" || v === "dubai-private" || v === "private" || v === "dubai") return "dubai_private";
-  if (v === "abudhabi" || v === "abu_dhabi" || v === "abu-dhabi" || v === "auh") return "abudhabi";
+  if (v === "abudhabi" || v === "abu_dhabi" || v === "abu-dhabi" || v === "auh" || v === "abu dhabi") return "abudhabi";
+  if (v === "sharjah") return "sharjah";
+  if (v === "ajman") return "ajman";
+  if (v === "umm_al_quwain" || v === "umm al quwain" || v === "uaq") return "umm_al_quwain";
+  if (v === "ras_al_khaimah" || v === "ras al khaimah" || v === "rak") return "ras_al_khaimah";
+  if (v === "fujairah") return "fujairah";
   if (v === "complimentary" || v === "no_charge") return "complimentary";
   if (v === "free") return "free";
   return null;
