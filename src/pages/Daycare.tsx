@@ -30,6 +30,8 @@ import {
   useSessionsByPackage,
   useAllDaycarePackages,
   useCreateDaycarePackage,
+  useUpdateDaycarePackage,
+  useDeleteDaycarePackage,
   useAddDaycareDay,
   useUpdateDaycareSession,
   useDeleteDaycareSession,
@@ -37,6 +39,7 @@ import {
   type PackageWithDetails,
   type SessionRow,
 } from "@/hooks/useDaycare";
+import { useAuth } from "@/contexts/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -73,6 +76,13 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1520,7 +1530,7 @@ function PlannerTab() {
 
 // ── Packages tab: PackageCard ─────────────────────────────────────────────────
 
-function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
+function PackageCard({ pkg, onEdit, onDelete }: { pkg: PackageWithDetails; onEdit: (pkg: PackageWithDetails) => void; onDelete: (pkg: PackageWithDetails) => void }) {
   const [, setSearchParams] = useSearchParams();
   const remaining  = pkg.total_days - pkg.days_used;
   const pct        = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
@@ -1542,21 +1552,12 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
 
   return (
     <Card
-      role="button"
-      tabIndex={0}
-      className={`cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isExhausted ? "opacity-60" : ""}`}
-      onClick={openInPlanner}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openInPlanner();
-        }
-      }}
+      className={`transition-shadow hover:shadow-md ${isExhausted ? "opacity-60" : ""}`}
     >
       <CardContent className="p-4 space-y-3">
         {/* Top row */}
         <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1 min-w-0">
+          <div className="space-y-1 min-w-0 cursor-pointer" onClick={openInPlanner}>
             <p className="font-semibold truncate">
               {pkg.pets?.name ?? "Unknown Pet"}
               <span className="font-normal text-muted-foreground"> — </span>
@@ -1601,6 +1602,30 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
               Expires {format(parseISO(pkg.expiry_date), "d MMM yyyy")}
             </p>
           )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 pt-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={(e) => { e.stopPropagation(); onEdit(pkg); }}
+          >
+            <Pencil className="mr-1 h-3 w-3" />
+            Edit
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs text-destructive hover:text-destructive"
+            onClick={(e) => { e.stopPropagation(); onDelete(pkg); }}
+          >
+            <Trash2 className="mr-1 h-3 w-3" />
+            Delete
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -1867,7 +1892,6 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
         .from("daycare_package_types")
         .select("id, name, total_days, base_price_aed, sort_order")
         .eq("is_active", true)
-        .eq("total_days", 12)
         .order("sort_order");
       if (error) throw error;
       return data ?? [];
@@ -2040,10 +2064,9 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
             <Select
               value={form.package_type_id}
               onValueChange={(v) => { setField("package_type_id", v); setField("price_override", ""); }}
-              disabled={packageTypes.length <= 1}
             >
               <SelectTrigger id="pkg_type">
-                <SelectValue placeholder={packageTypes.length <= 1 ? "12-day package" : "Select package type"} />
+                <SelectValue placeholder="Select package type" />
               </SelectTrigger>
               <SelectContent>
                 {packageTypes.map(t => (
@@ -2209,10 +2232,73 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
 type PkgFilter = "all" | "low" | "exhausted";
 
 function PackagesTab() {
-  const [filter,   setFilter]   = useState<PkgFilter>("all");
+  const [filter, setFilter] = useState<PkgFilter>("all");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [editPkg, setEditPkg] = useState<PackageWithDetails | null>(null);
+  const [deletePkg, setDeletePkg] = useState<PackageWithDetails | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
 
+  const { session } = useAuth();
   const { data: packages, isLoading } = useAllDaycarePackages();
+  const updatePackage = useUpdateDaycarePackage();
+  const deletePackage = useDeleteDaycarePackage();
+
+  const [editForm, setEditForm] = useState({ total_days: 0, price_paid: "", expiry_date: "", notes: "", pickup_included: false, dropoff_included: false });
+
+  const openEdit = (pkg: PackageWithDetails) => {
+    setEditForm({
+      total_days: pkg.total_days,
+      price_paid: pkg.price_paid != null ? String(pkg.price_paid) : "",
+      expiry_date: pkg.expiry_date ?? "",
+      notes: pkg.notes ?? "",
+      pickup_included: pkg.pickup_included,
+      dropoff_included: pkg.dropoff_included,
+    });
+    setEditPkg(pkg);
+  };
+
+  const handleEditSave = () => {
+    if (!editPkg) return;
+    updatePackage.mutate(
+      {
+        id: editPkg.id,
+        total_days: editForm.total_days,
+        price_paid: editForm.price_paid ? parseFloat(editForm.price_paid) : null,
+        expiry_date: editForm.expiry_date || null,
+        notes: editForm.notes || null,
+        pickup_included: editForm.pickup_included,
+        dropoff_included: editForm.dropoff_included,
+      },
+      {
+        onSuccess: () => { toast.success("Package updated"); setEditPkg(null); },
+        onError: (err) => toast.error(`Update failed: ${(err as Error).message}`),
+      }
+    );
+  };
+
+  const handleDelete = () => {
+    if (!deletePkg || !deleteReason.trim()) return;
+    const ownerName = deletePkg.owners ? ownerDisplayName(deletePkg.owners.first_name, deletePkg.owners.last_name) : "Unknown";
+    deletePackage.mutate(
+      {
+        packageId: deletePkg.id,
+        logEntry: {
+          package_id: deletePkg.id,
+          owner_name: ownerName,
+          pet_name: deletePkg.pets?.name ?? "Unknown",
+          total_days: deletePkg.total_days,
+          days_used: deletePkg.days_used,
+          price_paid: deletePkg.price_paid,
+          deleted_by: session?.user?.email ?? "unknown",
+          reason: deleteReason.trim(),
+        },
+      },
+      {
+        onSuccess: () => { toast.success("Package deleted"); setDeletePkg(null); setDeleteReason(""); },
+        onError: (err) => toast.error(`Delete failed: ${(err as Error).message}`),
+      }
+    );
+  };
 
   const filtered = (packages ?? []).filter(pkg => {
     const remaining = pkg.total_days - pkg.days_used;
@@ -2258,11 +2344,115 @@ function PackagesTab() {
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map(pkg => <PackageCard key={pkg.id} pkg={pkg} />)}
+          {filtered.map(pkg => <PackageCard key={pkg.id} pkg={pkg} onEdit={openEdit} onDelete={setDeletePkg} />)}
         </div>
       )}
 
       <NewPackageSheet open={sheetOpen} onClose={() => setSheetOpen(false)} />
+
+      {/* Edit Package Dialog */}
+      <Dialog open={!!editPkg} onOpenChange={(o) => { if (!o) setEditPkg(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Package</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label>Total Days</Label>
+              <Input
+                type="number"
+                min={1}
+                value={editForm.total_days}
+                onChange={(e) => setEditForm((f) => ({ ...f, total_days: parseInt(e.target.value) || 0 }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Price Paid (AED)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editForm.price_paid}
+                onChange={(e) => setEditForm((f) => ({ ...f, price_paid: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Expiry Date</Label>
+              <Input
+                type="date"
+                value={editForm.expiry_date}
+                onChange={(e) => setEditForm((f) => ({ ...f, expiry_date: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={editForm.notes}
+                onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                rows={3}
+              />
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="edit-pickup"
+                  checked={editForm.pickup_included}
+                  onCheckedChange={(c) => setEditForm((f) => ({ ...f, pickup_included: !!c }))}
+                />
+                <Label htmlFor="edit-pickup" className="cursor-pointer text-sm">Pickup included</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="edit-dropoff"
+                  checked={editForm.dropoff_included}
+                  onCheckedChange={(c) => setEditForm((f) => ({ ...f, dropoff_included: !!c }))}
+                />
+                <Label htmlFor="edit-dropoff" className="cursor-pointer text-sm">Dropoff included</Label>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPkg(null)}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={updatePackage.isPending}>
+              {updatePackage.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Package Dialog */}
+      <AlertDialog open={!!deletePkg} onOpenChange={(o) => { if (!o) { setDeletePkg(null); setDeleteReason(""); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Package</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action is permanent and cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-2">
+            <Label htmlFor="delete-reason">Reason for deletion <span className="text-destructive">*</span></Label>
+            <Textarea
+              id="delete-reason"
+              placeholder="Enter reason..."
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              rows={3}
+              className="mt-1.5"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setDeletePkg(null); setDeleteReason(""); }}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!deleteReason.trim() || deletePackage.isPending}
+              onClick={(e) => { e.preventDefault(); handleDelete(); }}
+            >
+              {deletePackage.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

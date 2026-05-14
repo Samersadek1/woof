@@ -376,6 +376,71 @@ export function useCreateDaycarePackage() {
   });
 }
 
+// ── useUpdateDaycarePackage ───────────────────────────────────────────────────
+
+type DaycarePackageUpdate = Database["public"]["Tables"]["daycare_packages"]["Update"];
+
+export function useUpdateDaycarePackage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, ...updates }: DaycarePackageUpdate & { id: string }) => {
+      const { data, error } = await supabase
+        .from("daycare_packages")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as DaycarePackage;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["daycare_packages"] });
+    },
+  });
+}
+
+// ── useDeleteDaycarePackage ──────────────────────────────────────────────────
+
+export type DeletePackagePayload = {
+  packageId: string;
+  logEntry: {
+    package_id: string;
+    owner_name: string;
+    pet_name: string;
+    total_days: number;
+    days_used: number;
+    price_paid: number | null;
+    deleted_by: string;
+    reason: string;
+  };
+};
+
+export function useDeleteDaycarePackage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ packageId, logEntry }: DeletePackagePayload) => {
+      const { error: logErr } = await supabase
+        .from("daycare_package_deletion_log")
+        .insert(logEntry as Record<string, unknown>);
+
+      if (logErr) throw logErr;
+
+      const { error: deleteErr } = await supabase
+        .from("daycare_packages")
+        .delete()
+        .eq("id", packageId);
+
+      if (deleteErr) throw deleteErr;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["daycare_packages"] });
+    },
+  });
+}
+
 // ── useDeleteDaycareSession ───────────────────────────────────────────────────
 
 export type DeleteSessionPayload = {
