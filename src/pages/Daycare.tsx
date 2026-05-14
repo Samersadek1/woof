@@ -2128,6 +2128,13 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
                           </p>
                         );
                       }
+                      if (form.transport_zone === "free") {
+                        return (
+                          <p className="text-xs text-muted-foreground">
+                            Free transport — AED 0
+                          </p>
+                        );
+                      }
                       return (
                         <p className="text-xs text-muted-foreground">
                           AED {transportRate.toFixed(2)}/trip × {totalDays} days
@@ -2192,17 +2199,17 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="pkg_price_override">Price override (AED)</Label>
+            <Label htmlFor="pkg_price_override">Custom Price (AED)</Label>
             <Input
               id="pkg_price_override"
               type="number"
               min="0"
               step="0.01"
               placeholder={calculatedPrice ? calculatedPrice.toFixed(2) : "0.00"}
-              value={form.price_override}
+              value={form.price_override || (calculatedPrice ? calculatedPrice.toFixed(2) : "")}
               onChange={(e) => setField("price_override", e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">Leave blank to use calculated price</p>
+            <p className="text-xs text-muted-foreground">Pre-filled with calculated price. Edit to set a custom amount.</p>
           </div>
 
           <div className="space-y-1.5">

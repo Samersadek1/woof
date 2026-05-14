@@ -17,13 +17,16 @@ export type TransportZone =
   | "dubai_private"
   | "abudhabi"
   /** Staff-selected complimentary transport: no pricing key, zero charges. */
-  | "complimentary";
+  | "complimentary"
+  /** Free transport — AED 0, explicitly priced at zero. */
+  | "free";
 
 export const TRANSPORT_ZONES: TransportZone[] = [
   "dubai_shared",
   "dubai_private",
   "abudhabi",
   "complimentary",
+  "free",
 ];
 
 export const TRANSPORT_ZONE_OPTIONS: {
@@ -51,6 +54,11 @@ export const TRANSPORT_ZONE_OPTIONS: {
     label: "Complimentary",
     helper: "No charge — not billed",
   },
+  {
+    value: "free",
+    label: "Free — AED 0",
+    helper: "No transport charge",
+  },
 ];
 
 /**
@@ -66,6 +74,8 @@ export function transportPricingKey(zone: TransportZone): string {
       return "transport_abudhabi";
     case "complimentary":
       return "transport_complimentary";
+    case "free":
+      return "transport_free";
   }
 }
 
@@ -82,6 +92,8 @@ export function transportZoneLabel(zone: TransportZone): string {
       return "Other Emirates";
     case "complimentary":
       return "Complimentary";
+    case "free":
+      return "Free";
   }
 }
 
@@ -92,7 +104,7 @@ export function transportZoneLabel(zone: TransportZone): string {
  *   - private           → flat per trip (quantity = 1, cap 3 dogs)
  */
 export function transportQuantityForPets(zone: TransportZone, petCount: number): number {
-  if (zone === "complimentary") return 0;
+  if (zone === "complimentary" || zone === "free") return 0;
   const pets = Math.max(1, petCount);
   if (zone === "dubai_private") return 1;
   return pets;
@@ -103,7 +115,7 @@ export function transportQuantityForPets(zone: TransportZone, petCount: number):
  * Callers can surface a warning and/or auto-split into extra shared legs.
  */
 export function privateDubaiOverCapacity(zone: TransportZone, petCount: number): boolean {
-  if (zone === "complimentary") return false;
+  if (zone === "complimentary" || zone === "free") return false;
   return zone === "dubai_private" && petCount > 3;
 }
 
@@ -120,7 +132,8 @@ export function normalizeStoredTransportZone(
   if (v === "dubai_shared" || v === "dubai-shared" || v === "shared") return "dubai_shared";
   if (v === "dubai_private" || v === "dubai-private" || v === "private" || v === "dubai") return "dubai_private";
   if (v === "abudhabi" || v === "abu_dhabi" || v === "abu-dhabi" || v === "auh") return "abudhabi";
-  if (v === "complimentary" || v === "free" || v === "no_charge") return "complimentary";
+  if (v === "complimentary" || v === "no_charge") return "complimentary";
+  if (v === "free") return "free";
   return null;
 }
 
