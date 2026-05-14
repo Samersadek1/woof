@@ -1018,6 +1018,21 @@ const RoomsAdminPage = () => {
                 </Select>
               </div>
               <div className="grid gap-2">
+                <Label>Pet Type</Label>
+                <Select
+                  value={(newRoom as any).pet_type ?? "dog"}
+                  onValueChange={(v) => setNewRoom((f) => ({ ...f, pet_type: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="dog">Dog</SelectItem>
+                    <SelectItem value="cat">Cat</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
                 <Label htmlFor="nr-max">Max pets</Label>
                 <Input
                   id="nr-max"
