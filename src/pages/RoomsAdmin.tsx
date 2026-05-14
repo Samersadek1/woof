@@ -422,14 +422,7 @@ const RoomsAdminPage = () => {
   const rooms = useMemo(() => {
     if (!allRooms) return undefined;
     const wings = species === "cat" ? CAT_WINGS : DOG_WINGS;
-    return allRooms
-      .filter((r) => wings.includes(r.wing))
-      .sort((a, b) => {
-        const aIdx = wings.indexOf(a.wing);
-        const bIdx = wings.indexOf(b.wing);
-        if (aIdx !== bIdx) return aIdx - bIdx;
-        return (parseInt(a.room_number) || 0) - (parseInt(b.room_number) || 0);
-      });
+    return allRooms.filter((r) => wings.includes(r.wing));
   }, [allRooms, species]);
 
   const [searchQuery, setSearchQuery] = useState("");
