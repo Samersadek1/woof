@@ -195,6 +195,7 @@ export function useAllRooms() {
       const { data, error } = await supabase
         .from("rooms")
         .select("*")
+        .order("display_name", { ascending: true })
         .order("wing", { ascending: true })
         .order("room_number", { ascending: true });
 
