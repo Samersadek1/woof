@@ -154,26 +154,54 @@ const DAYS = 14;
 const ROOM_COL_W = 160; // px
 const DAY_COL_W = 100;  // px
 
-const WING_LABELS: Record<RoomWing, string> = {
+const WING_LABELS: Record<string, string> = {
   oxford: "Oxford Street",
   piccadilly: "Piccadilly",
   park_lane: "Park Lane",
-  fleet: "Fleet Street",
+  fleet: "Fleet",
   back_kennels: "Back Kennels",
   cattery: "Cat Boarding",
   grooming_upstairs: "Grooming Upstairs",
   bond_rooms: "Bond Rooms",
   dluxe: "Dluxe",
   standard_room: "Standard Room",
+  royal_annex: "Royal Annex",
+  royal_suite: "Royal Suite",
+  bond_suite: "Bond Suite",
+  pall_mall: "Pall Mall",
+  deluxe_suite: "Deluxe Suite",
+  deluxe_annex: "Deluxe Annex",
+  standard_suite: "Standard Suite",
+  little_gems: "Little Gems",
+  lg_resting_nook: "LG Resting Nook",
+  lg_grooming_room: "LG Grooming Room",
+  furrari_lounge: "Furrari Lounge",
+  grooming_room: "Grooming Room",
+  training_room: "Training Room",
+  kitchen: "Kitchen",
 };
 
-const WING_ORDER: RoomWing[] = [
-  "bond_rooms",
+const WING_ORDER: string[] = [
   "oxford",
+  "back_kennels",
   "piccadilly",
   "park_lane",
   "fleet",
-  "back_kennels",
+  "royal_annex",
+  "royal_suite",
+  "bond_suite",
+  "pall_mall",
+  "deluxe_suite",
+  "deluxe_annex",
+  "standard_suite",
+  "little_gems",
+  "lg_resting_nook",
+  "lg_grooming_room",
+  "furrari_lounge",
+  "grooming_room",
+  "training_room",
+  "kitchen",
+  "bond_rooms",
   "dluxe",
   "standard_room",
 ];
@@ -1146,11 +1174,11 @@ export function DogBoardingCalendar({
 
   // rooms grouped by wing
   const roomsByWing = useMemo(() => {
-    const map = new Map<RoomWing, typeof rooms>();
+    const map = new Map<string, typeof rooms>();
     WING_ORDER.forEach((w) => map.set(w, []));
     rooms.forEach((r) => {
-      const wing = r.wing as RoomWing;
-      if (map.has(wing)) map.get(wing)!.push(r);
+      if (!map.has(r.wing)) map.set(r.wing, []);
+      map.get(r.wing)!.push(r);
     });
     return map;
   }, [rooms]);
@@ -1531,7 +1559,7 @@ export function DogBoardingCalendar({
               </div>
 
               {/* Wing groups + room rows */}
-              {WING_ORDER.map((wing) => {
+              {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
                 const wingRooms = roomsByWing.get(wing) ?? [];
                 if (wingRooms.length === 0) return null;
                 return (
@@ -1542,7 +1570,7 @@ export function DogBoardingCalendar({
                       style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}
                     >
                       <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {WING_LABELS[wing]}
+                        {WING_LABELS[wing] ?? wing.replace(/_/g, " ")}
                       </div>
                     </div>
 
@@ -1751,13 +1779,13 @@ export function DogBoardingCalendar({
                   <SelectValue placeholder="Select room" />
                 </SelectTrigger>
                 <SelectContent>
-                  {WING_ORDER.map((wing) => {
+                  {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
                     const wr = (roomsByWing.get(wing) ?? []);
                     if (wr.length === 0) return null;
                     return (
                       <div key={wing}>
                         <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase">
-                          {WING_LABELS[wing]}
+                          {WING_LABELS[wing] ?? wing.replace(/_/g, " ")}
                         </div>
                         {wr.map((r) => (
                           <SelectItem key={r.id} value={r.id}>
