@@ -360,6 +360,15 @@ const RoomsAdminPage = () => {
       });
   }, [allRooms, species]);
 
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredRooms = useMemo(() => {
+    if (!rooms) return undefined;
+    if (!searchQuery.trim()) return rooms;
+    const q = searchQuery.trim().toLowerCase();
+    return rooms.filter((r) => r.display_name.toLowerCase().includes(q));
+  }, [rooms, searchQuery]);
+
   const handleSpeciesChange = (s: Species) => {
     setSpecies(s);
     setSearchParams({ species: s }, { replace: true });
@@ -616,6 +625,16 @@ const RoomsAdminPage = () => {
         ) : !rooms || rooms.length === 0 ? (
           <p className="text-muted-foreground">No rooms found.</p>
         ) : (
+          <>
+          <div className="mb-4">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search room name..."
+              className="w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
           <div className="rounded-lg border overflow-x-auto">
             <Table>
               <TableHeader>
@@ -634,7 +653,7 @@ const RoomsAdminPage = () => {
               </TableHeader>
 
               <TableBody>
-                {rooms.map((room) => (
+                {(filteredRooms ?? []).map((room) => (
                   <TableRow
                     key={room.id}
                     className={room.is_active ? "" : "opacity-50 bg-muted/20"}
@@ -750,6 +769,7 @@ const RoomsAdminPage = () => {
               </TableBody>
             </Table>
           </div>
+          </>
         )}
 
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
