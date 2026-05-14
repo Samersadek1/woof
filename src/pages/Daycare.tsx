@@ -1923,12 +1923,24 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
     return packageTransportPricing.find((r) => r.key === key)?.amount_aed ?? 0;
   }, [packageTransportPricing, form.transport_zone]);
 
+  const [discountType, setDiscountType] = useState<"percentage" | "fixed">("percentage");
+  const [discountValue, setDiscountValue] = useState("");
+
   const totalDays = selectedType?.total_days ?? 0;
   const basePrice = selectedType?.base_price_aed ?? 0;
   const pickupTotal = form.pickup ? totalDays * transportRate : 0;
   const dropoffTotal = form.dropoff ? totalDays * transportRate : 0;
   const calculatedPrice = basePrice + pickupTotal + dropoffTotal;
-  const displayPrice = form.price_override ? parseFloat(form.price_override) || 0 : calculatedPrice;
+  const priceBeforeDiscount = form.price_override ? parseFloat(form.price_override) || 0 : calculatedPrice;
+
+  const discountAmount = useMemo(() => {
+    const dv = parseFloat(discountValue) || 0;
+    if (dv <= 0) return 0;
+    if (discountType === "percentage") return Math.min(priceBeforeDiscount, priceBeforeDiscount * (dv / 100));
+    return Math.min(priceBeforeDiscount, dv);
+  }, [discountType, discountValue, priceBeforeDiscount]);
+
+  const displayPrice = Math.max(0, priceBeforeDiscount - discountAmount);
 
   const setField = (field: string, value: unknown) =>
     setForm(f => ({ ...f, [field]: value }));
@@ -1937,6 +1949,8 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
     setOwnerId(null);
     setOwnerLabel(null);
     setForm({ pet_id: "", package_type_id: "", purchase_date: TODAY, expiry_date: "", pickup: false, dropoff: false, transport_zone: "dubai_shared", price_override: "", notes: "" });
+    setDiscountType("percentage");
+    setDiscountValue("");
     onClose();
   };
 
@@ -2210,6 +2224,90 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
               onChange={(e) => setField("price_override", e.target.value)}
             />
             <p className="text-xs text-muted-foreground">Pre-filled with calculated price. Edit to set a custom amount.</p>
+          </div>
+
+          {/* Discount section */}
+          <div className="space-y-3">
+            <Label className="text-sm font-semibold">Discount</Label>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant={discountType === "percentage" ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => { setDiscountType("percentage"); setDiscountValue(""); }}
+              >
+                Percentage %
+              </Button>
+              <Button
+                type="button"
+                variant={discountType === "fixed" ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => { setDiscountType("fixed"); setDiscountValue(""); }}
+              >
+                Fixed Amount AED
+              </Button>
+            </div>
+
+            {discountType === "percentage" && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {[10, 15, 20, 25, 30, 40, 50].map((pct) => (
+                    <Button
+                      key={pct}
+                      type="button"
+                      variant={discountValue === String(pct) ? "default" : "outline"}
+                      size="sm"
+                      className="h-7 text-xs px-2.5"
+                      onClick={() => setDiscountValue(String(pct))}
+                    >
+                      {pct}%
+                    </Button>
+                  ))}
+                </div>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="Custom %"
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                />
+              </div>
+            )}
+
+            {discountType === "fixed" && (
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Discount amount (AED)"
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+              />
+            )}
+
+            {discountAmount > 0 && (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span>Subtotal</span>
+                  <span>AED {priceBeforeDiscount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-red-600">
+                  <span>
+                    Discount{discountType === "percentage" ? ` (${discountValue}%)` : ""}
+                  </span>
+                  <span>- AED {discountAmount.toFixed(2)}</span>
+                </div>
+                <Separator />
+                <div className="flex justify-between font-semibold">
+                  <span>Total</span>
+                  <span>AED {displayPrice.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-1.5">
