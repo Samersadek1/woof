@@ -606,7 +606,6 @@ const RoomsAdminPage = () => {
                   <TableHead className="min-w-[190px]">Room Type</TableHead>
                   <TableHead className="min-w-[120px]">Capacity</TableHead>
                   <TableHead className="text-right min-w-[80px]">Max Pets</TableHead>
-                  <TableHead className="text-right min-w-[120px]">Nightly Rate (AED)</TableHead>
                   <TableHead className="min-w-[100px]">Camera No.</TableHead>
                   <TableHead className="text-center min-w-[120px]">Camera recording</TableHead>
                   <TableHead className="text-center min-w-[80px]">Active</TableHead>
@@ -678,15 +677,6 @@ const RoomsAdminPage = () => {
                       />
                     </TableCell>
 
-                    <TableCell className="text-right">
-                      <TextCell
-                        room={room}
-                        field="nightly_rate"
-                        value={room.nightly_rate}
-                        type="number"
-                        placeholder="—"
-                      />
-                    </TableCell>
 
                     <TableCell>
                       <TextCell room={room} field="cam_number" value={room.cam_number} />
