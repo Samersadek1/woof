@@ -427,7 +427,13 @@ const RoomsAdminPage = () => {
     let result = rooms;
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
-      result = result.filter((r) => r.display_name.toLowerCase().includes(q));
+      result = result.filter((r) => {
+        const name = r.display_name.toLowerCase();
+        const wing = (WING_LABELS[r.wing as RoomWing] ?? r.wing).toLowerCase();
+        const type = (ROOM_TYPE_LABELS[r.room_type as RoomType] ?? r.room_type).toLowerCase();
+        const num = r.room_number.toLowerCase();
+        return name.includes(q) || wing.includes(q) || type.includes(q) || num.includes(q);
+      });
     }
     if (wingFilter !== "__all__") {
       result = result.filter((r) => r.wing === wingFilter);
