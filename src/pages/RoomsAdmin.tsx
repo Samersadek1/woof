@@ -337,7 +337,13 @@ const RoomsAdminPage = () => {
   const rooms = useMemo(() => {
     if (!allRooms) return undefined;
     const wings = species === "cat" ? CAT_WINGS : DOG_WINGS;
-    return allRooms.filter((r) => wings.includes(r.wing));
+    return allRooms
+      .filter((r) => wings.includes(r.wing))
+      .sort((a, b) => {
+        const wingCmp = a.wing.localeCompare(b.wing);
+        if (wingCmp !== 0) return wingCmp;
+        return (parseInt(a.room_number) || 0) - (parseInt(b.room_number) || 0);
+      });
   }, [allRooms, species]);
 
   const handleSpeciesChange = (s: Species) => {
