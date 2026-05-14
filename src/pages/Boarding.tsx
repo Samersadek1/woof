@@ -953,6 +953,7 @@ export function DogBoardingCalendar({
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
   const [form, setForm] = useState<NewBookingForm>({ ...BLANK_FORM });
+  const [roomSearch, setRoomSearch] = useState("");
   const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
   const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
   const [belongingsReadOnly, setBelongingsReadOnly] = useState(false);
@@ -1774,18 +1775,35 @@ export function DogBoardingCalendar({
             {/* Room */}
             <div className="space-y-2">
               <Label>Room <span className="text-destructive">*</span></Label>
+              <input
+                type="text"
+                value={roomSearch}
+                onChange={(e) => setRoomSearch(e.target.value)}
+                placeholder="Search room name or number..."
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
               <Select value={form.room_id} onValueChange={(v) => setForm((f) => ({ ...f, room_id: v }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select room" />
                 </SelectTrigger>
                 <SelectContent>
                   {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
-                    const wr = (roomsByWing.get(wing) ?? []);
+                    const wingLabel = WING_LABELS[wing] ?? wing.replace(/_/g, " ");
+                    const q = roomSearch.trim().toLowerCase();
+                    const wr = (roomsByWing.get(wing) ?? []).filter((r) => {
+                      if (!q) return true;
+                      return (
+                        r.display_name.toLowerCase().includes(q) ||
+                        r.room_number.toLowerCase().includes(q) ||
+                        wingLabel.toLowerCase().includes(q) ||
+                        wing.toLowerCase().includes(q)
+                      );
+                    });
                     if (wr.length === 0) return null;
                     return (
                       <div key={wing}>
                         <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase">
-                          {WING_LABELS[wing] ?? wing.replace(/_/g, " ")}
+                          {wingLabel}
                         </div>
                         {wr.map((r) => (
                           <SelectItem key={r.id} value={r.id}>
