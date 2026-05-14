@@ -302,14 +302,23 @@ function toastRoomSaveFailed(err: unknown) {
 }
 
 const DOG_WINGS: RoomWing[] = [
-  "bond_rooms",
-  "dluxe",
-  "standard_room",
   "oxford",
+  "back_kennels",
   "piccadilly",
   "park_lane",
   "fleet",
-  "back_kennels",
+  "royal_annex",
+  "royal_suite",
+  "bond_suite",
+  "little_gems",
+  "deluxe_suite",
+  "standard_suite",
+  "pall_mall",
+  "grooming_room",
+  "training_room",
+  "bond_rooms",
+  "dluxe",
+  "standard_room",
 ];
 const CAT_WINGS: RoomWing[] = ["cattery"];
 
@@ -340,8 +349,9 @@ const RoomsAdminPage = () => {
     return allRooms
       .filter((r) => wings.includes(r.wing))
       .sort((a, b) => {
-        const wingCmp = a.wing.localeCompare(b.wing);
-        if (wingCmp !== 0) return wingCmp;
+        const aIdx = wings.indexOf(a.wing);
+        const bIdx = wings.indexOf(b.wing);
+        if (aIdx !== bIdx) return aIdx - bIdx;
         return (parseInt(a.room_number) || 0) - (parseInt(b.room_number) || 0);
       });
   }, [allRooms, species]);
