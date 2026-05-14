@@ -100,6 +100,7 @@ import {
   LayoutGrid,
   Printer,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
 import { DogSizeField } from "@/components/DogSizeField";
@@ -1775,46 +1776,74 @@ export function DogBoardingCalendar({
             {/* Room */}
             <div className="space-y-2">
               <Label>Room <span className="text-destructive">*</span></Label>
-              <input
-                type="text"
-                value={roomSearch}
-                onChange={(e) => setRoomSearch(e.target.value)}
-                placeholder="Search room name or number..."
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              <Select value={form.room_id} onValueChange={(v) => setForm((f) => ({ ...f, room_id: v }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select room" />
-                </SelectTrigger>
-                <SelectContent>
-                  {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
-                    const wingLabel = WING_LABELS[wing] ?? wing.replace(/_/g, " ");
-                    const q = roomSearch.trim().toLowerCase();
-                    const wr = (roomsByWing.get(wing) ?? []).filter((r) => {
-                      if (!q) return true;
-                      return (
-                        r.display_name.toLowerCase().includes(q) ||
-                        r.room_number.toLowerCase().includes(q) ||
-                        wingLabel.toLowerCase().includes(q) ||
-                        wing.toLowerCase().includes(q)
-                      );
-                    });
-                    if (wr.length === 0) return null;
-                    return (
-                      <div key={wing}>
-                        <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase">
-                          {wingLabel}
-                        </div>
-                        {wr.map((r) => (
-                          <SelectItem key={r.id} value={r.id}>
-                            {r.room_number} — <span className="capitalize text-muted-foreground">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
-                          </SelectItem>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
+              {form.room_id ? (
+                <div className="flex items-center gap-2 rounded-md border border-input bg-muted/30 px-3 py-2">
+                  <span className="flex-1 text-sm">
+                    {(() => {
+                      const sel = rooms.find((r) => r.id === form.room_id);
+                      if (!sel) return "Selected room";
+                      const wl = WING_LABELS[sel.wing] ?? sel.wing.replace(/_/g, " ");
+                      return `${wl} | ${sel.room_number} — ${sel.room_type?.replace(/_/g, " ")} | ${sel.capacity_type}`;
+                    })()}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-full p-0.5 hover:bg-muted"
+                    onClick={() => { setForm((f) => ({ ...f, room_id: "" })); setRoomSearch(""); }}
+                    aria-label="Clear room selection"
+                  >
+                    <X className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={roomSearch}
+                    onChange={(e) => setRoomSearch(e.target.value)}
+                    placeholder="Search room by name, number, or wing..."
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  {roomSearch.trim().length > 0 && (
+                    <div className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-md border bg-popover shadow-md">
+                      {(() => {
+                        const q = roomSearch.trim().toLowerCase();
+                        let hasResults = false;
+                        const groups = [...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
+                          const wingLabel = WING_LABELS[wing] ?? wing.replace(/_/g, " ");
+                          const wr = (roomsByWing.get(wing) ?? []).filter((r) =>
+                            r.display_name.toLowerCase().includes(q) ||
+                            r.room_number.toLowerCase().includes(q) ||
+                            wingLabel.toLowerCase().includes(q) ||
+                            wing.toLowerCase().includes(q)
+                          );
+                          if (wr.length === 0) return null;
+                          hasResults = true;
+                          return (
+                            <div key={wing}>
+                              <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/40">
+                                {wingLabel}
+                              </div>
+                              {wr.map((r) => (
+                                <button
+                                  key={r.id}
+                                  type="button"
+                                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                                  onClick={() => { setForm((f) => ({ ...f, room_id: r.id })); setRoomSearch(""); }}
+                                >
+                                  {wingLabel} | {r.room_number} — <span className="capitalize text-muted-foreground">{r.room_type?.replace(/_/g, " ")} | {r.capacity_type}</span>
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        });
+                        if (!hasResults) return <div className="px-3 py-2 text-sm text-muted-foreground">No rooms found</div>;
+                        return groups;
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
               {form.room_id && (
                 <div className="rounded-md border bg-muted/30 px-3 py-2">
                   {dogRatePreview.isLoading ? (
