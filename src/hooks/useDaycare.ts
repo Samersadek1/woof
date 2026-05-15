@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
 
 type DaycarePackage = Database["public"]["Tables"]["daycare_packages"]["Row"];
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
@@ -226,20 +227,18 @@ export function useAddDaycareDay() {
         throw new Error("Pet is already checked in for this date");
       }
 
-      // cast until types.ts is regenerated to include the new columns
       const insert = {
         session_date,
         pet_id,
         owner_id,
-        package_id:    package_id  ?? null,
-        checked_in:    true,
+        package_id: package_id ?? null,
+        checked_in: true,
         checked_in_at: new Date().toISOString(),
-        notes:         remark      ?? null,
-        pickup_used:   pickup_used  ?? false,
-        dropoff_used:  dropoff_used ?? false,
-        logged_by:     logged_by    ?? null,
-        dog_size:      dog_size     ?? null,
-      } as unknown as DaycareSessionInsert;
+        notes: appendDogSizeToNotes(remark ?? null, dog_size),
+        pickup_used: pickup_used ?? false,
+        dropoff_used: dropoff_used ?? false,
+        logged_by: logged_by ?? null,
+      } as DaycareSessionInsert;
 
       const { data: session, error } = await supabase
         .from("daycare_sessions")
@@ -427,6 +426,12 @@ export function useDeleteDaycarePackage() {
         .insert(logEntry as Record<string, unknown>);
 
       if (logErr) throw logErr;
+
+      const { error: unlinkErr } = await supabase
+        .from("daycare_sessions")
+        .update({ package_id: null })
+        .eq("package_id", packageId);
+      if (unlinkErr) throw unlinkErr;
 
       const { error: deleteErr } = await supabase
         .from("daycare_packages")

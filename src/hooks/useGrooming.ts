@@ -10,6 +10,7 @@ import {
   deleteGroomingAppointmentWithLog,
   type DeleteGroomingAppointmentWithLogInput,
 } from "@/lib/deleteGroomingAppointment";
+import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
 import {
   GROOMING_WORKFLOW_STATUSES,
   timestampClearsForUndoTo,
@@ -152,15 +153,12 @@ export function useCreateGroomingAppointment() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ dog_size, ...row }: GroomingInsert) => {
-      const notes = [row.notes, dog_size ? `Dog size: ${dog_size}` : ""]
-        .filter(Boolean)
-        .join("\n") || null;
+    mutationFn: async (row: GroomingInsert) => {
+      const payload = withoutDogSizeColumn(row);
       const { data, error } = await supabase
         .from("grooming_appointments")
         .insert({
-          ...row,
-          notes,
+          ...payload,
           status: row.status ?? "new",
           no_show: row.no_show ?? false,
         })
@@ -216,9 +214,10 @@ export function useUpdateGroomingAppointment() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: GroomingUpdate & { id: string }) => {
+      const payload = withoutDogSizeColumn(updates);
       const { data, error } = await supabase
         .from("grooming_appointments")
-        .update(updates)
+        .update(payload)
         .eq("id", id)
         .select()
         .single();

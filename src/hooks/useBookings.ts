@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
 
 type Booking = Database["public"]["Tables"]["bookings"]["Row"];
 type BookingInsert = Database["public"]["Tables"]["bookings"]["Insert"];
@@ -252,6 +253,16 @@ export function useDeleteRoom() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      const { data: linkedBookings, error: checkErr } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("room_id", id)
+        .limit(1);
+      if (checkErr) throw checkErr;
+      if (linkedBookings && linkedBookings.length > 0) {
+        throw new Error("Cannot delete a room that has bookings assigned to it.");
+      }
+
       const { error } = await supabase.from("rooms").delete().eq("id", id);
       if (error) throw error;
     },
@@ -274,12 +285,8 @@ export function useCreateBooking() {
       // #region agent log
       fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H1',location:'src/hooks/useBookings.ts:useCreateBooking:entry',message:'create booking mutation started',data:{hasOwnerId:!!bookingData.owner_id,roomId:bookingData.room_id??null,bookingType:bookingData.booking_type??null,petCount:pet_ids.length,checkInDate:bookingData.check_in_date??null,checkOutDate:bookingData.check_out_date??null},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
-      const notes = [bookingData.notes, dog_size ? `Dog size: ${dog_size}` : ""]
-        .filter(Boolean)
-        .join("\n") || null;
       const payload: BookingInsert = {
-        ...bookingData,
-        notes,
+        ...withoutDogSizeColumn({ ...bookingData, dog_size }),
         booking_type: bookingData.booking_type ?? "boarding",
       };
       const { data: booking, error: bookingError } = await supabase
@@ -329,9 +336,10 @@ export function useUpdateBooking() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: BookingUpdate & { id: string }) => {
+      const payload = withoutDogSizeColumn(updates);
       const { data, error } = await supabase
         .from("bookings")
-        .update(updates)
+        .update(payload)
         .eq("id", id)
         .select()
         .single();

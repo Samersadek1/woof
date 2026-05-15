@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { assertNoChildRows, deleteChildRows } from "@/lib/supabaseDelete";
 
 export interface DeleteGroomingAppointmentWithLogInput {
   appointmentId: string;
@@ -30,23 +31,13 @@ export async function deleteGroomingAppointmentWithLog(
     throw new Error("A deletion reason is required.");
   }
 
-  const { error: eventsErr } = await supabase
-    .from("grooming_status_events")
-    .delete()
-    .eq("appointment_id", appointmentId);
-  if (eventsErr) throw eventsErr;
-
-  const { data: remainingEvents, error: checkErr } = await supabase
-    .from("grooming_status_events")
-    .select("id")
-    .eq("appointment_id", appointmentId)
-    .limit(1);
-  if (checkErr) throw checkErr;
-  if (remainingEvents && remainingEvents.length > 0) {
-    throw new Error(
-      "Could not remove status history for this appointment. Apply the grooming_status_events delete policy migration.",
-    );
-  }
+  await deleteChildRows("grooming_status_events", "appointment_id", appointmentId);
+  await assertNoChildRows(
+    "grooming_status_events",
+    "appointment_id",
+    appointmentId,
+    "Could not remove status history for this appointment. Apply the grooming_status_events delete policy migration.",
+  );
 
   const { error: apptErr } = await supabase
     .from("grooming_appointments")
