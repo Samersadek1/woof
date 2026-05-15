@@ -1,10 +1,20 @@
+export const GROOMING_PAYMENT_METHOD_NONE = "__none__" as const;
+
 export const GROOMING_PAYMENT_METHOD_OPTIONS = [
   { value: "cash", label: "Cash" },
   { value: "card", label: "Card" },
   { value: "wallet", label: "Wallet" },
+  { value: "mamo_pay", label: "Mamo Pay" },
 ] as const;
 
 export type GroomingPaymentMethod = (typeof GROOMING_PAYMENT_METHOD_OPTIONS)[number]["value"];
+
+export function parseGroomingPaymentMethodSelectValue(
+  value: string,
+): GroomingPaymentMethod | null {
+  if (value === GROOMING_PAYMENT_METHOD_NONE) return null;
+  return value as GroomingPaymentMethod;
+}
 
 export function groomingPaymentMethodLabel(
   method: string | null | undefined,

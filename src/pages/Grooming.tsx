@@ -41,8 +41,10 @@ import {
 import { grandTotalFromNet, invoiceDisplayTotals, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
 import { memberTierBadgeClassName, memberTierBadgeLabel, memberTierDiscountPct } from "@/lib/memberTier";
 import {
+  GROOMING_PAYMENT_METHOD_NONE,
   GROOMING_PAYMENT_METHOD_OPTIONS,
   groomingPaymentMethodLabel,
+  parseGroomingPaymentMethodSelectValue,
   type GroomingPaymentMethod,
 } from "@/lib/groomingPaymentMethod";
 import {
@@ -781,7 +783,7 @@ const GroomingPage = () => {
   const [discountPct, setDiscountPct] = useState("");
   const discountAutoFromMemberRef = useRef(true);
   const prevOwnerIdForMemberDiscountRef = useRef<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<GroomingPaymentMethod>("cash");
+  const [paymentMethod, setPaymentMethod] = useState<GroomingPaymentMethod | null>(null);
   const [visitNotes, setVisitNotes] = useState("");
   const [linkBoarding, setLinkBoarding] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
@@ -1014,7 +1016,7 @@ const GroomingPage = () => {
     newApptPriceManualRef.current = false;
     setPrice("");
     setDiscountPct("");
-    setPaymentMethod("cash");
+    setPaymentMethod(null);
     setVisitNotes("");
     setOwnerId(null);
     setOwnerLabel(null);
@@ -1202,7 +1204,7 @@ const GroomingPage = () => {
       price: finalPrice,
       notes: composedNotes || null,
       booking_id: linkBoarding ? bookingId : null,
-      payment_method: paymentMethod,
+      payment_method: paymentMethod ?? null,
       dog_size: dogSize,
     };
 
@@ -1228,7 +1230,9 @@ const GroomingPage = () => {
         ownerId: ownerId!,
         serviceType: "grooming",
         referenceId: createdRows[0].id,
-        notes: `Payment method: ${groomingPaymentMethodLabel(paymentMethod)}`,
+        notes: paymentMethod
+          ? `Payment method: ${groomingPaymentMethodLabel(paymentMethod)}`
+          : undefined,
         lineItems: createdRows.map((appt) => {
           const petName =
             pets.find((p) => p.id === appt.pet_id)?.name ?? "Pet";
@@ -2689,15 +2693,20 @@ const GroomingPage = () => {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Payment method</Label>
+                <Label>Payment method (optional)</Label>
                 <Select
-                  value={paymentMethod}
-                  onValueChange={(v) => setPaymentMethod(v as GroomingPaymentMethod)}
+                  value={paymentMethod ?? GROOMING_PAYMENT_METHOD_NONE}
+                  onValueChange={(v) =>
+                    setPaymentMethod(parseGroomingPaymentMethodSelectValue(v))
+                  }
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="Not specified" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={GROOMING_PAYMENT_METHOD_NONE}>
+                      Not specified
+                    </SelectItem>
                     {GROOMING_PAYMENT_METHOD_OPTIONS.map((o) => (
                       <SelectItem key={o.value} value={o.value}>
                         {o.label}
@@ -2706,7 +2715,7 @@ const GroomingPage = () => {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  How the client plans to pay at checkout (stored on the appointment and copied to the draft invoice).
+                  Optional. When set, stored on the appointment and copied to the draft invoice.
                 </p>
               </div>
               <div className="space-y-2">
