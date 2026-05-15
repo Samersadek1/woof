@@ -195,18 +195,23 @@ export function useDeleteGroomingAppointment() {
         throw new Error("A deletion reason is required.");
       }
 
+      const id = input.appointmentId;
+
+      // Step 1: remove status history (must complete before appointment delete).
       const { error: statusEventsError } = await supabase
         .from("grooming_status_events")
         .delete()
-        .eq("appointment_id", input.appointmentId);
+        .eq("appointment_id", id);
       if (statusEventsError) throw statusEventsError;
 
+      // Step 2: remove appointment row.
       const { error: appointmentError } = await supabase
         .from("grooming_appointments")
         .delete()
-        .eq("id", input.appointmentId);
+        .eq("id", id);
       if (appointmentError) throw appointmentError;
 
+      // Audit log (do not fail the mutation if logging is unavailable).
       const { error: logError } = await supabase.from("grooming_appointment_deletion_log").insert({
         appointment_id: input.appointmentId,
         appointment_date: input.appointmentDate,
@@ -217,7 +222,9 @@ export function useDeleteGroomingAppointment() {
         deleted_by: input.deletedByEmail,
         reason: trimmedReason,
       });
-      if (logError) throw logError;
+      if (logError) {
+        console.error("grooming_appointment_deletion_log insert failed:", logError);
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["grooming"] });
