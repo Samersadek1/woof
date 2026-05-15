@@ -6,10 +6,6 @@ import {
 } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import {
-  deleteGroomingAppointmentWithLog,
-  type DeleteGroomingAppointmentWithLogInput,
-} from "@/lib/deleteGroomingAppointment";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
 import {
   GROOMING_WORKFLOW_STATUSES,
@@ -178,12 +174,51 @@ export function useCreateGroomingAppointment() {
   });
 }
 
+export type DeleteGroomingAppointmentWithLogInput = {
+  appointmentId: string;
+  appointmentDate: string;
+  petName: string;
+  ownerName: string;
+  service: string;
+  price: number | null;
+  reason: string;
+  deletedByEmail: string;
+};
+
 export function useDeleteGroomingAppointment() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: DeleteGroomingAppointmentWithLogInput) =>
-      deleteGroomingAppointmentWithLog(input),
+    mutationFn: async (input: DeleteGroomingAppointmentWithLogInput) => {
+      const trimmedReason = input.reason.trim();
+      if (!trimmedReason) {
+        throw new Error("A deletion reason is required.");
+      }
+
+      const { error: statusEventsError } = await supabase
+        .from("grooming_status_events")
+        .delete()
+        .eq("appointment_id", input.appointmentId);
+      if (statusEventsError) throw statusEventsError;
+
+      const { error: appointmentError } = await supabase
+        .from("grooming_appointments")
+        .delete()
+        .eq("id", input.appointmentId);
+      if (appointmentError) throw appointmentError;
+
+      const { error: logError } = await supabase.from("grooming_appointment_deletion_log").insert({
+        appointment_id: input.appointmentId,
+        appointment_date: input.appointmentDate,
+        pet_name: input.petName,
+        owner_name: input.ownerName,
+        service: input.service,
+        price: input.price,
+        deleted_by: input.deletedByEmail,
+        reason: trimmedReason,
+      });
+      if (logError) throw logError;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["grooming"] });
     },
