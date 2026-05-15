@@ -14,6 +14,7 @@ import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import {
   useGroomingAppointments,
+  useGroomingHistoryList,
   useGroomingGlobalSearch,
   useCreateGroomingAppointment,
   useUpdateGroomingAppointment,
@@ -737,10 +738,15 @@ const GroomingPage = () => {
   }, [searchParams]);
 
   const dateStr = format(day, "yyyy-MM-dd");
+  const todayStr = format(new Date(), "yyyy-MM-dd");
 
+  const [groomingTab, setGroomingTab] = useState("day");
   const { data: dayAppointments = [], isLoading: dayLoading } =
     useGroomingAppointments(dateStr);
   const [historySearch, setHistorySearch] = useState("");
+  const historySearchActive = historySearch.trim().length >= 2;
+  const { data: historyAppointments = [], isFetching: historyListFetching } =
+    useGroomingHistoryList(todayStr, groomingTab === "history" && !historySearchActive);
   const { data: searchResults = [], isFetching: searchFetching } =
     useGroomingGlobalSearch(historySearch);
 
@@ -1246,13 +1252,15 @@ const GroomingPage = () => {
   };
 
   const sortedHistory = useMemo(() => {
-    return [...searchResults].sort((a, b) => {
+    const source = historySearchActive ? searchResults : historyAppointments;
+    return [...source].sort((a, b) => {
       const d =
         b.appointment_date.localeCompare(a.appointment_date) ||
         (b.appointment_time ?? "").localeCompare(a.appointment_time ?? "");
       return d;
     });
-  }, [searchResults]);
+  }, [historySearchActive, searchResults, historyAppointments]);
+  const historyTableFetching = historySearchActive ? searchFetching : historyListFetching;
   const serviceMatches = (
     a: GroomingAppointmentWithJoins,
     exactFilter: string,
@@ -1457,7 +1465,7 @@ const GroomingPage = () => {
           </div>
         </div>
 
-        <Tabs defaultValue="day" className="space-y-4">
+        <Tabs value={groomingTab} onValueChange={setGroomingTab} className="space-y-4">
           <TabsList>
             <TabsTrigger value="day">Day View</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
@@ -1528,24 +1536,22 @@ const GroomingPage = () => {
           <TabsContent value="history" className="space-y-4">
             <div className="max-w-md">
               <Label className="text-xs text-muted-foreground">
-                Search by pet or owner
+                Search by pet or owner (optional)
               </Label>
               <Input
                 className="mt-1"
-                placeholder="Type at least 2 characters…"
+                placeholder="Filter by pet or owner name…"
                 value={historySearch}
                 onChange={(e) => setHistorySearch(e.target.value)}
               />
             </div>
             {historySearch.trim().length > 0 && historySearch.trim().length < 2 && (
               <p className="text-sm text-muted-foreground">
-                Enter at least 2 characters to search.
+                Enter at least 2 characters to filter the list.
               </p>
             )}
-            {historySearch.trim().length >= 2 && searchFetching && (
-              <Skeleton className="h-40 w-full" />
-            )}
-            {historySearch.trim().length >= 2 && !searchFetching && (
+            {historyTableFetching && <Skeleton className="h-40 w-full" />}
+            {!historyTableFetching && (historySearchActive || historySearch.trim().length === 0) && (
               <div className="rounded-md border overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -1563,7 +1569,7 @@ const GroomingPage = () => {
                     {filteredHistory.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center text-muted-foreground">
-                          No matches for this search/filter combination.
+                          No appointments match the current filters.
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -1630,7 +1636,7 @@ const GroomingPage = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel this appointment?</AlertDialogTitle>
             <AlertDialogDescription>
-              The slot will be marked as cancelled. This can be seen in history search.
+              The slot will be marked as cancelled. It will appear in the History tab.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

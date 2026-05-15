@@ -36,6 +36,7 @@ export type GroomingAppointmentWithJoins = GroomingRow & {
 export const queryKeys = {
   groomingDay: (date: string) => ["grooming", "day", date] as const,
   groomingHistory: (petId: string) => ["grooming", "history", petId] as const,
+  groomingHistoryList: (beforeDate: string) => ["grooming", "history-list", beforeDate] as const,
   groomingSearch: (term: string) => ["grooming", "search", term] as const,
   ownerGrooming: (ownerId: string) => ["grooming", "owner", ownerId] as const,
 };
@@ -54,6 +55,7 @@ function invalidateGrooming(
     qc.invalidateQueries({ queryKey: queryKeys.ownerGrooming(opts.ownerId) });
   }
   qc.invalidateQueries({ queryKey: ["grooming", "search"] });
+  qc.invalidateQueries({ queryKey: ["grooming", "history-list"] });
   qc.invalidateQueries({ queryKey: ["grooming", "lastCompletedByPets"] });
   qc.invalidateQueries({ queryKey: ["grooming", "dayInvoices"] });
 }
@@ -87,6 +89,26 @@ export function useGroomingHistory(petId: string, limit = 20) {
         .order("appointment_date", { ascending: false })
         .order("appointment_time", { ascending: false })
         .limit(limit);
+
+      if (error) throw error;
+      return data as GroomingAppointmentWithJoins[];
+    },
+  });
+}
+
+/** Past appointments and any cancelled (including today), for the History tab. */
+export function useGroomingHistoryList(beforeDate: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.groomingHistoryList(beforeDate),
+    enabled: enabled && !!beforeDate,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("grooming_appointments")
+        .select(GROOMING_JOIN_SELECT)
+        .or(`appointment_date.lt.${beforeDate},status.eq.cancelled`)
+        .order("appointment_date", { ascending: false })
+        .order("appointment_time", { ascending: false, nullsFirst: false })
+        .limit(500);
 
       if (error) throw error;
       return data as GroomingAppointmentWithJoins[];
