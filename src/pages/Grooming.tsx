@@ -955,15 +955,21 @@ const GroomingPage = () => {
     newApptPriceManualRef.current = false;
   }, [selectedServices, dogSize]);
 
+  const isComplimentaryPayment = paymentMethod === "complimentary";
+
   useEffect(() => {
     if (!sheetOpen) return;
+    if (isComplimentaryPayment) {
+      setPrice("0");
+      return;
+    }
     if (newApptPriceManualRef.current) return;
     if (newApptComputedOriginalAed == null) {
       setPrice("");
       return;
     }
     setPrice(String(newApptComputedOriginalAed));
-  }, [sheetOpen, newApptComputedOriginalAed]);
+  }, [sheetOpen, isComplimentaryPayment, newApptComputedOriginalAed]);
 
   const normalizedDiscountPct = useMemo(() => {
     const trimmed = discountPct.trim();
@@ -980,9 +986,10 @@ const GroomingPage = () => {
   }, [price]);
 
   const newApptFinalAed = useMemo(() => {
+    if (isComplimentaryPayment) return 0;
     if (newApptOriginalAed == null) return null;
     return Number((newApptOriginalAed * (1 - normalizedDiscountPct / 100)).toFixed(2));
-  }, [newApptOriginalAed, normalizedDiscountPct]);
+  }, [isComplimentaryPayment, newApptOriginalAed, normalizedDiscountPct]);
 
   const newApptSaveAed = useMemo(() => {
     if (newApptOriginalAed == null || normalizedDiscountPct <= 0 || newApptFinalAed == null) {
@@ -1155,11 +1162,12 @@ const GroomingPage = () => {
     const fallbackBase =
       typeof serviceRate === "number" && serviceRate >= 0 ? serviceRate : null;
     const basePrice = baseForCharge ?? fallbackBase;
-    const finalPrice =
-      basePrice != null
+    const finalPrice = isComplimentaryPayment
+      ? 0
+      : basePrice != null
         ? Number((basePrice * (1 - normalizedDiscountPct / 100)).toFixed(2))
         : NaN;
-    if (Number.isNaN(finalPrice) || finalPrice < 0) {
+    if (!isComplimentaryPayment && (Number.isNaN(finalPrice) || finalPrice < 0)) {
       toast.error("Price is not loaded yet. Wait a moment or enter it manually.");
       return;
     }
@@ -2605,6 +2613,7 @@ const GroomingPage = () => {
                     min={0}
                     step={1}
                     value={price}
+                    disabled={isComplimentaryPayment}
                     onChange={(e) => {
                       newApptPriceManualRef.current = true;
                       setPrice(e.target.value);
@@ -2613,7 +2622,12 @@ const GroomingPage = () => {
                   />
                 </div>
               </div>
-              <div className="space-y-3 rounded-lg border p-3">
+              <div
+                className={cn(
+                  "space-y-3 rounded-lg border p-3",
+                  isComplimentaryPayment && "pointer-events-none opacity-50",
+                )}
+              >
                 <Label>Discount</Label>
                 <p className="text-xs text-muted-foreground">
                   Choose a preset or enter a custom percentage. Leave empty or 0 for no discount.
@@ -2717,6 +2731,11 @@ const GroomingPage = () => {
                 <p className="text-xs text-muted-foreground">
                   Optional. When set, stored on the appointment and copied to the draft invoice.
                 </p>
+                {isComplimentaryPayment ? (
+                  <p className="text-sm font-medium text-emerald-700">
+                    This service is complimentary
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label>Groomer</Label>
