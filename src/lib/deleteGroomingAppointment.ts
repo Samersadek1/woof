@@ -30,6 +30,30 @@ export async function deleteGroomingAppointmentWithLog(
     throw new Error("A deletion reason is required.");
   }
 
+  const { error: eventsErr } = await supabase
+    .from("grooming_status_events")
+    .delete()
+    .eq("appointment_id", appointmentId);
+  if (eventsErr) throw eventsErr;
+
+  const { data: remainingEvents, error: checkErr } = await supabase
+    .from("grooming_status_events")
+    .select("id")
+    .eq("appointment_id", appointmentId)
+    .limit(1);
+  if (checkErr) throw checkErr;
+  if (remainingEvents && remainingEvents.length > 0) {
+    throw new Error(
+      "Could not remove status history for this appointment. Apply the grooming_status_events delete policy migration.",
+    );
+  }
+
+  const { error: apptErr } = await supabase
+    .from("grooming_appointments")
+    .delete()
+    .eq("id", appointmentId);
+  if (apptErr) throw apptErr;
+
   const { error: logErr } = await supabase.from("grooming_appointment_deletion_log").insert({
     appointment_id: appointmentId,
     appointment_date: appointmentDate,
@@ -41,16 +65,4 @@ export async function deleteGroomingAppointmentWithLog(
     reason: trimmedReason,
   });
   if (logErr) throw logErr;
-
-  const { error: eventsErr } = await supabase
-    .from("grooming_status_events")
-    .delete()
-    .eq("appointment_id", appointmentId);
-  if (eventsErr) throw eventsErr;
-
-  const { error: apptErr } = await supabase
-    .from("grooming_appointments")
-    .delete()
-    .eq("id", appointmentId);
-  if (apptErr) throw apptErr;
 }

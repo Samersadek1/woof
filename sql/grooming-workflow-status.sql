@@ -24,5 +24,12 @@ DROP POLICY IF EXISTS "grooming_status_events_all" ON grooming_status_events;
 CREATE POLICY "grooming_status_events_all"
   ON grooming_status_events FOR ALL USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "grooming_status_events_delete_authenticated" ON grooming_status_events;
+CREATE POLICY "grooming_status_events_delete_authenticated"
+  ON grooming_status_events
+  FOR DELETE
+  TO authenticated
+  USING (true);
+
 -- Migrate legacy scheduled → new
 UPDATE grooming_appointments SET status = 'new' WHERE status = 'scheduled';
