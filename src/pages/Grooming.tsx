@@ -1268,9 +1268,9 @@ const GroomingPage = () => {
   };
   const filteredDayAppointments = useMemo(
     () =>
-      dayAppointments.filter((a) =>
-        serviceMatches(a, serviceFilter, serviceSearch),
-      ),
+      dayAppointments
+        .filter((a) => normalizeGroomingWorkflowStatus(a.status) !== "cancelled")
+        .filter((a) => serviceMatches(a, serviceFilter, serviceSearch)),
     [dayAppointments, serviceFilter, serviceSearch],
   );
   const filteredHistory = useMemo(
