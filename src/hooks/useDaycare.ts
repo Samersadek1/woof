@@ -402,31 +402,11 @@ export function useUpdateDaycarePackage() {
 
 // ── useDeleteDaycarePackage ──────────────────────────────────────────────────
 
-export type DeletePackagePayload = {
-  packageId: string;
-  logEntry: {
-    package_id: string;
-    owner_name: string;
-    pet_name: string;
-    total_days: number;
-    days_used: number;
-    price_paid: number | null;
-    deleted_by: string;
-    reason: string;
-  };
-};
-
 export function useDeleteDaycarePackage() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ packageId, logEntry }: DeletePackagePayload) => {
-      const { error: logErr } = await supabase
-        .from("daycare_package_deletion_log")
-        .insert(logEntry as Record<string, unknown>);
-
-      if (logErr) throw logErr;
-
+    mutationFn: async (packageId: string) => {
       const { error: unlinkErr } = await supabase
         .from("daycare_sessions")
         .update({ package_id: null })

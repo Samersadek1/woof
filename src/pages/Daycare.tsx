@@ -39,7 +39,6 @@ import {
   type PackageWithDetails,
   type SessionRow,
 } from "@/hooks/useDaycare";
-import { useAuth } from "@/contexts/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -2341,9 +2340,7 @@ function PackagesTab() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editPkg, setEditPkg] = useState<PackageWithDetails | null>(null);
   const [deletePkg, setDeletePkg] = useState<PackageWithDetails | null>(null);
-  const [deleteReason, setDeleteReason] = useState("");
 
-  const { session } = useAuth();
   const { data: packages, isLoading } = useAllDaycarePackages();
   const updatePackage = useUpdateDaycarePackage();
   const deletePackage = useDeleteDaycarePackage();
@@ -2382,27 +2379,14 @@ function PackagesTab() {
   };
 
   const handleDelete = () => {
-    if (!deletePkg || !deleteReason.trim()) return;
-    const ownerName = deletePkg.owners ? ownerDisplayName(deletePkg.owners.first_name, deletePkg.owners.last_name) : "Unknown";
-    deletePackage.mutate(
-      {
-        packageId: deletePkg.id,
-        logEntry: {
-          package_id: deletePkg.id,
-          owner_name: ownerName,
-          pet_name: deletePkg.pets?.name ?? "Unknown",
-          total_days: deletePkg.total_days,
-          days_used: deletePkg.days_used,
-          price_paid: deletePkg.price_paid,
-          deleted_by: session?.user?.email ?? "unknown",
-          reason: deleteReason.trim(),
-        },
+    if (!deletePkg) return;
+    deletePackage.mutate(deletePkg.id, {
+      onSuccess: () => {
+        toast.success("Package deleted");
+        setDeletePkg(null);
       },
-      {
-        onSuccess: () => { toast.success("Package deleted"); setDeletePkg(null); setDeleteReason(""); },
-        onError: (err) => toast.error(`Delete failed: ${(err as Error).message}`),
-      }
-    );
+      onError: (err) => toast.error(`Delete failed: ${(err as Error).message}`),
+    });
   };
 
   const filtered = (packages ?? []).filter(pkg => {
@@ -2526,30 +2510,20 @@ function PackagesTab() {
       </Dialog>
 
       {/* Delete Package Dialog */}
-      <AlertDialog open={!!deletePkg} onOpenChange={(o) => { if (!o) { setDeletePkg(null); setDeleteReason(""); } }}>
+      <AlertDialog open={!!deletePkg} onOpenChange={(o) => { if (!o) setDeletePkg(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Package</AlertDialogTitle>
             <AlertDialogDescription>
-              This action is permanent and cannot be undone.
+              This permanently deletes the package. Linked session history is kept but will no
+              longer reference this package.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="py-2">
-            <Label htmlFor="delete-reason">Reason for deletion <span className="text-destructive">*</span></Label>
-            <Textarea
-              id="delete-reason"
-              placeholder="Enter reason..."
-              value={deleteReason}
-              onChange={(e) => setDeleteReason(e.target.value)}
-              rows={3}
-              className="mt-1.5"
-            />
-          </div>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => { setDeletePkg(null); setDeleteReason(""); }}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setDeletePkg(null)}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={!deleteReason.trim() || deletePackage.isPending}
+              disabled={deletePackage.isPending}
               onClick={(e) => { e.preventDefault(); handleDelete(); }}
             >
               {deletePackage.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
