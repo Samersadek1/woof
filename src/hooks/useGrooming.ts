@@ -7,6 +7,10 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import {
+  deleteGroomingAppointmentWithLog,
+  type DeleteGroomingAppointmentWithLogInput,
+} from "@/lib/deleteGroomingAppointment";
+import {
   GROOMING_WORKFLOW_STATUSES,
   timestampClearsForUndoTo,
   timestampSetsForForwardStep,
@@ -172,6 +176,18 @@ export function useCreateGroomingAppointment() {
         petId: data.pet_id,
         ownerId: data.owner_id,
       });
+    },
+  });
+}
+
+export function useDeleteGroomingAppointment() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: DeleteGroomingAppointmentWithLogInput) =>
+      deleteGroomingAppointmentWithLog(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["grooming"] });
     },
   });
 }

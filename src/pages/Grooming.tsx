@@ -9,6 +9,7 @@ import {
   subDays,
 } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
+import { useAuth } from "@/contexts/AuthContext";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
@@ -17,6 +18,7 @@ import {
   useGroomingHistoryList,
   useGroomingGlobalSearch,
   useCreateGroomingAppointment,
+  useDeleteGroomingAppointment,
   useUpdateGroomingAppointment,
   useGroomingStatusTransition,
   useInvoiceForGroomingAppointment,
@@ -122,6 +124,7 @@ import {
   Plus,
   Printer,
   Search,
+  Trash2,
   Undo2,
   X,
   CalendarIcon,
@@ -788,7 +791,9 @@ const GroomingPage = () => {
   const [eodReportOpen, setEodReportOpen] = useState(false);
 
   const navigate = useNavigate();
+  const { session } = useAuth();
   const statusTransition = useGroomingStatusTransition();
+  const deleteGroomingAppt = useDeleteGroomingAppointment();
   const processPayment = useProcessPayment();
   const updateAppt = useUpdateGroomingAppointment();
 
@@ -796,6 +801,8 @@ const GroomingPage = () => {
   const [editAppt, setEditAppt] = useState<GroomingAppointmentWithJoins | null>(null);
   const [paymentAppt, setPaymentAppt] = useState<GroomingAppointmentWithJoins | null>(null);
   const [cancelTarget, setCancelTarget] = useState<GroomingAppointmentWithJoins | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<GroomingAppointmentWithJoins | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
   const [paymentStaffName, setPaymentStaffName] = useState("Front desk");
 
   const [editSelectedServices, setEditSelectedServices] = useState<GroomingServiceCheckbox[]>([
@@ -1251,6 +1258,34 @@ const GroomingPage = () => {
     }
   };
 
+  const handleDeleteGroomingAppt = () => {
+    if (!deleteTarget || !deleteReason.trim()) return;
+    const ownerName = deleteTarget.owners
+      ? ownerDisplayName(deleteTarget.owners.first_name, deleteTarget.owners.last_name)
+      : "Unknown";
+    deleteGroomingAppt.mutate(
+      {
+        appointmentId: deleteTarget.id,
+        appointmentDate: deleteTarget.appointment_date,
+        petName: deleteTarget.pets?.name ?? "Unknown",
+        ownerName,
+        service: serviceLabel(deleteTarget.service),
+        price: deleteTarget.price,
+        reason: deleteReason.trim(),
+        deletedByEmail: session?.user?.email ?? "unknown",
+      },
+      {
+        onSuccess: () => {
+          toast.success("Appointment deleted");
+          setDeleteTarget(null);
+          setDeleteReason("");
+        },
+        onError: (e) =>
+          toast.error(e instanceof Error ? e.message : "Could not delete appointment."),
+      },
+    );
+  };
+
   const sortedHistory = useMemo(() => {
     const source = historySearchActive ? searchResults : historyAppointments;
     return [...source].sort((a, b) => {
@@ -1563,12 +1598,13 @@ const GroomingPage = () => {
                       <TableHead>Groomer</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Price</TableHead>
+                      <TableHead className="w-[100px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredHistory.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center text-muted-foreground">
+                        <TableCell colSpan={8} className="text-center text-muted-foreground">
                           No appointments match the current filters.
                         </TableCell>
                       </TableRow>
@@ -1620,6 +1656,25 @@ const GroomingPage = () => {
                           <TableCell className="text-right tabular-nums">
                             {r.price != null ? `AED ${r.price}` : "—"}
                           </TableCell>
+                          <TableCell>
+                            {normalizeGroomingWorkflowStatus(r.status) === "cancelled" ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                onClick={() => {
+                                  setDeleteTarget(r);
+                                  setDeleteReason("");
+                                }}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                Delete
+                              </Button>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
                         </TableRow>
                       ))
                     )}
@@ -1630,6 +1685,62 @@ const GroomingPage = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteReason("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete cancelled appointment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the appointment and its status history. This cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-2">
+            <Label htmlFor="grooming-delete-reason">
+              Reason for deletion <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              id="grooming-delete-reason"
+              placeholder="Enter reason..."
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              rows={3}
+              className="mt-1.5"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setDeleteTarget(null);
+                setDeleteReason("");
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!deleteReason.trim() || deleteGroomingAppt.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteGroomingAppt();
+              }}
+            >
+              {deleteGroomingAppt.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
         <AlertDialogContent>

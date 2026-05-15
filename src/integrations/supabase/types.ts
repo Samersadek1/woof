@@ -861,6 +861,45 @@ export type Database = {
           },
         ]
       }
+      grooming_appointment_deletion_log: {
+        Row: {
+          appointment_date: string | null
+          appointment_id: string | null
+          deleted_at: string
+          deleted_by: string | null
+          id: string
+          owner_name: string | null
+          pet_name: string | null
+          price: number | null
+          reason: string | null
+          service: string | null
+        }
+        Insert: {
+          appointment_date?: string | null
+          appointment_id?: string | null
+          deleted_at?: string
+          deleted_by?: string | null
+          id?: string
+          owner_name?: string | null
+          pet_name?: string | null
+          price?: number | null
+          reason?: string | null
+          service?: string | null
+        }
+        Update: {
+          appointment_date?: string | null
+          appointment_id?: string | null
+          deleted_at?: string
+          deleted_by?: string | null
+          id?: string
+          owner_name?: string | null
+          pet_name?: string | null
+          price?: number | null
+          reason?: string | null
+          service?: string | null
+        }
+        Relationships: []
+      }
       grooming_package_rates: {
         Row: {
           amount_aed: number
