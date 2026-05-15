@@ -303,6 +303,50 @@ export function useUpdateDaycareSession() {
   });
 }
 
+/** Change `session_date` without affecting package `days_used` (reschedule / correction). */
+export function useRescheduleDaycareSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      sessionId,
+      petId,
+      session_date,
+    }: {
+      sessionId: string;
+      petId: string;
+      session_date: string;
+    }) => {
+      const { data: conflict, error: conflictErr } = await supabase
+        .from("daycare_sessions")
+        .select("id")
+        .eq("pet_id", petId)
+        .eq("session_date", session_date)
+        .neq("id", sessionId)
+        .limit(1);
+
+      if (conflictErr) throw conflictErr;
+      if ((conflict?.length ?? 0) > 0) {
+        throw new Error("This pet already has a session on the selected date.");
+      }
+
+      const { data, error } = await supabase
+        .from("daycare_sessions")
+        .update({ session_date })
+        .eq("id", sessionId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as DaycareSession;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["daycare_packages"] });
+    },
+  });
+}
+
 // ── useSessionsByPackage ──────────────────────────────────────────────────────
 
 /** Extended session type that includes the three columns added post-generation */

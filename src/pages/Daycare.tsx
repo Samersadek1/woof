@@ -34,6 +34,7 @@ import {
   useDeleteDaycarePackage,
   useAddDaycareDay,
   useUpdateDaycareSession,
+  useRescheduleDaycareSession,
   useDeleteDaycareSession,
   type DaycarePackage,
   type PackageWithDetails,
@@ -93,6 +94,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  CalendarDays,
   Search,
   Printer,
   Plus,
@@ -250,6 +252,7 @@ interface SessionsTableProps {
 
 function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: SessionsTableProps) {
   const updateSession = useUpdateDaycareSession();
+  const rescheduleSession = useRescheduleDaycareSession();
   const deleteSession = useDeleteDaycareSession();
   const addDay        = useAddDaycareDay();
 
@@ -258,6 +261,8 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
   const [deleteId,   setDeleteId]   = useState<string | null>(null);
   const [addOpen,    setAddOpen]    = useState(false);
   const [addDraft,   setAddDraft]   = useState({ session_date: TODAY, pickup_used: false, dropoff_used: false, logged_by: "", remark: "" });
+  const [dateEditSession, setDateEditSession] = useState<SessionRow | null>(null);
+  const [dateEditValue, setDateEditValue] = useState("");
 
   const startEdit = (s: SessionRow) => {
     setEditingId(s.id);
@@ -322,7 +327,7 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
           <TableHeader>
             <TableRow className="bg-muted/40">
               <TableHead className="w-10 text-center">#</TableHead>
-              <TableHead className="min-w-[90px]">Date</TableHead>
+              <TableHead className="min-w-[140px]">Date</TableHead>
               <TableHead className="text-center w-20">Pickup</TableHead>
               <TableHead className="text-center w-20">Drop-off</TableHead>
               <TableHead className="min-w-[110px]">By</TableHead>
@@ -348,9 +353,25 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
                   {/* # */}
                   <TableCell className="text-center text-xs text-muted-foreground">{idx + 1}</TableCell>
 
-                  {/* Date */}
+                  {/* Date + reschedule */}
                   <TableCell className="text-sm whitespace-nowrap">
-                    {format(parseISO(s.session_date), "d MMM")}
+                    <div className="flex items-center gap-1">
+                      <span>{format(parseISO(s.session_date), "d MMM yyyy")}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                        title="Change session date"
+                        disabled={isEditing}
+                        onClick={() => {
+                          setDateEditSession(s);
+                          setDateEditValue(s.session_date);
+                        }}
+                      >
+                        <CalendarDays className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
 
                   {/* Pickup */}
@@ -538,6 +559,84 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
           </TableBody>
         </Table>
       </div>
+
+      <Dialog
+        open={!!dateEditSession}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDateEditSession(null);
+            setDateEditValue("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change session date</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Use this when the visit was cancelled or moved to another day. Package day counts are
+              unchanged.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="reschedule-session-date">Session date</Label>
+              <Input
+                id="reschedule-session-date"
+                type="date"
+                value={dateEditValue}
+                onChange={(e) => setDateEditValue(e.target.value)}
+                className="w-full max-w-[240px]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDateEditSession(null);
+                setDateEditValue("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={
+                !dateEditSession ||
+                !dateEditValue ||
+                rescheduleSession.isPending
+              }
+              onClick={() => {
+                if (!dateEditSession || !dateEditValue.trim()) return;
+                rescheduleSession.mutate(
+                  {
+                    sessionId: dateEditSession.id,
+                    petId,
+                    session_date: dateEditValue.trim(),
+                  },
+                  {
+                    onSuccess: () => {
+                      toast.success("Session date updated");
+                      setDateEditSession(null);
+                      setDateEditValue("");
+                    },
+                    onError: (err) =>
+                      toast.error(
+                        err instanceof Error ? err.message : "Could not update date",
+                      ),
+                  },
+                );
+              }}
+            >
+              {rescheduleSession.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation */}
       <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null); }}>
