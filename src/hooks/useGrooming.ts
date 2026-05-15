@@ -126,11 +126,15 @@ export function useCreateGroomingAppointment() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (row: GroomingInsert) => {
+    mutationFn: async ({ dog_size, ...row }: GroomingInsert) => {
+      const notes = [row.notes, dog_size ? `Dog size: ${dog_size}` : ""]
+        .filter(Boolean)
+        .join("\n") || null;
       const { data, error } = await supabase
         .from("grooming_appointments")
         .insert({
           ...row,
+          notes,
           status: row.status ?? "new",
           no_show: row.no_show ?? false,
         })
