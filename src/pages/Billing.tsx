@@ -1250,12 +1250,7 @@ function PricingTab() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="pricing-add-category">Category</Label>
-              <Input
-                id="pricing-add-category"
-                value={addForm.category}
-                onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))}
-                placeholder="e.g. daycare"
-              />
+              <select id="pricing-add-category" value={addForm.category} onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"><option value="" disabled>Select category…</option><option value="boarding">boarding</option><option value="grooming">grooming</option><option value="transport">transport</option><option value="daycare">daycare</option><option value="park">park</option><option value="membership">membership</option><option value="rule">rule</option></select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="pricing-add-price">Price (AED)</Label>
