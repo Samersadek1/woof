@@ -1160,12 +1160,6 @@ function PricingTab() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="flex justify-end border-b border-border px-4 py-3">
-            <Button type="button" size="sm" variant="outline" onClick={() => setAddOpen(true)}>
-              <Plus className="mr-1.5 h-4 w-4" />
-              Add item
-            </Button>
-          </div>
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40">
@@ -1217,12 +1211,6 @@ function PricingTab() {
               ))}
             </TableBody>
           </Table>
-          <div className="flex justify-end border-t border-border px-4 py-3">
-            <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="mr-1.5 h-4 w-4" />
-              Add item
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
