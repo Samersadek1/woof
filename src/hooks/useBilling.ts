@@ -171,9 +171,30 @@ export const billingKeys = {
 interface PricingRow {
   key: string;
   amount_aed: number;
+  /** Display name for the rate (DB column `label`; UI calls this "Item name"). */
   label: string;
   category: string;
   updated_at: string;
+}
+
+export type PricingItemInput = {
+  key: string;
+  label: string;
+  category: string;
+  amount_aed: number;
+};
+
+function pricingRowPayload(item: PricingItemInput) {
+  return {
+    key: item.key.trim(),
+    label: item.label.trim(),
+    category: item.category.trim(),
+    amount_aed: item.amount_aed,
+  };
+}
+
+function throwPricingError(error: { message: string } | null, fallback: string): never {
+  throw new Error(error?.message?.trim() || fallback);
 }
 
 export function usePricing() {
@@ -210,24 +231,11 @@ export function usePricing() {
   };
 
   /** Update price, or insert the row when the key is not in the database yet. */
-  const upsertPricingPrice = async (item: {
-    key: string;
-    label: string;
-    category: string;
-    amount_aed: number;
-  }) => {
-    const now = new Date().toISOString();
-    const { error } = await supabase.from("pricing").upsert(
-      {
-        key: item.key.trim(),
-        label: item.label.trim(),
-        category: item.category.trim(),
-        amount_aed: item.amount_aed,
-        updated_at: now,
-      },
-      { onConflict: "key" },
-    );
-    if (error) throw error;
+  const upsertPricingPrice = async (item: PricingItemInput) => {
+    const { error } = await supabase
+      .from("pricing")
+      .upsert(pricingRowPayload(item), { onConflict: "key" });
+    if (error) throwPricingError(error, "Failed to save pricing item");
     queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
   };
 
@@ -244,27 +252,14 @@ export function usePricing() {
     toast.success("Pricing saved");
   };
 
-  const createPricingItem = async (item: {
-    key: string;
-    label: string;
-    category: string;
-    amount_aed: number;
-  }) => {
-    const { error } = await supabase.from("pricing").insert({
-      key: item.key.trim(),
-      label: item.label.trim(),
-      category: item.category.trim(),
-      amount_aed: item.amount_aed,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) throw error;
-    queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
+  const createPricingItem = async (item: PricingItemInput) => {
+    await upsertPricingPrice(item);
     toast.success("Pricing item added");
   };
 
   const deletePricingItem = async (key: string) => {
     const { error } = await supabase.from("pricing").delete().eq("key", key);
-    if (error) throw error;
+    if (error) throwPricingError(error, "Failed to delete pricing item");
     queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
     toast.success("Pricing item deleted");
   };
