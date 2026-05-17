@@ -80,7 +80,19 @@ import {
   Printer,
   Eye,
   ScrollText,
+  Plus,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
@@ -938,14 +950,34 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
 
 // ── PricingTab ───────────────────────────────────────────────────────────────
 
+type RateCardRow = {
+  key: string;
+  label: string;
+  category: string;
+  amount_aed: number;
+  inDb: boolean;
+};
+
+const EMPTY_NEW_PRICING_ITEM = {
+  label: "",
+  key: "",
+  category: "",
+  amount_aed: "",
+};
+
 function PricingTab() {
-  const { allRows, updatePrice } = usePricing();
+  const { allRows, updatePrice, createPricingItem, deletePricingItem } = usePricing();
   const {
     groomingRates, daycarePackageTypes, addonRates,
     updateGroomingRate, updateDaycareType, updateAddonRate,
     isLoading,
   } = useServiceRates();
   const [saving, setSaving] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState(EMPTY_NEW_PRICING_ITEM);
+  const [adding, setAdding] = useState(false);
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const daycare12DayTypes = useMemo(
     () => daycarePackageTypes.filter((t) => t.is_active && t.total_days === 12),
     [daycarePackageTypes],
@@ -968,6 +1000,32 @@ function PricingTab() {
     () => new Map((allRows ?? []).map((r) => [r.key, r])),
     [allRows],
   );
+  const rateCardRows = useMemo((): RateCardRow[] => {
+    const byKey = new Map((allRows ?? []).map((r) => [r.key, r]));
+    const rows: RateCardRow[] = [];
+    for (const c of CANONICAL_PRICING_KEYS) {
+      const live = byKey.get(c.key);
+      rows.push({
+        key: c.key,
+        label: live?.label ?? c.label,
+        category: live?.category ?? c.category,
+        amount_aed: live?.amount_aed ?? 0,
+        inDb: !!live,
+      });
+    }
+    for (const r of allRows ?? []) {
+      if (!CANONICAL_PRICING_KEYS.some((c) => c.key === r.key)) {
+        rows.push({
+          key: r.key,
+          label: r.label,
+          category: r.category,
+          amount_aed: r.amount_aed,
+          inDb: true,
+        });
+      }
+    }
+    return rows;
+  }, [allRows]);
 
   const { groomingAddOnRates, transportAddOnRates, boardingAddOnRates, otherAddOnRates } = useMemo(() => {
     const grooming: AddonRateRow[] = [];
@@ -1021,6 +1079,48 @@ function PricingTab() {
     }
   };
 
+  const handleAddPricingItem = async () => {
+    const label = addForm.label.trim();
+    const key = addForm.key.trim();
+    const category = addForm.category.trim();
+    const amount = parseFloat(addForm.amount_aed);
+    if (!label || !key || !category) {
+      toast.error("Item name, key, and category are required.");
+      return;
+    }
+    if (Number.isNaN(amount) || amount < 0) {
+      toast.error("Enter a valid price (0 or greater).");
+      return;
+    }
+    if (canonicalByKey.has(key)) {
+      toast.error("This key already exists. Edit the existing row or choose a different key.");
+      return;
+    }
+    setAdding(true);
+    try {
+      await createPricingItem({ key, label, category, amount_aed: amount });
+      setAddForm(EMPTY_NEW_PRICING_ITEM);
+      setAddOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add pricing item");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDeletePricingItem = async () => {
+    if (!pendingDeleteKey) return;
+    setDeletingKey(pendingDeleteKey);
+    try {
+      await deletePricingItem(pendingDeleteKey);
+      setPendingDeleteKey(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete pricing item");
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
   if (isLoading) {
     return <div className="space-y-3 p-4">{[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>;
   }
@@ -1037,10 +1137,23 @@ function PricingTab() {
         <TabsContent value="core" className="mt-0 space-y-6">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Live Rate Card (pricing table)</CardTitle>
-          <p className="text-xs text-muted-foreground font-normal pt-1">
-            These keys drive live billing for transport, daycare day-pass, daycare hourly, park visits, and registration. Update these first.
-          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Live Rate Card (pricing table)</CardTitle>
+              <p className="text-xs text-muted-foreground font-normal pt-1">
+                These keys drive live billing for transport, daycare day-pass, daycare hourly, park visits, and registration. Press Enter or blur to save price changes.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              onClick={() => setAddOpen(true)}
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add item
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -1050,35 +1163,150 @@ function PricingTab() {
                 <TableHead className="min-w-[120px]">Key</TableHead>
                 <TableHead className="w-[100px]">Category</TableHead>
                 <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
+                <TableHead className="w-[72px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {CANONICAL_PRICING_KEYS.map((row) => {
-                const live = canonicalByKey.get(row.key);
-                return (
-                  <TableRow key={row.key}>
-                    <TableCell className="text-sm">{row.label}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{row.key}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{row.category}</TableCell>
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="w-[140px] ml-auto text-right h-8 text-sm"
-                        defaultValue={live?.amount_aed ?? 0}
-                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                        disabled={saving === `key:${row.key}`}
-                      />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {rateCardRows.map((row) => (
+                <TableRow key={row.key}>
+                  <TableCell className="text-sm">{row.label}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{row.key}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{row.category}</TableCell>
+                  <TableCell className="text-right">
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="w-[140px] ml-auto text-right h-8 text-sm"
+                      defaultValue={row.amount_aed}
+                      onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      disabled={!row.inDb || saving === `key:${row.key}`}
+                      title={row.inDb ? undefined : "Add this item to the database before setting a price"}
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {row.inDb ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => setPendingDeleteKey(row.key)}
+                        disabled={deletingKey === row.key}
+                        aria-label={`Delete ${row.label}`}
+                      >
+                        {deletingKey === row.key ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={addOpen}
+        onOpenChange={(open) => {
+          setAddOpen(open);
+          if (!open) setAddForm(EMPTY_NEW_PRICING_ITEM);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add pricing item</DialogTitle>
+            <DialogDescription>
+              Creates a new row in the pricing table. Changes are saved immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="pricing-add-label">Item name</Label>
+              <Input
+                id="pricing-add-label"
+                value={addForm.label}
+                onChange={(e) => setAddForm((f) => ({ ...f, label: e.target.value }))}
+                placeholder="e.g. Weekend daycare surcharge"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="pricing-add-key">Key</Label>
+              <Input
+                id="pricing-add-key"
+                value={addForm.key}
+                onChange={(e) => setAddForm((f) => ({ ...f, key: e.target.value }))}
+                placeholder="e.g. daycare_weekend_surcharge"
+                className="font-mono text-sm"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="pricing-add-category">Category</Label>
+              <Input
+                id="pricing-add-category"
+                value={addForm.category}
+                onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))}
+                placeholder="e.g. daycare"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="pricing-add-price">Price (AED)</Label>
+              <Input
+                id="pricing-add-price"
+                type="number"
+                min="0"
+                step="0.01"
+                value={addForm.amount_aed}
+                onChange={(e) => setAddForm((f) => ({ ...f, amount_aed: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={adding}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleAddPricingItem} disabled={adding}>
+              {adding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save item
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={!!pendingDeleteKey}
+        onOpenChange={(open) => { if (!open) setPendingDeleteKey(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete pricing item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes{" "}
+              <span className="font-mono text-foreground">{pendingDeleteKey}</span>{" "}
+              from the pricing table. Billing that references this key may break until it is re-added.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!deletingKey}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!!deletingKey}
+              onClick={(e) => { e.preventDefault(); void handleDeletePricingItem(); }}
+            >
+              {deletingKey ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Deleting…</>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Card>
         <CardHeader className="pb-3">

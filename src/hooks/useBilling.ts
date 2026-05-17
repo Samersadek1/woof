@@ -222,12 +222,39 @@ export function usePricing() {
     toast.success("Pricing saved");
   };
 
+  const createPricingItem = async (item: {
+    key: string;
+    label: string;
+    category: string;
+    amount_aed: number;
+  }) => {
+    const { error } = await supabase.from("pricing").insert({
+      key: item.key.trim(),
+      label: item.label.trim(),
+      category: item.category.trim(),
+      amount_aed: item.amount_aed,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
+    toast.success("Pricing item added");
+  };
+
+  const deletePricingItem = async (key: string) => {
+    const { error } = await supabase.from("pricing").delete().eq("key", key);
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
+    toast.success("Pricing item deleted");
+  };
+
   return {
     prices,
     allRows: query.data ?? [],
     getPrice,
     updatePrice,
     updatePrices,
+    createPricingItem,
+    deletePricingItem,
     isLoading: query.isLoading,
     error: query.error,
   };
