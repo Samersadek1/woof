@@ -6,16 +6,19 @@
  * change. Active and Camera recording toggles save immediately.
  */
 
-import { useState, useRef, useMemo, useLayoutEffect, KeyboardEvent } from "react";
+import {
+  useState,
+  useRef,
+  useMemo,
+  useLayoutEffect,
+  useCallback,
+  useEffect,
+  KeyboardEvent,
+} from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import TopBar from "@/components/dashboard/TopBar";
-import {
-  useAllRooms,
-  useUpdateRoom,
-  useCreateRoom,
-  useDeleteRoom,
-} from "@/hooks/useBookings";
+import { useUpdateRoom, useCreateRoom, useDeleteRoom } from "@/hooks/useBookings";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -167,6 +170,11 @@ const CAPACITY_VALUES: CapacityType[] = ["single", "twin", "twin_plus", "multipl
 
 const MIN_MAX_PETS = 1;
 const MAX_MAX_PETS = 100;
+const ROOMS_PAGE_SIZE = 50;
+
+/** Columns required for admin table, filters, export, and inline edits */
+const ROOMS_ADMIN_SELECT =
+  "id, display_name, room_number, wing, room_type, capacity_type, max_pets, cam_number, camera_recording, is_active";
 
 function clampMaxPets(n: number): number {
   if (!Number.isFinite(n)) return MIN_MAX_PETS;
@@ -443,7 +451,19 @@ const RoomsAdminPage = () => {
   const initialSpecies: Species = searchParams.get("species") === "cat" ? "cat" : "dog";
   const [species, setSpecies] = useState<Species>(initialSpecies);
 
-  const { data: allRooms, isLoading } = useAllRooms();
+  const { data: allRooms, isLoading } = useQuery({
+    queryKey: ["rooms", "all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("rooms")
+        .select(ROOMS_ADMIN_SELECT)
+        .order("display_name", { ascending: true })
+        .order("wing", { ascending: true })
+        .order("room_number", { ascending: true });
+      if (error) throw error;
+      return data as Room[];
+    },
+  });
   const updateRoom = useUpdateRoom();
   const createRoom = useCreateRoom();
   const deleteRoom = useDeleteRoom();
@@ -451,14 +471,13 @@ const RoomsAdminPage = () => {
   const rooms = useMemo(() => {
     if (!allRooms) return undefined;
     return allRooms.filter((r) =>
-      species === "cat"
-        ? (r as any).pet_type === "cat"
-        : (r as any).pet_type !== "cat"
+      species === "cat" ? r.wing === "cattery" : r.wing !== "cattery",
     );
   }, [allRooms, species]);
   const [searchQuery, setSearchQuery] = useState("");
   const [wingFilter, setWingFilter] = useState("__all__");
   const [typeFilter, setTypeFilter] = useState("__all__");
+  const [visibleCount, setVisibleCount] = useState(ROOMS_PAGE_SIZE);
 
   const { data: occupiedRoomIds } = useQuery({
     queryKey: ["rooms", "occupied-today"],
@@ -501,10 +520,29 @@ const RoomsAdminPage = () => {
     return result;
   }, [rooms, searchQuery, wingFilter, typeFilter]);
 
-  const handleSpeciesChange = (s: Species) => {
-    setSpecies(s);
-    setSearchParams({ species: s }, { replace: true });
-  };
+  const visibleRooms = useMemo(
+    () => (filteredRooms ?? []).slice(0, visibleCount),
+    [filteredRooms, visibleCount],
+  );
+
+  const filteredRoomCount = filteredRooms?.length ?? 0;
+  const hasMoreRooms = filteredRoomCount > visibleCount;
+
+  useEffect(() => {
+    setVisibleCount(ROOMS_PAGE_SIZE);
+  }, [searchQuery, wingFilter, typeFilter, species]);
+
+  const loadMore = useCallback(() => {
+    setVisibleCount((c) => c + ROOMS_PAGE_SIZE);
+  }, []);
+
+  const handleSpeciesChange = useCallback(
+    (s: Species) => {
+      setSpecies(s);
+      setSearchParams({ species: s }, { replace: true });
+    },
+    [setSearchParams],
+  );
 
   const [editingCell, setEditingCell] = useState<EditingCell>(null);
   const [editValue, setEditValue] = useState("");
@@ -523,17 +561,20 @@ const RoomsAdminPage = () => {
 
   const [pendingDelete, setPendingDelete] = useState<Room | null>(null);
 
-  const isEditing = (id: string, field: string) =>
-    editingCell?.id === id && editingCell?.field === field;
+  const isEditing = useCallback(
+    (id: string, field: string) =>
+      editingCell?.id === id && editingCell?.field === field,
+    [editingCell],
+  );
 
-  const startEdit = (room: Room, field: keyof Room, currentVal: string) => {
+  const startEdit = useCallback((room: Room, field: keyof Room, currentVal: string) => {
     setEditingCell({ id: room.id, field: field as string });
     setEditValue(currentVal);
     latestEditDraftRef.current = currentVal;
     setTimeout(() => inputRef.current?.focus(), 0);
-  };
+  }, []);
 
-  const commitEdit = (id: string, field: string, raw: string, previous: Room) => {
+  const commitEdit = useCallback((id: string, field: string, raw: string, previous: Room) => {
     setEditingCell(null);
 
     let value: string | number | boolean | null = raw.trim() === "" ? null : raw.trim();
@@ -558,25 +599,31 @@ const RoomsAdminPage = () => {
       { id, [field]: value },
       { onError: toastRoomSaveFailed },
     );
-  };
+  }, [updateRoom]);
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, id: string, field: string) => {
-    if (e.key === "Enter") {
-      e.currentTarget.blur();
-    }
-    if (e.key === "Escape") {
-      setEditingCell(null);
-    }
-  };
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>, id: string, field: string) => {
+      if (e.key === "Enter") {
+        e.currentTarget.blur();
+      }
+      if (e.key === "Escape") {
+        setEditingCell(null);
+      }
+    },
+    [],
+  );
 
-  const saveEnum = <T extends string>(id: string, field: string, value: T) => {
-    updateRoom.mutate(
-      { id, [field]: value },
-      { onError: toastRoomSaveFailed },
-    );
-  };
+  const saveEnum = useCallback(
+    <T extends string>(id: string, field: string, value: T) => {
+      updateRoom.mutate(
+        { id, [field]: value },
+        { onError: toastRoomSaveFailed },
+      );
+    },
+    [updateRoom],
+  );
 
-  const toggleActive = (room: Room) => {
+  const toggleActive = useCallback((room: Room) => {
     updateRoom.mutate(
       { id: room.id, is_active: !room.is_active },
       {
@@ -589,22 +636,25 @@ const RoomsAdminPage = () => {
         onError: toastRoomSaveFailed,
       },
     );
-  };
+  }, [updateRoom]);
 
-  const toggleCameraRecording = (room: Room) => {
-    const next = !(room.camera_recording ?? false);
-    updateRoom.mutate(
-      { id: room.id, camera_recording: next },
-      { onError: toastRoomSaveFailed },
-    );
-  };
+  const toggleCameraRecording = useCallback(
+    (room: Room) => {
+      const next = !(room.camera_recording ?? false);
+      updateRoom.mutate(
+        { id: room.id, camera_recording: next },
+        { onError: toastRoomSaveFailed },
+      );
+    },
+    [updateRoom],
+  );
 
-  const openEditRoom = (room: Room) => {
+  const openEditRoom = useCallback((room: Room) => {
     setEditingRoom(room);
     setEditForm(roomToEditForm(room));
-  };
+  }, []);
 
-  const submitEditRoom = () => {
+  const submitEditRoom = useCallback(() => {
     if (!editingRoom) return;
     const name = editForm.display_name.trim();
     const num = editForm.room_number.trim();
@@ -631,9 +681,9 @@ const RoomsAdminPage = () => {
         onError: toastRoomSaveFailed,
       },
     );
-  };
+  }, [editingRoom, editForm, updateRoom]);
 
-  const submitNewRoom = () => {
+  const submitNewRoom = useCallback(() => {
     const name = newRoom.display_name?.trim();
     const num = newRoom.room_number?.trim();
     if (!name || !num) {
@@ -659,9 +709,9 @@ const RoomsAdminPage = () => {
         },
       },
     );
-  };
+  }, [newRoom, createRoom]);
 
-  const confirmDelete = () => {
+  const confirmDelete = useCallback(() => {
     if (!pendingDelete) return;
     deleteRoom.mutate(pendingDelete.id, {
       onSuccess: () => {
@@ -671,7 +721,14 @@ const RoomsAdminPage = () => {
       onError: (err) =>
         toast.error(formatRoomMutationError(err) || "Delete failed (room may have bookings)."),
     });
-  };
+  }, [pendingDelete, deleteRoom]);
+
+  const saveMaxPets = useCallback(
+    (roomId: string, max_pets: number) => {
+      updateRoom.mutate({ id: roomId, max_pets }, { onError: toastRoomSaveFailed });
+    },
+    [updateRoom],
+  );
 
   const TextCell = ({
     room,
@@ -749,7 +806,7 @@ const RoomsAdminPage = () => {
     </Select>
   );
 
-  const handleExport = () => {
+  const handleExport = useCallback(() => {
     const data = (filteredRooms ?? []).map((room) => ({
       "Room Name": room.display_name,
       "Room No": room.room_number,
@@ -763,7 +820,7 @@ const RoomsAdminPage = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Rooms");
     XLSX.writeFile(wb, `rooms-export-${todayISO()}.xlsx`);
-  };
+  }, [filteredRooms, occupiedRoomIds]);
 
   return (
     <>
@@ -872,7 +929,7 @@ const RoomsAdminPage = () => {
               </TableHeader>
 
               <TableBody>
-                {(filteredRooms ?? []).map((room) => (
+                {visibleRooms.map((room) => (
                   <TableRow
                     key={room.id}
                     className={room.is_active ? "" : "opacity-50 bg-muted/20"}
@@ -929,9 +986,7 @@ const RoomsAdminPage = () => {
                         isEditing={isEditing(room.id, "max_pets")}
                         onOpen={() => setEditingCell({ id: room.id, field: "max_pets" })}
                         onClose={() => setEditingCell(null)}
-                        onSave={(roomId, max_pets) =>
-                          updateRoom.mutate({ id: roomId, max_pets }, { onError: toastRoomSaveFailed })
-                        }
+                        onSave={saveMaxPets}
                       />
                     </TableCell>
 
@@ -1012,6 +1067,19 @@ const RoomsAdminPage = () => {
               </TableBody>
             </Table>
           </div>
+          {filteredRoomCount > 0 && (
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <p className="text-sm text-muted-foreground">
+                Showing {visibleRooms.length} of {filteredRoomCount} room
+                {filteredRoomCount === 1 ? "" : "s"}
+              </p>
+              {hasMoreRooms && (
+                <Button type="button" variant="outline" onClick={loadMore}>
+                  Load more
+                </Button>
+              )}
+            </div>
+          )}
           </>
         )}
 
