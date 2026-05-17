@@ -978,6 +978,7 @@ function PricingTab() {
   const [adding, setAdding] = useState(false);
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const daycare12DayTypes = useMemo(
     () => daycarePackageTypes.filter((t) => t.is_active && t.total_days === 12),
     [daycarePackageTypes],
@@ -1026,6 +1027,15 @@ function PricingTab() {
     }
     return rows;
   }, [allRows]);
+  const filteredRateCardRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return rateCardRows;
+    return rateCardRows.filter(
+      (row) =>
+        row.label.toLowerCase().includes(q) ||
+        row.key.toLowerCase().includes(q),
+    );
+  }, [rateCardRows, searchQuery]);
 
   const { groomingAddOnRates, transportAddOnRates, boardingAddOnRates, otherAddOnRates } = useMemo(() => {
     const grooming: AddonRateRow[] = [];
@@ -1163,7 +1173,19 @@ function PricingTab() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40">
-                <TableHead className="min-w-[220px]">Item</TableHead>
+                <TableHead className="min-w-[220px]">
+                  <div className="flex items-center gap-2">
+                    Item
+                    <Input
+                      type="search"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search…"
+                      className="h-7 w-28 text-xs"
+                      aria-label="Search rate card items"
+                    />
+                  </div>
+                </TableHead>
                 <TableHead className="min-w-[120px]">Key</TableHead>
                 <TableHead className="w-[100px]">Category</TableHead>
                 <TableHead className="text-right min-w-[140px]">Price (AED)</TableHead>
@@ -1171,7 +1193,7 @@ function PricingTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rateCardRows.map((row) => (
+              {filteredRateCardRows.map((row) => (
                 <TableRow key={row.key}>
                   <TableCell className="text-sm">{row.label}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{row.key}</TableCell>
