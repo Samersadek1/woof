@@ -56,7 +56,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Plus, Trash2, Download } from "lucide-react";
+import { Plus, Trash2, Download, Pencil } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -409,6 +409,35 @@ const emptyInsertDefaults = (): Omit<RoomInsert, "id" | "created_at"> => ({
   camera_recording: false,
 });
 
+type RoomEditForm = {
+  display_name: string;
+  room_number: string;
+  wing: RoomWing;
+  room_type: RoomType;
+  capacity_type: CapacityType;
+  max_pets: number;
+};
+
+const EMPTY_EDIT_FORM: RoomEditForm = {
+  display_name: "",
+  room_number: "",
+  wing: "oxford",
+  room_type: "single_royal",
+  capacity_type: "single",
+  max_pets: MIN_MAX_PETS,
+};
+
+function roomToEditForm(room: Room): RoomEditForm {
+  return {
+    display_name: room.display_name,
+    room_number: room.room_number,
+    wing: room.wing,
+    room_type: room.room_type,
+    capacity_type: room.capacity_type,
+    max_pets: clampMaxPets(room.max_pets ?? MIN_MAX_PETS),
+  };
+}
+
 const RoomsAdminPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialSpecies: Species = searchParams.get("species") === "cat" ? "cat" : "dog";
@@ -489,6 +518,9 @@ const RoomsAdminPage = () => {
   const [addOpen, setAddOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(emptyInsertDefaults);
 
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const [editForm, setEditForm] = useState<RoomEditForm>(EMPTY_EDIT_FORM);
+
   const [pendingDelete, setPendingDelete] = useState<Room | null>(null);
 
   const isEditing = (id: string, field: string) =>
@@ -564,6 +596,40 @@ const RoomsAdminPage = () => {
     updateRoom.mutate(
       { id: room.id, camera_recording: next },
       { onError: toastRoomSaveFailed },
+    );
+  };
+
+  const openEditRoom = (room: Room) => {
+    setEditingRoom(room);
+    setEditForm(roomToEditForm(room));
+  };
+
+  const submitEditRoom = () => {
+    if (!editingRoom) return;
+    const name = editForm.display_name.trim();
+    const num = editForm.room_number.trim();
+    if (!name || !num) {
+      toast.error("Display name and room number are required.");
+      return;
+    }
+    updateRoom.mutate(
+      {
+        id: editingRoom.id,
+        display_name: name,
+        room_number: num,
+        wing: editForm.wing,
+        room_type: editForm.room_type,
+        capacity_type: editForm.capacity_type,
+        max_pets: clampMaxPets(editForm.max_pets),
+      },
+      {
+        onSuccess: () => {
+          toast.success("Room updated");
+          setEditingRoom(null);
+          setEditForm(EMPTY_EDIT_FORM);
+        },
+        onError: toastRoomSaveFailed,
+      },
     );
   };
 
@@ -801,7 +867,7 @@ const RoomsAdminPage = () => {
                   <TableHead className="text-center min-w-[120px]">Camera recording</TableHead>
                   <TableHead className="text-center min-w-[100px]">Status</TableHead>
                   <TableHead className="text-center min-w-[80px]">Active</TableHead>
-                  <TableHead className="w-[52px]" />
+                  <TableHead className="w-[88px]" />
                 </TableRow>
               </TableHeader>
 
@@ -918,16 +984,28 @@ const RoomsAdminPage = () => {
                     </TableCell>
 
                     <TableCell className="text-center">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        aria-label={`Delete ${room.display_name}`}
-                        onClick={() => setPendingDelete(room)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center justify-center gap-0.5">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          aria-label={`Edit ${room.display_name}`}
+                          onClick={() => openEditRoom(room)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          aria-label={`Delete ${room.display_name}`}
+                          onClick={() => setPendingDelete(room)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -936,6 +1014,129 @@ const RoomsAdminPage = () => {
           </div>
           </>
         )}
+
+        <Dialog
+          open={!!editingRoom}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingRoom(null);
+              setEditForm(EMPTY_EDIT_FORM);
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md print-sans">
+            <DialogHeader>
+              <DialogTitle>Edit room</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-2">
+              <div className="grid gap-2">
+                <Label htmlFor="er-name">Display name</Label>
+                <Input
+                  id="er-name"
+                  value={editForm.display_name}
+                  onChange={(e) => setEditForm((f) => ({ ...f, display_name: e.target.value }))}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="er-num">Room number</Label>
+                <Input
+                  id="er-num"
+                  value={editForm.room_number}
+                  onChange={(e) => setEditForm((f) => ({ ...f, room_number: e.target.value }))}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Wing</Label>
+                <Select
+                  value={editForm.wing}
+                  onValueChange={(v) => setEditForm((f) => ({ ...f, wing: v as RoomWing }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WING_VALUES.map((w) => (
+                      <SelectItem key={w} value={w}>
+                        {WING_LABELS[w]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Room type</Label>
+                <Select
+                  value={editForm.room_type}
+                  onValueChange={(v) => setEditForm((f) => ({ ...f, room_type: v as RoomType }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROOM_TYPE_VALUES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {ROOM_TYPE_LABELS[t]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Capacity</Label>
+                <Select
+                  value={editForm.capacity_type}
+                  onValueChange={(v) =>
+                    setEditForm((f) => ({ ...f, capacity_type: v as CapacityType }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CAPACITY_VALUES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {CAPACITY_LABELS[c]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="er-max">Max pets</Label>
+                <Input
+                  id="er-max"
+                  type="number"
+                  inputMode="numeric"
+                  min={MIN_MAX_PETS}
+                  max={MAX_MAX_PETS}
+                  step={1}
+                  value={editForm.max_pets}
+                  onChange={(e) =>
+                    setEditForm((f) => ({
+                      ...f,
+                      max_pets: clampMaxPets(parseInt(e.target.value, 10) || MIN_MAX_PETS),
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingRoom(null);
+                  setEditForm(EMPTY_EDIT_FORM);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="button" onClick={submitEditRoom} disabled={updateRoom.isPending}>
+                Save changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogContent className="sm:max-w-md print-sans">
