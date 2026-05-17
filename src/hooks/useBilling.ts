@@ -209,6 +209,28 @@ export function usePricing() {
     queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
   };
 
+  /** Update price, or insert the row when the key is not in the database yet. */
+  const upsertPricingPrice = async (item: {
+    key: string;
+    label: string;
+    category: string;
+    amount_aed: number;
+  }) => {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("pricing").upsert(
+      {
+        key: item.key.trim(),
+        label: item.label.trim(),
+        category: item.category.trim(),
+        amount_aed: item.amount_aed,
+        updated_at: now,
+      },
+      { onConflict: "key" },
+    );
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
+  };
+
   const updatePrices = async (updates: Record<string, number>) => {
     const now = new Date().toISOString();
     for (const [key, amount_aed] of Object.entries(updates)) {
@@ -252,6 +274,7 @@ export function usePricing() {
     allRows: query.data ?? [],
     getPrice,
     updatePrice,
+    upsertPricingPrice,
     updatePrices,
     createPricingItem,
     deletePricingItem,

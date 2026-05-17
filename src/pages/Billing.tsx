@@ -966,7 +966,7 @@ const EMPTY_NEW_PRICING_ITEM = {
 };
 
 function PricingTab() {
-  const { allRows, updatePrice, createPricingItem, deletePricingItem } = usePricing();
+  const { allRows, upsertPricingPrice, createPricingItem, deletePricingItem } = usePricing();
   const {
     groomingRates, daycarePackageTypes, addonRates,
     updateGroomingRate, updateDaycareType, updateAddonRate,
@@ -1065,12 +1065,16 @@ function PricingTab() {
     }
   };
 
-  const saveCanonicalKey = async (key: string, value: string) => {
+  const saveCanonicalKey = async (
+    key: string,
+    value: string,
+    meta: { label: string; category: string },
+  ) => {
     const num = parseFloat(value);
     if (Number.isNaN(num) || num < 0) return;
     setSaving(`key:${key}`);
     try {
-      await updatePrice(key, num);
+      await upsertPricingPrice({ key, label: meta.label, category: meta.category, amount_aed: num });
       toast.success("Rate card key saved");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
@@ -1156,6 +1160,12 @@ function PricingTab() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="flex justify-end border-b border-border px-4 py-3">
+            <Button type="button" size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add item
+            </Button>
+          </div>
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40">
@@ -1179,10 +1189,9 @@ function PricingTab() {
                       step="0.01"
                       className="w-[140px] ml-auto text-right h-8 text-sm"
                       defaultValue={row.amount_aed}
-                      onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                      onBlur={(e) => saveCanonicalKey(row.key, e.target.value, { label: row.label, category: row.category })}
                       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      disabled={!row.inDb || saving === `key:${row.key}`}
-                      title={row.inDb ? undefined : "Add this item to the database before setting a price"}
+                      disabled={saving === `key:${row.key}`}
                     />
                   </TableCell>
                   <TableCell className="text-right">
@@ -1208,6 +1217,12 @@ function PricingTab() {
               ))}
             </TableBody>
           </Table>
+          <div className="flex justify-end border-t border-border px-4 py-3">
+            <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add item
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -1337,7 +1352,10 @@ function PricingTab() {
                           step="0.01"
                           className="w-[120px] ml-auto text-right h-8 text-sm"
                           defaultValue={live?.amount_aed ?? row.defaultPct}
-                          onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                          onBlur={(e) => saveCanonicalKey(row.key, e.target.value, {
+                            label: live?.label ?? `${row.tier} membership discount`,
+                            category: live?.category ?? "membership",
+                          })}
                           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                           disabled={saving === `key:${row.key}`}
                         />
@@ -1388,7 +1406,10 @@ function PricingTab() {
                         step="0.01"
                         className="w-[140px] ml-auto text-right h-8 text-sm"
                         defaultValue={row.amount_aed}
-                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value, {
+                          label: row.label || row.key,
+                          category: row.category,
+                        })}
                         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                         disabled={saving === `key:${row.key}`}
                       />
@@ -1432,7 +1453,10 @@ function PricingTab() {
                       defaultValue={live?.amount_aed ?? r.price_aed}
                       onBlur={(e) => {
                         if (key) {
-                          saveCanonicalKey(key, e.target.value);
+                          saveCanonicalKey(key, e.target.value, {
+                            label: live?.label ?? r.label,
+                            category: live?.category ?? "grooming",
+                          });
                         } else {
                           saveRate("grooming", r.id, e.target.value);
                         }
@@ -1485,7 +1509,10 @@ function PricingTab() {
                         step="0.01"
                         className="w-[140px] ml-auto text-right h-8 text-sm"
                         defaultValue={row.amount_aed}
-                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value)}
+                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value, {
+                          label: row.label || row.key,
+                          category: row.category,
+                        })}
                         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                         disabled={saving === `key:${row.key}`}
                       />
