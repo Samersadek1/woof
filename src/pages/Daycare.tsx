@@ -117,6 +117,16 @@ type MemberType = Database["public"]["Enums"]["member_type"];
 
 const TODAY = format(new Date(), "yyyy-MM-dd");
 
+const LOGGED_BY_OPTIONS = [
+  "Mariel",
+  "Lilian",
+  "Judy",
+  "Darilyn",
+  "Mitch",
+  "Jovy",
+  "Melissa",
+] as const;
+
 const MEMBER_BADGE: Record<string, string> = {
   standard: "bg-slate-100 text-slate-700 border-slate-200",
   silver:   "bg-blue-50  text-blue-700  border-blue-200",
@@ -1330,12 +1340,21 @@ function PlannerTab() {
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="checkin_logged_by">Logged by</Label>
-                  <Input
-                    id="checkin_logged_by"
-                    value={checkInDraft.logged_by}
-                    onChange={(e) => setCheckInDraft((prev) => ({ ...prev, logged_by: e.target.value }))}
-                    placeholder="Staff name"
-                  />
+                  <Select
+                    value={checkInDraft.logged_by || undefined}
+                    onValueChange={(v) => setCheckInDraft((prev) => ({ ...prev, logged_by: v }))}
+                  >
+                    <SelectTrigger id="checkin_logged_by">
+                      <SelectValue placeholder="Select staff" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LOGGED_BY_OPTIONS.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
