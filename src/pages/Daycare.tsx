@@ -54,6 +54,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { DogSizeField } from "@/components/DogSizeField";
 import { DEFAULT_DOG_SIZE, type DogSizeFormValue } from "@/lib/dogSizeForm";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -94,6 +95,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
   CalendarDays,
   Search,
   Printer,
@@ -101,6 +111,7 @@ import {
   Pencil,
   Trash2,
   Check,
+  ChevronsUpDown,
   X,
   Loader2,
   AlertTriangle,
@@ -247,6 +258,90 @@ function OwnerCombobox({
         </div>
       )}
     </div>
+  );
+}
+
+function packageTypeOptionLabel(t: { name: string; total_days: number; base_price_aed: number }) {
+  return `${t.name} — ${t.total_days} days — AED ${t.base_price_aed}`;
+}
+
+interface PkgTypeRow { id: string; name: string; total_days: number; base_price_aed: number; sort_order: number }
+
+interface PackageTypeComboboxProps {
+  id?: string;
+  options: PkgTypeRow[];
+  value: string;
+  onChange: (packageTypeId: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}
+
+function PackageTypeCombobox({
+  id,
+  options,
+  value,
+  onChange,
+  disabled,
+  placeholder = "Select package type",
+}: PackageTypeComboboxProps) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((t) => t.id === value) ?? null;
+  const sortedOptions = useMemo(
+    () => [...options].sort((a, b) => a.total_days - b.total_days || a.name.localeCompare(b.name)),
+    [options],
+  );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          className={cn(
+            "h-9 w-full justify-between font-normal",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          <span className="truncate text-left">
+            {selected ? packageTypeOptionLabel(selected) : placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search packages…" />
+          <CommandList>
+            <CommandEmpty>No package found.</CommandEmpty>
+            <CommandGroup>
+              {sortedOptions.map((t) => (
+                <CommandItem
+                  key={t.id}
+                  value={packageTypeOptionLabel(t)}
+                  keywords={[t.name, String(t.total_days), String(t.base_price_aed)]}
+                  onSelect={() => {
+                    onChange(t.id);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value === t.id ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span className="truncate">{packageTypeOptionLabel(t)}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1751,8 +1846,6 @@ function PackageCard({ pkg, onEdit, onDelete }: { pkg: PackageWithDetails; onEdi
 
 // ── Packages tab: NewPackageSheet ─────────────────────────────────────────────
 
-interface PkgTypeRow { id: string; name: string; total_days: number; base_price_aed: number; sort_order: number }
-
 type DaycareListPreset = "today" | "tomorrow" | "next7";
 type CollectionStatus = "not_collected" | "owner" | "pet_taxi";
 
@@ -2009,7 +2102,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
         .from("daycare_package_types")
         .select("id, name, total_days, base_price_aed, sort_order")
         .eq("is_active", true)
-        .order("sort_order");
+        .order("total_days");
       if (error) throw error;
       return data ?? [];
     },
@@ -2233,21 +2326,17 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
 
           <div className="space-y-1.5">
             <Label htmlFor="pkg_type">Package <span className="text-destructive">*</span></Label>
-            <Select
+            <PackageTypeCombobox
+              id="pkg_type"
+              options={packageTypes}
               value={form.package_type_id}
-              onValueChange={(v) => { setField("package_type_id", v); setField("price_override", ""); }}
-            >
-              <SelectTrigger id="pkg_type">
-                <SelectValue placeholder="Select package type" />
-              </SelectTrigger>
-              <SelectContent>
-                {packageTypes.map(t => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name} — {t.total_days} days — AED {t.base_price_aed}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={(v) => {
+                setField("package_type_id", v);
+                setField("price_override", "");
+              }}
+              disabled={packageTypes.length === 0}
+              placeholder={packageTypes.length === 0 ? "No package types available" : "Select package type"}
+            />
           </div>
 
           {selectedType && (
