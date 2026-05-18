@@ -340,7 +340,7 @@ export function useServiceRates() {
 
   const updateDaycarePackageType = async (
     id: string,
-    fields: { name: string; total_days: number; num_dogs: number; base_price_aed: number },
+    fields: { name: string; total_days: number; base_price_aed: number },
   ) => {
     const { error } = await supabase
       .from("daycare_package_types")
@@ -353,7 +353,6 @@ export function useServiceRates() {
   const createDaycarePackageType = async (input: {
     name: string;
     total_days: number;
-    num_dogs: number;
     base_price_aed: number;
   }) => {
     const existing = queryClient.getQueryData<DaycarePackageTypeRow[]>(["daycare_package_types"]) ?? [];
@@ -361,7 +360,6 @@ export function useServiceRates() {
     const { error } = await supabase.from("daycare_package_types").insert({
       name: input.name,
       total_days: input.total_days,
-      num_dogs: input.num_dogs,
       base_price_aed: input.base_price_aed,
       sort_order: maxSort + 1,
       is_active: true,

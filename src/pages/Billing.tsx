@@ -970,7 +970,6 @@ const EMPTY_NEW_PRICING_ITEM = {
 const EMPTY_NEW_DAYCARE_PACKAGE = {
   name: "",
   total_days: "",
-  num_dogs: "1",
   base_price_aed: "",
 };
 
@@ -992,7 +991,6 @@ function PricingTab() {
   const [packageEditDraft, setPackageEditDraft] = useState({
     name: "",
     total_days: "",
-    num_dogs: "",
     base_price_aed: "",
   });
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
@@ -1145,21 +1143,19 @@ function PricingTab() {
     setPackageEditDraft({
       name: t.name,
       total_days: String(t.total_days),
-      num_dogs: String(t.num_dogs ?? 1),
       base_price_aed: String(t.base_price_aed),
     });
   };
 
   const cancelPackageEdit = () => {
     setEditingPackageId(null);
-    setPackageEditDraft({ name: "", total_days: "", num_dogs: "", base_price_aed: "" });
+    setPackageEditDraft({ name: "", total_days: "", base_price_aed: "" });
   };
 
   const handleSavePackageEdit = async () => {
     if (!editingPackageId) return;
     const name = packageEditDraft.name.trim();
     const totalDays = parseInt(packageEditDraft.total_days, 10);
-    const numDogs = parseInt(packageEditDraft.num_dogs, 10);
     const basePrice = parseFloat(packageEditDraft.base_price_aed);
     if (!name) {
       toast.error("Package name is required.");
@@ -1167,10 +1163,6 @@ function PricingTab() {
     }
     if (!Number.isInteger(totalDays) || totalDays < 1) {
       toast.error("Enter a valid number of days (1 or greater).");
-      return;
-    }
-    if (!Number.isInteger(numDogs) || numDogs < 1) {
-      toast.error("Enter a valid number of dogs (1 or greater).");
       return;
     }
     if (Number.isNaN(basePrice) || basePrice < 0) {
@@ -1182,7 +1174,6 @@ function PricingTab() {
       await updateDaycarePackageType(editingPackageId, {
         name,
         total_days: totalDays,
-        num_dogs: numDogs,
         base_price_aed: basePrice,
       });
       toast.success("Package updated");
@@ -1197,7 +1188,6 @@ function PricingTab() {
   const handleAddDaycarePackage = async () => {
     const name = addPackageForm.name.trim();
     const totalDays = parseInt(addPackageForm.total_days, 10);
-    const numDogs = parseInt(addPackageForm.num_dogs, 10);
     const basePrice = parseFloat(addPackageForm.base_price_aed);
     if (!name) {
       toast.error("Package name is required.");
@@ -1207,17 +1197,13 @@ function PricingTab() {
       toast.error("Enter a valid number of days (1 or greater).");
       return;
     }
-    if (!Number.isInteger(numDogs) || numDogs < 1) {
-      toast.error("Enter a valid number of dogs (1 or greater).");
-      return;
-    }
     if (Number.isNaN(basePrice) || basePrice < 0) {
       toast.error("Enter a valid base price (0 or greater).");
       return;
     }
     setAddingPackage(true);
     try {
-      await createDaycarePackageType({ name, total_days: totalDays, num_dogs: numDogs, base_price_aed: basePrice });
+      await createDaycarePackageType({ name, total_days: totalDays, base_price_aed: basePrice });
       setAddPackageForm(EMPTY_NEW_DAYCARE_PACKAGE);
       setAddPackageOpen(false);
       toast.success("Daycare package type added");
@@ -1667,7 +1653,6 @@ function PricingTab() {
               <TableRow className="bg-muted/40">
                 <TableHead className="min-w-[180px]">Package</TableHead>
                 <TableHead className="text-center w-20">Days</TableHead>
-                <TableHead className="text-center w-24">Dogs</TableHead>
                 <TableHead className="text-right min-w-[140px]">Base Price (AED)</TableHead>
                 <TableHead className="w-[88px]" />
               </TableRow>
@@ -1675,7 +1660,7 @@ function PricingTab() {
             <TableBody>
               {activeDaycarePackageTypes.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-sm text-muted-foreground py-6 text-center">
+                  <TableCell colSpan={4} className="text-sm text-muted-foreground py-6 text-center">
                     No active package types found.
                   </TableCell>
                 </TableRow>
@@ -1709,21 +1694,6 @@ function PricingTab() {
                         />
                       ) : (
                         <span className="text-sm text-muted-foreground">{t.total_days}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {isEditing ? (
-                        <Input
-                          type="number"
-                          min="1"
-                          step="1"
-                          value={packageEditDraft.num_dogs}
-                          onChange={(e) => setPackageEditDraft((d) => ({ ...d, num_dogs: e.target.value }))}
-                          className="h-8 text-sm text-center w-20 mx-auto"
-                          disabled={saving === t.id}
-                        />
-                      ) : (
-                        <span className="text-sm text-muted-foreground">{t.num_dogs ?? 1}</span>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
@@ -1828,18 +1798,6 @@ function PricingTab() {
                 value={addPackageForm.total_days}
                 onChange={(e) => setAddPackageForm((f) => ({ ...f, total_days: e.target.value }))}
                 placeholder="12"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="daycare-package-add-dogs">Number of dogs</Label>
-              <Input
-                id="daycare-package-add-dogs"
-                type="number"
-                min="1"
-                step="1"
-                value={addPackageForm.num_dogs}
-                onChange={(e) => setAddPackageForm((f) => ({ ...f, num_dogs: e.target.value }))}
-                placeholder="1"
               />
             </div>
             <div className="grid gap-2">
