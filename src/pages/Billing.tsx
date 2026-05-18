@@ -965,22 +965,31 @@ const EMPTY_NEW_PRICING_ITEM = {
   amount_aed: "",
 };
 
+const EMPTY_NEW_DAYCARE_PACKAGE = {
+  name: "",
+  total_days: "",
+  base_price_aed: "",
+};
+
 function PricingTab() {
   const { allRows, upsertPricingPrice, createPricingItem, deletePricingItem } = usePricing();
   const {
     groomingRates, daycarePackageTypes, addonRates,
-    updateGroomingRate, updateDaycareType, updateAddonRate,
+    updateGroomingRate, updateDaycareType, createDaycarePackageType, updateAddonRate,
     isLoading,
   } = useServiceRates();
   const [saving, setSaving] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState(EMPTY_NEW_PRICING_ITEM);
   const [adding, setAdding] = useState(false);
+  const [addPackageOpen, setAddPackageOpen] = useState(false);
+  const [addPackageForm, setAddPackageForm] = useState(EMPTY_NEW_DAYCARE_PACKAGE);
+  const [addingPackage, setAddingPackage] = useState(false);
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const daycare12DayTypes = useMemo(
-    () => daycarePackageTypes.filter((t) => t.is_active && t.total_days === 12),
+  const activeDaycarePackageTypes = useMemo(
+    () => daycarePackageTypes.filter((t) => t.is_active).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)),
     [daycarePackageTypes],
   );
   const boardingRateRows = useMemo(
@@ -1119,6 +1128,35 @@ function PricingTab() {
       toast.error(e instanceof Error ? e.message : "Failed to add pricing item");
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleAddDaycarePackage = async () => {
+    const name = addPackageForm.name.trim();
+    const totalDays = parseInt(addPackageForm.total_days, 10);
+    const basePrice = parseFloat(addPackageForm.base_price_aed);
+    if (!name) {
+      toast.error("Package name is required.");
+      return;
+    }
+    if (!Number.isInteger(totalDays) || totalDays < 1) {
+      toast.error("Enter a valid number of days (1 or greater).");
+      return;
+    }
+    if (Number.isNaN(basePrice) || basePrice < 0) {
+      toast.error("Enter a valid base price (0 or greater).");
+      return;
+    }
+    setAddingPackage(true);
+    try {
+      await createDaycarePackageType({ name, total_days: totalDays, base_price_aed: basePrice });
+      setAddPackageForm(EMPTY_NEW_DAYCARE_PACKAGE);
+      setAddPackageOpen(false);
+      toast.success("Daycare package type added");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add package");
+    } finally {
+      setAddingPackage(false);
     }
   };
 
@@ -1537,10 +1575,23 @@ function PricingTab() {
       {/* Daycare Package Types */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Daycare Packages</CardTitle>
-          <p className="text-xs text-muted-foreground font-normal pt-1">
-            MSH currently sells only a 12-day package. Single-day daycare billing uses the Rate Card keys above (`daycare_*`).
-          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Daycare Packages</CardTitle>
+              <p className="text-xs text-muted-foreground font-normal pt-1">
+                Package types sold as multi-day bundles. Single-day daycare billing uses the Rate Card keys above (`daycare_*`).
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              onClick={() => setAddPackageOpen(true)}
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add Package
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -1552,14 +1603,14 @@ function PricingTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {daycare12DayTypes.length === 0 ? (
+              {activeDaycarePackageTypes.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={3} className="text-sm text-muted-foreground py-6 text-center">
-                    No active 12-day package type found.
+                    No active package types found.
                   </TableCell>
                 </TableRow>
               ) : (
-                daycare12DayTypes.map((t) => (
+                activeDaycarePackageTypes.map((t) => (
                   <TableRow key={t.id}>
                     <TableCell className="text-sm">{t.name}</TableCell>
                     <TableCell className="text-center text-sm text-muted-foreground">{t.total_days}</TableCell>
@@ -1580,6 +1631,66 @@ function PricingTab() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={addPackageOpen}
+        onOpenChange={(open) => {
+          setAddPackageOpen(open);
+          if (!open) setAddPackageForm(EMPTY_NEW_DAYCARE_PACKAGE);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add daycare package</DialogTitle>
+            <DialogDescription>
+              Creates a new row in daycare_package_types. It appears in the table immediately after save.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="daycare-package-add-name">Name</Label>
+              <Input
+                id="daycare-package-add-name"
+                value={addPackageForm.name}
+                onChange={(e) => setAddPackageForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. 12-Day Package"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="daycare-package-add-days">Total days</Label>
+              <Input
+                id="daycare-package-add-days"
+                type="number"
+                min="1"
+                step="1"
+                value={addPackageForm.total_days}
+                onChange={(e) => setAddPackageForm((f) => ({ ...f, total_days: e.target.value }))}
+                placeholder="12"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="daycare-package-add-price">Base price (AED)</Label>
+              <Input
+                id="daycare-package-add-price"
+                type="number"
+                min="0"
+                step="1"
+                value={addPackageForm.base_price_aed}
+                onChange={(e) => setAddPackageForm((f) => ({ ...f, base_price_aed: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAddPackageOpen(false)} disabled={addingPackage}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleAddDaycarePackage} disabled={addingPackage}>
+              {addingPackage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save package
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add-on rates — split so grooming lines stay with the grooming catalog */}
       <Card>

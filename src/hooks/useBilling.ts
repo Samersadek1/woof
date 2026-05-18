@@ -344,6 +344,25 @@ export function useServiceRates() {
     queryClient.invalidateQueries({ queryKey: ["daycare_package_types"] });
   };
 
+  const createDaycarePackageType = async (input: {
+    name: string;
+    total_days: number;
+    base_price_aed: number;
+  }) => {
+    const existing = queryClient.getQueryData<DaycarePackageTypeRow[]>(["daycare_package_types"]) ?? [];
+    const maxSort = existing.reduce((max, t) => Math.max(max, t.sort_order), 0);
+    const { error } = await supabase.from("daycare_package_types").insert({
+      name: input.name,
+      total_days: input.total_days,
+      base_price_aed: input.base_price_aed,
+      sort_order: maxSort + 1,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ["daycare_package_types"] });
+  };
+
   const updateAddonRate = async (id: string, price_aed: number) => {
     const { error } = await supabase.from("addon_rates").update({ price_aed, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) throw error;
@@ -358,6 +377,7 @@ export function useServiceRates() {
     updateGroomingRate,
     updateParkRate,
     updateDaycareType,
+    createDaycarePackageType,
     updateAddonRate,
     isLoading: groomingQuery.isLoading || parkQuery.isLoading || daycareQuery.isLoading || addonQuery.isLoading,
   };
