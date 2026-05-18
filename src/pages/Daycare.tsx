@@ -1969,8 +1969,8 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
 
   const [ownerId,    setOwnerId]    = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
+  const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [form, setForm] = useState({
-    pet_id:         "",
     package_type_id: "",
     purchase_date:  TODAY,
     expiry_date:    "",
@@ -2043,19 +2043,69 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
   const setField = (field: string, value: unknown) =>
     setForm(f => ({ ...f, [field]: value }));
 
+  const togglePetSelection = (petId: string, checked: boolean) => {
+    setSelectedPetIds((prev) => {
+      if (checked) {
+        if (prev.includes(petId)) return prev;
+        return [...prev, petId];
+      }
+      return prev.filter((id) => id !== petId);
+    });
+  };
+
+  const buildInvoiceLineItems = () => {
+    const lineItems: {
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      pricingKey?: string;
+      serviceType?: string;
+      preserveUnitPrice?: boolean;
+    }[] = [{
+      description: `${selectedType!.name} — ${selectedType!.total_days} days`,
+      quantity: 1,
+      unitPrice: basePrice,
+      pricingKey: `daycare:${selectedType!.name.toLowerCase().replace(/\s+/g, "_")}`,
+      serviceType: "daycare",
+    }];
+    const zoneLabel = transportZoneLabel(form.transport_zone);
+    const transportKey = transportPricingKey(form.transport_zone);
+    const billPackageTransport = form.transport_zone !== "complimentary";
+    if (billPackageTransport && form.pickup) {
+      lineItems.push({
+        description: `Pickup transport (${zoneLabel}) × ${totalDays} days`,
+        quantity: totalDays,
+        unitPrice: transportRate,
+        pricingKey: transportKey,
+        serviceType: "transport",
+      });
+    }
+    if (billPackageTransport && form.dropoff) {
+      lineItems.push({
+        description: `Drop-off transport (${zoneLabel}) × ${totalDays} days`,
+        quantity: totalDays,
+        unitPrice: transportRate,
+        pricingKey: transportKey,
+        serviceType: "transport",
+      });
+    }
+    return lineItems;
+  };
+
   const resetAndClose = () => {
     setOwnerId(null);
     setOwnerLabel(null);
-    setForm({ pet_id: "", package_type_id: "", purchase_date: TODAY, expiry_date: "", pickup: false, dropoff: false, transport_zone: "dubai_shared", price_override: "", notes: "" });
+    setSelectedPetIds([]);
+    setForm({ package_type_id: "", purchase_date: TODAY, expiry_date: "", pickup: false, dropoff: false, transport_zone: "dubai_shared", price_override: "", notes: "" });
     setDiscountType("percentage");
     setDiscountValue("");
     onClose();
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ownerId || !form.pet_id) {
-      toast.error("Select a client and pet");
+    if (!ownerId || selectedPetIds.length === 0) {
+      toast.error("Select a client and at least one pet");
       return;
     }
     if (!selectedType) {
@@ -2064,10 +2114,8 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
     }
 
     const pricePaid = displayPrice;
-
-    createPackage.mutate({
+    const packagePayload = {
       owner_id:        ownerId,
-      pet_id:          form.pet_id,
       total_days:      selectedType.total_days,
       purchase_date:   form.purchase_date,
       expiry_date:     form.expiry_date || null,
@@ -2078,60 +2126,40 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
       pickup_included: form.pickup,
       dropoff_included: form.dropoff,
       transport_zone:  (form.pickup || form.dropoff) ? form.transport_zone : null,
-    } as Parameters<typeof createPackage.mutate>[0], {
-      onSuccess: (pkg) => {
-        toast.success("Package created");
-        resetAndClose();
+    } as Omit<Parameters<typeof createPackage.mutateAsync>[0], "pet_id">;
 
-        const lineItems: {
-          description: string;
-          quantity: number;
-          unitPrice: number;
-          pricingKey?: string;
-          serviceType?: string;
-          preserveUnitPrice?: boolean;
-        }[] = [{
-          description: `${selectedType.name} — ${selectedType.total_days} days`,
-          quantity: 1,
-          unitPrice: basePrice,
-          pricingKey: `daycare:${selectedType.name.toLowerCase().replace(/\s+/g, "_")}`,
-          serviceType: "daycare",
-        }];
-        const zoneLabel = transportZoneLabel(form.transport_zone);
-        const transportKey = transportPricingKey(form.transport_zone);
-        const billPackageTransport = form.transport_zone !== "complimentary";
-        if (billPackageTransport && form.pickup) {
-          lineItems.push({
-            description: `Pickup transport (${zoneLabel}) × ${totalDays} days`,
-            quantity: totalDays,
-            unitPrice: transportRate,
-            pricingKey: transportKey,
-            serviceType: "transport",
-          });
-        }
-        if (billPackageTransport && form.dropoff) {
-          lineItems.push({
-            description: `Drop-off transport (${zoneLabel}) × ${totalDays} days`,
-            quantity: totalDays,
-            unitPrice: transportRate,
-            pricingKey: transportKey,
-            serviceType: "transport",
-          });
-        }
+    try {
+      const created = await Promise.all(
+        selectedPetIds.map((petId) =>
+          createPackage.mutateAsync({ ...packagePayload, pet_id: petId }),
+        ),
+      );
 
-        createServiceInvoice({
-          ownerId: ownerId!,
-          serviceType: "daycare",
-          referenceId: pkg.id,
-          lineItems,
-        }).then(() => {
-          toast.success("Draft invoice created");
-        }).catch((err) => {
-          console.error("Daycare auto-invoice failed:", err);
-        });
-      },
-      onError: (err) => toast.error(err.message),
-    });
+      const lineItems = buildInvoiceLineItems();
+      const invoiceResults = await Promise.allSettled(
+        created.map((pkg) =>
+          createServiceInvoice({
+            ownerId: ownerId!,
+            serviceType: "daycare",
+            referenceId: pkg.id,
+            lineItems,
+          }),
+        ),
+      );
+      const failedInvoices = invoiceResults.filter((r) => r.status === "rejected").length;
+      if (failedInvoices > 0) {
+        console.error("Some daycare auto-invoices failed:", invoiceResults);
+        toast.error(`${failedInvoices} draft invoice(s) could not be created`);
+      }
+
+      toast.success(
+        `Created ${created.length} package${created.length !== 1 ? "s" : ""}` +
+          (failedInvoices === 0 ? " and draft invoice(s)" : ""),
+      );
+      resetAndClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create packages");
+    }
   };
 
   return (
@@ -2139,7 +2167,7 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
           <SheetTitle>New Daycare Package</SheetTitle>
-          <SheetDescription>Sell a prepaid daycare package for a pet.</SheetDescription>
+          <SheetDescription>Sell prepaid daycare package(s) for one or more pets on the same account.</SheetDescription>
         </SheetHeader>
 
         <form onSubmit={handleSave} className="mt-6 space-y-4">
@@ -2148,27 +2176,40 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
             <OwnerCombobox
               selectedId={ownerId}
               selectedLabel={ownerLabel}
-              onSelect={(id, label) => { setOwnerId(id); setOwnerLabel(label); setField("pet_id", ""); }}
-              onClear={() => { setOwnerId(null); setOwnerLabel(null); setField("pet_id", ""); }}
+              onSelect={(id, label) => { setOwnerId(id); setOwnerLabel(label); setSelectedPetIds([]); }}
+              onClear={() => { setOwnerId(null); setOwnerLabel(null); setSelectedPetIds([]); }}
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="pkg_pet">Pet <span className="text-destructive">*</span></Label>
-            <Select
-              value={form.pet_id}
-              onValueChange={(v) => setField("pet_id", v)}
-              disabled={!ownerId || !pets?.length}
-            >
-              <SelectTrigger id="pkg_pet">
-                <SelectValue placeholder={!ownerId ? "Select client first" : "Select pet"} />
-              </SelectTrigger>
-              <SelectContent>
-                {pets?.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+              Pet(s) <span className="text-destructive">*</span>
+            </Label>
+            {!ownerId ? (
+              <p className="text-sm text-muted-foreground">Select a client first.</p>
+            ) : !pets?.length ? (
+              <p className="text-sm text-muted-foreground">No pets found for this client.</p>
+            ) : (
+              <div className="rounded-lg border divide-y">
+                {pets.map((pet) => (
+                  <div key={pet.id} className="flex items-center gap-2 p-3">
+                    <Checkbox
+                      id={`pkg_pet_${pet.id}`}
+                      checked={selectedPetIds.includes(pet.id)}
+                      onCheckedChange={(v) => togglePetSelection(pet.id, v === true)}
+                    />
+                    <Label htmlFor={`pkg_pet_${pet.id}`} className="font-medium">
+                      {pet.name}
+                    </Label>
+                  </div>
                 ))}
-              </SelectContent>
-            </Select>
+              </div>
+            )}
+            {selectedPetIds.length > 1 && (
+              <p className="text-xs text-muted-foreground">
+                {selectedPetIds.length} pets selected — one package will be created per pet with the same settings.
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -2420,9 +2461,16 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
 
           <Separator />
 
-          <Button type="submit" className="w-full" disabled={createPackage.isPending || !selectedType}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={createPackage.isPending || !selectedType || selectedPetIds.length === 0}
+          >
             {createPackage.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save Package{displayPrice > 0 ? ` — AED ${displayPrice.toFixed(2)}` : ""}
+            {selectedPetIds.length > 1
+              ? `Save ${selectedPetIds.length} packages`
+              : "Save Package"}
+            {displayPrice > 0 ? ` — AED ${displayPrice.toFixed(2)} each` : ""}
           </Button>
         </form>
       </SheetContent>
