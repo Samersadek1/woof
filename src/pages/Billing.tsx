@@ -997,7 +997,10 @@ function PricingTab() {
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const activeDaycarePackageTypes = useMemo(
-    () => daycarePackageTypes.filter((t) => t.is_active).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)),
+    () =>
+      daycarePackageTypes
+        .filter((t) => t.is_active)
+        .sort((a, b) => a.total_days - b.total_days || a.name.localeCompare(b.name)),
     [daycarePackageTypes],
   );
   const boardingRateRows = useMemo(
