@@ -338,8 +338,14 @@ export function useServiceRates() {
     queryClient.invalidateQueries({ queryKey: ["park_rates"] });
   };
 
-  const updateDaycareType = async (id: string, base_price_aed: number) => {
-    const { error } = await supabase.from("daycare_package_types").update({ base_price_aed, updated_at: new Date().toISOString() }).eq("id", id);
+  const updateDaycarePackageType = async (
+    id: string,
+    fields: { name: string; total_days: number; base_price_aed: number },
+  ) => {
+    const { error } = await supabase
+      .from("daycare_package_types")
+      .update({ ...fields, updated_at: new Date().toISOString() })
+      .eq("id", id);
     if (error) throw error;
     queryClient.invalidateQueries({ queryKey: ["daycare_package_types"] });
   };
@@ -376,7 +382,7 @@ export function useServiceRates() {
     addonRates: addonQuery.data ?? [],
     updateGroomingRate,
     updateParkRate,
-    updateDaycareType,
+    updateDaycarePackageType,
     createDaycarePackageType,
     updateAddonRate,
     isLoading: groomingQuery.isLoading || parkQuery.isLoading || daycareQuery.isLoading || addonQuery.isLoading,

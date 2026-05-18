@@ -82,6 +82,8 @@ import {
   ScrollText,
   Plus,
   Trash2,
+  Pencil,
+  Check,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -975,7 +977,7 @@ function PricingTab() {
   const { allRows, upsertPricingPrice, createPricingItem, deletePricingItem } = usePricing();
   const {
     groomingRates, daycarePackageTypes, addonRates,
-    updateGroomingRate, updateDaycareType, createDaycarePackageType, updateAddonRate,
+    updateGroomingRate, updateDaycarePackageType, createDaycarePackageType, updateAddonRate,
     isLoading,
   } = useServiceRates();
   const [saving, setSaving] = useState<string | null>(null);
@@ -985,6 +987,12 @@ function PricingTab() {
   const [addPackageOpen, setAddPackageOpen] = useState(false);
   const [addPackageForm, setAddPackageForm] = useState(EMPTY_NEW_DAYCARE_PACKAGE);
   const [addingPackage, setAddingPackage] = useState(false);
+  const [editingPackageId, setEditingPackageId] = useState<string | null>(null);
+  const [packageEditDraft, setPackageEditDraft] = useState({
+    name: "",
+    total_days: "",
+    base_price_aed: "",
+  });
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1074,7 +1082,6 @@ function PricingTab() {
     setSaving(id);
     try {
       if (type === "grooming") await updateGroomingRate(id, num);
-      else if (type === "daycare") await updateDaycareType(id, num);
       else if (type === "addon") await updateAddonRate(id, num);
       toast.success("Rate saved");
     } catch (e) {
@@ -1128,6 +1135,53 @@ function PricingTab() {
       toast.error(e instanceof Error ? e.message : "Failed to add pricing item");
     } finally {
       setAdding(false);
+    }
+  };
+
+  const startPackageEdit = (t: (typeof activeDaycarePackageTypes)[number]) => {
+    setEditingPackageId(t.id);
+    setPackageEditDraft({
+      name: t.name,
+      total_days: String(t.total_days),
+      base_price_aed: String(t.base_price_aed),
+    });
+  };
+
+  const cancelPackageEdit = () => {
+    setEditingPackageId(null);
+    setPackageEditDraft({ name: "", total_days: "", base_price_aed: "" });
+  };
+
+  const handleSavePackageEdit = async () => {
+    if (!editingPackageId) return;
+    const name = packageEditDraft.name.trim();
+    const totalDays = parseInt(packageEditDraft.total_days, 10);
+    const basePrice = parseFloat(packageEditDraft.base_price_aed);
+    if (!name) {
+      toast.error("Package name is required.");
+      return;
+    }
+    if (!Number.isInteger(totalDays) || totalDays < 1) {
+      toast.error("Enter a valid number of days (1 or greater).");
+      return;
+    }
+    if (Number.isNaN(basePrice) || basePrice < 0) {
+      toast.error("Enter a valid base price (0 or greater).");
+      return;
+    }
+    setSaving(editingPackageId);
+    try {
+      await updateDaycarePackageType(editingPackageId, {
+        name,
+        total_days: totalDays,
+        base_price_aed: basePrice,
+      });
+      toast.success("Package updated");
+      cancelPackageEdit();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(null);
     }
   };
 
@@ -1600,32 +1654,110 @@ function PricingTab() {
                 <TableHead className="min-w-[180px]">Package</TableHead>
                 <TableHead className="text-center w-20">Days</TableHead>
                 <TableHead className="text-right min-w-[140px]">Base Price (AED)</TableHead>
+                <TableHead className="w-[88px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {activeDaycarePackageTypes.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-sm text-muted-foreground py-6 text-center">
+                  <TableCell colSpan={4} className="text-sm text-muted-foreground py-6 text-center">
                     No active package types found.
                   </TableCell>
                 </TableRow>
               ) : (
-                activeDaycarePackageTypes.map((t) => (
+                activeDaycarePackageTypes.map((t) => {
+                  const isEditing = editingPackageId === t.id;
+                  return (
                   <TableRow key={t.id}>
-                    <TableCell className="text-sm">{t.name}</TableCell>
-                    <TableCell className="text-center text-sm text-muted-foreground">{t.total_days}</TableCell>
+                    <TableCell>
+                      {isEditing ? (
+                        <Input
+                          value={packageEditDraft.name}
+                          onChange={(e) => setPackageEditDraft((d) => ({ ...d, name: e.target.value }))}
+                          className="h-8 text-sm"
+                          disabled={saving === t.id}
+                        />
+                      ) : (
+                        <span className="text-sm">{t.name}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {isEditing ? (
+                        <Input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={packageEditDraft.total_days}
+                          onChange={(e) => setPackageEditDraft((d) => ({ ...d, total_days: e.target.value }))}
+                          className="h-8 text-sm text-center w-20 mx-auto"
+                          disabled={saving === t.id}
+                        />
+                      ) : (
+                        <span className="text-sm text-muted-foreground">{t.total_days}</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
-                      <Input
-                        type="number" min="0" step="1"
-                        className="w-[120px] ml-auto text-right h-8 text-sm"
-                        defaultValue={t.base_price_aed}
-                        onBlur={(e) => saveRate("daycare", t.id, e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                        disabled={saving === t.id}
-                      />
+                      {isEditing ? (
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={packageEditDraft.base_price_aed}
+                          onChange={(e) => setPackageEditDraft((d) => ({ ...d, base_price_aed: e.target.value }))}
+                          className="w-[120px] ml-auto text-right h-8 text-sm"
+                          disabled={saving === t.id}
+                        />
+                      ) : (
+                        <span className="text-sm tabular-nums">{t.base_price_aed}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {isEditing ? (
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-emerald-600 hover:bg-emerald-50"
+                            onClick={handleSavePackageEdit}
+                            disabled={saving === t.id}
+                            aria-label="Save package"
+                          >
+                            {saving === t.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Check className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground"
+                            onClick={cancelPackageEdit}
+                            disabled={saving === t.id}
+                            aria-label="Cancel edit"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => startPackageEdit(t)}
+                          disabled={editingPackageId !== null && editingPackageId !== t.id}
+                          aria-label={`Edit ${t.name}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>
