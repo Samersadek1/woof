@@ -284,7 +284,7 @@ export function usePricing() {
 
 export interface GroomingRateRow { id: string; service: string; label: string; price_aed: number; duration_minutes: number | null; is_active: boolean }
 export interface ParkRateRow { id: string; label: string; price_per_slot_aed: number; is_active: boolean }
-export interface DaycarePackageTypeRow { id: string; name: string; total_days: number; base_price_aed: number; is_active: boolean; sort_order: number }
+export interface DaycarePackageTypeRow { id: string; name: string; total_days: number; num_dogs: number; base_price_aed: number; is_active: boolean; sort_order: number }
 export interface AddonRateRow { id: string; addon_type: string; label: string; price_aed: number; unit: string; applicable_services: string[]; is_active: boolean }
 
 export function useServiceRates() {
@@ -340,7 +340,7 @@ export function useServiceRates() {
 
   const updateDaycarePackageType = async (
     id: string,
-    fields: { name: string; total_days: number; base_price_aed: number },
+    fields: { name: string; total_days: number; num_dogs: number; base_price_aed: number },
   ) => {
     const { error } = await supabase
       .from("daycare_package_types")
@@ -353,6 +353,7 @@ export function useServiceRates() {
   const createDaycarePackageType = async (input: {
     name: string;
     total_days: number;
+    num_dogs: number;
     base_price_aed: number;
   }) => {
     const existing = queryClient.getQueryData<DaycarePackageTypeRow[]>(["daycare_package_types"]) ?? [];
@@ -360,6 +361,7 @@ export function useServiceRates() {
     const { error } = await supabase.from("daycare_package_types").insert({
       name: input.name,
       total_days: input.total_days,
+      num_dogs: input.num_dogs,
       base_price_aed: input.base_price_aed,
       sort_order: maxSort + 1,
       is_active: true,

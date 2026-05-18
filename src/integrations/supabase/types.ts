@@ -443,6 +443,7 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          num_dogs: number
           sort_order: number
           total_days: number
           updated_at: string
@@ -452,6 +453,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          num_dogs?: number
           sort_order?: number
           total_days: number
           updated_at?: string
@@ -461,6 +463,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          num_dogs?: number
           sort_order?: number
           total_days?: number
           updated_at?: string
