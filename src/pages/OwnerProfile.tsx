@@ -20,7 +20,7 @@ import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { usePets, useCreatePet, getVaccinationStatus } from "@/hooks/usePets";
 import { petVaccinationSummaryLine } from "@/lib/vaccinationsDisplay";
 import { useDaycarePackages } from "@/hooks/useDaycare";
-import { useTopUpWallet } from "@/hooks/useWallet";
+import { useManualTopUpWallet } from "@/hooks/useWallet";
 import type { PetWithVaccinations } from "@/hooks/usePets";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
@@ -754,6 +754,10 @@ const OwnerProfilePage = () => {
   const [bookingDetail, setBookingDetail] = useState<BookingDetailSelection | null>(null);
   const [historyServiceFilter, setHistoryServiceFilter] =
     useState<HistoryServiceFilter>("all");
+  const [addBalanceOpen, setAddBalanceOpen] = useState(false);
+  const [addBalanceAmount, setAddBalanceAmount] = useState("");
+  const [addBalanceNote, setAddBalanceNote] = useState("");
+  const manualTopUp = useManualTopUpWallet();
 
   const [ownerForm, setOwnerForm] = useState<OwnerUpdate & { id: string }>({
     id: id!,
@@ -1030,6 +1034,15 @@ const OwnerProfilePage = () => {
                 <p className="mt-1 text-3xl font-bold tabular-nums">
                   AED {owner.wallet_balance.toFixed(2)}
                 </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => setAddBalanceOpen(true)}
+                >
+                  Add Balance
+                </Button>
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={openEditDrawer}>
@@ -2107,6 +2120,101 @@ const OwnerProfilePage = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={addBalanceOpen}
+        onOpenChange={(open) => {
+          if (!open && !manualTopUp.isPending) {
+            setAddBalanceOpen(false);
+            setAddBalanceAmount("");
+            setAddBalanceNote("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Balance</DialogTitle>
+            <DialogDescription>
+              Credit this customer&apos;s wallet. The amount is added to their balance and recorded as a manual
+              top-up.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const amount = parseFloat(addBalanceAmount);
+              const note = addBalanceNote.trim();
+              if (!amount || amount <= 0) {
+                toast.error("Enter a valid amount.");
+                return;
+              }
+              if (!note) {
+                toast.error("Enter a reason or note.");
+                return;
+              }
+              manualTopUp.mutate(
+                { owner_id: id!, amount, notes: note },
+                {
+                  onSuccess: () => {
+                    toast.success(`AED ${amount.toFixed(2)} added to wallet.`);
+                    setAddBalanceAmount("");
+                    setAddBalanceNote("");
+                    setAddBalanceOpen(false);
+                  },
+                  onError: (err) => toast.error(err.message || "Failed to add balance."),
+                },
+              );
+            }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="add_balance_amount">
+                Amount (AED) <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="add_balance_amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="0.00"
+                value={addBalanceAmount}
+                onChange={(e) => setAddBalanceAmount(e.target.value)}
+                disabled={manualTopUp.isPending}
+                autoFocus
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add_balance_note">
+                Reason / note <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="add_balance_note"
+                rows={3}
+                placeholder="e.g. Cash received at reception"
+                value={addBalanceNote}
+                onChange={(e) => setAddBalanceNote(e.target.value)}
+                disabled={manualTopUp.isPending}
+                required
+              />
+            </div>
+            <DialogFooter className="gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAddBalanceOpen(false)}
+                disabled={manualTopUp.isPending}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={manualTopUp.isPending} className="bg-emerald-600 hover:bg-emerald-700">
+                {manualTopUp.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Add Balance
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

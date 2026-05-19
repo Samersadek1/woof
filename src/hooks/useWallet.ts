@@ -168,3 +168,22 @@ export function useRefundWallet() {
     },
   });
 }
+
+// ── useManualTopUpWallet ──────────────────────────────────────────────────────
+
+/** Staff manual credit from customer profile (amount + reason/note). */
+export function useManualTopUpWallet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: WalletMutationPayload) =>
+      applyTransaction(payload, "manual_topup", Math.abs(payload.amount)),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: walletQueryKeys.transactions(variables.owner_id),
+      });
+      queryClient.invalidateQueries({ queryKey: ["owners"] });
+      queryClient.invalidateQueries({ queryKey: ["owner_wallet", variables.owner_id] });
+    },
+  });
+}

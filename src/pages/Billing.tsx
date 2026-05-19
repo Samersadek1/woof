@@ -115,6 +115,7 @@ const MEMBER_BADGE: Record<MemberType, string> = {
 
 const TX_BADGE: Record<string, { label: string; className: string }> = {
   top_up: { label: "Top Up", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  manual_topup: { label: "Manual Top-up", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   deduction: { label: "Deduction", className: "bg-red-50 text-red-700 border-red-200" },
   membership_fee: { label: "Membership Fee", className: "bg-purple-50 text-purple-700 border-purple-200" },
   refund: { label: "Refund", className: "bg-sky-50 text-sky-700 border-sky-200" },
