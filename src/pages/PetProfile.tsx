@@ -1439,6 +1439,7 @@ const PetProfilePage = () => {
                   id="edit_vet_name"
                   value={editForm.vet_name ?? ""}
                   onChange={(v) => handleField("vet_name", v)}
+                  onPhoneChange={(p) => handleField("vet_phone", p)}
                 />
               </div>
               <div className="space-y-2">

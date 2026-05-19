@@ -12,6 +12,7 @@ import {
   Settings,
   DoorOpen,
   Sparkles,
+  Stethoscope,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,6 +32,7 @@ const navItems = [
 ];
 
 const settingsItems = [
+  { icon: Stethoscope, label: "Vets", path: "/settings/vets" },
   { icon: DoorOpen, label: "Rooms", path: "/settings/rooms" },
 ];
 

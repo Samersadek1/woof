@@ -578,6 +578,7 @@ const CustomersPage = () => {
                     placeholder="Select vet clinic"
                     value={form.vet_name ?? ""}
                     onChange={(v) => handleField("vet_name", v)}
+                    onPhoneChange={(p) => handleField("vet_phone", p)}
                   />
                 </div>
                 <div className="space-y-2">

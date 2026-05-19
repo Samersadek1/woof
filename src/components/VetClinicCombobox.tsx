@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronsUpDown, Loader2, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { ADD_CUSTOM_VET_CLINIC_OPTION, VET_CLINICS } from "@/data/vetClinics";
-import { useVetClinicsQuery } from "@/hooks/useReferenceLists";
+import { useVetClinicsQuery } from "@/hooks/useVetClinics";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Command,
   CommandEmpty,
@@ -13,7 +11,6 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -21,6 +18,8 @@ export interface VetClinicComboboxProps {
   id?: string;
   value: string;
   onChange: (vetName: string) => void;
+  /** Called when a clinic with a phone number is selected. */
+  onPhoneChange?: (phone: string) => void;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -29,89 +28,35 @@ export function VetClinicCombobox({
   id,
   value,
   onChange,
+  onPhoneChange,
   disabled,
   placeholder = "Select vet clinic…",
 }: VetClinicComboboxProps) {
   const [open, setOpen] = useState(false);
-  const preserveManualEmpty = useRef(false);
+  const { data: clinicRows = [], isLoading } = useVetClinicsQuery({ activeOnly: true });
 
-  const { data: clinicRows, isLoading } = useVetClinicsQuery();
-
-  const clinicNames = useMemo(() => {
-    if (clinicRows && clinicRows.length > 0) {
-      return clinicRows.map((r) => r.name);
+  const clinicsByName = useMemo(() => {
+    const map = new Map<string, { name: string; phone: string | null }>();
+    for (const row of clinicRows) {
+      map.set(row.name, { name: row.name, phone: row.phone });
     }
-    return [...VET_CLINICS];
+    return map;
   }, [clinicRows]);
 
-  const clinicSet = useMemo(() => new Set(clinicNames), [clinicNames]);
-
+  const clinicNames = useMemo(() => clinicRows.map((r) => r.name), [clinicRows]);
   const trimmed = value.trim();
-  const inList = trimmed.length > 0 && clinicSet.has(trimmed);
+  const inList = trimmed.length > 0 && clinicsByName.has(trimmed);
 
-  const [manualChoice, setManualChoice] = useState(() => {
-    const t = value.trim();
-    return t.length > 0 && !clinicSet.has(t);
-  });
-
-  useEffect(() => {
-    const t = value.trim();
-    if (t.length === 0) {
-      if (preserveManualEmpty.current) {
-        preserveManualEmpty.current = false;
-        return;
-      }
-      setManualChoice(false);
-      return;
-    }
-    if (clinicSet.has(t)) setManualChoice(false);
-    else setManualChoice(true);
-  }, [value, clinicSet]);
-
-  function handleAddCustom() {
-    preserveManualEmpty.current = true;
-    setManualChoice(true);
-    onChange("");
-    setOpen(false);
-  }
-
-  function handleCancelCustom() {
-    setManualChoice(false);
-    onChange("");
-  }
-
-  const triggerLabel = useMemo(() => {
-    if (!trimmed) return placeholder;
-    return trimmed;
-  }, [trimmed, placeholder]);
-
+  const triggerLabel = trimmed || placeholder;
   const busy = disabled || isLoading;
 
-  if (manualChoice) {
-    return (
-      <div className="flex gap-2 items-center min-w-0">
-        <Input
-          id={id}
-          disabled={busy}
-          placeholder="Enter clinic name…"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="h-10 flex-1 min-w-0"
-          autoComplete="off"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-10 w-10 shrink-0"
-          disabled={busy}
-          aria-label="Cancel custom vet clinic"
-          onClick={handleCancelCustom}
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-    );
+  function selectClinic(name: string) {
+    onChange(name);
+    const phone = clinicsByName.get(name)?.phone;
+    if (phone && onPhoneChange) {
+      onPhoneChange(phone);
+    }
+    setOpen(false);
   }
 
   return (
@@ -141,17 +86,14 @@ export function VetClinicCombobox({
         <Command>
           <CommandInput placeholder="Type to filter…" />
           <CommandList>
-            <CommandEmpty>No clinic found.</CommandEmpty>
+            <CommandEmpty>
+              {clinicNames.length === 0
+                ? "No clinics yet. Add them in Settings → Vets."
+                : "No clinic found."}
+            </CommandEmpty>
             {!inList && trimmed.length > 0 ? (
               <CommandGroup heading="Current value (not in list)">
-                <CommandItem
-                  value={`__saved__${trimmed}`}
-                  onSelect={() => {
-                    onChange(trimmed);
-                    setManualChoice(true);
-                    setOpen(false);
-                  }}
-                >
+                <CommandItem value={`__saved__${trimmed}`} onSelect={() => selectClinic(trimmed)}>
                   <Check className="mr-2 h-4 w-4 opacity-100" />
                   <span className="truncate">{trimmed}</span>
                 </CommandItem>
@@ -159,15 +101,7 @@ export function VetClinicCombobox({
             ) : null}
             <CommandGroup heading="Clinics">
               {clinicNames.map((name) => (
-                <CommandItem
-                  key={name}
-                  value={name}
-                  onSelect={() => {
-                    onChange(name);
-                    setManualChoice(false);
-                    setOpen(false);
-                  }}
-                >
+                <CommandItem key={name} value={name} onSelect={() => selectClinic(name)}>
                   <Check
                     className={cn(
                       "mr-2 h-4 w-4",
@@ -177,12 +111,6 @@ export function VetClinicCombobox({
                   <span className="truncate">{name}</span>
                 </CommandItem>
               ))}
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup>
-              <CommandItem value="__add_custom_vet__" onSelect={handleAddCustom}>
-                <span className="font-medium text-muted-foreground">{ADD_CUSTOM_VET_CLINIC_OPTION}</span>
-              </CommandItem>
             </CommandGroup>
           </CommandList>
         </Command>

@@ -1809,6 +1809,7 @@ const OwnerProfilePage = () => {
                     id="edit_vet_name"
                     value={ownerForm.vet_name ?? ""}
                     onChange={(v) => handleOwnerField("vet_name", v)}
+                    onPhoneChange={(p) => handleOwnerField("vet_phone", p)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1984,6 +1985,7 @@ const OwnerProfilePage = () => {
                     id="pet_vet_name"
                     value={(petForm.vet_name as string) ?? ""}
                     onChange={(v) => handlePetField("vet_name", v)}
+                    onPhoneChange={(p) => handlePetField("vet_phone", p)}
                   />
                 </div>
                 <div className="space-y-2">

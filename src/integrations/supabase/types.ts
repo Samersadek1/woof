@@ -1922,20 +1922,23 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          is_active: boolean
           name: string
-          sort_order: number
+          phone: string | null
         }
         Insert: {
           created_at?: string
           id?: string
+          is_active?: boolean
           name: string
-          sort_order?: number
+          phone?: string | null
         }
         Update: {
           created_at?: string
           id?: string
+          is_active?: boolean
           name?: string
-          sort_order?: number
+          phone?: string | null
         }
         Relationships: []
       }
