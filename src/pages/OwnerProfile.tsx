@@ -20,7 +20,7 @@ import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { usePets, useCreatePet, getVaccinationStatus } from "@/hooks/usePets";
 import { petVaccinationSummaryLine } from "@/lib/vaccinationsDisplay";
 import { useDaycarePackages } from "@/hooks/useDaycare";
-import { useManualTopUpWallet } from "@/hooks/useWallet";
+import { useManualTopUpWallet, useTopUpWallet } from "@/hooks/useWallet";
 import type { PetWithVaccinations } from "@/hooks/usePets";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
