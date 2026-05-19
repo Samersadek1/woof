@@ -2589,9 +2589,36 @@ function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void
 // ── TAB 2: PackagesTab ────────────────────────────────────────────────────────
 
 type PkgFilter = "all" | "low" | "exhausted";
+type TierFilter = "all" | "standard" | "silver" | "gold";
+
+const TIER_FILTER_OPTIONS: { value: TierFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "standard", label: "Standard" },
+  { value: "silver", label: "Silver" },
+  { value: "gold", label: "Gold" },
+];
+
+function packageMatchesTier(pkg: PackageWithDetails, tier: TierFilter): boolean {
+  if (tier === "all") return true;
+  const memberType = (pkg.owners?.member_type ?? "standard").toLowerCase();
+  return memberType === tier;
+}
+
+function packageMatchesSearch(pkg: PackageWithDetails, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const ownerName = pkg.owners
+    ? ownerDisplayName(pkg.owners.first_name, pkg.owners.last_name).toLowerCase()
+    : "";
+  const petName = (pkg.pets?.name ?? "").toLowerCase();
+  const tier = (pkg.owners?.member_type ?? "standard").toLowerCase();
+  return ownerName.includes(q) || petName.includes(q) || tier.includes(q);
+}
 
 function PackagesTab() {
   const [filter, setFilter] = useState<PkgFilter>("all");
+  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editPkg, setEditPkg] = useState<PackageWithDetails | null>(null);
   const [deletePkg, setDeletePkg] = useState<PackageWithDetails | null>(null);
@@ -2644,31 +2671,61 @@ function PackagesTab() {
     });
   };
 
-  const filtered = (packages ?? []).filter(pkg => {
-    const remaining = pkg.total_days - pkg.days_used;
-    if (filter === "low")       return remaining > 0 && remaining <= 2;
-    if (filter === "exhausted") return remaining <= 0;
-    return true;
-  });
+  const filtered = useMemo(() => {
+    return (packages ?? []).filter((pkg) => {
+      const remaining = pkg.total_days - pkg.days_used;
+      if (filter === "low" && !(remaining > 0 && remaining <= 2)) return false;
+      if (filter === "exhausted" && remaining > 0) return false;
+      if (!packageMatchesTier(pkg, tierFilter)) return false;
+      if (!packageMatchesSearch(pkg, searchQuery)) return false;
+      return true;
+    });
+  }, [packages, filter, tierFilter, searchQuery]);
+
+  const hasActiveFilters =
+    filter !== "all" || tierFilter !== "all" || searchQuery.trim().length > 0;
 
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-3 min-w-0 flex-1">
           <h3 className="text-base font-semibold">Packages</h3>
-          <Select value={filter} onValueChange={(v) => setFilter(v as PkgFilter)}>
-            <SelectTrigger className="h-8 w-48 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Packages</SelectItem>
-              <SelectItem value="low">Low Credits (≤2 remaining)</SelectItem>
-              <SelectItem value="exhausted">Exhausted</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={filter} onValueChange={(v) => setFilter(v as PkgFilter)}>
+              <SelectTrigger className="h-8 w-48 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Packages</SelectItem>
+                <SelectItem value="low">Low Credits (≤2 remaining)</SelectItem>
+                <SelectItem value="exhausted">Exhausted</SelectItem>
+              </SelectContent>
+            </Select>
+            {TIER_FILTER_OPTIONS.map(({ value, label }) => (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                variant={tierFilter === value ? "default" : "outline"}
+                className="h-8 text-xs"
+                onClick={() => setTierFilter(value)}
+              >
+                {label}
+              </Button>
+            ))}
+            <div className="relative w-full sm:w-56">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                className="h-8 pl-8 text-xs"
+                placeholder="Search owner, pet, or tier…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
-        <Button size="sm" onClick={() => setSheetOpen(true)}>
+        <Button size="sm" className="shrink-0" onClick={() => setSheetOpen(true)}>
           <Plus className="mr-1.5 h-4 w-4" />
           New Package
         </Button>
@@ -2683,7 +2740,7 @@ function PackagesTab() {
         <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
           <Package className="h-8 w-8 mb-2 opacity-40" />
           <p className="text-sm">
-            {filter === "all" ? "No packages yet" : "No packages match this filter"}
+            {hasActiveFilters ? "No packages match these filters" : "No packages yet"}
           </p>
         </div>
       ) : (
