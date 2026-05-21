@@ -73,21 +73,26 @@ export function useUpdatePet() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: PetUpdate & { id: string }) => {
-      const { error: updateError } = await supabase
+      const { data, error } = await supabase
         .from("pets")
         .update(updates)
-        .eq("id", id);
-
-      if (updateError) throw updateError;
-
-      const { data, error: fetchError } = await supabase
-        .from("pets")
-        .select("*")
         .eq("id", id)
-        .single();
+        .select("id, owner_id")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (data) return data as Pet;
+
+      const { data: existing, error: fetchError } = await supabase
+        .from("pets")
+        .select("id, owner_id")
+        .eq("id", id)
+        .maybeSingle();
 
       if (fetchError) throw fetchError;
-      return data as Pet;
+      if (existing) return existing as Pet;
+
+      throw new Error("Pet update failed: record not found or not permitted.");
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: petQueryKeys.pets(data.owner_id) });

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useUpdatePet } from "@/hooks/usePets";
 import type { PetWithVaccinations } from "@/hooks/usePets";
+import type { Database } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TestTube2, Upload, ExternalLink, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+
+type PetUpdate = Database["public"]["Tables"]["pets"]["Update"];
 
 const BUCKET = "pet-photos";
 
@@ -80,22 +83,58 @@ function extractSaveError(err: unknown): string {
   return String(err);
 }
 
-function vaccicheckMigrationHint(message: string): string | null {
-  const m = message.toLowerCase();
-  if (
-    m.includes("vaccicheck_") ||
-    (m.includes("schema cache") && m.includes("pets")) ||
-    (m.includes("could not find") && m.includes("pets"))
-  ) {
-    return "VacciCheck columns are missing on pets. Run sql/add-pet-vaccicheck-columns.sql in the Supabase SQL Editor, then try again.";
-  }
-  return null;
-}
-
 function normalizeDateInput(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return trimmed.slice(0, 10);
+}
+
+const VACCICHECK_FIELD_KEYS = [
+  "vaccicheck_test_date",
+  "vaccicheck_performed_at",
+  "vaccicheck_distemper_tier",
+  "vaccicheck_parvovirus_tier",
+  "vaccicheck_hepatitis_tier",
+  "vaccicheck_immunity_rating",
+] as const;
+
+type VaccicheckFieldKey = (typeof VACCICHECK_FIELD_KEYS)[number];
+
+function petHasVaccicheckApiColumns(pet: PetWithVaccinations): boolean {
+  return VACCICHECK_FIELD_KEYS.some((key) => key in pet);
+}
+
+function vaccicheckSaveErrorHint(
+  message: string,
+  columnsAvailable: boolean,
+): string | null {
+  if (columnsAvailable) return null;
+
+  const m = message.toLowerCase();
+  if (m.includes("schema cache")) {
+    return "Supabase has not refreshed its API schema yet. Run NOTIFY pgrst, 'reload schema'; in the SQL Editor, wait a few seconds, refresh this page, and try again.";
+  }
+  if (m.includes("could not find") && m.includes("column") && m.includes("vaccicheck")) {
+    return "VacciCheck columns are missing on pets. Run sql/add-pet-vaccicheck-columns.sql in the Supabase SQL Editor, then run NOTIFY pgrst, 'reload schema'; and try again.";
+  }
+  return null;
+}
+
+function buildVaccicheckSavePayload(
+  pet: PetWithVaccinations,
+  values: Record<VaccicheckFieldKey, string | null>,
+): (PetUpdate & { id: string }) | null {
+  const payload: PetUpdate & { id: string } = { id: pet.id };
+  let hasField = false;
+
+  for (const key of VACCICHECK_FIELD_KEYS) {
+    if (key in pet) {
+      (payload as Record<VaccicheckFieldKey, string | null>)[key] = values[key];
+      hasField = true;
+    }
+  }
+
+  return hasField ? payload : null;
 }
 
 interface VaccicheckPanelProps {
@@ -134,26 +173,34 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
     pet.vaccicheck_report_url,
   ]);
 
+  const vaccicheckApiReady = petHasVaccicheckApiColumns(pet);
+
   const saveFields = () => {
-    updatePet.mutate(
-      {
-        id: pet.id,
-        vaccicheck_test_date: normalizeDateInput(testDate),
-        vaccicheck_performed_at: performedAt.trim() === "" ? null : performedAt.trim(),
-        vaccicheck_distemper_tier: distemper === NONE ? null : distemper,
-        vaccicheck_parvovirus_tier: parvo === NONE ? null : parvo,
-        vaccicheck_hepatitis_tier: hepatitis === NONE ? null : hepatitis,
-        vaccicheck_immunity_rating: immunity === NONE ? null : immunity,
+    const payload = buildVaccicheckSavePayload(pet, {
+      vaccicheck_test_date: normalizeDateInput(testDate),
+      vaccicheck_performed_at: performedAt.trim() === "" ? null : performedAt.trim(),
+      vaccicheck_distemper_tier: distemper === NONE ? null : distemper,
+      vaccicheck_parvovirus_tier: parvo === NONE ? null : parvo,
+      vaccicheck_hepatitis_tier: hepatitis === NONE ? null : hepatitis,
+      vaccicheck_immunity_rating: immunity === NONE ? null : immunity,
+    });
+
+    if (!payload) {
+      toast.error(
+        "VacciCheck fields are not available from the API yet. Run sql/add-pet-vaccicheck-columns.sql, then NOTIFY pgrst, 'reload schema'; refresh this page, and try again.",
+        { duration: 12_000 },
+      );
+      return;
+    }
+
+    updatePet.mutate(payload, {
+      onSuccess: () => toast.success("VacciCheck details saved"),
+      onError: (e) => {
+        const msg = extractSaveError(e);
+        const hint = vaccicheckSaveErrorHint(msg, vaccicheckApiReady);
+        toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
       },
-      {
-        onSuccess: () => toast.success("VacciCheck details saved"),
-        onError: (e) => {
-          const msg = extractSaveError(e);
-          const hint = vaccicheckMigrationHint(msg);
-          toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
-        },
-      },
-    );
+    });
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -183,13 +230,19 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
       {
         onSuccess: () => toast.success("Report uploaded"),
         onError: (err) => {
-          toast.error(extractSaveError(err));
+          const msg = extractSaveError(err);
+          const hint = vaccicheckSaveErrorHint(msg, "vaccicheck_report_url" in pet);
+          toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
         },
       },
     );
   };
 
   const clearReport = () => {
+    if (!("vaccicheck_report_url" in pet)) {
+      toast.error("Report URL field is not available from the API yet.");
+      return;
+    }
     setReportUrl(null);
     updatePet.mutate(
       { id: pet.id, vaccicheck_report_url: null },
@@ -360,7 +413,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
 
         <Button
           type="button"
-          disabled={!dirty || updatePet.isPending}
+          disabled={!dirty || updatePet.isPending || !vaccicheckApiReady}
           onClick={() => saveFields()}
         >
           {updatePet.isPending ? (
