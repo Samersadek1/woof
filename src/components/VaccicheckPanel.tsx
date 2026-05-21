@@ -71,6 +71,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
   const [uploading, setUploading] = useState(false);
 
   const [testDate, setTestDate] = useState("");
+  const [performedAt, setPerformedAt] = useState("");
   const [distemper, setDistemper] = useState(NONE);
   const [parvo, setParvo] = useState(NONE);
   const [hepatitis, setHepatitis] = useState(NONE);
@@ -79,6 +80,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
 
   useEffect(() => {
     setTestDate(pet.vaccicheck_test_date ?? "");
+    setPerformedAt(pet.vaccicheck_performed_at ?? "");
     setDistemper(tierToSelect(pet.vaccicheck_distemper_tier));
     setParvo(tierToSelect(pet.vaccicheck_parvovirus_tier));
     setHepatitis(tierToSelect(pet.vaccicheck_hepatitis_tier));
@@ -87,6 +89,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
   }, [
     pet.id,
     pet.vaccicheck_test_date,
+    pet.vaccicheck_performed_at,
     pet.vaccicheck_distemper_tier,
     pet.vaccicheck_parvovirus_tier,
     pet.vaccicheck_hepatitis_tier,
@@ -99,6 +102,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
       {
         id: pet.id,
         vaccicheck_test_date: testDate.trim() === "" ? null : testDate,
+        vaccicheck_performed_at: performedAt.trim() === "" ? null : performedAt.trim(),
         vaccicheck_distemper_tier: distemper === NONE ? null : distemper,
         vaccicheck_parvovirus_tier: parvo === NONE ? null : parvo,
         vaccicheck_hepatitis_tier: hepatitis === NONE ? null : hepatitis,
@@ -159,6 +163,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
 
   const dirty =
     testDate !== (pet.vaccicheck_test_date ?? "") ||
+    performedAt !== (pet.vaccicheck_performed_at ?? "") ||
     distemper !== tierToSelect(pet.vaccicheck_distemper_tier) ||
     parvo !== tierToSelect(pet.vaccicheck_parvovirus_tier) ||
     hepatitis !== tierToSelect(pet.vaccicheck_hepatitis_tier) ||
@@ -234,6 +239,18 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
             type="date"
             value={testDate}
             onChange={(e) => setTestDate(e.target.value)}
+          />
+        </div>
+
+        <div className="space-y-1 max-w-md">
+          <Label htmlFor="vcc_performed_at">VacciCheck performed at</Label>
+          <Input
+            id="vcc_performed_at"
+            type="text"
+            value={performedAt}
+            onChange={(e) => setPerformedAt(e.target.value)}
+            placeholder="e.g. JVC, British Veterinary Hospital"
+            className="h-9 text-sm"
           />
         </div>
 
