@@ -1,4 +1,5 @@
--- Room types reference table (Settings-managed). Slugs match public.room_type enum values.
+-- Idempotent: ensure room_types table, create_room_type RPC, grants, and PostgREST reload.
+-- Fixes "Could not find the function public.create_room_type(p_label) in the schema cache".
 
 CREATE TABLE IF NOT EXISTS public.room_types (
   slug text PRIMARY KEY,
@@ -18,7 +19,6 @@ CREATE POLICY "room_types_authenticated_all" ON public.room_types
   USING (true)
   WITH CHECK (true);
 
--- Seed built-in types (labels match RoomsAdmin defaults).
 INSERT INTO public.room_types (slug, label, is_builtin) VALUES
   ('presidential_super', 'Presidential Super', true),
   ('presidential_standard', 'Presidential Standard', true),
@@ -89,6 +89,7 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.create_room_type(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.create_room_type(text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.create_room_type(text) TO service_role;
 

@@ -10,6 +10,23 @@ export type RoomTypeRow = {
   created_at: string;
 };
 
+function extractRoomTypeError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) {
+    const m = (err as { message?: unknown }).message;
+    if (typeof m === "string" && m.trim()) return m;
+  }
+  return "Something went wrong";
+}
+
+function isMissingRoomTypeRpcError(err: unknown): boolean {
+  const msg = extractRoomTypeError(err).toLowerCase();
+  return (
+    msg.includes("create_room_type") &&
+    (msg.includes("schema cache") || msg.includes("could not find the function"))
+  );
+}
+
 async function fetchRoomTypes(): Promise<RoomTypeRow[]> {
   const { data, error } = await supabase
     .from("room_types")
@@ -32,8 +49,17 @@ export function useCreateRoomType() {
     mutationFn: async (label: string) => {
       const trimmed = label.trim();
       if (!trimmed) throw new Error("Name is required");
-      const { data, error } = await supabase.rpc("create_room_type", { p_label: trimmed });
-      if (error) throw error;
+      const { data, error } = await supabase.rpc("create_room_type", {
+        p_label: trimmed,
+      });
+      if (error) {
+        if (isMissingRoomTypeRpcError(error)) {
+          throw new Error(
+            "Room type setup is missing in Supabase. Run sql/create-room-types.sql in the SQL editor, then try again.",
+          );
+        }
+        throw error;
+      }
       return data as string;
     },
     onSuccess: () => {
