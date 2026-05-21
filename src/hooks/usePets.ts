@@ -73,14 +73,20 @@ export function useUpdatePet() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: PetUpdate & { id: string }) => {
-      const { data, error } = await supabase
+      const { error: updateError } = await supabase
         .from("pets")
         .update(updates)
+        .eq("id", id);
+
+      if (updateError) throw updateError;
+
+      const { data, error: fetchError } = await supabase
+        .from("pets")
+        .select("*")
         .eq("id", id)
-        .select()
         .single();
 
-      if (error) throw error;
+      if (fetchError) throw fetchError;
       return data as Pet;
     },
     onSuccess: (data) => {

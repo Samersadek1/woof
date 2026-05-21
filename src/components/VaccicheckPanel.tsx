@@ -62,20 +62,40 @@ function immunityToSelect(v: string | null | undefined): string {
 }
 
 function extractSaveError(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  if (typeof err === "object" && err !== null && "message" in err) {
-    const m = (err as { message?: unknown }).message;
-    if (typeof m === "string" && m.trim()) return m;
+  if (err == null) return "Could not save";
+  if (typeof err === "string") return err;
+  if (err instanceof Error && err.message.trim()) return err.message;
+  if (typeof err === "object") {
+    const o = err as Record<string, unknown>;
+    const msg = o.message;
+    if (typeof msg === "string" && msg.trim()) return msg;
+    if (typeof o.details === "string" && o.details.trim()) return o.details;
+    if (typeof o.hint === "string" && o.hint.trim()) return o.hint;
+    try {
+      return JSON.stringify(o);
+    } catch {
+      return "Could not save";
+    }
   }
-  return "Could not save";
+  return String(err);
 }
 
-function vaccicheckPerformedAtMigrationHint(message: string): string | null {
+function vaccicheckMigrationHint(message: string): string | null {
   const m = message.toLowerCase();
-  if (m.includes("vaccicheck_performed_at")) {
-    return "The database is missing column pets.vaccicheck_performed_at. Run sql/add-pet-vaccicheck-performed-at.sql in the Supabase SQL Editor, then try again.";
+  if (
+    m.includes("vaccicheck_") ||
+    (m.includes("schema cache") && m.includes("pets")) ||
+    (m.includes("could not find") && m.includes("pets"))
+  ) {
+    return "VacciCheck columns are missing on pets. Run sql/add-pet-vaccicheck-columns.sql in the Supabase SQL Editor, then try again.";
   }
   return null;
+}
+
+function normalizeDateInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 10);
 }
 
 interface VaccicheckPanelProps {
@@ -96,7 +116,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
   const [reportUrl, setReportUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    setTestDate(pet.vaccicheck_test_date ?? "");
+    setTestDate(normalizeDateInput(pet.vaccicheck_test_date ?? "") ?? "");
     setPerformedAt(pet.vaccicheck_performed_at ?? "");
     setDistemper(tierToSelect(pet.vaccicheck_distemper_tier));
     setParvo(tierToSelect(pet.vaccicheck_parvovirus_tier));
@@ -118,7 +138,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
     updatePet.mutate(
       {
         id: pet.id,
-        vaccicheck_test_date: testDate.trim() === "" ? null : testDate,
+        vaccicheck_test_date: normalizeDateInput(testDate),
         vaccicheck_performed_at: performedAt.trim() === "" ? null : performedAt.trim(),
         vaccicheck_distemper_tier: distemper === NONE ? null : distemper,
         vaccicheck_parvovirus_tier: parvo === NONE ? null : parvo,
@@ -129,7 +149,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
         onSuccess: () => toast.success("VacciCheck details saved"),
         onError: (e) => {
           const msg = extractSaveError(e);
-          const hint = vaccicheckPerformedAtMigrationHint(msg);
+          const hint = vaccicheckMigrationHint(msg);
           toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
         },
       },
@@ -163,7 +183,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
       {
         onSuccess: () => toast.success("Report uploaded"),
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : "Saved file but DB update failed");
+          toast.error(extractSaveError(err));
         },
       },
     );
@@ -175,14 +195,14 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
       { id: pet.id, vaccicheck_report_url: null },
       {
         onSuccess: () => toast.success("Report link removed"),
-        onError: (e) =>
-          toast.error(e instanceof Error ? e.message : "Could not update"),
+        onError: (e) => toast.error(extractSaveError(e)),
       },
     );
   };
 
+  const savedTestDate = normalizeDateInput(pet.vaccicheck_test_date ?? "") ?? "";
   const dirty =
-    testDate !== (pet.vaccicheck_test_date ?? "") ||
+    testDate !== savedTestDate ||
     performedAt !== (pet.vaccicheck_performed_at ?? "") ||
     distemper !== tierToSelect(pet.vaccicheck_distemper_tier) ||
     parvo !== tierToSelect(pet.vaccicheck_parvovirus_tier) ||
