@@ -61,6 +61,23 @@ function immunityToSelect(v: string | null | undefined): string {
   return IMMUNITY_OPTIONS.some((o) => o.value === v) ? v : NONE;
 }
 
+function extractSaveError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) {
+    const m = (err as { message?: unknown }).message;
+    if (typeof m === "string" && m.trim()) return m;
+  }
+  return "Could not save";
+}
+
+function vaccicheckPerformedAtMigrationHint(message: string): string | null {
+  const m = message.toLowerCase();
+  if (m.includes("vaccicheck_performed_at")) {
+    return "The database is missing column pets.vaccicheck_performed_at. Run sql/add-pet-vaccicheck-performed-at.sql in the Supabase SQL Editor, then try again.";
+  }
+  return null;
+}
+
 interface VaccicheckPanelProps {
   pet: PetWithVaccinations;
 }
@@ -110,8 +127,11 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
       },
       {
         onSuccess: () => toast.success("VacciCheck details saved"),
-        onError: (e) =>
-          toast.error(e instanceof Error ? e.message : "Could not save"),
+        onError: (e) => {
+          const msg = extractSaveError(e);
+          const hint = vaccicheckPerformedAtMigrationHint(msg);
+          toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
+        },
       },
     );
   };
