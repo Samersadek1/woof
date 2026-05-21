@@ -7,17 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
   SheetContent,
@@ -111,6 +103,115 @@ function ClinicFormFields({
   );
 }
 
+function ClinicsSearchField({
+  search,
+  setSearch,
+}: {
+  search: string;
+  setSearch: (v: string) => void;
+}) {
+  return (
+    <div className="relative max-w-md">
+      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        placeholder="Search clinics…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="pl-9"
+      />
+    </div>
+  );
+}
+
+function ClinicsList({
+  clinics,
+  search,
+  togglingId,
+  onToggleActive,
+  onEdit,
+  onDelete,
+  deletePending,
+}: {
+  clinics: VetClinicRow[];
+  search: string;
+  togglingId: string | null;
+  onToggleActive: (row: VetClinicRow, isActive: boolean) => void;
+  onEdit: (row: VetClinicRow) => void;
+  onDelete: (row: VetClinicRow) => void;
+  deletePending: boolean;
+}) {
+  if (clinics.length === 0) {
+    return (
+      <div className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
+        {search.trim() ? "No clinics match your search." : "No vet clinics yet."}
+      </div>
+    );
+  }
+
+  return (
+    <ScrollArea className="h-[min(70vh,720px)] rounded-md border">
+      <ul className="divide-y">
+        {clinics.map((row) => (
+          <li
+            key={row.id}
+            className={`flex items-center gap-3 px-4 py-3 ${row.is_active ? "" : "bg-muted/20"}`}
+          >
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium break-words">{row.name}</p>
+              {row.phone ? (
+                <p className="text-xs text-muted-foreground mt-0.5">{row.phone}</p>
+              ) : null}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <Label
+                htmlFor={`active-${row.id}`}
+                className="text-xs text-muted-foreground whitespace-nowrap cursor-pointer"
+              >
+                {row.is_active ? "Active" : "Inactive"}
+              </Label>
+              <Switch
+                id={`active-${row.id}`}
+                checked={row.is_active}
+                disabled={togglingId === row.id}
+                onCheckedChange={(checked) => onToggleActive(row, checked)}
+                aria-label={`Toggle ${row.name} active`}
+              />
+              {togglingId === row.id ? (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              ) : null}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label={`Edit ${row.name}`}
+                onClick={() => onEdit(row)}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                aria-label={`Delete ${row.name}`}
+                disabled={deletePending}
+                onClick={() => onDelete(row)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </ScrollArea>
+  );
+}
+
 const VetsAdminPage = () => {
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -118,6 +219,7 @@ const VetsAdminPage = () => {
   const [form, setForm] = useState<ClinicForm>({ ...EMPTY_FORM });
   const [editing, setEditing] = useState<VetClinicRow | null>(null);
   const [pendingDelete, setPendingDelete] = useState<VetClinicRow | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const clinicsQ = useVetClinicsQuery();
   const createClinic = useCreateVetClinic();
@@ -190,6 +292,25 @@ const VetsAdminPage = () => {
     );
   }
 
+  function toggleActive(row: VetClinicRow, is_active: boolean) {
+    setTogglingId(row.id);
+    updateClinic.mutate(
+      {
+        id: row.id,
+        name: row.name,
+        phone: row.phone,
+        is_active,
+      },
+      {
+        onSuccess: () => {
+          toast.success(is_active ? `${row.name} is now active` : `${row.name} is now inactive`);
+        },
+        onError: (e) => toast.error(extractErrorMessage(e)),
+        onSettled: () => setTogglingId(null),
+      },
+    );
+  }
+
   function confirmDelete() {
     if (!pendingDelete) return;
     deleteClinic.mutate(pendingDelete.id, {
@@ -234,17 +355,19 @@ const VetsAdminPage = () => {
             </Alert>
           )}
 
-          <motionSearchField search={search} setSearch={setSearch} />
+          <ClinicsSearchField search={search} setSearch={setSearch} />
 
           {clinicsQ.isLoading ? (
-            <Skeleton className="h-96 w-full rounded-md" />
+            <Skeleton className="h-[min(70vh,720px)] w-full rounded-md" />
           ) : (
-            <motionClinicsTable
-              filtered={filtered}
+            <ClinicsList
+              clinics={filtered}
               search={search}
-              openEdit={openEdit}
-              setPendingDelete={setPendingDelete}
-              deleteClinic={deleteClinic}
+              togglingId={togglingId}
+              onToggleActive={toggleActive}
+              onEdit={openEdit}
+              onDelete={setPendingDelete}
+              deletePending={deleteClinic.isPending}
             />
           )}
 
@@ -320,105 +443,5 @@ const VetsAdminPage = () => {
     </>
   );
 };
-
-function motionSearchField({
-  search,
-  setSearch,
-}: {
-  search: string;
-  setSearch: (v: string) => void;
-}) {
-  return (
-    <div className="relative max-w-sm">
-      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-      <Input
-        placeholder="Search clinics…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="pl-9"
-      />
-    </div>
-  );
-}
-
-function motionClinicsTable({
-  filtered,
-  search,
-  openEdit,
-  setPendingDelete,
-  deleteClinic,
-}: {
-  filtered: VetClinicRow[];
-  search: string;
-  openEdit: (row: VetClinicRow) => void;
-  setPendingDelete: (row: VetClinicRow | null) => void;
-  deleteClinic: ReturnType<typeof useDeleteVetClinic>;
-}) {
-  return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Phone</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="w-[100px] text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {filtered.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                {search.trim() ? "No clinics match your search." : "No vet clinics yet."}
-              </TableCell>
-            </TableRow>
-          ) : (
-            filtered.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="font-medium">{row.name}</TableCell>
-                <TableCell className="text-muted-foreground">{row.phone ?? "—"}</TableCell>
-                <TableCell>
-                  {row.is_active ? (
-                    <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
-                      Active
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      Inactive
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Edit ${row.name}`}
-                      onClick={() => openEdit(row)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      aria-label={`Delete ${row.name}`}
-                      disabled={deleteClinic.isPending}
-                      onClick={() => setPendingDelete(row)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
 
 export default VetsAdminPage;
