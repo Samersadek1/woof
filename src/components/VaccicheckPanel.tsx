@@ -83,6 +83,15 @@ function extractSaveError(err: unknown): string {
   return String(err);
 }
 
+function logVaccicheckSaveError(context: string, err: unknown): string {
+  const message = extractSaveError(err);
+  console.log("[VacciCheck save error]", context, {
+    message,
+    error: err,
+  });
+  return message;
+}
+
 function normalizeDateInput(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -196,7 +205,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
     updatePet.mutate(payload, {
       onSuccess: () => toast.success("VacciCheck details saved"),
       onError: (e) => {
-        const msg = extractSaveError(e);
+        const msg = logVaccicheckSaveError("saveFields", e);
         const hint = vaccicheckSaveErrorHint(msg, vaccicheckApiReady);
         toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
       },
@@ -230,7 +239,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
       {
         onSuccess: () => toast.success("Report uploaded"),
         onError: (err) => {
-          const msg = extractSaveError(err);
+          const msg = logVaccicheckSaveError("uploadReport", err);
           const hint = vaccicheckSaveErrorHint(msg, "vaccicheck_report_url" in pet);
           toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
         },
@@ -248,7 +257,10 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
       { id: pet.id, vaccicheck_report_url: null },
       {
         onSuccess: () => toast.success("Report link removed"),
-        onError: (e) => toast.error(extractSaveError(e)),
+        onError: (e) => {
+          const msg = logVaccicheckSaveError("clearReport", e);
+          toast.error(msg);
+        },
       },
     );
   };
