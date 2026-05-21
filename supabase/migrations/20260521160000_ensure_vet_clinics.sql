@@ -1,6 +1,7 @@
--- Vet clinics reference table (Settings-managed, used in owner/pet forms).
--- Manual apply: sql/create-vet-clinics.sql
--- Re-apply safely: supabase/migrations/20260521160000_ensure_vet_clinics.sql
+-- Idempotent: ensure vet_clinics table exists with current schema.
+-- No DROP TABLE vet_clinics exists in this repo; a missing table usually means
+-- migration 20260519120000_vet_clinics.sql was never applied to this Supabase project
+-- (or the database was reset / recreated without re-running migrations).
 
 CREATE TABLE IF NOT EXISTS public.vet_clinics (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -15,7 +16,6 @@ ALTER TABLE public.vet_clinics ADD COLUMN IF NOT EXISTS phone text;
 ALTER TABLE public.vet_clinics ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
 ALTER TABLE public.vet_clinics ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
 
--- Migrate away from legacy sort_order column if present.
 ALTER TABLE public.vet_clinics DROP COLUMN IF EXISTS sort_order;
 
 CREATE INDEX IF NOT EXISTS idx_vet_clinics_active_name ON public.vet_clinics (is_active, name);
@@ -27,3 +27,5 @@ CREATE POLICY "vet_clinics_authenticated_all" ON public.vet_clinics
   FOR ALL TO authenticated
   USING (true)
   WITH CHECK (true);
+
+NOTIFY pgrst, 'reload schema';

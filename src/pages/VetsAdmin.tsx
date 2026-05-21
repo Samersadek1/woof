@@ -224,8 +224,12 @@ const VetsAdminPage = () => {
             <Alert variant="destructive">
               <AlertTitle>Could not load vet clinics</AlertTitle>
               <AlertDescription>
-                {extractErrorMessage(clinicsQ.error)}. Run the latest Supabase migration for{" "}
-                <code className="rounded bg-muted px-1 text-xs">vet_clinics</code>.
+                {extractErrorMessage(clinicsQ.error)}. Run{" "}
+                <code className="rounded bg-muted px-1 text-xs">sql/create-vet-clinics.sql</code> in the Supabase
+                SQL Editor (or apply migration{" "}
+                <code className="rounded bg-muted px-1 text-xs">20260521160000_ensure_vet_clinics.sql</code>).
+                To restore default clinic names, also run the vet_clinics section of{" "}
+                <code className="rounded bg-muted px-1 text-xs">sql/seed-reference-lists.sql</code>.
               </AlertDescription>
             </Alert>
           )}
