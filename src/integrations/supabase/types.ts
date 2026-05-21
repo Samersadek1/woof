@@ -1674,6 +1674,7 @@ export type Database = {
           display_name: string
           id: string
           is_active: boolean
+          label_color: string | null
           max_pets: number
           nightly_rate: number | null
           notes: string | null
@@ -1696,6 +1697,7 @@ export type Database = {
           display_name: string
           id?: string
           is_active?: boolean
+          label_color?: string | null
           max_pets?: number
           nightly_rate?: number | null
           notes?: string | null
@@ -1718,6 +1720,7 @@ export type Database = {
           display_name?: string
           id?: string
           is_active?: boolean
+          label_color?: string | null
           max_pets?: number
           nightly_rate?: number | null
           notes?: string | null

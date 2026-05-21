@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { Plus, Trash2, Download, Pencil, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -175,7 +176,27 @@ const ROOMS_PAGE_SIZE = 50;
 
 /** Columns required for admin table, filters, export, and inline edits */
 const ROOMS_ADMIN_SELECT =
-  "id, display_name, room_number, wing, room_type, capacity_type, max_pets, cam_number, camera_recording, is_active";
+  "id, display_name, room_number, wing, room_type, capacity_type, max_pets, cam_number, camera_recording, is_active, label_color";
+
+const ROOM_LABEL_PRESET_COLORS = [
+  "#EF4444",
+  "#F97316",
+  "#EAB308",
+  "#22C55E",
+  "#14B8A6",
+  "#3B82F6",
+  "#8B5CF6",
+  "#EC4899",
+  "#78716C",
+  "#FFFFFF",
+] as const;
+
+function normalizeHexColor(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (/^#[0-9A-Fa-f]{6}$/.test(trimmed)) return trimmed.toUpperCase();
+  return null;
+}
 
 function clampMaxPets(n: number): number {
   if (!Number.isFinite(n)) return MIN_MAX_PETS;
@@ -323,8 +344,11 @@ function formatRoomMutationError(err: unknown): string {
   return String(err);
 }
 
-function roomsCameraRecordingMigrationHint(message: string): string | null {
+function roomsSchemaMigrationHint(message: string): string | null {
   const m = message.toLowerCase();
+  if (m.includes("label_color")) {
+    return "The database is missing column rooms.label_color. Apply sql/add-rooms-label-color.sql in the Supabase SQL Editor, then refresh the app.";
+  }
   if (
     m.includes("camera_recording") ||
     (m.includes("schema cache") && m.includes("rooms")) ||
@@ -337,8 +361,79 @@ function roomsCameraRecordingMigrationHint(message: string): string | null {
 
 function toastRoomSaveFailed(err: unknown) {
   const msg = formatRoomMutationError(err);
-  const hint = roomsCameraRecordingMigrationHint(msg);
+  const hint = roomsSchemaMigrationHint(msg);
   toast.error(hint ?? `Save failed: ${msg}`, hint ? { duration: 12_000 } : undefined);
+}
+
+function RoomColorCell({
+  room,
+  onSave,
+}: {
+  room: Room;
+  onSave: (roomId: string, labelColor: string | null) => void;
+}) {
+  const color = normalizeHexColor(room.label_color);
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/60 transition-colors"
+          aria-label={`Set color label for ${room.display_name}`}
+        >
+          <span
+            className="h-5 w-5 shrink-0 rounded-full border border-border shadow-sm"
+            style={{ backgroundColor: color ?? "transparent" }}
+          />
+          <span className="text-[10px] text-muted-foreground tabular-nums">
+            {color ?? "None"}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-3" align="start">
+        <p className="mb-2 text-xs font-medium text-muted-foreground">Room color label</p>
+        <div className="grid grid-cols-5 gap-2">
+          {ROOM_LABEL_PRESET_COLORS.map((preset) => {
+            const selected = color === preset;
+            return (
+              <button
+                key={preset}
+                type="button"
+                title={preset}
+                className={`h-7 w-7 rounded-full border transition-transform hover:scale-105 ${
+                  selected ? "ring-2 ring-ring ring-offset-2" : "border-border"
+                }`}
+                style={{ backgroundColor: preset }}
+                onClick={() => onSave(room.id, preset)}
+              />
+            );
+          })}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Label htmlFor={`room-color-${room.id}`} className="text-xs shrink-0">
+            Custom
+          </Label>
+          <Input
+            id={`room-color-${room.id}`}
+            type="color"
+            value={color ?? "#3B82F6"}
+            className="h-8 w-12 cursor-pointer p-1"
+            onChange={(e) => onSave(room.id, e.target.value.toUpperCase())}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-2 h-8 w-full text-xs"
+          onClick={() => onSave(room.id, null)}
+        >
+          Clear color
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 const DOG_WINGS: string[] = [
@@ -734,7 +829,7 @@ const RoomsAdminPage = () => {
         },
         onError: (err) => {
           const msg = formatRoomMutationError(err);
-          const hint = roomsCameraRecordingMigrationHint(msg);
+          const hint = roomsSchemaMigrationHint(msg);
           toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
         },
       },
@@ -783,6 +878,16 @@ const RoomsAdminPage = () => {
   const saveMaxPets = useCallback(
     (roomId: string, max_pets: number) => {
       updateRoom.mutate({ id: roomId, max_pets }, { onError: toastRoomSaveFailed });
+    },
+    [updateRoom],
+  );
+
+  const saveRoomColor = useCallback(
+    (roomId: string, label_color: string | null) => {
+      updateRoom.mutate(
+        { id: roomId, label_color: normalizeHexColor(label_color) },
+        { onError: toastRoomSaveFailed },
+      );
     },
     [updateRoom],
   );
@@ -976,6 +1081,7 @@ const RoomsAdminPage = () => {
               <TableHeader>
                 <TableRow className="bg-muted/40">
                   <TableHead className="min-w-[180px]">Room name</TableHead>
+                  <TableHead className="min-w-[88px] w-[88px] text-center">Color</TableHead>
                   <TableHead className="min-w-[88px] w-[88px] text-center">Room no.</TableHead>
                   <TableHead className="min-w-[150px]">Wing</TableHead>
                   <TableHead className="min-w-[190px]">Room Type</TableHead>
@@ -990,19 +1096,37 @@ const RoomsAdminPage = () => {
               </TableHeader>
 
               <TableBody>
-                {visibleRooms.map((room) => (
+                {visibleRooms.map((room) => {
+                  const rowColor = normalizeHexColor(room.label_color);
+                  return (
                   <TableRow
                     key={room.id}
                     className={room.is_active ? "" : "opacity-50 bg-muted/20"}
+                    style={
+                      rowColor
+                        ? { boxShadow: `inset 4px 0 0 0 ${rowColor}` }
+                        : undefined
+                    }
                   >
                     <TableCell>
-                      <span className="font-medium">
+                      <span className="font-medium flex items-center gap-2 min-w-0">
+                        {rowColor ? (
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full border border-border/60"
+                            style={{ backgroundColor: rowColor }}
+                            title={rowColor}
+                          />
+                        ) : null}
                         <TextCell
                           room={room}
                           field="display_name"
                           value={room.display_name}
                         />
                       </span>
+                    </TableCell>
+
+                    <TableCell className="text-center">
+                      <RoomColorCell room={room} onSave={saveRoomColor} />
                     </TableCell>
 
                     <TableCell className="text-center">
@@ -1124,7 +1248,8 @@ const RoomsAdminPage = () => {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
