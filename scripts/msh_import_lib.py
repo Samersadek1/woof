@@ -36,6 +36,16 @@ INPUT_FILES = {
 # Optional — used only to fill calendar_room on import rows (not Calendar_Raw).
 NIGHT_DETAIL_FILE = "msh_boarding_pet_night_detail_MAIN_BRANCH_ONLY_2026-05-19.csv"
 
+IMPORT_PLACEHOLDER_WING = "import_placeholder"
+
+DOG_IMPORT_TIERS = ("standard", "deluxe", "royal", "presidential", "family", "unknown")
+CAT_IMPORT_TIERS = (
+    "cattery_deluxe",
+    "cattery_presidential",
+    "cattery_super_presidential",
+    "unknown",
+)
+
 STAGING_FILES = {
     "customers": STAGING_DIR / "stg_customers.json",
     "pets": STAGING_DIR / "stg_pets.json",
@@ -653,7 +663,11 @@ def suggest_rooms(
         or raw.endswith(" cat")
         or (species or "").lower() == "cat"
     )
-    pool = [r for r in rooms if (r.get("wing") == "cattery") == is_cat]
+    pool = [
+        r
+        for r in rooms
+        if (r.get("wing") == "cattery") == is_cat and not is_placeholder_room(r)
+    ]
 
     # PetExec / calendar labels → pricing hints
     hints: list[str] = []
@@ -698,6 +712,94 @@ def suggest_rooms(
             scored.append({**r, "match_score": score})
     scored.sort(key=lambda x: -x["match_score"])
     return scored[:8]
+
+
+def is_placeholder_room(room: dict[str, Any]) -> bool:
+    if (room.get("wing") or "") == IMPORT_PLACEHOLDER_WING:
+        return True
+    rn = (room.get("room_number") or "").strip()
+    return rn.startswith("UNK-")
+
+
+def _species_from_row_and_pet(
+    row: dict[str, Any],
+    pet: dict[str, Any] | None,
+) -> str:
+    if pet and (pet.get("species") or "").lower() == "cat":
+        return "cat"
+    kennel = resolve_kennel_text(row)
+    if "cattery" in norm_display_name(kennel):
+        return "cat"
+    return "dog"
+
+
+def infer_import_tier(row: dict[str, Any], *, species: str = "dog") -> str:
+    kennel = resolve_kennel_text(row)
+    raw = norm_display_name(kennel)
+    if not raw or raw in ("not assigned", "unknown", "n/a"):
+        return "unknown"
+    if species == "cat":
+        if "super presidential" in raw:
+            return "cattery_super_presidential"
+        if "presidential" in raw:
+            return "cattery_presidential"
+        if "deluxe" in raw or "cattery" in raw:
+            return "cattery_deluxe"
+        return "unknown"
+    if "presidential" in raw:
+        return "presidential"
+    if "royal" in raw:
+        return "royal"
+    if "deluxe" in raw or "dluxe" in raw:
+        return "deluxe"
+    if "standard" in raw or "fleet" in raw or "glass" in raw:
+        return "standard"
+    if "family" in raw:
+        return "family"
+    return "unknown"
+
+
+def placeholder_rooms_for_tier(
+    rooms: list[dict[str, Any]],
+    tier: str,
+    *,
+    species: str = "dog",
+) -> list[dict[str, Any]]:
+    out = []
+    for r in rooms:
+        if not is_placeholder_room(r):
+            continue
+        notes = (r.get("notes") or "").lower()
+        rn = (r.get("room_number") or "").upper()
+        if species == "cat" and not (rn.startswith("UNK-CAT") or "species=cat" in notes):
+            continue
+        if species == "dog" and rn.startswith("UNK-CAT"):
+            continue
+        marker = re.search(r"import_placeholder_tier=([a-z0-9_]+)", notes)
+        room_tier = (marker.group(1) if marker else r.get("pricing_category") or "unknown").lower()
+        if room_tier == tier:
+            out.append({**r, "match_score": 100})
+    return out
+
+
+def resolve_room_for_import(
+    row: dict[str, Any],
+    rooms: list[dict[str, Any]],
+    pet: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Real kennel match first, then tier placeholder for blank / Not Assigned."""
+    species = _species_from_row_and_pet(row, pet)
+    kennel = resolve_kennel_text(row)
+    suggestions = suggest_rooms(kennel, rooms, species=species)
+    if suggestions:
+        return suggestions
+    tier = infer_import_tier(row, species=species)
+    placeholders = placeholder_rooms_for_tier(rooms, tier, species=species)
+    if placeholders:
+        return placeholders
+    if tier != "unknown":
+        return placeholder_rooms_for_tier(rooms, "unknown", species=species)
+    return []
 
 
 def booking_identity(row: dict[str, Any]) -> str:
@@ -839,9 +941,11 @@ def build_booking_payload_row(row: dict[str, Any], room_id: str) -> dict[str, An
     end = parse_date(row.get("end_date"))
     notes_parts = [
         "Imported from PetExec Main Branch staging",
+        "import_placeholder",
         f"PetExec boarding_id: {row.get('boarding_id', '').strip()}" if row.get("boarding_id") else "",
         f"source_match_key: {row.get('source_match_key', '').strip()}" if row.get("source_match_key") else "",
         f"PetExec kennel: {row.get('kennel', '').strip()}" if row.get("kennel") else "",
+        f"import_tier: {row.get('import_tier', '').strip()}" if row.get("import_tier") else "",
         f"PetExec status: {row.get('boarding_status', '').strip()}" if row.get("boarding_status") else "",
     ]
     if row.get("data_quality_flags"):

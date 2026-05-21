@@ -14,10 +14,11 @@ from msh_import_lib import (
     fetch_msh_snapshot,
     get_supabase_client,
     load_staging,
-    resolve_kennel_text,
+    infer_import_tier,
+    resolve_room_for_import,
+    _species_from_row_and_pet,
     save_staging,
     stay_period,
-    suggest_rooms,
     update_meta,
 )
 
@@ -47,12 +48,16 @@ def main() -> int:
         out["stay_period"] = out.get("stay_period") or stay_period(out)
         period_counts[out["stay_period"]] = period_counts.get(out["stay_period"], 0) + 1
         pet = pets_by_id.get(out.get("msh_pet_id", ""))
-        kennel = resolve_kennel_text(out)
         species = (pet or {}).get("species")
-        suggestions = suggest_rooms(kennel, rooms, species=species) if rooms else []
+        suggestions = resolve_room_for_import(out, rooms, pet) if rooms else []
         room = suggestions[0] if suggestions else None
         out["suggested_room_id"] = room["id"] if room else ""
         out["suggested_room_name"] = room.get("display_name") if room else ""
+        sp = _species_from_row_and_pet(out, pet)
+        out["import_tier"] = infer_import_tier(out, species=sp)
+        out["uses_placeholder_room"] = bool(
+            room and (room.get("wing") == "import_placeholder" or (room.get("room_number") or "").startswith("UNK-"))
+        )
 
         bucket, reasons = classify_boarding_row(
             out, pet, room, seen_identities=seen_identities

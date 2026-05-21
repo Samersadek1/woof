@@ -99,6 +99,7 @@ const WING_LABELS: Record<string, string> = {
   lg_grooming_room: "LG Grooming Room",
   furrari_lounge: "Furrari Lounge",
   kitchen: "Kitchen",
+  import_placeholder: "Import placeholder (unknown kennel)",
 };
 
 const ROOM_TYPE_LABELS: Record<string, string> = {

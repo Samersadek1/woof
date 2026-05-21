@@ -76,6 +76,13 @@ import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { CheckInSheet } from "@/components/CheckInSheet";
 import { CheckOutSheet } from "@/components/CheckOutSheet";
 import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
+import {
+  splitFacilityAndPlaceholderRooms,
+  isImportPlaceholderRoom,
+  isImportPlaceholderBooking,
+  IMPORT_PLACEHOLDER_STATUS_CLASS,
+} from "@/lib/boardingUnknownKennel";
+import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
@@ -190,6 +197,7 @@ const WING_LABELS: Record<string, string> = {
   grooming_room: "Grooming Room",
   training_room: "Training Room",
   kitchen: "Kitchen",
+  import_placeholder: "Import placeholder (assign real room)",
 };
 
 const WING_ORDER: string[] = [
@@ -941,6 +949,70 @@ export type DogBoardingCalendarProps = {
   suppressToolbar?: boolean;
 };
 
+function AssignRealRoomPanel({
+  booking,
+  facilityRooms,
+  updateBooking,
+  onRoomAssigned,
+}: {
+  booking: BookingWithDetails;
+  facilityRooms: Room[];
+  updateBooking: ReturnType<typeof useUpdateBooking>;
+  onRoomAssigned: (room: Room) => void;
+}) {
+  const [pickedRoomId, setPickedRoomId] = useState("");
+
+  if (!isImportPlaceholderBooking(booking)) return null;
+
+  const sorted = [...facilityRooms].sort((a, b) =>
+    a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
+  );
+
+  return (
+    <div className="rounded-md border border-amber-300 bg-amber-50/80 p-3 space-y-2">
+      <p className="text-xs font-semibold text-amber-900">Imported — assign real room</p>
+      <p className="text-xs text-amber-800/90">
+        This stay is on a tier placeholder. Choose a real kennel to move it off Unknown.
+      </p>
+      <Select value={pickedRoomId} onValueChange={setPickedRoomId}>
+        <SelectTrigger>
+          <SelectValue placeholder="Select real room…" />
+        </SelectTrigger>
+        <SelectContent className="max-h-64">
+          {sorted.map((r) => (
+            <SelectItem key={r.id} value={r.id}>
+              {r.room_number} — {r.display_name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        type="button"
+        className="w-full bg-amber-700 hover:bg-amber-800 text-white"
+        disabled={!pickedRoomId || updateBooking.isPending}
+        onClick={() => {
+          const room = sorted.find((r) => r.id === pickedRoomId);
+          if (!room) return;
+          updateBooking.mutate(
+            { id: booking.id, room_id: pickedRoomId },
+            {
+              onSuccess: () => {
+                toast.success(`Assigned to ${room.room_number}`);
+                onRoomAssigned(room);
+                setPickedRoomId("");
+              },
+              onError: (err) => toast.error(err.message),
+            },
+          );
+        }}
+      >
+        {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+        Assign real room
+      </Button>
+    </div>
+  );
+}
+
 // ─── dog boarding calendar (no TopBar — used inside Boarding hub) ─────────────
 export function DogBoardingCalendar({
   windowStart,
@@ -1184,16 +1256,23 @@ export function DogBoardingCalendar({
     return Array.from({ length: DAYS }, (_, i) => addDays(windowStart, i));
   }, [windowStart]);
 
-  // rooms grouped by wing
+  const { facility: dogFacilityRooms, placeholders: dogPlaceholderRooms } = useMemo(
+    () => splitFacilityAndPlaceholderRooms(rooms, "dog"),
+    [rooms],
+  );
+
+  const assignableDogRooms = dogFacilityRooms;
+
+  // rooms grouped by wing (facility only — placeholders render in UnknownKennel section)
   const roomsByWing = useMemo(() => {
     const map = new Map<string, typeof rooms>();
     WING_ORDER.forEach((w) => map.set(w, []));
-    rooms.forEach((r) => {
+    dogFacilityRooms.forEach((r) => {
       if (!map.has(r.wing)) map.set(r.wing, []);
       map.get(r.wing)!.push(r);
     });
     return map;
-  }, [rooms]);
+  }, [dogFacilityRooms]);
 
   // booking lookup: roomId → bookings (for this window)
   const bookingsByRoom = useMemo(() => {
@@ -1266,7 +1345,7 @@ export function DogBoardingCalendar({
       toast.error("Cats belong in Cat boarding — switch to Cats above");
       return;
     }
-    const selectedRoom = rooms.find((r) => r.id === form.room_id);
+    const selectedRoom = assignableDogRooms.find((r) => r.id === form.room_id);
     if (selectedRoom?.wing === "cattery") {
       toast.error("Cannot book a dog into a cattery room");
       return;
@@ -1398,7 +1477,7 @@ export function DogBoardingCalendar({
   // ─── calendar rendering helpers ───────────────────────────────────────────
 
   // for a given room row, render booking chips + empty cells
-  const renderRoomRow = (roomId: string) => {
+  const renderRoomRow = (roomId: string, isPlaceholder = false) => {
     const roomBookings = bookingsByRoom.get(roomId) ?? [];
 
     // build a day → booking map (only show chip on first visible day)
@@ -1466,6 +1545,8 @@ export function DogBoardingCalendar({
           ]
             .filter(Boolean)
             .join(" – ");
+          const chipPlaceholder =
+            isPlaceholder || isImportPlaceholderBooking(booking);
 
           return (
             <div
@@ -1477,8 +1558,8 @@ export function DogBoardingCalendar({
                 marginRight: 2,
               }}
               className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1
-                cursor-pointer truncate z-10 select-none
-                ${STATUS_CLASSES[booking.status]}`}
+                cursor-pointer truncate z-10 select-none border border-dashed
+                ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
               onClick={() => setDetailBooking(booking)}
             >
               <span className="truncate min-w-0 flex-1">{label || booking.booking_ref || "—"}</span>
@@ -1606,6 +1687,15 @@ export function DogBoardingCalendar({
                   </div>
                 );
               })}
+
+              <UnknownKennelCalendarSection
+                species="dog"
+                placeholderRooms={dogPlaceholderRooms}
+                roomColW={ROOM_COL_W}
+                dayColW={DAY_COL_W}
+                daysWidth={DAY_COL_W * DAYS}
+                renderRoomRow={(roomId, isPlaceholder) => renderRoomRow(roomId, isPlaceholder)}
+              />
             </div>
           )}
         </div>
@@ -1795,7 +1885,7 @@ export function DogBoardingCalendar({
                     className="w-full justify-between font-normal"
                   >
                     {form.room_id ? (() => {
-                      const sel = rooms.find((r) => r.id === form.room_id);
+                      const sel = assignableDogRooms.find((r) => r.id === form.room_id);
                       if (!sel) return "Select room";
                       const wl = WING_LABELS[sel.wing] ?? sel.wing.replace(/_/g, " ");
                       return `${wl} | ${sel.room_number} — ${sel.room_type?.replace(/_/g, " ")} · ${sel.capacity_type}`;
@@ -2339,6 +2429,21 @@ export function DogBoardingCalendar({
                   <p className="text-xs text-muted-foreground capitalize">{detailBooking.rooms?.room_type?.replace(/_/g, " ") ?? ""} · {detailBooking.rooms?.capacity_type ?? ""} · {detailBooking.rooms?.wing?.replace(/_/g, " ") ?? ""}</p>
                 </div>
 
+                {isImportPlaceholderBooking(detailBooking) && (
+                  <AssignRealRoomPanel
+                    booking={detailBooking}
+                    facilityRooms={assignableDogRooms}
+                    updateBooking={updateBooking}
+                    onRoomAssigned={(room) =>
+                      setDetailBooking((prev) =>
+                        prev && prev.id === detailBooking.id
+                          ? { ...prev, room_id: room.id, rooms: room }
+                          : prev,
+                      )
+                    }
+                  />
+                )}
+
                 {/* Dates */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -2620,10 +2725,12 @@ function CatBoardingCalendar({
   const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
   const { data: roomsAll = [], isLoading: roomsLoading } = useRooms();
 
-  const catRooms = useMemo(
-    () => roomsAll.filter((r) => r.wing === "cattery"),
+  const { facility: catFacilityRooms, placeholders: catPlaceholderRooms } = useMemo(
+    () => splitFacilityAndPlaceholderRooms(roomsAll, "cat"),
     [roomsAll],
   );
+
+  const catRooms = catFacilityRooms;
 
   const roomsByTier = useMemo(() => {
     const map = new Map<CatRoomType, Room[]>();
@@ -3046,7 +3153,7 @@ function CatBoardingCalendar({
     });
   };
 
-  const renderRoomRow = (roomId: string) => {
+  const renderRoomRow = (roomId: string, isPlaceholder = false) => {
     const roomBookings = bookingsByRoom.get(roomId) ?? [];
     const dayBookingMap = new Map<string, { booking: BookingWithDetails; span: number; isFirst: boolean }>();
 
@@ -3098,12 +3205,14 @@ function CatBoardingCalendar({
           const { booking, span } = entry;
           const names = booking.booking_pets.map((bp) => bp.pets?.name ?? "").filter(Boolean);
           const label = formatBookingCell(names, booking.owners?.last_name ?? "") || booking.booking_ref || "—";
+          const chipPlaceholder =
+            isPlaceholder || isImportPlaceholderBooking(booking);
 
           return (
             <div
               key={dayStr}
               style={{ minWidth: DAY_COL_W * span - 4, width: DAY_COL_W * span - 4, marginLeft: 2, marginRight: 2 }}
-              className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1 cursor-pointer truncate z-10 select-none ${STATUS_CLASSES[booking.status]}`}
+              className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1 cursor-pointer truncate z-10 select-none border border-dashed ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
               onClick={() => setDetailBooking(booking)}
             >
               <span className="truncate min-w-0 flex-1">{label}</span>
@@ -3185,6 +3294,15 @@ function CatBoardingCalendar({
                   </div>
                 );
               })}
+
+              <UnknownKennelCalendarSection
+                species="cat"
+                placeholderRooms={catPlaceholderRooms}
+                roomColW={ROOM_COL_W}
+                dayColW={DAY_COL_W}
+                daysWidth={DAY_COL_W * DAYS}
+                renderRoomRow={(roomId, isPlaceholder) => renderRoomRow(roomId, isPlaceholder)}
+              />
             </div>
           )}
         </div>
@@ -3740,6 +3858,22 @@ function CatBoardingCalendar({
                   <p className="text-sm font-medium">{detailBooking.rooms?.room_number ?? detailBooking.rooms?.display_name ?? "—"}</p>
                   <p className="text-xs text-muted-foreground capitalize">{detailBooking.rooms?.room_type?.replace(/_/g, " ") ?? ""} · {detailBooking.rooms?.capacity_type ?? ""} · {detailBooking.rooms?.wing?.replace(/_/g, " ") ?? ""}</p>
                 </div>
+
+                {isImportPlaceholderBooking(detailBooking) && (
+                  <AssignRealRoomPanel
+                    booking={detailBooking}
+                    facilityRooms={catRooms}
+                    updateBooking={updateBooking}
+                    onRoomAssigned={(room) =>
+                      setDetailBooking((prev) =>
+                        prev && prev.id === detailBooking.id
+                          ? { ...prev, room_id: room.id, rooms: room }
+                          : prev,
+                      )
+                    }
+                  />
+                )}
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <p className="text-xs uppercase text-muted-foreground font-medium">Check-in</p>
@@ -3828,7 +3962,15 @@ function boardingBookingOverlapsDate(
 }
 
 function occupancyFacilityRooms(rooms: Room[], species: Species): Room[] {
-  return rooms.filter((r) => r.is_active && (species === "cat" ? r.wing === "cattery" : r.wing !== "cattery"));
+  return rooms.filter((r) => {
+    if (!r.is_active || isImportPlaceholderRoom(r)) return false;
+    return species === "cat" ? r.wing === "cattery" : r.wing !== "cattery";
+  });
+}
+
+function occupancyPlaceholderRooms(rooms: Room[], species: Species): Room[] {
+  const { placeholders } = splitFacilityAndPlaceholderRooms(rooms, species);
+  return placeholders.filter((r) => r.is_active);
 }
 
 function occupancySuiteGroupLabel(room: Room, species: Species): string {
@@ -4055,13 +4197,20 @@ function BoardingHubPage() {
   const occupancyStats = useMemo(() => {
     const occBookingsList = occRaw as BookingWithDetails[];
     const roomsPool = occupancyFacilityRooms(facilityRooms, species);
+    const placeholderPool = occupancyPlaceholderRooms(facilityRooms, species);
     const poolIds = new Set(roomsPool.map((r) => r.id));
+    const placeholderIds = new Set(placeholderPool.map((r) => r.id));
     const total = roomsPool.length;
 
     const occupiedByRoomId = new Map<string, BookingWithDetails>();
+    let importedUnassignedCount = 0;
     for (const b of occBookingsList) {
-      if (!b.room_id || !poolIds.has(b.room_id)) continue;
-      if (!boardingBookingOverlapsDate(b, occupancyDate)) continue;
+      if (!b.room_id || !boardingBookingOverlapsDate(b, occupancyDate)) continue;
+      if (placeholderIds.has(b.room_id)) {
+        importedUnassignedCount += 1;
+        continue;
+      }
+      if (!poolIds.has(b.room_id)) continue;
       if (!occupiedByRoomId.has(b.room_id)) occupiedByRoomId.set(b.room_id, b);
     }
     const occupiedCount = occupiedByRoomId.size;
@@ -4089,7 +4238,7 @@ function BoardingHubPage() {
       b.available.sort(sortRooms);
     }
 
-    return { total, occupiedCount, availableCount, pct, byGroup };
+    return { total, occupiedCount, availableCount, pct, byGroup, importedUnassignedCount };
   }, [occRaw, facilityRooms, species, occupancyDate]);
 
   return (
@@ -4138,6 +4287,13 @@ function BoardingHubPage() {
                 </p>
               </div>
             </div>
+
+            {occupancyStats.importedUnassignedCount > 0 && (
+              <p className="text-sm rounded-md border border-amber-200 bg-amber-50/90 px-3 py-2 text-amber-900">
+                <span className="font-medium">{occupancyStats.importedUnassignedCount}</span> imported stay
+                {occupancyStats.importedUnassignedCount !== 1 ? "s" : ""} on unknown tier placeholders (excluded from occupancy %).
+              </p>
+            )}
 
             {OCCUPANCY_SUITE_GROUPS.map((groupName) => {
               const bucket = occupancyStats.byGroup.get(groupName);

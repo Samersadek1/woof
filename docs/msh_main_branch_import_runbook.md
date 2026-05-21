@@ -83,10 +83,19 @@ Only rows whose customer has `msh_customer_id`.
 - Non-empty `medication_detail` (unstructured — use `stay_medications` manually)
 - Would overwrite non-blank MSH pet notes (`feeding_instructions`, `medications`, `other_notes`)
 - Fuzzy customer/pet match
-- No resolvable `room_id` (most rows with `kennel_unknown_or_blank` land in manual review)
+- No resolvable `room_id` (blank / Not Assigned kennel without night-detail room)
 - Duplicate booking identity in the safe set
 
-High DQ (`kennel_unknown_or_blank`, `vaccine_expiring_soon`) → manual review, not safe auto-import.
+High DQ (`kennel_unknown_or_blank`, `vaccine_expiring_soon`) → manual review when **no** room could be mapped. When a tier **placeholder** room is assigned, the row can proceed to safe import.
+
+### Unknown kennel (tier placeholders)
+
+PetExec rows with blank or `Not Assigned` kennel are mapped to synthetic rooms (`wing = import_placeholder`, `room_number` like `UNK-STD`, `UNK-DLX`, …) inferred from kennel text or night-detail tier.
+
+1. Apply migration `supabase/migrations/20260521210000_import_placeholder_rooms.sql` (adds enum value + seeds UNK-* rooms).
+2. Re-run validate → generate; more past/ongoing rows should land in `safe_import_payload` with `uses_placeholder_room = true`.
+3. In **Boarding** calendar, placeholder rows appear in the amber **Unknown kennel** section at the bottom; open a booking → **Assign real room** when a real kennel is known.
+4. Occupancy % excludes placeholder rooms; the report shows a separate “imported on unknown tier” count.
 
 ### Stay period (past / ongoing / future)
 
@@ -151,7 +160,7 @@ Behaviour:
 
 ## Verify in MSH
 
-1. **Boarding** calendar — filter check-in range; confirm stays and rooms.
+1. **Boarding** calendar — filter check-in range; confirm stays; amber rows = tier placeholders pending real room assignment.
 2. **Customers & Pets** — spot-check matched owners/pets from `matched_*.csv`.
 3. **Service check-ins** — upcoming check-ins for imported dates.
 4. Compare counts in `output/import_summary.md` vs PetExec (optional: `msh_boarding_pets_per_night_view_*` for night totals only).

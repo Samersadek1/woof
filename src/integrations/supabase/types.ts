@@ -2293,6 +2293,7 @@ export type Database = {
         | "bond_rooms"
         | "dluxe"
         | "standard_room"
+        | "import_placeholder"
       species: "dog" | "cat" | "other"
       staff_role:
         | "booking_coordinator"
@@ -2525,6 +2526,7 @@ export const Constants = {
         "bond_rooms",
         "dluxe",
         "standard_room",
+        "import_placeholder",
       ],
       species: ["dog", "cat", "other"],
       staff_role: [
