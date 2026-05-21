@@ -90,6 +90,65 @@ export function useUpdatePet() {
   });
 }
 
+const PET_REFERENCE_CHECKS = [
+  { table: "booking_pets" as const, label: "boarding bookings" },
+  { table: "grooming_appointments" as const, label: "grooming appointments" },
+  { table: "daycare_packages" as const, label: "daycare packages" },
+  { table: "daycare_sessions" as const, label: "daycare sessions" },
+  { table: "park_bookings" as const, label: "park bookings" },
+  { table: "waiting_list" as const, label: "waiting list entries" },
+  { table: "feeding_schedules" as const, label: "feeding schedules" },
+  { table: "daily_notes" as const, label: "daily notes" },
+  { table: "stay_medications" as const, label: "stay medications" },
+];
+
+async function getPetDeleteBlockers(petId: string): Promise<string[]> {
+  const blockers: string[] = [];
+
+  for (const { table, label } of PET_REFERENCE_CHECKS) {
+    const { count, error } = await supabase
+      .from(table)
+      .select("*", { count: "exact", head: true })
+      .eq("pet_id", petId);
+
+    if (error) throw error;
+    if (count && count > 0) blockers.push(label);
+  }
+
+  return blockers;
+}
+
+export function useDeletePet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, ownerId }: { id: string; ownerId: string }) => {
+      const blockers = await getPetDeleteBlockers(id);
+      if (blockers.length > 0) {
+        throw new Error(
+          `This pet cannot be deleted because they have existing ${blockers.join(", ")}.`,
+        );
+      }
+
+      const { error: vacError } = await supabase
+        .from("vaccinations")
+        .delete()
+        .eq("pet_id", id);
+      if (vacError) throw vacError;
+
+      const { error } = await supabase.from("pets").delete().eq("id", id);
+      if (error) throw error;
+
+      return { id, ownerId };
+    },
+    onSuccess: ({ id, ownerId }) => {
+      queryClient.invalidateQueries({ queryKey: petQueryKeys.pets(ownerId) });
+      queryClient.removeQueries({ queryKey: petQueryKeys.pet(id) });
+      queryClient.invalidateQueries({ queryKey: ["owners"] });
+    },
+  });
+}
+
 export type VaccinationInsert = Database["public"]["Tables"]["vaccinations"]["Insert"];
 
 export function useAddVaccination() {

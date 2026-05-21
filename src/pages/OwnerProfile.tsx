@@ -17,7 +17,7 @@ import {
 import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
-import { usePets, useCreatePet, getVaccinationStatus } from "@/hooks/usePets";
+import { usePets, useCreatePet, useDeletePet, getVaccinationStatus } from "@/hooks/usePets";
 import { petVaccinationSummaryLine } from "@/lib/vaccinationsDisplay";
 import { useDaycarePackages } from "@/hooks/useDaycare";
 import { useManualTopUpWallet, useTopUpWallet } from "@/hooks/useWallet";
@@ -747,10 +747,12 @@ const OwnerProfilePage = () => {
   const updateOwner = useUpdateOwner();
   const deleteOwner = useDeleteOwner();
   const createPet = useCreatePet();
+  const deletePet = useDeletePet();
 
   const [editOwnerOpen, setEditOwnerOpen] = useState(false);
   const [addPetOpen, setAddPetOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [pendingDeletePet, setPendingDeletePet] = useState<PetWithVaccinations | null>(null);
   const [bookingDetail, setBookingDetail] = useState<BookingDetailSelection | null>(null);
   const [historyServiceFilter, setHistoryServiceFilter] =
     useState<HistoryServiceFilter>("all");
@@ -1135,7 +1137,20 @@ const OwnerProfilePage = () => {
                       navigate(`/customers/${id}/pets/${pet.id}`)
                     }
                   >
-                    <CardContent className="flex gap-4 p-4">
+                    <CardContent className="relative flex gap-4 p-4">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-2 right-2 h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        aria-label={`Delete ${pet.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPendingDeletePet(pet);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                       {pet.photo_url ? (
                         <img
                           src={pet.photo_url}
@@ -2115,6 +2130,62 @@ const OwnerProfilePage = () => {
                 </>
               ) : (
                 "Delete permanently"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!pendingDeletePet}
+        onOpenChange={(open) => {
+          if (!open && !deletePet.isPending) setPendingDeletePet(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete pet?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this pet?
+              {pendingDeletePet ? (
+                <>
+                  {" "}
+                  <span className="font-medium text-foreground">{pendingDeletePet.name}</span>{" "}
+                  will be permanently removed. Pets with existing bookings or service history
+                  cannot be deleted.
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletePet.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deletePet.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!pendingDeletePet || !id) return;
+                deletePet.mutate(
+                  { id: pendingDeletePet.id, ownerId: id },
+                  {
+                    onSuccess: () => {
+                      toast.success(`${pendingDeletePet.name} deleted`);
+                      setPendingDeletePet(null);
+                    },
+                    onError: (err) => {
+                      toast.error(err.message || "Failed to delete pet");
+                    },
+                  },
+                );
+              }}
+            >
+              {deletePet.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
