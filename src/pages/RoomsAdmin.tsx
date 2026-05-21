@@ -19,6 +19,7 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import TopBar from "@/components/dashboard/TopBar";
 import { useUpdateRoom, useCreateRoom, useDeleteRoom } from "@/hooks/useBookings";
+import { useCreateRoomType, useRoomTypesQuery } from "@/hooks/useRoomTypes";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +60,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Plus, Trash2, Download, Pencil } from "lucide-react";
+import { Plus, Trash2, Download, Pencil, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -421,7 +422,7 @@ type RoomEditForm = {
   display_name: string;
   room_number: string;
   wing: RoomWing;
-  room_type: RoomType;
+  room_type: string;
   capacity_type: CapacityType;
   max_pets: number;
 };
@@ -467,6 +468,32 @@ const RoomsAdminPage = () => {
   const updateRoom = useUpdateRoom();
   const createRoom = useCreateRoom();
   const deleteRoom = useDeleteRoom();
+  const roomTypesQ = useRoomTypesQuery();
+  const createRoomType = useCreateRoomType();
+
+  const { roomTypeValues, roomTypeLabels } = useMemo(() => {
+    const labels: Record<string, string> = { ...ROOM_TYPE_LABELS };
+    const slugs = new Set<string>(ROOM_TYPE_VALUES);
+
+    for (const rt of roomTypesQ.data ?? []) {
+      labels[rt.slug] = rt.label;
+      slugs.add(rt.slug);
+    }
+
+    for (const room of allRooms ?? []) {
+      if (room.room_type && !slugs.has(room.room_type)) {
+        slugs.add(room.room_type);
+        labels[room.room_type] =
+          labels[room.room_type] ?? room.room_type.replace(/_/g, " ");
+      }
+    }
+
+    const values = Array.from(slugs).sort((a, b) =>
+      (labels[a] ?? a).localeCompare(labels[b] ?? b),
+    );
+
+    return { roomTypeValues: values, roomTypeLabels: labels };
+  }, [roomTypesQ.data, allRooms]);
 
   const rooms = useMemo(() => {
     if (!allRooms) return undefined;
@@ -503,7 +530,7 @@ const RoomsAdminPage = () => {
       result = result.filter((r) => {
         const name = r.display_name.toLowerCase();
         const wing = (WING_LABELS[r.wing as RoomWing] ?? r.wing).toLowerCase();
-        const type = (ROOM_TYPE_LABELS[r.room_type as RoomType] ?? r.room_type).toLowerCase();
+        const type = (roomTypeLabels[r.room_type] ?? r.room_type).toLowerCase();
         const num = r.room_number.toLowerCase();
         return name.includes(q) || wing.includes(q) || type.includes(q) || num.includes(q);
       });
@@ -518,7 +545,7 @@ const RoomsAdminPage = () => {
       }
     }
     return result;
-  }, [rooms, searchQuery, wingFilter, typeFilter]);
+  }, [rooms, searchQuery, wingFilter, typeFilter, roomTypeLabels]);
 
   const visibleRooms = useMemo(
     () => (filteredRooms ?? []).slice(0, visibleCount),
@@ -555,6 +582,9 @@ const RoomsAdminPage = () => {
 
   const [addOpen, setAddOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(emptyInsertDefaults);
+
+  const [addRoomTypeOpen, setAddRoomTypeOpen] = useState(false);
+  const [newRoomTypeName, setNewRoomTypeName] = useState("");
 
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [editForm, setEditForm] = useState<RoomEditForm>(EMPTY_EDIT_FORM);
@@ -711,6 +741,33 @@ const RoomsAdminPage = () => {
     );
   }, [newRoom, createRoom]);
 
+  const submitAddRoomType = useCallback(() => {
+    const name = newRoomTypeName.trim();
+    if (!name) {
+      toast.error("Room type name is required.");
+      return;
+    }
+    createRoomType.mutate(name, {
+      onSuccess: () => {
+        toast.success("Room type added");
+        setAddRoomTypeOpen(false);
+        setNewRoomTypeName("");
+      },
+      onError: (err) => {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : typeof err === "object" &&
+                err !== null &&
+                "message" in err &&
+                typeof (err as { message?: unknown }).message === "string"
+              ? (err as { message: string }).message
+              : "Could not add room type";
+        toast.error(msg);
+      },
+    });
+  }, [newRoomTypeName, createRoomType]);
+
   const confirmDelete = useCallback(() => {
     if (!pendingDelete) return;
     deleteRoom.mutate(pendingDelete.id, {
@@ -811,7 +868,7 @@ const RoomsAdminPage = () => {
       "Room Name": room.display_name,
       "Room No": room.room_number,
       "Wing": WING_LABELS[room.wing as RoomWing] ?? room.wing,
-      "Room Type": ROOM_TYPE_LABELS[room.room_type as RoomType] ?? room.room_type,
+      "Room Type": roomTypeLabels[room.room_type] ?? room.room_type,
       "Capacity": CAPACITY_LABELS[room.capacity_type as CapacityType] ?? room.capacity_type,
       "Max Pets": room.max_pets,
       "Status": occupiedRoomIds?.has(room.id) ? "Occupied" : "Available",
@@ -820,7 +877,7 @@ const RoomsAdminPage = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Rooms");
     XLSX.writeFile(wb, `rooms-export-${todayISO()}.xlsx`);
-  }, [filteredRooms, occupiedRoomIds]);
+  }, [filteredRooms, occupiedRoomIds, roomTypeLabels]);
 
   return (
     <>
@@ -835,6 +892,10 @@ const RoomsAdminPage = () => {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <Button type="button" variant="outline" onClick={() => setAddRoomTypeOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Room Type
+            </Button>
             <Button type="button" onClick={() => setAddOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Add room
@@ -961,12 +1022,12 @@ const RoomsAdminPage = () => {
                     </TableCell>
 
                     <TableCell>
-                      <EnumCell<RoomType>
+                      <EnumCell
                         room={room}
                         field="room_type"
                         value={room.room_type}
-                        options={ROOM_TYPE_VALUES}
-                        labels={ROOM_TYPE_LABELS}
+                        options={roomTypeValues}
+                        labels={roomTypeLabels}
                       />
                     </TableCell>
 
@@ -1135,15 +1196,15 @@ const RoomsAdminPage = () => {
                 <Label>Room type</Label>
                 <Select
                   value={editForm.room_type}
-                  onValueChange={(v) => setEditForm((f) => ({ ...f, room_type: v as RoomType }))}
+                  onValueChange={(v) => setEditForm((f) => ({ ...f, room_type: v }))}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROOM_TYPE_VALUES.map((t) => (
+                    {roomTypeValues.map((t) => (
                       <SelectItem key={t} value={t}>
-                        {ROOM_TYPE_LABELS[t]}
+                        {roomTypeLabels[t] ?? t}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1252,15 +1313,17 @@ const RoomsAdminPage = () => {
                 <Label>Room type</Label>
                 <Select
                   value={newRoom.room_type}
-                  onValueChange={(v) => setNewRoom((f) => ({ ...f, room_type: v as RoomType }))}
+                  onValueChange={(v) =>
+                    setNewRoom((f) => ({ ...f, room_type: v as RoomType }))
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROOM_TYPE_VALUES.map((t) => (
+                    {roomTypeValues.map((t) => (
                       <SelectItem key={t} value={t}>
-                        {ROOM_TYPE_LABELS[t]}
+                        {roomTypeLabels[t] ?? t}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1341,6 +1404,64 @@ const RoomsAdminPage = () => {
               </Button>
               <Button type="button" onClick={submitNewRoom} disabled={createRoom.isPending}>
                 Create room
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={addRoomTypeOpen}
+          onOpenChange={(open) => {
+            setAddRoomTypeOpen(open);
+            if (!open) setNewRoomTypeName("");
+          }}
+        >
+          <DialogContent className="sm:max-w-md print-sans">
+            <DialogHeader>
+              <DialogTitle>Add room type</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-2">
+              <div className="grid gap-2">
+                <Label htmlFor="rt-name">Room type name</Label>
+                <Input
+                  id="rt-name"
+                  value={newRoomTypeName}
+                  onChange={(e) => setNewRoomTypeName(e.target.value)}
+                  placeholder="e.g. Garden Suite"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      submitAddRoomType();
+                    }
+                  }}
+                  disabled={createRoomType.isPending}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setAddRoomTypeOpen(false);
+                  setNewRoomTypeName("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={submitAddRoomType}
+                disabled={!newRoomTypeName.trim() || createRoomType.isPending}
+              >
+                {createRoomType.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  "Save"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

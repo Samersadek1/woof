@@ -1730,6 +1730,27 @@ export type Database = {
         }
         Relationships: []
       }
+      room_types: {
+        Row: {
+          created_at: string
+          is_builtin: boolean
+          label: string
+          slug: string
+        }
+        Insert: {
+          created_at?: string
+          is_builtin?: boolean
+          label: string
+          slug: string
+        }
+        Update: {
+          created_at?: string
+          is_builtin?: boolean
+          label?: string
+          slug?: string
+        }
+        Relationships: []
+      }
       staff: {
         Row: {
           active: boolean
@@ -2086,6 +2107,7 @@ export type Database = {
           refund_pct: number
         }[]
       }
+      create_room_type: { Args: { p_label: string }; Returns: string }
       flag_overdue_invoices: { Args: never; Returns: number }
       get_price: { Args: { p_key: string }; Returns: number }
       get_statement_of_account: {
