@@ -18,12 +18,13 @@ import {
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import TopBar from "@/components/dashboard/TopBar";
-import { useUpdateRoom, useCreateRoom, useDeleteRoom } from "@/hooks/useBookings";
+import { useUpdateRoom, useCreateRoom, useDeleteRoom, useAllRooms } from "@/hooks/useBookings";
 import { useCreateRoomType, useRoomTypesQuery } from "@/hooks/useRoomTypes";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -173,10 +174,6 @@ const CAPACITY_VALUES: CapacityType[] = ["single", "twin", "twin_plus", "multipl
 const MIN_MAX_PETS = 1;
 const MAX_MAX_PETS = 100;
 const ROOMS_PAGE_SIZE = 50;
-
-/** Columns required for admin table, filters, export, and inline edits */
-const ROOMS_ADMIN_SELECT =
-  "id, display_name, room_number, wing, room_type, capacity_type, max_pets, cam_number, camera_recording, is_active, label_color";
 
 const ROOM_LABEL_PRESET_COLORS = [
   "#EF4444",
@@ -547,19 +544,7 @@ const RoomsAdminPage = () => {
   const initialSpecies: Species = searchParams.get("species") === "cat" ? "cat" : "dog";
   const [species, setSpecies] = useState<Species>(initialSpecies);
 
-  const { data: allRooms, isLoading } = useQuery({
-    queryKey: ["rooms", "all"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("rooms")
-        .select(ROOMS_ADMIN_SELECT)
-        .order("display_name", { ascending: true })
-        .order("wing", { ascending: true })
-        .order("room_number", { ascending: true });
-      if (error) throw error;
-      return data as Room[];
-    },
-  });
+  const { data: allRooms, isLoading, isError, error } = useAllRooms();
   const updateRoom = useUpdateRoom();
   const createRoom = useCreateRoom();
   const deleteRoom = useDeleteRoom();
@@ -1030,6 +1015,14 @@ const RoomsAdminPage = () => {
               <Skeleton key={i} className="h-12 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>Could not load rooms</AlertTitle>
+            <AlertDescription>
+              {roomsSchemaMigrationHint(formatRoomMutationError(error)) ??
+                formatRoomMutationError(error)}
+            </AlertDescription>
+          </Alert>
         ) : !rooms || rooms.length === 0 ? (
           <p className="text-muted-foreground">No rooms found.</p>
         ) : (
