@@ -31,6 +31,13 @@ import { createActivation } from "./lib/activation.js";
 import { createWaRuntime } from "./lib/runtime.js";
 import { bootstrapAgentSchema } from "./lib/db-bootstrap.js";
 import * as factsLib from "./lib/facts.js";
+import {
+  BRIDGE_SECRET_HEADER,
+  fetchCompanyChatReply,
+  formatE164Phone,
+  getConnectedBusinessPhone,
+  verifyBridgeTargetSecret,
+} from "./lib/company-chat-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -604,6 +611,30 @@ async function handleOwnerInboundMessage(msg) {
     mode,
   });
 
+  try {
+    const brandPhone = getConnectedBusinessPhone(client);
+    const senderKey =
+      routing.conversationPhone || routing.contactMappedPhone || routing.replyTarget;
+    const bridgeReply = await fetchCompanyChatReply({
+      from: senderKey,
+      body: messageBody,
+      brandPhoneNumber: brandPhone ?? "",
+    });
+    if (bridgeReply) {
+      await client.sendMessage(routing.replyTarget, bridgeReply);
+      await logAgentEvent(supabase, {
+        tenant_id: tenantCtx.tenant?.id ?? null,
+        chat_id: modeKey,
+        event: "outbound",
+        payload: { source: "company_chat_bridge", length: bridgeReply.length },
+      });
+      console.log("company-chat bridge reply sent:", modeKey);
+      return;
+    }
+  } catch (err) {
+    console.warn("company-chat bridge handler error (falling through):", err?.message ?? err);
+  }
+
   if (mode !== "agent") return;
   const activeKey = modeKey;
 
@@ -731,7 +762,42 @@ client.on("message_create", handleDirectChatCommand);
 // HTTP server (QR display)
 // ---------------------------------------------------------------------------
 const app = express();
+app.use(express.json());
 const PORT = process.env.PORT || 3000;
+
+app.post("/bridge/outgoing", async (req, res) => {
+  const secret =
+    req.headers[BRIDGE_SECRET_HEADER] ??
+    req.headers["x-bridge-secret"];
+  const headerValue = Array.isArray(secret) ? secret[0] : secret;
+  if (!verifyBridgeTargetSecret(headerValue ?? null)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const to = typeof req.body?.to === "string" ? req.body.to.trim() : "";
+  const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+  if (!to || !message) {
+    return res.status(400).json({ error: "Expected { to, message }" });
+  }
+
+  let jid = to;
+  if (!jid.includes("@")) {
+    const e164 = formatE164Phone(to);
+    const digits = e164 ? e164.replace(/\D/g, "") : "";
+    if (!digits) {
+      return res.status(400).json({ error: "Invalid to address" });
+    }
+    jid = `${digits}@c.us`;
+  }
+
+  try {
+    await channel.sendMessage(jid, message);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("bridge/outgoing failed:", err?.message ?? err);
+    return res.status(500).json({ error: "Send failed" });
+  }
+});
 
 app.get("/", async (_req, res) => {
   const latestQR = runtime.getLatestQR();
