@@ -35,6 +35,10 @@ dist-ssr
 supabase/.temp/
 .vercel
 
+# MSH PetExec import staging (local dry-run artifacts)
+/staging/
+/output/
+
 # Standalone WhatsApp agent artifacts
 whatsapp-agent/node_modules/
 whatsapp-agent/.wwebjs_auth/

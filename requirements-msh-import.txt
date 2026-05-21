@@ -1,0 +1,2 @@
+# Optional — only needed for `python scripts/*_msh_*.py --apply` (Supabase REST client).
+supabase>=2.0.0
