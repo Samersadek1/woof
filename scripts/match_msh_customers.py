@@ -33,7 +33,7 @@ def main() -> int:
         print("Offline mode — no DB matching performed.")
         return 0
 
-    client = get_supabase_client()
+    client = get_supabase_client(require_service_role=True)
     snap = fetch_msh_snapshot(client)
     indexes = build_owner_indexes(snap.owners)
 

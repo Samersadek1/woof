@@ -9,6 +9,7 @@ import sys
 
 from msh_import_lib import (
     OUTPUT_DIR,
+    assert_room_snapshot_ready,
     booking_identity,
     classify_boarding_row,
     fetch_msh_snapshot,
@@ -33,10 +34,23 @@ def main() -> int:
     rooms = []
 
     if not args.offline:
-        client = get_supabase_client()
+        client = get_supabase_client(require_service_role=True)
         snap = fetch_msh_snapshot(client)
         pets_by_id = {p["id"]: p for p in snap.pets}
         rooms = snap.rooms
+        assert_room_snapshot_ready(rooms)
+        if len(snap.owners) < 10:
+            print(
+                "WARNING: very few owners loaded — check SUPABASE_SERVICE_ROLE_KEY in .env",
+                file=sys.stderr,
+            )
+        placeholder_count = sum(
+            1
+            for r in rooms
+            if (r.get("wing") or "") == "import_placeholder"
+            or (r.get("room_number") or "").startswith("UNK-")
+        )
+        print(f"  rooms loaded: {len(rooms)} ({placeholder_count} import placeholders)")
 
     validated = []
     counts = {"safe": 0, "manual_review": 0, "blocked": 0}

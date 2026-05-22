@@ -30,7 +30,7 @@ def main() -> int:
         print("Offline mode — skipped.")
         return 0
 
-    client = get_supabase_client()
+    client = get_supabase_client(require_service_role=True)
     snap = fetch_msh_snapshot(client)
 
     pet_summary: dict[str, int] = {}

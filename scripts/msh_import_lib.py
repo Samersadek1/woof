@@ -96,17 +96,19 @@ def utc_now_iso() -> str:
 
 
 def load_dotenv(path: Path | None = None) -> None:
-    env_path = path or (ROOT / ".env")
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    """Load .env files; later files do not override keys already set."""
+    paths = [path] if path else [ROOT / ".env", ROOT / "whatsapp-agent" / ".env"]
+    for env_path in paths:
+        if env_path is None or not env_path.exists():
             continue
-        key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip().strip('"').strip("'")
-        os.environ.setdefault(key, val)
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            os.environ.setdefault(key, val)
 
 
 def norm_email(email: str | None) -> str:
@@ -423,22 +425,28 @@ class MshSnapshot:
     bookings: list[dict[str, Any]] = field(default_factory=list)
 
 
-def get_supabase_client():
+def get_supabase_client(*, require_service_role: bool = False):
     load_dotenv()
     url = os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL")
-    key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        or os.environ.get("SUPABASE_SERVICE_KEY")
-        or os.environ.get("SUPABASE_PUBLISHABLE_KEY")
-        or os.environ.get("VITE_SUPABASE_PUBLISHABLE_KEY")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get(
+        "SUPABASE_SERVICE_KEY"
+    )
+    key = service_key or os.environ.get("SUPABASE_PUBLISHABLE_KEY") or os.environ.get(
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
     )
     if not url or not key:
         raise RuntimeError(
             "Set SUPABASE_URL (or VITE_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY in .env for DB matching."
         )
+    if require_service_role and not service_key:
+        raise RuntimeError(
+            "SUPABASE_SERVICE_ROLE_KEY is required for this step (anon/publishable keys cannot load all owners)."
+        )
     from supabase import create_client
 
-    return create_client(url, key)
+    client = create_client(url, key)
+    client._msh_uses_service_role = bool(service_key)  # type: ignore[attr-defined]
+    return client
 
 
 def fetch_msh_snapshot(client) -> MshSnapshot:
@@ -477,7 +485,9 @@ def fetch_msh_snapshot(client) -> MshSnapshot:
 
     res = (
         client.table("rooms")
-        .select("id, display_name, wing, room_type, pricing_category, is_active")
+        .select(
+            "id, display_name, wing, room_type, room_number, pricing_category, is_active, notes"
+        )
         .eq("is_active", True)
         .execute()
     )
@@ -502,6 +512,27 @@ def fetch_msh_snapshot(client) -> MshSnapshot:
         start += page_size
 
     return snap
+
+
+def assert_room_snapshot_ready(rooms: list[dict[str, Any]]) -> None:
+    """Fail fast when DB room list is empty or import placeholders were not seeded."""
+    if not rooms:
+        raise RuntimeError(
+            "Loaded 0 active rooms from Supabase. Check SUPABASE_SERVICE_ROLE_KEY, network, "
+            "and that migrations for import_placeholder rooms have been applied."
+        )
+    placeholders = [
+        r
+        for r in rooms
+        if (r.get("wing") or "") == IMPORT_PLACEHOLDER_WING
+        or (r.get("room_number") or "").startswith("UNK-")
+    ]
+    if not placeholders:
+        raise RuntimeError(
+            "No UNK-* import placeholder rooms in Supabase. Apply migrations "
+            "20260521210000_import_placeholder_rooms.sql and "
+            "20260521210001_import_placeholder_rooms_seed.sql (or re-run validate after seeding)."
+        )
 
 
 def build_owner_indexes(owners: list[dict[str, Any]]):
