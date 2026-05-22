@@ -967,6 +967,34 @@ def classify_boarding_row(
     return "safe", reasons
 
 
+def grandfather_import_pets_for_apply(
+    client,
+    payload: list[dict[str, Any]],
+) -> int:
+    """Mark pets in import payload as assessment passed (PetExec historical backfill)."""
+    pet_ids = sorted({p["booking_pets"]["pet_id"] for p in payload if p.get("booking_pets", {}).get("pet_id")})
+    updated = 0
+    for pet_id in pet_ids:
+        res = (
+            client.table("pets")
+            .update(
+                {
+                    "assessment_status": "passed",
+                    "assessment_date": datetime.now(timezone.utc).date().isoformat(),
+                    "assessed_by": "petexec_import",
+                    "assessment_notes": "PetExec Main Branch import — assessment grandfathered for historical boarding backfill.",
+                    "registration_invoiced": True,
+                }
+            )
+            .eq("id", pet_id)
+            .neq("assessment_status", "passed")
+            .execute()
+        )
+        if res.data:
+            updated += len(res.data)
+    return updated
+
+
 def build_booking_payload_row(row: dict[str, Any], room_id: str) -> dict[str, Any]:
     start = parse_date(row.get("start_date"))
     end = parse_date(row.get("end_date"))

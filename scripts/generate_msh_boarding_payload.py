@@ -13,6 +13,7 @@ from msh_import_lib import (
     fetch_msh_snapshot,
     find_existing_booking,
     get_supabase_client,
+    grandfather_import_pets_for_apply,
     load_staging,
     update_meta,
     write_csv,
@@ -108,15 +109,19 @@ def apply_payload(client, payload: list[dict], existing_bookings) -> dict[str, i
             res = client.table("bookings").insert(booking_insert).execute()
             booking = res.data[0]
             bp = row["booking_pets"]
-            client.table("booking_pets").insert(
-                {
-                    "booking_id": booking["id"],
-                    "pet_id": bp["pet_id"],
-                    "feeding_notes": bp.get("feeding_notes"),
-                    "medication_notes": bp.get("medication_notes"),
-                    "special_instructions": bp.get("special_instructions"),
-                }
-            ).execute()
+            try:
+                client.table("booking_pets").insert(
+                    {
+                        "booking_id": booking["id"],
+                        "pet_id": bp["pet_id"],
+                        "feeding_notes": bp.get("feeding_notes"),
+                        "medication_notes": bp.get("medication_notes"),
+                        "special_instructions": bp.get("special_instructions"),
+                    }
+                ).execute()
+            except Exception as pet_err:
+                client.table("bookings").delete().eq("id", booking["id"]).execute()
+                raise pet_err
             manifest[ident] = booking["id"]
             stats["inserted"] += 1
         except Exception as e:
@@ -277,7 +282,9 @@ def main() -> int:
         if not payload:
             print("Nothing to apply.", file=sys.stderr)
             return 0
-        client = get_supabase_client()
+        client = get_supabase_client(require_service_role=True)
+        n_pets = grandfather_import_pets_for_apply(client, payload)
+        print(f"Grandfathered assessment for {n_pets} pet(s) in import payload")
         snap = fetch_msh_snapshot(client)
         stats = apply_payload(client, payload, snap.bookings)
         print("Apply stats:", stats)
