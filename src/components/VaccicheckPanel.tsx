@@ -130,6 +130,12 @@ function resultModeFromPet(v: string | null | undefined): ResultMode {
   return v === "numerical" ? "numerical" : "s_class";
 }
 
+function dateFromPet(value: string | null | undefined): string {
+  if (value == null || value === "") return "";
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] ?? "";
+}
+
 function normalizeDateInput(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -197,20 +203,10 @@ function vaccicheckSaveErrorHint(
 }
 
 function buildVaccicheckSavePayload(
-  pet: PetWithVaccinations,
+  petId: string,
   values: VaccicheckSaveValues,
-): (PetUpdate & { id: string }) | null {
-  const payload: PetUpdate & { id: string } = { id: pet.id };
-  let hasField = false;
-
-  for (const [key, value] of Object.entries(values) as [VaccicheckFieldKey, string | number | null][]) {
-    if (key in pet) {
-      (payload as Record<string, string | number | null>)[key] = value;
-      hasField = true;
-    }
-  }
-
-  return hasField ? payload : null;
+): PetUpdate & { id: string } {
+  return { id: petId, ...values };
 }
 
 function immunityBadgeClass(value: string): string {
@@ -249,7 +245,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
   const [reportUrl, setReportUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    setSampleDate(normalizeDateInput(pet.vaccicheck_test_date ?? "") ?? "");
+    setSampleDate(dateFromPet(pet.vaccicheck_test_date));
     setPerformedAt(pet.vaccicheck_performed_at ?? "");
     setResultMode(resultModeFromPet(pet.vaccicheck_result_mode));
     setCavTier(tierToSelect(pet.vaccicheck_hepatitis_tier));
@@ -303,7 +299,7 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
     if (key === "cdv") setCdvValue(value);
   };
 
-  const savedSampleDate = normalizeDateInput(pet.vaccicheck_test_date ?? "") ?? "";
+  const savedSampleDate = dateFromPet(pet.vaccicheck_test_date);
   const savedMode = resultModeFromPet(pet.vaccicheck_result_mode);
   const dirty =
     sampleDate !== savedSampleDate ||
@@ -319,7 +315,15 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
     recommendations !== (pet.vaccicheck_recommendations ?? "");
 
   const saveFields = () => {
-    const payload = buildVaccicheckSavePayload(pet, {
+    if (!vaccicheckApiReady) {
+      toast.error(
+        "VacciCheck fields are not available from the API yet. Run sql/add-pet-vaccicheck-columns.sql and sql/add-pet-vaccicheck-lab-report-fields.sql, then NOTIFY pgrst, 'reload schema'; refresh this page, and try again.",
+        { duration: 12_000 },
+      );
+      return;
+    }
+
+    const payload = buildVaccicheckSavePayload(pet.id, {
       vaccicheck_test_date: normalizeDateInput(sampleDate),
       vaccicheck_performed_at: performedAt.trim() === "" ? null : performedAt.trim(),
       vaccicheck_result_mode: resultMode,
@@ -332,14 +336,6 @@ export function VaccicheckPanel({ pet }: VaccicheckPanelProps) {
       vaccicheck_immunity_rating: immunity === NONE ? null : immunity,
       vaccicheck_recommendations: recommendations.trim() === "" ? null : recommendations.trim(),
     });
-
-    if (!payload) {
-      toast.error(
-        "VacciCheck fields are not available from the API yet. Run sql/add-pet-vaccicheck-columns.sql and sql/add-pet-vaccicheck-lab-report-fields.sql, then NOTIFY pgrst, 'reload schema'; refresh this page, and try again.",
-        { duration: 12_000 },
-      );
-      return;
-    }
 
     updatePet.mutate(payload, {
       onSuccess: () => toast.success("Serology report saved"),

@@ -94,7 +94,17 @@ export function useUpdatePet() {
 
       throw new Error("Pet update failed: record not found or not permitted.");
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
+      const { id, ...updates } = variables;
+      queryClient.setQueryData<PetWithVaccinations>(
+        petQueryKeys.pet(id),
+        (current) => (current ? { ...current, ...updates } : current),
+      );
+      queryClient.setQueriesData<PetWithVaccinations[]>(
+        { queryKey: ["pets"], exact: false },
+        (current) =>
+          current?.map((pet) => (pet.id === id ? { ...pet, ...updates } : pet)),
+      );
       queryClient.invalidateQueries({ queryKey: petQueryKeys.pets(data.owner_id) });
       queryClient.invalidateQueries({ queryKey: petQueryKeys.pet(data.id) });
     },
