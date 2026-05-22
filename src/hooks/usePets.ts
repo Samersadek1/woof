@@ -100,10 +100,12 @@ export function useUpdatePet() {
         petQueryKeys.pet(id),
         (current) => (current ? { ...current, ...updates } : current),
       );
-      queryClient.setQueriesData<PetWithVaccinations[]>(
-        { queryKey: ["pets"], exact: false },
+      queryClient.setQueryData<PetWithVaccinations[]>(
+        petQueryKeys.pets(data.owner_id),
         (current) =>
-          current?.map((pet) => (pet.id === id ? { ...pet, ...updates } : pet)),
+          Array.isArray(current)
+            ? current.map((pet) => (pet.id === id ? { ...pet, ...updates } : pet))
+            : current,
       );
       queryClient.invalidateQueries({ queryKey: petQueryKeys.pets(data.owner_id) });
       queryClient.invalidateQueries({ queryKey: petQueryKeys.pet(data.id) });
