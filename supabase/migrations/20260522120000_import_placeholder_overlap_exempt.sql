@@ -1,12 +1,28 @@
--- Allow multiple PetExec import rows on the same UNK placeholder room (calendar backfill).
+-- Unassigned / tier placeholder rooms (UNK-*) may hold many overlapping import stays.
 
-CREATE OR REPLACE FUNCTION enforce_boarding_room_overlap()
+CREATE OR REPLACE FUNCTION public.is_import_placeholder_room_id(p_room_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.rooms r
+    WHERE r.id = p_room_id
+      AND (
+        r.wing = 'import_placeholder'::public.room_wing
+        OR r.room_number LIKE 'UNK-%'
+        OR COALESCE(r.notes, '') ILIKE '%import_placeholder_tier=%'
+      )
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.enforce_boarding_room_overlap()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 DECLARE
   v_conflict RECORD;
-  v_wing public.room_wing;
 BEGIN
   IF COALESCE(NEW.booking_type, 'boarding') <> 'boarding' THEN
     RETURN NEW;
@@ -20,8 +36,8 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT r.wing INTO v_wing FROM public.rooms r WHERE r.id = NEW.room_id;
-  IF v_wing = 'import_placeholder' THEN
+  -- Tier / unknown kennel placeholders: unlimited stacked bookings for PetExec backfill.
+  IF public.is_import_placeholder_room_id(NEW.room_id) THEN
     RETURN NEW;
   END IF;
 
@@ -32,7 +48,7 @@ BEGIN
     b.check_out_date,
     b.status
   INTO v_conflict
-  FROM bookings b
+  FROM public.bookings b
   WHERE b.room_id = NEW.room_id
     AND (NEW.id IS NULL OR b.id <> NEW.id)
     AND b.status <> 'cancelled'
@@ -42,18 +58,17 @@ BEGIN
   LIMIT 1;
 
   IF FOUND THEN
-    RAISE EXCEPTION 'ROOM_OVERLAP_CONFLICT'
-      USING ERRCODE = 'check_violation',
-            DETAIL = format(
-              'Room %s already has booking %s (%s to %s) for a different owner.',
-              NEW.room_id,
-              v_conflict.id,
-              v_conflict.check_in_date,
-              v_conflict.check_out_date
-            ),
-            HINT = 'Choose another room or non-overlapping dates.';
+    RAISE EXCEPTION 'Room % is already booked for those dates', NEW.room_id
+      USING ERRCODE = 'P0001';
   END IF;
 
   RETURN NEW;
 END;
 $$;
+
+DROP TRIGGER IF EXISTS trg_enforce_boarding_room_overlap ON public.bookings;
+CREATE TRIGGER trg_enforce_boarding_room_overlap
+  BEFORE INSERT OR UPDATE OF room_id, owner_id, check_in_date, check_out_date, status, booking_type
+  ON public.bookings
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_boarding_room_overlap();

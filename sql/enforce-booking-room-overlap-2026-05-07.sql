@@ -13,7 +13,6 @@ AS $$
 DECLARE
   v_conflict RECORD;
 BEGIN
-  -- Only enforce on active boarding rows.
   IF COALESCE(NEW.booking_type, 'boarding') <> 'boarding' THEN
     RETURN NEW;
   END IF;
@@ -23,6 +22,10 @@ BEGIN
   END IF;
 
   IF NEW.room_id IS NULL OR NEW.owner_id IS NULL OR NEW.check_in_date IS NULL OR NEW.check_out_date IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF public.is_import_placeholder_room_id(NEW.room_id) THEN
     RETURN NEW;
   END IF;
 
@@ -43,16 +46,8 @@ BEGIN
   LIMIT 1;
 
   IF FOUND THEN
-    RAISE EXCEPTION 'ROOM_OVERLAP_CONFLICT'
-      USING ERRCODE = 'check_violation',
-            DETAIL = format(
-              'Room %s already has booking %s (%s to %s) for a different owner.',
-              NEW.room_id,
-              v_conflict.id,
-              v_conflict.check_in_date,
-              v_conflict.check_out_date
-            ),
-            HINT = 'Choose another room or non-overlapping dates.';
+    RAISE EXCEPTION 'Room % is already booked for those dates', NEW.room_id
+      USING ERRCODE = 'P0001';
   END IF;
 
   RETURN NEW;
