@@ -190,7 +190,7 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
             {packageDefsLoading ? (
               <p className="text-sm text-muted-foreground">Loading packages…</p>
             ) : (
-              <div className="grid gap-3">
+              <div data-testid="purchase-pkg-definition-select" className="grid gap-3">
                 {Object.entries(groupedByCategory).map(([category, defs]) => (
                   <div key={category} className="space-y-2">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">{CATEGORY_LABELS[category] ?? category}</p>
@@ -202,6 +202,7 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
                         return (
                           <button
                             key={pkg.id}
+                            data-testid={`purchase-pkg-definition-${pkg.code}`}
                             type="button"
                             className={`rounded-md border p-3 text-left transition ${
                               selectedPackageCode === pkg.code ? "border-primary bg-primary/5" : "hover:bg-muted/40"
@@ -250,7 +251,12 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
                         {!speciesAllowed ? <p className="text-xs text-destructive">Species not eligible for this package.</p> : null}
                         {sizeBlocked ? <p className="text-xs text-destructive">Set pet size before purchasing this package.</p> : null}
                       </div>
-                      <Checkbox checked={checked} disabled={disabled} onCheckedChange={(v) => togglePet(pet.id, v === true)} />
+                      <Checkbox
+                        data-testid={`purchase-pkg-pet-checkbox-${pet.id}`}
+                        checked={checked}
+                        disabled={disabled}
+                        onCheckedChange={(v) => togglePet(pet.id, v === true)}
+                      />
                     </div>
                   );
                 })}
@@ -270,14 +276,14 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
                 </div>
               ))}
               <Separator />
-              <div className="flex items-center justify-between"><span>Subtotal</span><span>AED {subtotal.toFixed(2)}</span></div>
+              <div data-testid="purchase-pkg-subtotal" className="flex items-center justify-between"><span>Subtotal</span><span>AED {subtotal.toFixed(2)}</span></div>
               {selectedPetIds.length >= 2 ? (
-                <div className="flex items-center justify-between text-emerald-700">
+                <div data-testid="purchase-pkg-discount" className="flex items-center justify-between text-emerald-700">
                   <span>Multi-pet {selectedPackage?.multi_pet_discount_pct ?? 10}% discount</span>
                   <span>- AED {discount.toFixed(2)}</span>
                 </div>
               ) : null}
-              <div className="flex items-center justify-between font-semibold"><span>Total</span><span>AED {total.toFixed(2)}</span></div>
+              <div data-testid="purchase-pkg-total" className="flex items-center justify-between font-semibold"><span>Total</span><span>AED {total.toFixed(2)}</span></div>
             </div>
           </section>
 
@@ -301,7 +307,11 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
-              <Button onClick={handlePurchase} disabled={isSubmitting || !selectedPackageCode || selectedPetIds.length === 0}>
+              <Button
+                data-testid="purchase-pkg-confirm-btn"
+                onClick={handlePurchase}
+                disabled={isSubmitting || !selectedPackageCode || selectedPetIds.length === 0}
+              >
                 {isSubmitting ? "Purchasing..." : "Purchase"}
               </Button>
             </div>

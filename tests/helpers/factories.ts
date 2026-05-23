@@ -187,3 +187,29 @@ export async function createTestBoardingBooking(
     invoice,
   };
 }
+
+export async function createTestServiceCredit(
+  scope: Scope,
+  petId: string,
+  overrides: Partial<Database["public"]["Tables"]["service_credits"]["Insert"]> = {},
+) {
+  const supabase = getServiceRoleClient();
+  const payload: Database["public"]["Tables"]["service_credits"]["Insert"] = {
+    pet_id: petId,
+    service_code: "daycare_full_day",
+    units_total: 5,
+    units_consumed: 0,
+    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    source_type: overrides.source_type ?? "promotional",
+    ...overrides,
+  };
+
+  const { data, error } = await supabase
+    .from("service_credits")
+    .insert(payload)
+    .select("*")
+    .single();
+  if (error) throw error;
+  scope.registerResource("service_credits", data.id);
+  return data;
+}

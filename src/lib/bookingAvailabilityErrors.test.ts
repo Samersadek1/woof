@@ -3,7 +3,7 @@ import {
   BOOKING_ROOM_OVERLAP_TOKEN,
   getBookingRoomOverlapErrorMessage,
   isBookingRoomOverlapError,
-} from "@/lib/bookingAvailabilityErrors";
+} from "./bookingAvailabilityErrors";
 
 describe("booking availability error mapping", () => {
   it("detects overlap conflict by deterministic DB token in message", () => {

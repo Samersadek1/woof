@@ -124,7 +124,7 @@ describe("consume_service_credit", () => {
     });
   });
 
-  it("marks expired credit and throws", async () => {
+  it("throws on expired credit", async () => {
     await withScope(async (scope) => {
       const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
@@ -136,7 +136,7 @@ describe("consume_service_credit", () => {
           service_code: "daycare_full_day",
           units_total: 2,
           units_consumed: 0,
-          expires_at: dateOnly(addDays(new Date(), -1)),
+          expires_at: dateOnly(addDays(new Date(), -5)),
           source_type: "promotional",
           status: "active",
         })
@@ -150,12 +150,15 @@ describe("consume_service_credit", () => {
       });
       expect(result.error?.message ?? "").toContain("Credit expired");
 
+      // Note: status is NOT updated to 'expired' on access — see
+      // consume_service_credit comment. list_active_credits_for_pet filters by
+      // expires_at so callers don't see it as active.
       const { data: refreshed } = await supabase
         .from("service_credits")
         .select("status")
         .eq("id", credit!.id)
         .single();
-      expect(refreshed?.status).toBe("expired");
+      expect(refreshed?.status).toBe("active");
     });
   });
 

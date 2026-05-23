@@ -151,6 +151,7 @@ interface OwnerComboboxProps {
   onSelect:      (id: string, label: string) => void;
   onClear:       () => void;
   placeholder?:  string;
+  inputTestId?:  string;
 }
 
 function extractErrorMessage(error: unknown): string {
@@ -166,6 +167,7 @@ function extractErrorMessage(error: unknown): string {
 
 function OwnerCombobox({
   selectedId, selectedLabel, onSelect, onClear, placeholder = "Search client or pet name / phone…",
+  inputTestId,
 }: OwnerComboboxProps) {
   const [query, setQuery]   = useState("");
   const [open, setOpen]     = useState(false);
@@ -198,6 +200,7 @@ function OwnerCombobox({
     <div ref={wrapperRef} className="relative">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
       <Input
+        data-testid={inputTestId}
         className="pl-8 h-9"
         placeholder={placeholder}
         value={query}
@@ -222,6 +225,7 @@ function OwnerCombobox({
                 return (
                   <li key={o.id}>
                     <button
+                      data-testid={`daycare-owner-option-${o.id}`}
                       type="button"
                       className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/60 text-left"
                       onMouseDown={(e) => {
@@ -983,6 +987,9 @@ function PlannerTab() {
     let successCount = 0;
     const sessionsCreated: Record<string, string> = {};
     const consumedCreditByPet: Record<string, DaycarePackage> = {};
+    const successfullyCreditCovered: string[] = [];
+    const fallbackSingleIds: string[] = [];
+    const fallbackHourlyIds: string[] = [];
     const privateFlat = checkInDraft.transport_zone === "dubai_private";
 
     for (const petId of selectedPetIds) {
@@ -1006,30 +1013,38 @@ function PlannerTab() {
         });
 
         sessionsCreated[petId] = session.id;
+        successCount += 1;
 
         if (chosenCredit) {
           const consumeUnits = chosenCredit.service_code === "daycare_hourly" ? Math.max(1, effectiveHours) : 1;
-          await consumeCredit.mutateAsync({
-            creditId: chosenCredit.id,
-            units: consumeUnits,
-            consumedForRefId: session.id,
-            consumedForRefType: "daycare_session",
-          });
-          consumedCreditByPet[petId] = chosenCredit;
+          try {
+            await consumeCredit.mutateAsync({
+              creditId: chosenCredit.id,
+              units: consumeUnits,
+              consumedForRefId: session.id,
+              consumedForRefType: "daycare_session",
+            });
+            consumedCreditByPet[petId] = chosenCredit;
+            successfullyCreditCovered.push(petId);
+          } catch (error) {
+            const message = extractErrorMessage(error);
+            failures.push(`${petName}: credit consumption failed (${message}); charging this check-in instead`);
+            if (chosenCredit.service_code === "daycare_hourly") {
+              fallbackHourlyIds.push(petId);
+            } else {
+              fallbackSingleIds.push(petId);
+            }
+          }
         }
-
-        successCount += 1;
       } catch (error) {
         const message = extractErrorMessage(error);
         failures.push(`${petName}: ${message}`);
       }
     }
 
-    const okSingleIds = singleDayPetIds.filter((id) => sessionsCreated[id]);
-    const okHourlyIds = hourlyPetIds.filter((id) => sessionsCreated[id]);
-    const okCreditIds = selectedPetIds.filter(
-      (id) => sessionsCreated[id] && !okSingleIds.includes(id) && !okHourlyIds.includes(id),
-    );
+    const okSingleIds = [...singleDayPetIds.filter((id) => sessionsCreated[id]), ...fallbackSingleIds];
+    const okHourlyIds = [...hourlyPetIds.filter((id) => sessionsCreated[id]), ...fallbackHourlyIds];
+    const okCreditIds = successfullyCreditCovered.filter((id) => sessionsCreated[id]);
     const invoicedPetTotal = okSingleIds.length + okHourlyIds.length + okCreditIds.length;
     const hourlyDogsForInvoice = okHourlyIds.length > 0 ? effectiveHourlyDogs : 0;
     const hourlyHoursForInvoice = okHourlyIds.length > 0 ? effectiveHours : 0;
@@ -1198,6 +1213,7 @@ function PlannerTab() {
                   onSelect={handleOwnerSelect}
                   onClear={handleOwnerClear}
                   placeholder="Search by client name, pet name, or phone…"
+                  inputTestId="daycare-pet-search"
                 />
               </div>
               {ownerFromUrl &&
@@ -1244,7 +1260,10 @@ function PlannerTab() {
                                   setBillingChoiceByPet((prev) => ({ ...prev, [pet.id]: value }));
                                 }}
                               >
-                                <SelectTrigger className="h-8">
+                                <SelectTrigger
+                                  data-testid={`daycare-use-credit-toggle-${pet.id}`}
+                                  className="h-8"
+                                >
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1568,6 +1587,7 @@ function PlannerTab() {
               </div>
 
               <Button
+                data-testid="daycare-create-session-btn"
                 onClick={handleCheckInSelected}
                 disabled={isSubmittingCheckIn || selectedPetIds.length === 0}
               >

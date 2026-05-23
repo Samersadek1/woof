@@ -8,7 +8,7 @@ describe("create_assessment_booking", () => {
     await withScope(async (scope) => {
       const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
-      const pet = await createTestPet(scope, owner.id, { assessment_status: "not_required" });
+      const pet = await createTestPet(scope, owner.id, { assessment_status: "not_assessed" });
 
       const { data, error } = await supabase.rpc("create_assessment_booking", {
         p_pet_id: pet.id,

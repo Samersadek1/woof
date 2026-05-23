@@ -1628,14 +1628,14 @@ export function DogBoardingCalendar({
                 {format(windowStart, "d MMM")} – {format(windowEnd, "d MMM yyyy")}
               </span>
             </div>
-            <Button onClick={() => openNewBooking()}>
+            <Button data-testid="boarding-new-booking-btn" onClick={() => openNewBooking()}>
               <Plus className="mr-2 h-4 w-4" />
               New booking
             </Button>
           </div>
         ) : (
           <div className="flex items-center justify-end px-6 py-2 border-b border-border bg-slate-50/90 shrink-0">
-            <Button size="sm" onClick={() => openNewBooking()}>
+            <Button data-testid="boarding-new-booking-btn" size="sm" onClick={() => openNewBooking()}>
               <Plus className="mr-2 h-4 w-4" />
               New dog booking
             </Button>
@@ -1747,6 +1747,7 @@ export function DogBoardingCalendar({
                   <PopoverTrigger asChild>
                     <div className="relative">
                       <Input
+                        data-testid="boarding-owner-search"
                         placeholder="Search by name or phone…"
                         value={ownerSearch}
                         onChange={(e) => {
@@ -1762,6 +1763,7 @@ export function DogBoardingCalendar({
                       {ownerResults.map((o) => (
                         <button
                           key={o.id}
+                          data-testid={`boarding-owner-option-${o.id}`}
                           type="button"
                           className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent"
                           onClick={() => {
@@ -1796,6 +1798,7 @@ export function DogBoardingCalendar({
                     {dogBoardingPets.map((pet) => (
                       <div key={pet.id} className="flex items-center gap-2">
                         <Checkbox
+                          data-testid={`boarding-pet-checkbox-${pet.id}`}
                           id={`pet-${pet.id}`}
                           checked={form.pet_ids.includes(pet.id)}
                           onCheckedChange={() => togglePet(pet.id)}
@@ -1894,6 +1897,7 @@ export function DogBoardingCalendar({
               <Popover open={roomPickerOpen} onOpenChange={setRoomPickerOpen}>
                 <PopoverTrigger asChild>
                   <Button
+                    data-testid="boarding-room-select"
                     variant="outline"
                     role="combobox"
                     aria-expanded={roomPickerOpen}
@@ -2070,6 +2074,7 @@ export function DogBoardingCalendar({
               <div className="space-y-2">
                 <Label>Check-in <span className="text-destructive">*</span></Label>
                 <Input
+                  data-testid="boarding-checkin-date"
                   type="date"
                   value={form.check_in_date}
                   onChange={(e) => setForm((f) => ({ ...f, check_in_date: e.target.value }))}
@@ -2078,6 +2083,7 @@ export function DogBoardingCalendar({
               <div className="space-y-2">
                 <Label>Check-out <span className="text-destructive">*</span></Label>
                 <Input
+                  data-testid="boarding-checkout-date"
                   type="date"
                   value={form.check_out_date}
                   onChange={(e) => setForm((f) => ({ ...f, check_out_date: e.target.value }))}
@@ -2363,7 +2369,12 @@ export function DogBoardingCalendar({
               />
             </div>
 
-            <Button type="submit" className="w-full" disabled={createBooking.isPending}>
+            <Button
+              data-testid="boarding-save-booking-btn"
+              type="submit"
+              className="w-full"
+              disabled={createBooking.isPending}
+            >
               {createBooking.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Booking
             </Button>

@@ -320,7 +320,11 @@ const CustomersPage = () => {
                 Filter: {activeFilter.replace(/-/g, " ")}
               </Badge>
             )}
-            <Button variant="outline" onClick={() => setWizardOpen(true)}>
+            <Button
+              variant="outline"
+              data-testid="customers-add-client-btn"
+              onClick={() => setWizardOpen(true)}
+            >
               New Client Wizard
             </Button>
             <Button onClick={() => setDrawerOpen(true)}>
@@ -561,11 +565,13 @@ const CustomersPage = () => {
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <Input
+                      data-testid="owner-form-first-name"
                       placeholder="First name"
                       value={wizardOwner.first_name}
                       onChange={(e) => setWizardOwner((p) => ({ ...p, first_name: e.target.value }))}
                     />
                     <Input
+                      data-testid="owner-form-last-name"
                       placeholder="Last name"
                       value={wizardOwner.last_name}
                       onChange={(e) => setWizardOwner((p) => ({ ...p, last_name: e.target.value }))}
@@ -573,6 +579,7 @@ const CustomersPage = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <Input
+                      data-testid="owner-form-phone"
                       placeholder="Phone"
                       value={wizardOwner.phone}
                       onChange={(e) => setWizardOwner((p) => ({ ...p, phone: e.target.value }))}
@@ -584,6 +591,7 @@ const CustomersPage = () => {
                     />
                   </div>
                   <Button
+                    data-testid="owner-form-submit"
                     onClick={async () => {
                       try {
                         await saveWizardOwner();
@@ -606,6 +614,7 @@ const CustomersPage = () => {
                       <p className="text-sm font-medium">Pet #{idx + 1}</p>
                       <div className="grid grid-cols-2 gap-2">
                         <Input
+                          data-testid="pet-form-name"
                           placeholder="Name"
                           value={pet.name}
                           onChange={(e) =>
@@ -622,7 +631,7 @@ const CustomersPage = () => {
                             )
                           }
                         >
-                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectTrigger data-testid="pet-form-species"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="dog">Dog</SelectItem>
                             <SelectItem value="cat">Cat</SelectItem>
@@ -640,6 +649,7 @@ const CustomersPage = () => {
                           }
                         />
                         <Input
+                          data-testid="pet-form-coat"
                           type="date"
                           value={pet.date_of_birth}
                           onChange={(e) =>
@@ -649,6 +659,7 @@ const CustomersPage = () => {
                           }
                         />
                         <Input
+                          data-testid="pet-form-size"
                           type="number"
                           step="0.1"
                           min="0"
@@ -676,6 +687,7 @@ const CustomersPage = () => {
                       Add another pet
                     </Button>
                     <Button
+                      data-testid="pet-form-submit"
                       onClick={async () => {
                         try {
                           await saveWizardPets();

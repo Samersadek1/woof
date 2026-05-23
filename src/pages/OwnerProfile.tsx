@@ -1360,13 +1360,14 @@ const OwnerProfilePage = () => {
         <Separator />
 
         {/* ─── Active Packages ─── */}
-        <section>
+        <section data-testid="owner-profile-active-packages-section">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold flex items-center gap-2">
               <CalendarDays className="h-5 w-5" />
               Active Packages
             </h3>
             <Button
+              data-testid="owner-profile-purchase-package-btn"
               size="sm"
               variant="outline"
               onClick={() => setPackageDialogOpen(true)}
@@ -1419,7 +1420,11 @@ const OwnerProfilePage = () => {
                   {(pets ?? []).map((pet) => {
                     const petCredits = ownerActiveCredits.filter((row) => row.pet_id === pet.id);
                     return (
-                      <div key={pet.id} className="rounded border p-2">
+                      <div
+                        key={pet.id}
+                        data-testid={`owner-profile-pet-credits-${pet.id}`}
+                        className="rounded border p-2"
+                      >
                         <p className="font-medium text-sm">{pet.name}</p>
                         {petCredits.length === 0 ? (
                           <p className="text-xs text-muted-foreground">No active credits.</p>

@@ -47,3 +47,4 @@ whatsapp-agent/.wwebjs_cache/
 whatsapp-agent/.env
 whatsapp-agent/.railway-log-state*.json
 .env*.local
+tests/e2e/.auth/

@@ -1,0 +1,9 @@
+# Woof Engineering Rules
+
+## E2E Selector Convention
+
+- Add `data-testid` only to elements that an automated test must target.
+- Use the pattern `<page>-<element-purpose>` (for example: `boarding-new-booking-btn`).
+- Prefer updating existing test IDs over introducing duplicates for the same action.
+- Keep labels/placeholder text user-friendly; tests should rely on `data-testid` for stability.
+- When a UI flow has both owner and pet variants, include entity context in the test ID suffix.
