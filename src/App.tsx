@@ -16,7 +16,6 @@ const DashboardPage = lazy(() => import("@/pages/DashboardPage"));
 const CustomersPage = lazy(() => import("@/pages/Customers"));
 const OwnerProfilePage = lazy(() => import("@/pages/OwnerProfile"));
 const BoardingPage = lazy(() => import("@/pages/Boarding"));
-const BoardingImportPage = lazy(() => import("@/pages/BoardingImport"));
 const PetProfilePage = lazy(() => import("@/pages/PetProfile"));
 const RoomsAdminPage = lazy(() => import("@/pages/RoomsAdmin"));
 const BillingPage = lazy(() => import("@/pages/Billing"));
@@ -124,7 +123,6 @@ const App = () => (
                 <Route path="customers/:id" element={<OwnerProfilePage />} />
                 <Route path="customers/:ownerId/pets/:petId" element={<PetProfilePage />} />
                 <Route path="boarding" element={<BoardingPage />} />
-                <Route path="boarding/import" element={<BoardingImportPage />} />
                 <Route path="daycare" element={<DaycarePage />} />
                 <Route path="dashboard/checkins" element={<ServiceCheckinsPage />} />
                 <Route path="agent" element={<AgentPage />} />

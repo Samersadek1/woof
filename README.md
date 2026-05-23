@@ -1,6 +1,12 @@
-# Admin Essentials
+# Woof
 
-This repository hosts multiple independently deployed services that share the same Supabase project.
+Kennel admin app — **separate codebase** copied from [admin-essentials](https://github.com/Samersadek1/admin-essentials). Uses its **own Supabase project** (no MSH customer data).
+
+Setup: [docs/WOOF_SETUP.md](docs/WOOF_SETUP.md)
+
+---
+
+This repository hosts multiple independently deployed services that share the same Supabase project (per deployment).
 
 ## Repository Layout
 

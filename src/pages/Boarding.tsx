@@ -4441,14 +4441,6 @@ function BoardingHubPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate("/boarding/import")}
-          >
-            Calendar import
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
             onClick={() => navigate(`/settings/rooms?species=${species}`)}
           >
             Manage Rooms

@@ -1,5 +1,5 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "woof",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,13 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "msh:import:load": "python3 scripts/load_msh_boarding_staging.py",
-    "msh:import:match-customers": "python3 scripts/match_msh_customers.py",
-    "msh:import:match-pets": "python3 scripts/match_msh_pets.py",
-    "msh:import:validate": "python3 scripts/validate_msh_boarding_import.py",
-    "msh:import:payload": "python3 scripts/generate_msh_boarding_payload.py",
-    "msh:import:all": "npm run msh:import:load && npm run msh:import:match-customers && npm run msh:import:match-pets && npm run msh:import:validate && npm run msh:import:payload"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
