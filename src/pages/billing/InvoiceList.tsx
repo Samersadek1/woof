@@ -68,6 +68,15 @@ function formatAed(v: number) {
   })}`;
 }
 
+function renderBranchCode(branchCode: string | null) {
+  if (!branchCode) return <span className="text-muted-foreground">—</span>;
+  return (
+    <Badge variant="outline" className="font-mono text-[11px]">
+      {branchCode}
+    </Badge>
+  );
+}
+
 export default function InvoiceListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -241,6 +250,7 @@ export default function InvoiceListPage() {
                   <TableRow className="bg-muted/40">
                     <TableHead>Invoice #</TableHead>
                     <TableHead>Owner</TableHead>
+                    <TableHead>Branch</TableHead>
                     <TableHead>Service</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Total</TableHead>
@@ -253,7 +263,7 @@ export default function InvoiceListPage() {
                 <TableBody>
                   {invoices.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">No invoices found.</TableCell>
+                      <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">No invoices found.</TableCell>
                     </TableRow>
                   ) : (
                     invoices.map((inv) => {
@@ -273,6 +283,7 @@ export default function InvoiceListPage() {
                       >
                         <TableCell className="font-mono text-xs">{inv.invoice_number ?? inv.id.slice(0, 8)}</TableCell>
                         <TableCell>{inv.owner_name}</TableCell>
+                        <TableCell>{renderBranchCode(inv.branch_code)}</TableCell>
                         <TableCell className="capitalize">{inv.service_type?.replace(/_/g, " ") ?? "—"}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={STATUS_BADGE[inv.status] ?? STATUS_BADGE.draft}>

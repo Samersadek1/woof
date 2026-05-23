@@ -18,6 +18,7 @@ export interface UseInvoicesFilters {
 export interface InvoiceSummary {
   id: string;
   invoice_number: string | null;
+  branch_code: string | null;
   owner_id: string;
   owner_name: string;
   owner_phone: string | null;
@@ -38,26 +39,64 @@ const UNPAID: InvoiceStatus[] = [
   "overdue",
 ];
 
+function deriveBranchCodeFromInvoiceNumber(invoiceNumber: string | null): string | null {
+  const normalized = invoiceNumber?.trim();
+  if (!normalized) return null;
+  const match = normalized.match(/^([A-Za-z]{2,8})[-/]/);
+  return match ? match[1].toUpperCase() : null;
+}
+
 export function useInvoices(filters: UseInvoicesFilters = {}) {
   return useQuery({
     queryKey: ["invoices", "list", filters],
     queryFn: async () => {
-      let q = supabase
-        .from("invoices")
-        .select(
-          "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name, phone)",
-        )
-        .order("created_at", { ascending: false });
+      const withBranchSelect =
+        "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name, phone), branches(code)";
+      const legacySelect =
+        "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name, phone)";
+      const applyFilters = <T,>(query: T): T => {
+        let next = query as T & {
+          eq: (column: string, value: string) => T;
+          in: (column: string, values: InvoiceStatus[]) => T;
+          gte: (column: string, value: string) => T;
+          lte: (column: string, value: string) => T;
+        };
+        if (filters.ownerId) next = next.eq("owner_id", filters.ownerId);
+        if (filters.status?.length) next = next.in("status", filters.status);
+        if (filters.from) next = next.gte("created_at", `${filters.from}T00:00:00`);
+        if (filters.to) next = next.lte("created_at", `${filters.to}T23:59:59`);
+        if (filters.serviceType && filters.serviceType !== "all") {
+          next = next.eq("service_type", filters.serviceType);
+        }
+        return next;
+      };
 
-      if (filters.ownerId) q = q.eq("owner_id", filters.ownerId);
-      if (filters.status?.length) q = q.in("status", filters.status);
-      if (filters.from) q = q.gte("created_at", `${filters.from}T00:00:00`);
-      if (filters.to) q = q.lte("created_at", `${filters.to}T23:59:59`);
-      if (filters.serviceType && filters.serviceType !== "all") {
-        q = q.eq("service_type", filters.serviceType);
+      let q = applyFilters(
+        supabase
+          .from("invoices")
+          .select(withBranchSelect)
+          .order("created_at", { ascending: false }),
+      );
+
+      let { data, error } = await q;
+      if (error) {
+        const msg = error.message.toLowerCase();
+        const missingBranchRelation =
+          msg.includes("branches") ||
+          msg.includes("branch_id") ||
+          msg.includes("relationship");
+        if (!missingBranchRelation) throw error;
+        q = applyFilters(
+          supabase
+            .from("invoices")
+            .select(legacySelect)
+            .order("created_at", { ascending: false }),
+        );
+        const fallbackResult = await q;
+        data = fallbackResult.data;
+        error = fallbackResult.error;
       }
 
-      const { data, error } = await q;
       if (error) throw error;
 
       const today = new Date();
@@ -75,6 +114,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         due_date: string | null;
         created_at: string;
         owners: { first_name: string | null; last_name: string | null; phone: string | null } | null;
+        branches?: { code: string | null } | null;
       };
 
       return ((data ?? []) as InvoiceListRow[]).map((row) => {
@@ -94,6 +134,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         return {
           id: row.id,
           invoice_number: row.invoice_number,
+          branch_code: row.branches?.code ?? deriveBranchCodeFromInvoiceNumber(row.invoice_number),
           owner_id: row.owner_id,
           owner_name: ownerDisplayName(owner?.first_name, owner?.last_name),
           owner_phone: owner?.phone ?? null,

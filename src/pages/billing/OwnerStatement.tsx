@@ -14,6 +14,13 @@ function aed(v: number) {
   return `AED ${v.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function deriveBranchCodeFromInvoiceNumber(invoiceNumber: string | null): string | null {
+  const normalized = invoiceNumber?.trim();
+  if (!normalized) return null;
+  const match = normalized.match(/^([A-Za-z]{2,8})[-/]/);
+  return match ? match[1].toUpperCase() : null;
+}
+
 export default function OwnerStatementPage() {
   const { ownerId } = useParams<{ ownerId: string }>();
   const { data: owner } = useOwner(ownerId || "");
@@ -104,7 +111,14 @@ export default function OwnerStatementPage() {
                   {outstanding.map((r) => (
                     <div key={r.invoice_id} className="rounded-md border p-3 flex items-center justify-between">
                       <div>
-                        <p className="font-mono text-xs">{r.invoice_number ?? r.invoice_id.slice(0, 8)}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-mono text-xs">{r.invoice_number ?? r.invoice_id.slice(0, 8)}</p>
+                          {deriveBranchCodeFromInvoiceNumber(r.invoice_number) ? (
+                            <Badge variant="outline" className="font-mono text-[11px]">
+                              {deriveBranchCodeFromInvoiceNumber(r.invoice_number)}
+                            </Badge>
+                          ) : null}
+                        </div>
                         <p className="text-sm capitalize">{r.service_type?.replace(/_/g, " ") ?? "—"}</p>
                         <p className="text-xs text-muted-foreground">Due {r.due_date ? format(new Date(`${r.due_date}T00:00:00`), "d MMM yyyy") : "—"}</p>
                       </div>
@@ -129,7 +143,14 @@ export default function OwnerStatementPage() {
                   <div className="space-y-2">
                     {rows.map((r) => (
                       <div key={r.invoice_id} className="flex items-center justify-between text-sm">
-                        <span>{r.invoice_number ?? r.invoice_id.slice(0, 8)} · {r.status}</span>
+                        <span className="flex items-center gap-2">
+                          <span>{r.invoice_number ?? r.invoice_id.slice(0, 8)} · {r.status}</span>
+                          {deriveBranchCodeFromInvoiceNumber(r.invoice_number) ? (
+                            <Badge variant="outline" className="font-mono text-[11px]">
+                              {deriveBranchCodeFromInvoiceNumber(r.invoice_number)}
+                            </Badge>
+                          ) : null}
+                        </span>
                         <span className="tabular-nums">{aed(r.total_aed)}</span>
                       </div>
                     ))}

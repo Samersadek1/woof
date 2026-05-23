@@ -86,6 +86,7 @@ export interface LineItemRow {
 export interface InvoiceWithItems {
   id: string;
   invoice_number: string | null;
+  branch_code: string | null;
   owner_id: string;
   service_type: string | null;
   service_id: string | null;
@@ -146,6 +147,13 @@ export interface CancellationRefund {
 
 export function formatAed(amount: number): string {
   return `AED ${amount.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function deriveBranchCodeFromInvoiceNumber(invoiceNumber: string | null): string | null {
+  const normalized = invoiceNumber?.trim();
+  if (!normalized) return null;
+  const match = normalized.match(/^([A-Za-z]{2,8})[-/]/);
+  return match ? match[1].toUpperCase() : null;
 }
 
 // ── Query keys ───────────────────────────────────────────────────────────────
@@ -1230,15 +1238,36 @@ export function useInvoicesForOwner(
     queryKey: billingKeys.invoices(ownerId, filters as Record<string, string>),
     enabled: !!ownerId,
     queryFn: async () => {
+      const withBranchSelect =
+        "*, line_items:invoice_line_items(*), bookings(booking_ref, check_in_date, check_out_date), branches(code)";
+      const legacySelect =
+        "*, line_items:invoice_line_items(*), bookings(booking_ref, check_in_date, check_out_date)";
       let q = supabase
         .from("invoices")
-        .select("*, line_items:invoice_line_items(*), bookings(booking_ref, check_in_date, check_out_date)")
+        .select(withBranchSelect)
         .eq("owner_id", ownerId)
         .order("created_at", { ascending: false });
 
       if (filters?.status) q = q.eq("status", filters.status);
 
-      const { data, error } = await q;
+      let { data, error } = await q;
+      if (error) {
+        const msg = error.message.toLowerCase();
+        const missingBranchRelation =
+          msg.includes("branches") ||
+          msg.includes("branch_id") ||
+          msg.includes("relationship");
+        if (!missingBranchRelation) throw error;
+        q = supabase
+          .from("invoices")
+          .select(legacySelect)
+          .eq("owner_id", ownerId)
+          .order("created_at", { ascending: false });
+        if (filters?.status) q = q.eq("status", filters.status);
+        const fallback = await q;
+        data = fallback.data;
+        error = fallback.error;
+      }
       if (error) throw error;
 
       type RawLineItem = { id: string; description: string; quantity: number; unit_price: number; total_price: number; service_type: string | null };
@@ -1248,19 +1277,34 @@ export function useInvoicesForOwner(
         const raw = inv as Record<string, unknown>;
         const lineItems = (raw.line_items as RawLineItem[] | null) ?? [];
         const booking = raw.bookings as RawBooking;
+        const subtotalAedResolved =
+          Number(inv.subtotal_aed ?? 0) === 0 && Number(inv.subtotal ?? 0) > 0
+            ? inv.subtotal
+            : (inv.subtotal_aed ?? inv.subtotal ?? 0);
+        const discountAedResolved =
+          Number(inv.discount_aed ?? 0) === 0 && Number(inv.discount_amount ?? 0) > 0
+            ? inv.discount_amount
+            : (inv.discount_aed ?? inv.discount_amount ?? 0);
+        const totalAedResolved =
+          Number(inv.total_aed ?? 0) === 0 && Number(inv.total ?? 0) > 0
+            ? inv.total
+            : (inv.total_aed ?? inv.total ?? 0);
 
         return {
           id: inv.id,
           invoice_number: inv.invoice_number,
+          branch_code:
+            ((raw.branches as { code: string | null } | null | undefined)?.code ?? null) ??
+            deriveBranchCodeFromInvoiceNumber(inv.invoice_number),
           owner_id: inv.owner_id,
           service_type: inv.service_type ?? null,
           service_id: inv.booking_id,
           status: inv.status as InvoiceStatus,
-          subtotal_aed: inv.subtotal_aed || inv.subtotal || 0,
+          subtotal_aed: subtotalAedResolved,
           discount_pct: inv.discount_pct,
-          discount_aed: inv.discount_aed || inv.discount_amount || 0,
+          discount_aed: discountAedResolved,
           total: inv.total,
-          total_aed: inv.total_aed ?? inv.total ?? 0,
+          total_aed: totalAedResolved,
           vat_aed: inv.vat_aed ?? null,
           payment_method: inv.payment_method as PaymentMethod | null,
           paid_at: inv.paid_at ?? (inv.status === "paid" ? inv.updated_at : null),

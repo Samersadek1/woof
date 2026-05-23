@@ -29,7 +29,7 @@ import {
   type PaymentMethod as BillingPaymentMethod,
   type ServiceType,
 } from "@/hooks/useBilling";
-import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -520,7 +520,14 @@ function InvoiceDetailDialog({
             </div>
             {invoice.discount_aed > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between", width: 240 }}>
-                <span style={{ color: "#666" }}>Discount ({invoice.discount_pct}%)</span>
+                <span style={{ color: "#666" }}>
+                  Discount ({invoiceDiscountPercent({
+                    subtotal: invoice.subtotal_aed,
+                    subtotal_aed: invoice.subtotal_aed,
+                    discount_amount: invoice.discount_aed,
+                    discount_aed: invoice.discount_aed,
+                  })}%)
+                </span>
                 <span style={{ color: "#16a34a" }}>-{formatAed(invoice.discount_aed)}</span>
               </div>
             )}
@@ -624,11 +631,13 @@ function OwnerSearchBar({ onSelect, selectedLabel, selectedOwnerId, onClear }: O
   }
 
   return (
-    <div ref={wrapperRef} className="relative max-w-lg">
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-      <Input className="pl-9" placeholder="Search client or pet name / phone…" value={query} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} autoComplete="off" />
+    <div ref={wrapperRef} className="max-w-lg space-y-1">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <Input className="pl-9" placeholder="Search client or pet name / phone…" value={query} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} autoComplete="off" />
+      </div>
       {open && query.length >= 1 && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border bg-popover shadow-md overflow-hidden">
+        <div className="w-full rounded-lg border bg-popover shadow-md overflow-hidden">
           {isLoading ? (
             <div className="p-3 space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
           ) : !owners || owners.length === 0 ? (
@@ -873,6 +882,7 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
               <TableHeader>
                 <TableRow className="bg-muted/40">
                   <TableHead className="min-w-[120px]">Invoice #</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead className="min-w-[100px]">Date</TableHead>
                   <TableHead>Service</TableHead>
                   <TableHead>Status</TableHead>
@@ -892,6 +902,15 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                         <button type="button" className="text-sm font-medium text-primary hover:underline" onClick={() => setViewInvoice(inv)}>
                           {inv.invoice_number ?? inv.id.slice(0, 8)}
                         </button>
+                      </TableCell>
+                      <TableCell>
+                        {inv.branch_code ? (
+                          <Badge variant="outline" className="font-mono text-[11px]">
+                            {inv.branch_code}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{format(parseISO(inv.created_at), "d MMM yyyy")}</TableCell>
                       <TableCell className="text-sm capitalize">{inv.service_type?.replace(/_/g, " ") ?? "—"}</TableCell>
