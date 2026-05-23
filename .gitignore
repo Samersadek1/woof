@@ -39,6 +39,7 @@ supabase/.temp/
 # Legacy PetExec import staging (local dry-run artifacts; removed from woof)
 /staging/
 /output/
+/migration/staging/
 
 # Standalone WhatsApp agent artifacts
 whatsapp-agent/node_modules/
