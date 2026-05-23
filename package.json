@@ -10,7 +10,11 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:unit": "vitest run --project unit",
+    "test:db": "vitest run --project db",
+    "test:e2e": "playwright test",
+    "test:all": "npm run test && npm run test:e2e"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -79,6 +83,7 @@
     "autoprefixer": "^10.4.21",
     "browserslist": "^4.28.2",
     "caniuse-lite": "^1.0.30001790",
+    "dotenv": "^17.4.2",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",

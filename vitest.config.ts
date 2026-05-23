@@ -5,10 +5,34 @@ import path from "path";
 export default defineConfig({
   plugins: [react()],
   test: {
-    environment: "jsdom",
     globals: true,
-    setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}", "tests/**/*.test.ts"],
+    projects: [
+      {
+        test: {
+          name: "unit",
+          globals: true,
+          environment: "jsdom",
+          setupFiles: ["./src/test/setup.ts"],
+          include: ["src/**/*.{test,spec}.{ts,tsx}"],
+        },
+      },
+      {
+        test: {
+          name: "db",
+          globals: true,
+          environment: "node",
+          include: ["tests/db/**/*.test.ts"],
+          setupFiles: ["./tests/helpers/setup.ts"],
+          testTimeout: 30000,
+          poolOptions: {
+            threads: {
+              singleThread: false,
+            },
+          },
+        },
+      },
+    ],
   },
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
