@@ -226,7 +226,7 @@ const VetsAdminPage = () => {
   const updateClinic = useUpdateVetClinic();
   const deleteClinic = useDeleteVetClinic();
 
-  const clinics = clinicsQ.data ?? [];
+  const clinics = useMemo(() => clinicsQ.data ?? [], [clinicsQ.data]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return clinics;

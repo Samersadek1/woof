@@ -33,7 +33,7 @@ import {
   type InvoiceWithItems,
   type InvoiceStatus,
 } from "@/hooks/useBilling";
-import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -637,7 +637,14 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                 </div>
                 {viewInvoice.discount_aed > 0 && (
                   <div className="flex justify-between w-60">
-                    <span className="text-muted-foreground">Discount ({viewInvoice.discount_pct}%)</span>
+                    <span className="text-muted-foreground">
+                      Discount ({invoiceDiscountPercent({
+                        subtotal: viewInvoice.subtotal_aed,
+                        subtotal_aed: viewInvoice.subtotal_aed,
+                        discount_amount: viewInvoice.discount_aed,
+                        discount_aed: viewInvoice.discount_aed,
+                      })}%)
+                    </span>
                     <span className="text-emerald-600">-{formatAed(viewInvoice.discount_aed)}</span>
                   </div>
                 )}

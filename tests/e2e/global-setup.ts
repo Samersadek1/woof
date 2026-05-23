@@ -8,6 +8,7 @@ dotenv.config({ path: ".env.test" });
 
 const TEST_ADMIN_EMAIL = "e2e-admin@woof.test";
 const TEST_ADMIN_PASSWORD = "E2EAdminPass_DoNotUseInProd_2026!";
+const E2E_PORT = Number(process.env.PLAYWRIGHT_WEB_PORT ?? "8091");
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -90,7 +91,7 @@ export default async function globalSetup() {
   const browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.goto("http://localhost:8080");
+  await page.goto(`http://localhost:${E2E_PORT}`);
   await page.evaluate(
     ({ k, v }) => {
       localStorage.setItem(k, v);

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { format, formatDistanceToNowStrict, parseISO } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { ownerDisplayName } from "@/lib/bookingUtils";
@@ -163,7 +164,7 @@ function stayDates(checkInDate: string, checkOutDate: string): string[] {
   try {
     const start = parseISO(checkInDate);
     const end = parseISO(checkOutDate);
-    let cursor = new Date(start);
+    const cursor = new Date(start);
     while (cursor < end && out.length < 14) {
       out.push(format(cursor, "dd MMM"));
       cursor.setDate(cursor.getDate() + 1);

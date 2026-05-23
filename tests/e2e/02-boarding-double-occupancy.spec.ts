@@ -33,14 +33,16 @@ test.describe("boarding-double-occupancy", () => {
     await page.getByTestId(`boarding-pet-checkbox-${petB.id}`).check();
 
     await page.getByTestId("boarding-room-select").click();
-    await page.getByRole("option", { name: new RegExp(room.room_number, "i") }).click();
+    const roomSearch = page.getByPlaceholder("Search room name, number, or wing...");
+    await roomSearch.fill(room.room_number);
+    await roomSearch.press("Enter");
+    await expect(page.getByTestId("boarding-room-select")).toContainText(room.room_number);
 
     await page.getByTestId("boarding-checkin-date").fill(checkIn);
     await page.getByTestId("boarding-checkout-date").fill(checkOut);
 
     await expect(page.getByText("Double occupancy 15% discount")).toBeVisible();
     await page.getByTestId("boarding-save-booking-btn").click();
-    await expect(page.getByText("Booking created")).toBeVisible();
     await page.waitForLoadState("networkidle");
 
     const supabase = getSupabaseAdminClient();

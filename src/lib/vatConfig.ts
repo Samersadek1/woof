@@ -54,7 +54,14 @@ export function invoiceDisplayTotals(inv: InvoiceVatInput): {
   vat: number;
   grandTotal: number;
 } {
-  const stored = inv.total_aed ?? inv.total ?? 0;
+  const totalBase = inv.total ?? 0;
+  const totalAedBase = inv.total_aed;
+  // Hygiene fallback for historical rows where *_aed columns were persisted as 0
+  // while total held the real amount.
+  const stored =
+    totalAedBase != null && Number(totalAedBase) === 0 && Number(totalBase) > 0
+      ? totalBase
+      : totalAedBase ?? totalBase;
   const vatStored = inv.vat_aed;
 
   if (vatStored != null) {
@@ -73,4 +80,25 @@ export function invoiceDisplayTotals(inv: InvoiceVatInput): {
 /** Amount to charge / outstanding balance (incl. VAT). */
 export function invoiceAmountDue(inv: InvoiceVatInput): number {
   return invoiceDisplayTotals(inv).grandTotal;
+}
+
+export type InvoiceDiscountInput = {
+  subtotal: number;
+  subtotal_aed: number | null;
+  discount_amount: number;
+  discount_aed: number | null;
+};
+
+/** Computes the effective discount percentage from stored amounts. */
+export function invoiceDiscountPercent(inv: InvoiceDiscountInput): number {
+  const subtotalStored =
+    inv.subtotal_aed != null && Number(inv.subtotal_aed) === 0 && Number(inv.subtotal) > 0
+      ? inv.subtotal
+      : inv.subtotal_aed ?? inv.subtotal ?? 0;
+  const discountStored =
+    inv.discount_aed != null && Number(inv.discount_aed) === 0 && Number(inv.discount_amount) > 0
+      ? inv.discount_amount
+      : inv.discount_aed ?? inv.discount_amount ?? 0;
+  if (subtotalStored <= 0 || discountStored <= 0) return 0;
+  return roundMoney2((discountStored / subtotalStored) * 100);
 }

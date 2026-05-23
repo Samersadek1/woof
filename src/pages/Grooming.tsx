@@ -845,11 +845,11 @@ const GroomingPage = () => {
   }, [ownerId]);
 
   useEffect(() => {
-    if (!sheetOpen || !ownerId || !ownerForGroomingPref || ownerForGroomingPref.id !== ownerId) return;
+    if (!sheetOpen || !ownerId || ownerForGroomingPref?.id !== ownerId) return;
     if (!discountAutoFromMemberRef.current) return;
     const pct = 0;
     setDiscountPct(pct > 0 ? String(pct) : "");
-  }, [sheetOpen, ownerId, ownerForGroomingPref?.id]);
+  }, [sheetOpen, ownerId, ownerForGroomingPref]);
 
   useEffect(() => {
     if (!ownerId) {
@@ -939,7 +939,7 @@ const GroomingPage = () => {
     if (pets.length === 1) {
       setSelectedPetIds([pets[0].id]);
     }
-  }, [sheetOpen, ownerId, petsIdFingerprint, pets.length]);
+  }, [sheetOpen, ownerId, pets, petsIdFingerprint, pets.length]);
 
   const newApptManualAddonAed = useMemo(() => {
     const out: { matting_fee?: number; heavy_dog_fee?: number } = {};

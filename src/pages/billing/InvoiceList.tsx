@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
@@ -87,7 +87,9 @@ export default function InvoiceListPage() {
   const [ownerSearch, setOwnerSearch] = useState("");
   const [ownerId, setOwnerId] = useState<string | undefined>(undefined);
   const [ownerLabel, setOwnerLabel] = useState("");
+  const [ownerSearchOpen, setOwnerSearchOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<InvoiceSummary | null>(null);
+  const ownerSearchRef = useRef<HTMLDivElement>(null);
 
   const { data: ownerHits = [] } = useOwners(ownerSearch.trim().length >= 2 ? ownerSearch : undefined);
   const { data: invoices = [], isLoading } = useInvoices({
@@ -124,6 +126,16 @@ export default function InvoiceListPage() {
     setStatus(Array.from(new Set(next)));
   }, [searchParams]);
 
+  useEffect(() => {
+    const handler = (event: PointerEvent) => {
+      if (ownerSearchRef.current && !ownerSearchRef.current.contains(event.target as Node)) {
+        setOwnerSearchOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, []);
+
   return (
     <>
       <TopBar title="Billing Invoices" />
@@ -138,7 +150,7 @@ export default function InvoiceListPage() {
         <Card>
           <CardContent className="p-4 space-y-4">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              <div className="space-y-1">
+              <div ref={ownerSearchRef} className="space-y-1">
                 <Label>Owner</Label>
                 <Input
                   placeholder="Search name/phone"
@@ -147,21 +159,23 @@ export default function InvoiceListPage() {
                     setOwnerSearch(e.target.value);
                     setOwnerId(undefined);
                     setOwnerLabel("");
+                    setOwnerSearchOpen(true);
                   }}
+                  onFocus={() => setOwnerSearchOpen(true)}
                 />
-                {ownerSearch.trim().length >= 2 && !ownerId && ownerHits.length > 0 && (
-                  <div className="rounded border bg-background max-h-40 overflow-auto">
+                {ownerSearchOpen && ownerSearch.trim().length >= 2 && !ownerId && ownerHits.length > 0 && (
+                  <div className="rounded border bg-popover shadow-md max-h-40 overflow-auto">
                     {ownerHits.slice(0, 8).map((o) => (
                       <button
                         key={o.id}
                         type="button"
                         className="w-full text-left px-3 py-2 text-sm hover:bg-muted"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
+                        onClick={() => {
                           setOwnerId(o.id);
                           const label = ownerDisplayName(o.first_name, o.last_name);
                           setOwnerLabel(label);
                           setOwnerSearch("");
+                          setOwnerSearchOpen(false);
                         }}
                       >
                         {ownerDisplayName(o.first_name, o.last_name)} <span className="text-muted-foreground">{o.phone}</span>

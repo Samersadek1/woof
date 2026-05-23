@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createTestOwner, createTestRoom } from "../helpers/factories";
 import { getServiceRoleClient } from "../helpers/supabaseTestClient";
 import { withScope } from "./_utils";
+import type { Database } from "@/integrations/supabase/types";
 
 async function createTestBooking(args: { ownerId: string; roomId?: string | null; notes: string }) {
   const supabase = getServiceRoleClient();
@@ -27,7 +28,7 @@ async function createTestBooking(args: { ownerId: string; roomId?: string | null
 describe("booking_room_assignments", () => {
   it("inserts assignment and reads it back", async () => {
     await withScope(async (scope) => {
-      const supabase = getServiceRoleClient() as any;
+      const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
       const room = await createTestRoom(scope, { display_name: `${scope.scopeId}_A`, room_number: "A100" });
       const booking = await createTestBooking({
@@ -65,7 +66,7 @@ describe("booking_room_assignments", () => {
 
   it("rejects end_date earlier than start_date", async () => {
     await withScope(async (scope) => {
-      const supabase = getServiceRoleClient() as any;
+      const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
       const room = await createTestRoom(scope, { display_name: `${scope.scopeId}_B`, room_number: "B100" });
       const booking = await createTestBooking({
@@ -89,7 +90,7 @@ describe("booking_room_assignments", () => {
 
   it("cascades assignment deletes when booking is deleted", async () => {
     await withScope(async (scope) => {
-      const supabase = getServiceRoleClient() as any;
+      const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
       const room = await createTestRoom(scope, { display_name: `${scope.scopeId}_C`, room_number: "C100" });
       const booking = await createTestBooking({
@@ -126,7 +127,7 @@ describe("booking_room_assignments", () => {
 
   it("lists assignments by room and date window", async () => {
     await withScope(async (scope) => {
-      const supabase = getServiceRoleClient() as any;
+      const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
       const room = await createTestRoom(scope, { display_name: `${scope.scopeId}_D`, room_number: "D100" });
 
@@ -174,7 +175,7 @@ describe("booking_room_assignments", () => {
 
   it("supports multiple non-overlapping segments for one booking", async () => {
     await withScope(async (scope) => {
-      const supabase = getServiceRoleClient() as any;
+      const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
       const room = await createTestRoom(scope, { display_name: `${scope.scopeId}_E`, room_number: "E100" });
       const booking = await createTestBooking({
@@ -212,7 +213,7 @@ describe("booking_room_assignments", () => {
 
   it("allows same room across different bookings on different dates", async () => {
     await withScope(async (scope) => {
-      const supabase = getServiceRoleClient() as any;
+      const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
       const room = await createTestRoom(scope, { display_name: `${scope.scopeId}_F`, room_number: "F100" });
 
@@ -256,7 +257,7 @@ describe("booking_room_assignments", () => {
   });
 
   it("keeps source-id counts stable when import subset is re-run", async () => {
-    const supabase = getServiceRoleClient() as any;
+    const supabase = getServiceRoleClient();
 
     const before = await Promise.all([
       supabase.from("rooms").select("*", { count: "exact", head: true }).like("source_external_id", "ROOM-%"),
@@ -302,7 +303,7 @@ describe("booking_room_assignments", () => {
   });
 
   it("spot-checks known imported booking with pet and room segments", async () => {
-    const supabase = getServiceRoleClient() as any;
+    const supabase = getServiceRoleClient();
     const { data: booking, error: bookingError } = await supabase
       .from("bookings")
       .select("id, source_external_id")
@@ -323,12 +324,21 @@ describe("booking_room_assignments", () => {
       .order("start_date", { ascending: true });
     if (segmentsError) throw segmentsError;
 
-    const petNames = (pets ?? [])
-      .map((row: any) => row.pets?.name)
+    type BookingPetNameRow = Pick<
+      Database["public"]["Tables"]["booking_pets"]["Row"],
+      "booking_id"
+    > & { pets: Pick<Database["public"]["Tables"]["pets"]["Row"], "name"> | null };
+    type RoomSegmentRow = Pick<
+      Database["public"]["Tables"]["booking_room_assignments"]["Row"],
+      "start_date" | "end_date"
+    > & { rooms: Pick<Database["public"]["Tables"]["rooms"]["Row"], "name"> | null };
+
+    const petNames = ((pets ?? []) as BookingPetNameRow[])
+      .map((row) => row.pets?.name)
       .filter(Boolean)
       .sort();
-    const roomSegments = (segments ?? []).map(
-      (row: any) => `${row.rooms?.name} (${row.start_date} to ${row.end_date})`,
+    const roomSegments = ((segments ?? []) as RoomSegmentRow[]).map(
+      (row) => `${row.rooms?.name} (${row.start_date} to ${row.end_date})`,
     );
 
     expect(petNames).toEqual(["Paddy"]);

@@ -3,6 +3,8 @@ import { config as loadEnv } from "dotenv";
 
 loadEnv({ path: ".env.test" });
 
+const E2E_PORT = Number(process.env.PLAYWRIGHT_WEB_PORT ?? "8091");
+
 export default defineConfig({
   testDir: "./tests/e2e",
   globalSetup: "./tests/e2e/global-setup.ts",
@@ -10,7 +12,7 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://localhost:8080",
+    baseURL: `http://localhost:${E2E_PORT}`,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     storageState: "tests/e2e/.auth/admin.json",
@@ -22,8 +24,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 8080",
-    port: 8080,
+    command: `PORT=${E2E_PORT} npm run dev -- --host 127.0.0.1 --port ${E2E_PORT}`,
+    port: E2E_PORT,
     reuseExistingServer: false,
     timeout: 120_000,
     env: {

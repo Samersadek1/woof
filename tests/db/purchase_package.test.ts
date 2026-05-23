@@ -8,6 +8,10 @@ function isoDate(value: Date): string {
   return formatISO(value, { representation: "date" });
 }
 
+function utcToday(): Date {
+  return new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
+}
+
 describe("purchase_package", () => {
   it("purchases lucky_7 for one medium pet", async () => {
     await withScope(async (scope) => {
@@ -40,7 +44,7 @@ describe("purchase_package", () => {
       expect(credits?.[0].pet_id).toBe(pet.id);
       scope.registerResource("service_credits", credits?.[0].id ?? null);
 
-      const expectedExpiry = isoDate(addMonths(new Date(), 2));
+      const expectedExpiry = isoDate(addMonths(utcToday(), 2));
       expect(credits?.[0].expires_at).toBe(expectedExpiry);
     });
   });

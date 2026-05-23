@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { addMinutes, format, parse, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { labelForGroomingService, type GroomingService } from "@/lib/groomingCatalog";

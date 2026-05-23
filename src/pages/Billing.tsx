@@ -609,11 +609,11 @@ function OwnerSearchBar({ onSelect, selectedLabel, selectedOwnerId, onClear }: O
   const { data: owners, isLoading } = useOwners(query.length >= 1 ? query : undefined);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handler = (e: PointerEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
   }, []);
 
   if (selectedLabel && selectedOwnerId) {
@@ -651,12 +651,12 @@ function OwnerSearchBar({ onSelect, selectedLabel, selectedOwnerId, onClear }: O
                 return (
                   <li key={o.id} className="flex items-stretch">
                     <button type="button" className="flex-1 min-w-0 flex items-center justify-between gap-2 px-4 py-2.5 text-sm hover:bg-muted/60 text-left transition-colors"
-                      onMouseDown={(e) => { e.preventDefault(); onSelect(o.id, label); setQuery(""); setOpen(false); }}>
+                      onClick={() => { onSelect(o.id, label); setQuery(""); setOpen(false); }}>
                       <span className="font-medium truncate">{label}</span>
                       <span className="text-muted-foreground text-xs shrink-0">{details}</span>
                     </button>
                     <button type="button" className="shrink-0 px-3 flex items-center justify-center border-l hover:bg-muted/80 transition-colors" title="Open profile"
-                      onMouseDown={(e) => { e.preventDefault(); navigate(`/customers/${o.id}`); setOpen(false); }}>
+                      onClick={() => { navigate(`/customers/${o.id}`); setOpen(false); }}>
                       <ExternalLink className="h-4 w-4 text-muted-foreground" />
                     </button>
                   </li>

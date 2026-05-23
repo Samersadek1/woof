@@ -8,6 +8,11 @@ function d(daysFromNow: number): string {
   return formatISO(addDays(new Date(), daysFromNow), { representation: "date" });
 }
 
+function utcDate(daysFromNow: number): string {
+  const nowUtc = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
+  return formatISO(addDays(nowUtc, daysFromNow), { representation: "date" });
+}
+
 describe("list_active_credits_for_pet", () => {
   it("returns empty when pet has no credits", async () => {
     await withScope(async (scope) => {
@@ -97,7 +102,7 @@ describe("list_active_credits_for_pet", () => {
             service_code: "daycare_full_day",
             units_total: 3,
             units_consumed: 0,
-            expires_at: d(-1),
+            expires_at: utcDate(-1),
             source_type: "promotional",
             status: "active",
           },

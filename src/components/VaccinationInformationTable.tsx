@@ -114,7 +114,7 @@ export function VaccinationInformationTable({
   useEffect(() => {
     setRows(buildDraftRows(vaccinations));
     setPendingDeletes([]);
-  }, [petId, serialized]);
+  }, [petId, serialized, vaccinations]);
 
   const isSaving =
     addVac.isPending || updateVac.isPending || deleteVac.isPending;
