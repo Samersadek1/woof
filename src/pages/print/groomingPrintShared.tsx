@@ -3,9 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { labelForGroomingService, type GroomingService } from "@/lib/groomingCatalog";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import {
-  grandTotalFromNet,
   invoiceDisplayTotals,
-  vatAmountFromNet,
+  netFromGrossInclusive,
+  vatAmountFromGrossInclusive,
   vatLineLabel,
 } from "@/lib/vatConfig";
 
@@ -16,11 +16,11 @@ export type GroomingInvoiceMoney = {
 };
 
 function groomingMoneyFromPrice(price: number): GroomingInvoiceMoney {
-  const netExVat = Math.max(0, price);
+  const gross = Math.max(0, price);
   return {
-    netExVat,
-    vat: vatAmountFromNet(netExVat),
-    grandTotal: grandTotalFromNet(netExVat),
+    netExVat: netFromGrossInclusive(gross),
+    vat: vatAmountFromGrossInclusive(gross),
+    grandTotal: gross,
   };
 }
 

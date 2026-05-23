@@ -13,7 +13,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
+import {
+  netFromGrossInclusive,
+  vatAmountFromGrossInclusive,
+  vatLineLabel,
+} from "@/lib/vatConfig";
 
 type PricingRow = {
   key: Database["public"]["Enums"]["service_code"];
@@ -188,9 +192,9 @@ export default function CreateInvoicePage() {
   const lineDiscount = lines.reduce((s, l) => s + l.discount, 0);
   const lineTotal = lines.reduce((s, l) => s + l.total, 0);
   const adjustmentTotal = adjustments.reduce((s, a) => s + Math.max(0, a.amount), 0);
-  const netExVat = Math.max(0, lineTotal - adjustmentTotal);
-  const vatAed = vatAmountFromNet(netExVat);
-  const invoiceGross = grandTotalFromNet(netExVat);
+  const invoiceGross = Math.max(0, lineTotal - adjustmentTotal);
+  const vatAed = vatAmountFromGrossInclusive(invoiceGross);
+  const netExVat = netFromGrossInclusive(invoiceGross);
 
   const submit = async () => {
     if (!ownerId) return toast.error("Owner is required.");

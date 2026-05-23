@@ -85,7 +85,11 @@ import {
 import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
-import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
+import {
+  netFromGrossInclusive,
+  vatAmountFromGrossInclusive,
+  vatLineLabel,
+} from "@/lib/vatConfig";
 import {
   BOARDING_TRANSPORT_REGION_OPTIONS,
   TRANSPORT_PRICING_KEYS,
@@ -1254,12 +1258,12 @@ export function DogBoardingCalendar({
     },
   });
 
-  const dogNetAfterMember = dogMemberDiscountPreview?.final_aed ?? dogSubtotalAfterDoubleOccupancy;
-  const dogBookingVatEstimate = useMemo(() => vatAmountFromNet(dogNetAfterMember), [dogNetAfterMember]);
-  const dogBookingGrossEstimate = useMemo(
-    () => grandTotalFromNet(dogNetAfterMember),
-    [dogNetAfterMember],
+  const dogGrossAfterMember = dogMemberDiscountPreview?.final_aed ?? dogSubtotalAfterDoubleOccupancy;
+  const dogBookingVatEstimate = useMemo(
+    () => vatAmountFromGrossInclusive(dogGrossAfterMember),
+    [dogGrossAfterMember],
   );
+  const dogBookingGrossEstimate = useMemo(() => Math.max(0, dogGrossAfterMember), [dogGrossAfterMember]);
 
   const handleBelongingsFlowFinished = () => {
     queryClient.invalidateQueries({ queryKey: ["bookings"] });
@@ -2312,7 +2316,7 @@ export function DogBoardingCalendar({
                     {dogBookingEstimateTotal > 0 && (
                       <div className="flex justify-between gap-4 font-medium">
                         <span>Total</span>
-                        <span className="tabular-nums">{formatAed(dogNetAfterMember)}</span>
+                        <span className="tabular-nums">{formatAed(netFromGrossInclusive(dogGrossAfterMember))}</span>
                       </div>
                     )}
                     {dogBookingEstimateTotal > 0 && (
@@ -2985,12 +2989,12 @@ function CatBoardingCalendar({
     },
   });
 
-  const catNetAfterMember = catMemberDiscountPreview?.final_aed ?? catSubtotalAfterDoubleOccupancy;
-  const catBookingVatEstimate = useMemo(() => vatAmountFromNet(catNetAfterMember), [catNetAfterMember]);
-  const catBookingGrossEstimate = useMemo(
-    () => grandTotalFromNet(catNetAfterMember),
-    [catNetAfterMember],
+  const catGrossAfterMember = catMemberDiscountPreview?.final_aed ?? catSubtotalAfterDoubleOccupancy;
+  const catBookingVatEstimate = useMemo(
+    () => vatAmountFromGrossInclusive(catGrossAfterMember),
+    [catGrossAfterMember],
   );
+  const catBookingGrossEstimate = useMemo(() => Math.max(0, catGrossAfterMember), [catGrossAfterMember]);
 
   const handleBelongingsFlowFinished = () => {
     queryClient.invalidateQueries({ queryKey: ["bookings"] });
@@ -3841,7 +3845,7 @@ function CatBoardingCalendar({
                     {catBookingEstimateTotal > 0 && (
                       <div className="flex justify-between gap-4 font-medium">
                         <span>Total</span>
-                        <span className="tabular-nums">{formatAed(catNetAfterMember)}</span>
+                        <span className="tabular-nums">{formatAed(netFromGrossInclusive(catGrossAfterMember))}</span>
                       </div>
                     )}
                     {catBookingEstimateTotal > 0 && (

@@ -19,7 +19,11 @@ import {
   daycareHourlyLinearTotal,
   DAYCARE_HOURLY_UNIT_KEY,
 } from "@/lib/servicePricing";
-import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
+import {
+  netFromGrossInclusive,
+  vatAmountFromGrossInclusive,
+  vatLineLabel,
+} from "@/lib/vatConfig";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1548,7 +1552,7 @@ function PlannerTab() {
                         <span>Net (ex VAT)</span>
                         <span className="tabular-nums">
                           {daycareInvoiceNetExVatPreview != null
-                            ? `AED ${daycareInvoiceNetExVatPreview.toFixed(2)}`
+                            ? `AED ${netFromGrossInclusive(daycareInvoiceNetExVatPreview).toFixed(2)}`
                             : "—"}
                         </span>
                       </div>
@@ -1556,7 +1560,7 @@ function PlannerTab() {
                         <div className="flex items-center justify-between text-sm">
                           <span>{vatLineLabel()}</span>
                           <span className="tabular-nums">
-                            AED {vatAmountFromNet(daycareInvoiceNetExVatPreview).toFixed(2)}
+                            AED {vatAmountFromGrossInclusive(daycareInvoiceNetExVatPreview).toFixed(2)}
                           </span>
                         </div>
                       ) : null}
@@ -1564,7 +1568,7 @@ function PlannerTab() {
                         <span>Total incl. VAT</span>
                         <span className="tabular-nums">
                           {daycareInvoiceNetExVatPreview != null
-                            ? `AED ${grandTotalFromNet(daycareInvoiceNetExVatPreview).toFixed(2)}`
+                            ? `AED ${Math.max(0, daycareInvoiceNetExVatPreview).toFixed(2)}`
                             : "—"}
                         </span>
                       </div>

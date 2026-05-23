@@ -14,6 +14,18 @@ export function roundMoney2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+/** VAT amount when prices are VAT-inclusive gross values. */
+export function vatAmountFromGrossInclusive(grossInclusive: number): number {
+  const gross = Math.max(0, grossInclusive);
+  return roundMoney2(gross - gross / (1 + VAT_RATE));
+}
+
+/** Net ex-VAT amount from a VAT-inclusive gross value. */
+export function netFromGrossInclusive(grossInclusive: number): number {
+  const gross = Math.max(0, grossInclusive);
+  return roundMoney2(gross - vatAmountFromGrossInclusive(gross));
+}
+
 /** VAT amount on a net (ex-VAT) total after discounts. */
 export function vatAmountFromNet(netAfterDiscount: number): number {
   return roundMoney2(Math.max(0, netAfterDiscount) * VAT_RATE);

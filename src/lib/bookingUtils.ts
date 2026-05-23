@@ -4,7 +4,7 @@ import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import { serviceTypeForBoardingAddonKey } from "@/lib/groomingCatalog";
-import { grandTotalFromNet, vatAmountFromNet } from "@/lib/vatConfig";
+import { netFromGrossInclusive, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
 
 /**
  * Returns the number of nights between two ISO date strings.
@@ -154,9 +154,9 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
   const isBoardingReference = serviceType === "boarding";
 
-  const netAfterDiscount = total;
-  const vatAed = vatAmountFromNet(netAfterDiscount);
-  const grossTotal = grandTotalFromNet(netAfterDiscount);
+  const grossTotal = Math.max(0, total);
+  const vatAed = vatAmountFromGrossInclusive(grossTotal);
+  const netAfterDiscount = netFromGrossInclusive(grossTotal);
 
   const { data: inv, error: invErr } = await supabase
     .from("invoices")

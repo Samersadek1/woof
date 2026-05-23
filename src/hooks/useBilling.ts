@@ -15,7 +15,12 @@ import {
   useRefundWallet,
   type WalletMutationPayload,
 } from "@/hooks/useWallet";
-import { grandTotalFromNet, invoiceAmountDue, invoiceDisplayTotals, vatAmountFromNet } from "@/lib/vatConfig";
+import {
+  invoiceAmountDue,
+  invoiceDisplayTotals,
+  netFromGrossInclusive,
+  vatAmountFromGrossInclusive,
+} from "@/lib/vatConfig";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -634,9 +639,9 @@ export function useCreateInvoice() {
       const normalizedDiscountPct = 0;
       const normalizedTotal = normalizedSubtotal;
 
-      const netExVat = normalizedTotal;
-      const vatAed = vatAmountFromNet(netExVat);
-      const grossTotal = grandTotalFromNet(netExVat);
+      const grossTotal = Math.max(0, normalizedTotal);
+      const vatAed = vatAmountFromGrossInclusive(grossTotal);
+      const netExVat = netFromGrossInclusive(grossTotal);
 
       const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         .toISOString()

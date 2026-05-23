@@ -42,7 +42,11 @@ import {
   workflowStatusLabel,
   type GroomingWorkflowStatus,
 } from "@/lib/groomingWorkflow";
-import { grandTotalFromNet, invoiceDisplayTotals, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
+import {
+  invoiceDisplayTotals,
+  vatAmountFromGrossInclusive,
+  vatLineLabel,
+} from "@/lib/vatConfig";
 import {
   GROOMING_PAYMENT_METHOD_NONE,
   GROOMING_PAYMENT_METHOD_OPTIONS,
@@ -2777,13 +2781,13 @@ const GroomingPage = () => {
                       <div className="flex justify-between gap-3">
                         <span className="text-muted-foreground">{vatLineLabel()}</span>
                         <span className="tabular-nums font-medium">
-                          {vatAmountFromNet(newApptFinalAed).toFixed(2)} AED
+                          {vatAmountFromGrossInclusive(newApptFinalAed).toFixed(2)} AED
                         </span>
                       </div>
                       <div className="flex justify-between gap-3 font-bold">
                         <span>Total incl. VAT</span>
                         <span className="tabular-nums">
-                          {grandTotalFromNet(newApptFinalAed).toFixed(2)} AED
+                          {Math.max(0, newApptFinalAed).toFixed(2)} AED
                         </span>
                       </div>
                     </div>
