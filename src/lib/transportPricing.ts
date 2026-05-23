@@ -7,7 +7,7 @@
  *   - `transport_abudhabi`      — AED 250.00 per dog per one-way trip
  *
  * We call the union of these "TransportZone". The legacy DB column
- * `bookings.transport_zone` / `daycare_packages.transport_zone` stores a
+ * `bookings.transport_zone` stores a
  * free-text string — older rows contain the value `"dubai"` which we treat as
  * `"dubai_private"` (since `transport_dubai` is the private key).
  */
@@ -154,10 +154,10 @@ export function transportZoneLabel(zone: TransportZone): string {
  *   - private           → flat per trip (quantity = 1, cap 3 dogs)
  */
 export function transportQuantityForPets(zone: TransportZone, petCount: number): number {
-  if (zone === "complimentary" || zone === "free") return 0;
-  const pets = Math.max(1, petCount);
-  if (zone === "dubai_private") return 1;
-  return pets;
+  void zone;
+  void petCount;
+  // Woof Phase 2 transport pricing is intentionally zeroed (UI flags remain).
+  return 0;
 }
 
 /**
@@ -232,8 +232,9 @@ export function regionToTransportZone(region: BoardingTransportRegion): Transpor
 
 /** Parses AED amounts from boarding transport price inputs (comma-safe). */
 export function parseBoardingTransportAed(value: string): number {
-  const n = parseFloat(String(value).replace(/,/g, "").trim());
-  return Number.isFinite(n) && n >= 0 ? n : 0;
+  void value;
+  // Woof Phase 2 transport pricing is intentionally zeroed (UI flags remain).
+  return 0;
 }
 
 export function transportRegionLabel(region: BoardingTransportRegion): string {

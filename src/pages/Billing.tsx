@@ -100,18 +100,10 @@ import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
 import { useInvoiceDeletionLog } from "@/hooks/useInvoices";
 
-type MemberType = Database["public"]["Enums"]["member_type"];
 type PaymentMethod = Database["public"]["Enums"]["payment_method"];
 type TransactionType = Database["public"]["Enums"]["transaction_type"];
 
 const LOW_BALANCE_THRESHOLD = 500;
-
-const MEMBER_BADGE: Record<MemberType, string> = {
-  standard: "bg-slate-100 text-slate-700 border-slate-200",
-  silver: "bg-blue-50 text-blue-700 border-blue-200",
-  gold: "bg-amber-50 text-amber-700 border-amber-200",
-  platinum: "bg-violet-50 text-violet-700 border-violet-200",
-};
 
 const TX_BADGE: Record<string, { label: string; className: string }> = {
   top_up: { label: "Top Up", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
@@ -671,7 +663,7 @@ function OwnerSearchBar({ onSelect, selectedLabel, selectedOwnerId, onClear }: O
 
 // ── WalletTab ────────────────────────────────────────────────────────────────
 
-function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: string; last_name: string; phone: string; member_type: MemberType; wallet_balance: number; id: string } }) {
+function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: string; last_name: string; phone: string; wallet_balance: number; id: string } }) {
   const navigate = useNavigate();
   const { data: transactions, isLoading: txLoading } = useWalletTransactions(ownerId);
   const createInvoice = useCreateInvoice();
@@ -702,7 +694,7 @@ function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: s
         discountPct: 0,
         discountAed: 0,
         total: amount,
-        memberType: owner.member_type,
+        memberType: "none",
       },
       notes: "Registration fee",
     }, {
@@ -725,7 +717,7 @@ function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: s
             onClick={() => navigate(`/customers/${owner.id}`)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/customers/${owner.id}`); } }}>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-xl font-semibold">{ownerDisplayName(owner.first_name, owner.last_name)}</h2>
-              <Badge variant="outline" className={MEMBER_BADGE[owner.member_type]}>{owner.member_type.charAt(0).toUpperCase() + owner.member_type.slice(1)}</Badge>
+              <Badge variant="outline">Woof</Badge>
             </div>
             <p className="text-sm text-muted-foreground">{owner.phone}</p>
           </div>
@@ -1779,7 +1771,7 @@ function PricingTab() {
           <DialogHeader>
             <DialogTitle>Add daycare package</DialogTitle>
             <DialogDescription>
-              Creates a new row in daycare_package_types. It appears in the table immediately after save.
+              Adds a daycare package definition entry. It appears in the table immediately after save.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">

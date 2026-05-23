@@ -1,5 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parse, differenceInYears, differenceInMonths, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { usePet, useUpdatePet } from "@/hooks/usePets";
@@ -9,11 +10,6 @@ import {
   type GroomingAppointmentWithJoins,
 } from "@/hooks/useGrooming";
 import { usePetBookings, type BookingWithDetails } from "@/hooks/useBookings";
-import {
-  usePetParkBookings,
-  useCreateParkBooking,
-  type ParkBookingWithJoins,
-} from "@/hooks/usePark";
 import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
@@ -41,6 +37,14 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -83,23 +87,43 @@ import {
 type PetUpdate = Database["public"]["Tables"]["pets"]["Update"];
 type AssessmentStatus = Database["public"]["Enums"]["assessment_status"];
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
-type ParkSize = Database["public"]["Enums"]["park_size"];
-type PetSizeCategory = Database["public"]["Enums"]["pet_size_category"];
+type PetSize = Database["public"]["Enums"]["pet_size"];
+type AssessmentBookingRpcRow =
+  Database["public"]["Functions"]["create_assessment_booking"]["Returns"][number];
+type ActiveCreditRow = Database["public"]["Tables"]["service_credits"]["Row"] & {
+  package_name: string | null;
+  units_remaining: number;
+};
 
-const PARK_ASSESSMENT_SLOTS = Array.from({ length: 20 }, (_, i) => {
-  const totalMinutes = 8 * 60 + i * 30;
-  const endMinutes = totalMinutes + 30;
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  const eh = Math.floor(endMinutes / 60);
-  const em = endMinutes % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return {
-    start: `${pad(h)}:${pad(m)}:00`,
-    end: `${pad(eh)}:${pad(em)}:00`,
-    label: `${pad(h)}:${pad(m)} - ${pad(eh)}:${pad(em)}`,
+function creditServiceLabel(serviceCode: Database["public"]["Enums"]["service_code"]): string {
+  const labels: Record<Database["public"]["Enums"]["service_code"], string> = {
+    boarding_night: "boarding night",
+    daycare_full_day: "daycare day",
+    daycare_hourly: "daycare hourly",
+    grooming_full_service: "full service grooming",
+    cat_grooming_full_no_bath: "cat full service (no bath)",
+    cat_grooming_full_with_bath: "cat full service (with bath)",
+    grooming_bath_brush_tidy: "bath, brush and tidy",
+    grooming_nail_ear_teeth: "nail/ear/teeth care",
+    cat_grooming_nail_ear: "cat nail/ear care",
+    grooming_hair_no_more: "hair-no-more",
+    cat_grooming_hair_no_more: "cat hair-no-more",
+    grooming_splash: "splash",
+    cat_grooming_splash: "cat splash",
+    addon_nails: "nail add-on",
+    addon_glands: "glands add-on",
+    addon_dematting: "dematting add-on",
+    addon_teeth_cleaning: "teeth cleaning add-on",
+    addon_flea_tick_bath: "flea/tick bath add-on",
+    addon_specialised_shampoo: "specialised shampoo add-on",
+    treadmill_daycare_addon: "treadmill session",
+    treadmill_hourly_addon: "treadmill hourly",
+    assessment_with_first_hour: "assessment",
   };
-});
+  return labels[serviceCode] ?? serviceCode;
+}
+
+const ASSESSMENT_SLOT_OPTIONS = ["10:00", "11:00", "12:00", "13:00", "14:00"] as const;
 
 const ASSESSMENT_BADGE: Record<AssessmentStatus, string> = {
   not_assessed: "bg-slate-100 text-slate-600 border-slate-200",
@@ -115,14 +139,14 @@ const ASSESSMENT_LABEL: Record<AssessmentStatus, string> = {
   failed: "Failed",
 };
 
-const SIZE_CATEGORY_LABEL: Record<PetSizeCategory, string> = {
-  S: "Small (up to 10kg)",
-  M: "Medium (10-20kg)",
-  L: "Large (20-35kg)",
-  XL: "X-Large (35kg+)",
+const PET_SIZE_LABEL: Record<PetSize, string> = {
+  small: "Small",
+  medium: "Medium",
+  large: "Large",
 };
 
 const BOOKING_STATUS_BADGE: Record<BookingStatus, string> = {
+  draft: "bg-slate-100 text-slate-600 border-slate-200",
   confirmed: "bg-blue-100 text-blue-800 border-blue-200",
   checked_in: "bg-emerald-100 text-emerald-800 border-emerald-200",
   checked_out: "bg-slate-100 text-slate-600 border-slate-200",
@@ -133,7 +157,7 @@ const BOOKING_STATUS_BADGE: Record<BookingStatus, string> = {
 
 const TIME_ANCHOR = new Date(2000, 0, 1);
 
-type HistoryServiceFilter = "all" | "boarding" | "grooming" | "park";
+type HistoryServiceFilter = "all" | "boarding" | "grooming";
 
 function historyFilterEmptyMessage(filter: HistoryServiceFilter): string {
   switch (filter) {
@@ -141,8 +165,6 @@ function historyFilterEmptyMessage(filter: HistoryServiceFilter): string {
       return "No boarding stays in this history.";
     case "grooming":
       return "No grooming appointments in this history.";
-    case "park":
-      return "No park visits in this history.";
     default:
       return "No bookings yet.";
   }
@@ -169,10 +191,6 @@ function formatGroomSlotTime(t: string | null): string {
   }
 }
 
-function parkLaneLabel(lane: ParkSize): string {
-  return lane === "small" ? "Small dog" : "Big dog";
-}
-
 function groomerLine(g: GroomingAppointmentWithJoins): string {
   if (g.grooming_notes?.trim()) return g.grooming_notes.trim();
   return "—";
@@ -185,8 +203,7 @@ function groomingStatusLabel(status: string, noShow: boolean): string {
 
 type BookingDetailSelection =
   | { kind: "stay"; stay: BookingWithDetails }
-  | { kind: "grooming"; groom: GroomingAppointmentWithJoins }
-  | { kind: "park"; park: ParkBookingWithJoins };
+  | { kind: "grooming"; groom: GroomingAppointmentWithJoins };
 
 function petAge(dob: string | null): string {
   if (!dob) return "—";
@@ -201,37 +218,86 @@ const PetProfilePage = () => {
   const { ownerId, petId } = useParams<{ ownerId: string; petId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
 
   const { data: pet, isLoading } = usePet(petId!);
+  const { data: activeCredits = [], isLoading: creditsLoading } = useQuery({
+    queryKey: ["pet_active_credits", petId],
+    enabled: !!petId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("service_credits")
+        .select("*, purchase_groups(package_definitions(display_name))")
+        .eq("pet_id", petId!)
+        .eq("status", "active")
+        .gte("expires_at", new Date().toISOString().slice(0, 10))
+        .order("expires_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map((row) => {
+        const packageName =
+          (
+            row as unknown as {
+              purchase_groups?: { package_definitions?: { display_name?: string | null } | null } | null;
+            }
+          ).purchase_groups?.package_definitions?.display_name ?? null;
+        return {
+          ...row,
+          package_name: packageName,
+          units_remaining: row.units_total - row.units_consumed,
+        };
+      }) as ActiveCreditRow[];
+    },
+  });
   const { data: petStays = [], isLoading: staysLoading } = usePetBookings(petId ?? "");
   const { data: groomingHistory = [], isLoading: groomingLoading } = useGroomingHistory(
     petId ?? "",
     80,
   );
-  const { data: petPark = [], isLoading: parkLoading } = usePetParkBookings(petId ?? "");
   const updatePet = useUpdatePet();
   const updateAssessment = useUpdateAssessment();
-  const createParkBooking = useCreateParkBooking();
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<PetUpdate & { id: string }>({ id: petId! });
   const [alertDraft, setAlertDraft] = useState<PetSpecialAlertsShape>({ ...EMPTY_PET_ALERTS });
   const [historyServiceFilter, setHistoryServiceFilter] =
     useState<HistoryServiceFilter>("all");
   const [bookingDetail, setBookingDetail] = useState<BookingDetailSelection | null>(null);
-  const [assessmentSheetOpen, setAssessmentSheetOpen] = useState(false);
-  const [assessmentDate, setAssessmentDate] = useState(
-    format(new Date(), "yyyy-MM-dd"),
-  );
-  const [assessmentSlot, setAssessmentSlot] = useState(PARK_ASSESSMENT_SLOTS[2].start);
   const [assessmentNotesDraft, setAssessmentNotesDraft] = useState("");
   const [assessmentEditorOpen, setAssessmentEditorOpen] = useState(false);
   const [failNotes, setFailNotes] = useState("");
+  const [assessmentDialogOpen, setAssessmentDialogOpen] = useState(false);
+  const [assessmentDateDraft, setAssessmentDateDraft] = useState("");
+  const [assessmentSlotDraft, setAssessmentSlotDraft] = useState<(typeof ASSESSMENT_SLOT_OPTIONS)[number]>("10:00");
+  const [assessmentBookingPending, setAssessmentBookingPending] = useState(false);
+
+  const { data: scheduledAssessment } = useQuery({
+    queryKey: ["pets", "assessment-booking", pet?.id],
+    enabled: !!pet?.id && pet.assessment_status === "scheduled",
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("check_in_date, agent_notes, booking_pets!inner(pet_id)")
+        .eq("booking_type", "assessment")
+        .eq("booking_pets.pet_id", pet!.id)
+        .neq("status", "cancelled")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const scheduledAssessmentSlot = useMemo(() => {
+    const notes = scheduledAssessment?.agent_notes;
+    if (!notes) return null;
+    const match = notes.match(/Assessment session\s+(\d{2}:\d{2})/i);
+    return match?.[1] ?? null;
+  }, [scheduledAssessment?.agent_notes]);
 
   const bookingTimeline = useMemo(() => {
     type Row =
       | { kind: "stay"; sortKey: string; id: string; stay: BookingWithDetails }
-      | { kind: "grooming"; sortKey: string; id: string; groom: GroomingAppointmentWithJoins }
-      | { kind: "park"; sortKey: string; id: string; park: ParkBookingWithJoins };
+      | { kind: "grooming"; sortKey: string; id: string; groom: GroomingAppointmentWithJoins };
 
     const rows: Row[] = [];
 
@@ -254,19 +320,9 @@ const PetProfilePage = () => {
       });
     });
 
-    petPark.forEach((p) => {
-      const tt = (p.slot_start || "00:00:00").slice(0, 8);
-      rows.push({
-        kind: "park",
-        sortKey: `${p.visit_date}T${tt}`,
-        id: p.id,
-        park: p,
-      });
-    });
-
     rows.sort((a, b) => (a.sortKey < b.sortKey ? 1 : a.sortKey > b.sortKey ? -1 : 0));
     return rows;
-  }, [petStays, groomingHistory, petPark]);
+  }, [petStays, groomingHistory]);
 
   const filteredBookingTimeline = useMemo(() => {
     if (historyServiceFilter === "all") return bookingTimeline;
@@ -274,8 +330,6 @@ const PetProfilePage = () => {
       switch (historyServiceFilter) {
         case "grooming":
           return row.kind === "grooming";
-        case "park":
-          return row.kind === "park";
         case "boarding":
           return row.kind === "stay";
         default:
@@ -284,15 +338,19 @@ const PetProfilePage = () => {
     });
   }, [bookingTimeline, historyServiceFilter]);
 
-  const historyLoading = staysLoading || groomingLoading || parkLoading;
+  const historyLoading = staysLoading || groomingLoading;
 
   useEffect(() => {
     if (!pet) return;
     setAssessmentNotesDraft(pet.assessment_notes ?? "");
+  }, [pet]);
+
+  useEffect(() => {
+    if (!petId) return;
     if (searchParams.get("schedule_assessment") === "1") {
-      setAssessmentSheetOpen(true);
+      setAssessmentDialogOpen(true);
     }
-  }, [pet, searchParams]);
+  }, [petId, searchParams]);
 
   // photo upload
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -373,34 +431,6 @@ const PetProfilePage = () => {
     );
   };
 
-  const scheduleAssessment = async () => {
-    if (!pet || !ownerId) return;
-    try {
-      const selectedSlot = PARK_ASSESSMENT_SLOTS.find((s) => s.start === assessmentSlot) ?? PARK_ASSESSMENT_SLOTS[2];
-      await createParkBooking.mutateAsync({
-        owner_id: ownerId,
-        pet_id: pet.id,
-        visit_date: assessmentDate,
-        slot_start: selectedSlot.start,
-        slot_end: selectedSlot.end,
-        size_lane: "big",
-        is_assessment: true,
-        notes: "Assessment booking",
-        price: 0,
-      });
-      await updateAssessment.mutateAsync({
-        pet_id: pet.id,
-        status: "scheduled",
-        date: assessmentDate,
-        notes: assessmentNotesDraft || undefined,
-      });
-      toast.success("Assessment scheduled.");
-      setAssessmentSheetOpen(false);
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Could not schedule assessment.");
-    }
-  };
-
   const markPassed = async () => {
     if (!pet) return;
     try {
@@ -444,6 +474,55 @@ const PetProfilePage = () => {
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Could not save notes.");
     }
+  };
+
+  const bookAssessment = async () => {
+    if (!pet) return;
+    if (!assessmentDateDraft) {
+      toast.error("Select an assessment date.");
+      return;
+    }
+
+    const todayIso = format(new Date(), "yyyy-MM-dd");
+    if (assessmentDateDraft <= todayIso) {
+      toast.error("Assessment date must be in the future.");
+      return;
+    }
+
+    const weekday = new Date(`${assessmentDateDraft}T00:00:00`).getDay();
+    if (weekday === 0 || weekday === 6) {
+      toast.error("Assessment sessions are Monday to Friday only.");
+      return;
+    }
+
+    setAssessmentBookingPending(true);
+    const { data, error } = await supabase.rpc("create_assessment_booking", {
+      p_pet_id: pet.id,
+      p_session_date: assessmentDateDraft,
+      p_session_start_time: assessmentSlotDraft,
+      p_staff_id: null,
+      p_notes: null,
+    });
+    setAssessmentBookingPending(false);
+
+    if (error) {
+      toast.error(error.message || "Could not book assessment.");
+      return;
+    }
+
+    const row = Array.isArray(data) ? (data[0] as AssessmentBookingRpcRow | undefined) : undefined;
+    const amount = Number(row?.amount_aed ?? 52.5);
+    toast.success(`Assessment booked. Charge AED ${amount.toFixed(2)} applied.`);
+
+    setAssessmentDialogOpen(false);
+    setAssessmentDateDraft("");
+    setAssessmentSlotDraft("10:00");
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["pets", "detail", pet.id] }),
+      queryClient.invalidateQueries({ queryKey: ["pets"] }),
+      queryClient.invalidateQueries({ queryKey: ["bookings"] }),
+      queryClient.invalidateQueries({ queryKey: ["invoices"] }),
+    ]);
   };
 
   // ── loading / not found ──────────────────────────────────────────────────
@@ -656,11 +735,11 @@ const PetProfilePage = () => {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
-                  Size category
+                  Size
                 </p>
                 <p className="text-sm">
-                  {pet.size_category
-                    ? SIZE_CATEGORY_LABEL[pet.size_category as PetSizeCategory]
+                  {pet.size
+                    ? PET_SIZE_LABEL[pet.size as PetSize]
                     : "—"}
                 </p>
               </div>
@@ -699,13 +778,22 @@ const PetProfilePage = () => {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {(assessmentStatus === "not_assessed" || assessmentStatus === "failed") && (
-                <Button variant="outline" onClick={() => setAssessmentSheetOpen(true)}>
-                  Schedule Assessment
+              {assessmentStatus === "not_assessed" && (
+                <Button onClick={() => setAssessmentDialogOpen(true)}>
+                  Book Assessment
                 </Button>
               )}
               {assessmentStatus === "scheduled" && (
                 <>
+                  <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200">
+                    Assessment scheduled for{" "}
+                    {scheduledAssessment?.check_in_date
+                      ? format(parseISO(scheduledAssessment.check_in_date), "d MMM yyyy")
+                      : (pet.assessment_date
+                          ? format(parseISO(pet.assessment_date), "d MMM yyyy")
+                          : "—")}
+                    {scheduledAssessmentSlot ? ` at ${scheduledAssessmentSlot}` : ""}
+                  </Badge>
                   <Button onClick={markPassed} disabled={updateAssessment.isPending}>
                     Mark as Passed
                   </Button>
@@ -730,7 +818,65 @@ const PetProfilePage = () => {
           </CardContent>
         </Card>
 
-        {/* ── Booking history (stays, grooming, park) ── */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Active Packages</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {creditsLoading ? (
+              <Skeleton className="h-20 w-full rounded-md" />
+            ) : activeCredits.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No active packages.</p>
+            ) : (
+              <div className="space-y-3">
+                {Object.entries(
+                  activeCredits.reduce<Record<string, ActiveCreditRow[]>>((acc, row) => {
+                    const key = row.package_name ?? "Package";
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(row);
+                    return acc;
+                  }, {}),
+                ).map(([pkgName, rows]) => {
+                  const bonusGroups = rows
+                    .filter((r) => r.is_bonus && r.redemption_group_id)
+                    .reduce<Record<string, ActiveCreditRow[]>>((acc, row) => {
+                    const key = row.redemption_group_id as string;
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(row);
+                    return acc;
+                  }, {});
+                  return (
+                    <div key={pkgName} className="rounded-md border p-3 space-y-2">
+                      <p className="font-medium">{pkgName}</p>
+                      {rows.map((row) => (
+                        <div key={row.id} className="flex items-center justify-between gap-2 text-sm">
+                          <div>
+                            <span className="font-medium">
+                              {row.units_remaining} {creditServiceLabel(row.service_code)} remaining
+                            </span>
+                            {" "}— expires {format(parseISO(row.expires_at), "dd MMM yyyy")}
+                          </div>
+                          {row.is_bonus ? (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200">
+                              Bonus
+                            </Badge>
+                          ) : null}
+                        </div>
+                      ))}
+                      {Object.values(bonusGroups).some((items) => items.length > 1) ? (
+                        <div className="rounded border border-amber-200 bg-amber-50/50 p-2 text-xs text-amber-900">
+                          Bonus (choose one): consuming one bonus credit revokes the sibling credit from the same package.
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Booking history (stays, grooming) ── */}
         <section>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
             <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -761,14 +907,6 @@ const PetProfilePage = () => {
                 onClick={() => setHistoryServiceFilter("grooming")}
               >
                 Grooming
-              </Button>
-              <Button
-                variant={historyServiceFilter === "park" ? "default" : "outline"}
-                size="sm"
-                aria-pressed={historyServiceFilter === "park"}
-                onClick={() => setHistoryServiceFilter("park")}
-              >
-                Park
               </Button>
             </div>
           </div>
@@ -874,32 +1012,7 @@ const PetProfilePage = () => {
                         </TableRow>
                       );
                     }
-                    const p = row.park;
-                    const dateLine = `${format(parseISO(p.visit_date), "d MMM yyyy")} · ${formatGroomSlotTime(p.slot_start)}`;
-                    return (
-                      <TableRow
-                        key={`park-${p.id}`}
-                        className="cursor-pointer hover:bg-muted/40"
-                        onClick={() => setBookingDetail({ kind: "park", park: p })}
-                      >
-                        <TableCell className="font-mono text-xs whitespace-nowrap">
-                          {p.id.slice(0, 8)}
-                        </TableCell>
-                        <TableCell className="text-sm font-medium">Park</TableCell>
-                        <TableCell className="text-sm whitespace-nowrap">{dateLine}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {p.is_assessment ? "Assessment" : "Booked"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell
-                          className="text-sm max-w-[220px] truncate"
-                          title={`${p.pets?.name ?? "—"} · ${parkLaneLabel(p.size_lane)}`}
-                        >
-                          {p.pets?.name ?? "—"} · {parkLaneLabel(p.size_lane)}
-                        </TableCell>
-                      </TableRow>
-                    );
+                    return null;
                   })}
                 </TableBody>
               </Table>
@@ -1144,125 +1257,55 @@ const PetProfilePage = () => {
             </>
           )}
 
-          {bookingDetail?.kind === "park" && (
-            <>
-              <SheetHeader>
-                <SheetTitle>Park visit</SheetTitle>
-                <SheetDescription>
-                  {format(parseISO(bookingDetail.park.visit_date), "EEEE, d MMMM yyyy")}
-                </SheetDescription>
-              </SheetHeader>
-              <div className="mt-6 space-y-4">
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Time slot</p>
-                  <p className="text-sm">{formatGroomSlotTime(bookingDetail.park.slot_start)}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Lane</p>
-                  <p className="text-sm">{parkLaneLabel(bookingDetail.park.size_lane)}</p>
-                </div>
-                <Badge variant="outline">
-                  {bookingDetail.park.is_assessment ? "Assessment" : "Standard visit"}
-                </Badge>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Pet</p>
-                  {bookingDetail.park.pet_id === petId ? (
-                    <p className="text-sm font-medium">{pet.name}</p>
-                  ) : bookingDetail.park.pet_id ? (
-                    <button
-                      type="button"
-                      className="flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                      onClick={() =>
-                        navigate(`/customers/${ownerId}/pets/${bookingDetail.park.pet_id}`)
-                      }
-                    >
-                      {bookingDetail.park.pets?.name ?? "—"}
-                      <ExternalLink className="h-3 w-3" />
-                    </button>
-                  ) : (
-                    <p className="text-sm">—</p>
-                  )}
-                </div>
-                <BookingProfileNotes
-                  compact
-                  pets={[
-                    {
-                      name: bookingDetail.park.pets?.name ?? pet.name,
-                      otherNotes: bookingDetail.park.pets?.other_notes,
-                    },
-                  ]}
-                />
-                {bookingDetail.park.notes && (
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Notes</p>
-                    <p className="text-sm whitespace-pre-line">{bookingDetail.park.notes}</p>
-                  </div>
-                )}
-                <Button variant="outline" className="w-full" asChild>
-                  <Link to={`/park?date=${bookingDetail.park.visit_date}`}>
-                    Open park schedule
-                  </Link>
-                </Button>
-              </div>
-            </>
-          )}
         </SheetContent>
       </Sheet>
 
-      <Sheet open={assessmentSheetOpen} onOpenChange={setAssessmentSheetOpen}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Schedule Assessment</SheetTitle>
-            <SheetDescription>
-              Assessment bookings are created as zero-charge park slots.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="mt-6 space-y-4">
+      <Dialog open={assessmentDialogOpen} onOpenChange={setAssessmentDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Book Assessment</DialogTitle>
+            <DialogDescription>
+              Assessment + first hour daycare is AED 52.50. Sessions run Mon-Fri between 10:00 and 15:00.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label>Assessment date</Label>
+              <Label htmlFor="assessment_date">Date</Label>
               <Input
+                id="assessment_date"
                 type="date"
-                value={assessmentDate}
-                onChange={(e) => setAssessmentDate(e.target.value)}
+                value={assessmentDateDraft}
+                min={format(new Date(Date.now() + 24 * 60 * 60 * 1000), "yyyy-MM-dd")}
+                onChange={(e) => setAssessmentDateDraft(e.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <Label>Time slot</Label>
-              <Select value={assessmentSlot} onValueChange={setAssessmentSlot}>
-                <SelectTrigger>
+              <Label htmlFor="assessment_slot">Slot</Label>
+              <Select value={assessmentSlotDraft} onValueChange={(v) => setAssessmentSlotDraft(v as (typeof ASSESSMENT_SLOT_OPTIONS)[number])}>
+                <SelectTrigger id="assessment_slot">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PARK_ASSESSMENT_SLOTS.map((slot) => (
-                    <SelectItem key={slot.start} value={slot.start}>
-                      {slot.label}
+                  {ASSESSMENT_SLOT_OPTIONS.map((slot) => (
+                    <SelectItem key={slot} value={slot}>
+                      {slot}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea
-                rows={3}
-                value={assessmentNotesDraft}
-                onChange={(e) => setAssessmentNotesDraft(e.target.value)}
-                placeholder="Optional assessment notes"
-              />
-            </div>
-            <Button
-              className="w-full"
-              onClick={scheduleAssessment}
-              disabled={createParkBooking.isPending || updateAssessment.isPending}
-            >
-              {(createParkBooking.isPending || updateAssessment.isPending) && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Save Schedule
-            </Button>
           </div>
-        </SheetContent>
-      </Sheet>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssessmentDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void bookAssessment()} disabled={assessmentBookingPending}>
+              {assessmentBookingPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Confirm Booking
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ══════════════════════════════════════════
           EDIT PET DRAWER
@@ -1476,7 +1519,7 @@ const PetProfilePage = () => {
 
             <div className="space-y-2">
               <Label htmlFor="edit_other_notes">Other notes (bookings &amp; appointments)</Label>
-              <Textarea id="edit_other_notes" rows={2} value={editForm.other_notes ?? ""} onChange={(e) => handleField("other_notes", e.target.value)} placeholder="Shown on boarding, grooming, park…" />
+              <Textarea id="edit_other_notes" rows={2} value={editForm.other_notes ?? ""} onChange={(e) => handleField("other_notes", e.target.value)} placeholder="Shown on boarding, grooming…" />
             </div>
 
             <div className="space-y-2">

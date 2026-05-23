@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { addDays, format, parseISO } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
-import { memberTierBadgeClassName, memberTierBadgeLabel } from "@/lib/memberTier";
 import { buildDaycareTags, tagToneClass } from "@/lib/operationsTags";
 import {
   TRANSPORT_PRICING_KEYS,
@@ -27,17 +26,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   useDaycarePackages,
+  useConsumeServiceCredit,
   useSessionsByPackage,
-  useAllDaycarePackages,
-  useCreateDaycarePackage,
-  useUpdateDaycarePackage,
-  useDeleteDaycarePackage,
   useAddDaycareDay,
   useUpdateDaycareSession,
   useRescheduleDaycareSession,
   useDeleteDaycareSession,
   type DaycarePackage,
-  type PackageWithDetails,
   type SessionRow,
 } from "@/hooks/useDaycare";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -122,8 +117,6 @@ import type { Database } from "@/integrations/supabase/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type MemberType = Database["public"]["Enums"]["member_type"];
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const TODAY = format(new Date(), "yyyy-MM-dd");
@@ -137,13 +130,6 @@ const LOGGED_BY_OPTIONS = [
   "Jovy",
   "Melissa",
 ] as const;
-
-const MEMBER_BADGE: Record<string, string> = {
-  standard: "bg-slate-100 text-slate-700 border-slate-200",
-  silver:   "bg-blue-50  text-blue-700  border-blue-200",
-  gold:     "bg-amber-50 text-amber-700 border-amber-200",
-  platinum: "bg-violet-50 text-violet-700 border-violet-200",
-};
 
 function creditColour(remaining: number) {
   if (remaining <= 1) return "text-red-600";
@@ -258,90 +244,6 @@ function OwnerCombobox({
         </div>
       )}
     </div>
-  );
-}
-
-function packageTypeOptionLabel(t: { name: string; total_days: number; base_price_aed: number }) {
-  return `${t.name} — ${t.total_days} days — AED ${t.base_price_aed}`;
-}
-
-interface PkgTypeRow { id: string; name: string; total_days: number; base_price_aed: number; sort_order: number }
-
-interface PackageTypeComboboxProps {
-  id?: string;
-  options: PkgTypeRow[];
-  value: string;
-  onChange: (packageTypeId: string) => void;
-  disabled?: boolean;
-  placeholder?: string;
-}
-
-function PackageTypeCombobox({
-  id,
-  options,
-  value,
-  onChange,
-  disabled,
-  placeholder = "Select package type",
-}: PackageTypeComboboxProps) {
-  const [open, setOpen] = useState(false);
-  const selected = options.find((t) => t.id === value) ?? null;
-  const sortedOptions = useMemo(
-    () => [...options].sort((a, b) => a.total_days - b.total_days || a.name.localeCompare(b.name)),
-    [options],
-  );
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          id={id}
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          disabled={disabled}
-          className={cn(
-            "h-9 w-full justify-between font-normal",
-            !selected && "text-muted-foreground",
-          )}
-        >
-          <span className="truncate text-left">
-            {selected ? packageTypeOptionLabel(selected) : placeholder}
-          </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Search packages…" />
-          <CommandList>
-            <CommandEmpty>No package found.</CommandEmpty>
-            <CommandGroup>
-              {sortedOptions.map((t) => (
-                <CommandItem
-                  key={t.id}
-                  value={packageTypeOptionLabel(t)}
-                  keywords={[t.name, String(t.total_days), String(t.base_price_aed)]}
-                  onSelect={() => {
-                    onChange(t.id);
-                    setOpen(false);
-                  }}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      value === t.id ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  <span className="truncate">{packageTypeOptionLabel(t)}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
   );
 }
 
@@ -833,37 +735,33 @@ function PlannerTab() {
   const { data: pets } = usePets(ownerId ?? "");
   const { data: packages } = useDaycarePackages(ownerId ?? "");
   const addDay = useAddDaycareDay();
+  const consumeCredit = useConsumeServiceCredit();
   const { data: sessions, isLoading: sessionsLoading } =
     useSessionsByPackage(packageId ?? "");
   const { data: pricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
     queryKey: ["pricing", "daycare_checkin"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("pricing")
-        .select("key, amount_aed")
-        .in("key", [
-          "daycare_single_day",
-          "daycare_2_dogs",
-          "daycare_3_dogs",
-          "daycare_family_per_dog",
-          "daycare_4_dogs",
-          "daycare_5_dogs",
-          "daycare_6_dogs",
-          DAYCARE_HOURLY_UNIT_KEY,
-        ]);
-      if (error) throw error;
-      return data ?? [];
+      const [single, hourly] = await Promise.all([
+        supabase.rpc("resolve_woof_service_rate", { p_service_code: "daycare_full_day" }),
+        supabase.rpc("resolve_woof_service_rate", { p_service_code: "daycare_hourly" }),
+      ]);
+      if (single.error) throw single.error;
+      if (hourly.error) throw hourly.error;
+      const singleAmount = (single.data as { amount_aed: number }[] | null)?.[0]?.amount_aed ?? 0;
+      const hourlyAmount = (hourly.data as { amount_aed: number }[] | null)?.[0]?.amount_aed ?? 0;
+      return [
+        { key: "daycare_single_day", amount_aed: singleAmount },
+        { key: DAYCARE_HOURLY_UNIT_KEY, amount_aed: hourlyAmount },
+      ];
     },
   });
   const { data: transportPricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
     queryKey: ["pricing", "transport_zones", "daycare"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("pricing")
-        .select("key, amount_aed")
-        .in("key", TRANSPORT_PRICING_KEYS as readonly string[] as string[]);
-      if (error) throw error;
-      return data ?? [];
+      return (TRANSPORT_PRICING_KEYS as readonly string[]).map((key) => ({
+        key,
+        amount_aed: 0,
+      }));
     },
   });
 
@@ -945,25 +843,11 @@ function PlannerTab() {
       immediateInvoiceSubtotalPreview > 0 &&
       !skipInvoiceDiscount,
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("apply_member_discount", {
-        p_owner_id: ownerId!,
-        p_subtotal: immediateInvoiceSubtotalPreview,
-      });
-      if (error) {
-        return {
-          discount_pct: 0,
-          discount_aed: 0,
-          final_aed: immediateInvoiceSubtotalPreview,
-        };
-      }
-      const first = (data as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
-      return (
-        first ?? {
-          discount_pct: 0,
-          discount_aed: 0,
-          final_aed: immediateInvoiceSubtotalPreview,
-        }
-      );
+      return {
+        discount_pct: 0,
+        discount_aed: 0,
+        final_aed: immediateInvoiceSubtotalPreview,
+      };
     },
   });
 
@@ -1098,6 +982,7 @@ function PlannerTab() {
     const failures: string[] = [];
     let successCount = 0;
     const sessionsCreated: Record<string, string> = {};
+    const consumedCreditByPet: Record<string, DaycarePackage> = {};
     const privateFlat = checkInDraft.transport_zone === "dubai_private";
 
     for (const petId of selectedPetIds) {
@@ -1105,6 +990,7 @@ function PlannerTab() {
       const petName = pet?.name ?? "Pet";
       const choice = billingChoiceByPet[petId] ?? "single";
       const chosenPackageId = choice === "single" || choice === "hourly" ? null : choice;
+      const chosenCredit = chosenPackageId ? packages?.find((pkg) => pkg.id === chosenPackageId) : null;
 
       try {
         const session = await addDay.mutateAsync({
@@ -1120,6 +1006,18 @@ function PlannerTab() {
         });
 
         sessionsCreated[petId] = session.id;
+
+        if (chosenCredit) {
+          const consumeUnits = chosenCredit.service_code === "daycare_hourly" ? Math.max(1, effectiveHours) : 1;
+          await consumeCredit.mutateAsync({
+            creditId: chosenCredit.id,
+            units: consumeUnits,
+            consumedForRefId: session.id,
+            consumedForRefType: "daycare_session",
+          });
+          consumedCreditByPet[petId] = chosenCredit;
+        }
+
         successCount += 1;
       } catch (error) {
         const message = extractErrorMessage(error);
@@ -1129,7 +1027,10 @@ function PlannerTab() {
 
     const okSingleIds = singleDayPetIds.filter((id) => sessionsCreated[id]);
     const okHourlyIds = hourlyPetIds.filter((id) => sessionsCreated[id]);
-    const invoicedPetTotal = okSingleIds.length + okHourlyIds.length;
+    const okCreditIds = selectedPetIds.filter(
+      (id) => sessionsCreated[id] && !okSingleIds.includes(id) && !okHourlyIds.includes(id),
+    );
+    const invoicedPetTotal = okSingleIds.length + okHourlyIds.length + okCreditIds.length;
     const hourlyDogsForInvoice = okHourlyIds.length > 0 ? effectiveHourlyDogs : 0;
     const hourlyHoursForInvoice = okHourlyIds.length > 0 ? effectiveHours : 0;
 
@@ -1174,6 +1075,22 @@ function PlannerTab() {
           serviceType: "daycare",
           preserveUnitPrice: true,
         });
+      }
+      if (okCreditIds.length > 0) {
+        for (const petId of okCreditIds) {
+          const petName = pets?.find((p) => p.id === petId)?.name ?? "Pet";
+          const credit = consumedCreditByPet[petId];
+          const packageName = credit?.package_name ?? "package credit";
+          const isHourlyCredit = credit?.service_code === "daycare_hourly";
+          const units = isHourlyCredit ? Math.max(1, effectiveHours) : 1;
+          lineItems.push({
+            description: `${isHourlyCredit ? "Daycare hourly" : "Daycare full day"} — ${petName} (covered by ${packageName})`,
+            quantity: units,
+            unitPrice: 0,
+            serviceType: "daycare",
+            preserveUnitPrice: true,
+          });
+        }
       }
 
       const includePickup = checkInDraft.pickup_used;
@@ -1285,14 +1202,7 @@ function PlannerTab() {
               </div>
               {ownerFromUrl &&
               ownerFromUrl.id === ownerId &&
-              memberTierBadgeLabel(ownerFromUrl.member_type) ? (
-                <Badge
-                  variant="outline"
-                  className={memberTierBadgeClassName(ownerFromUrl.member_type)}
-                >
-                  {memberTierBadgeLabel(ownerFromUrl.member_type)}
-                </Badge>
-              ) : null}
+              null}
             </div>
           </div>
 
@@ -1342,11 +1252,16 @@ function PlannerTab() {
                                   <SelectItem value="hourly">Hourly (invoice now)</SelectItem>
                                   {usablePackages.map((pkg) => (
                                     <SelectItem key={pkg.id} value={pkg.id}>
-                                      Use package ({pkg.total_days - pkg.days_used} remaining)
+                                      Use credit ({pkg.total_days - pkg.days_used} remaining{pkg.service_code === "daycare_hourly" ? " hourly" : ""}{pkg.is_bonus ? ", bonus choice" : ""})
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
+                              {usablePackages.some((pkg) => pkg.is_bonus && pkg.service_code === "daycare_full_day") && (
+                                <p className="text-[11px] text-amber-700">
+                                  Using bonus daycare credit revokes the sibling bonus Splash credit from the same package.
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1740,111 +1655,7 @@ function PlannerTab() {
   );
 }
 
-// ── Packages tab: PackageCard ─────────────────────────────────────────────────
-
-function PackageCard({ pkg, onEdit, onDelete }: { pkg: PackageWithDetails; onEdit: (pkg: PackageWithDetails) => void; onDelete: (pkg: PackageWithDetails) => void }) {
-  const [, setSearchParams] = useSearchParams();
-  const remaining  = pkg.total_days - pkg.days_used;
-  const pct        = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
-  const isExhausted = remaining <= 0;
-  const memberType  = (pkg.owners?.member_type ?? "standard") as MemberType;
-
-  const openInPlanner = () => {
-    setSearchParams(
-      (prev) => {
-        const n = new URLSearchParams(prev);
-        n.set("tab", "planner");
-        n.set("ownerId", pkg.owner_id);
-        n.set("packageId", pkg.id);
-        return n;
-      },
-      { replace: true }
-    );
-  };
-
-  return (
-    <Card
-      className={`transition-shadow hover:shadow-md ${isExhausted ? "opacity-60" : ""}`}
-    >
-      <CardContent className="p-4 space-y-3">
-        {/* Top row */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1 min-w-0 cursor-pointer" onClick={openInPlanner}>
-            <p className="font-semibold truncate">
-              {pkg.pets?.name ?? "Unknown Pet"}
-              <span className="font-normal text-muted-foreground"> — </span>
-              {pkg.owners ? ownerDisplayName(pkg.owners.first_name, pkg.owners.last_name) : "Unknown Owner"}
-            </p>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Badge variant="outline" className={MEMBER_BADGE[memberType] ?? MEMBER_BADGE.standard}>
-                {memberType.charAt(0).toUpperCase() + memberType.slice(1)}
-              </Badge>
-              {isExhausted ? (
-                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-[10px]">
-                  Exhausted
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">
-                  Active
-                </Badge>
-              )}
-            </div>
-          </div>
-
-          {/* Credits counter */}
-          <div className={`text-right shrink-0 ${creditColour(remaining)}`}>
-            {remaining <= 3 && <AlertTriangle className="h-3.5 w-3.5 ml-auto mb-0.5" />}
-            <p className="text-2xl font-bold tabular-nums leading-none">
-              {pkg.days_used}<span className="text-base font-normal text-muted-foreground">/{pkg.total_days}</span>
-            </p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">{remaining} remaining</p>
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        <div className="space-y-1">
-          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${creditBarColour(remaining)}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          {pkg.expiry_date && (
-            <p className="text-[10px] text-muted-foreground">
-              Expires {format(parseISO(pkg.expiry_date), "d MMM yyyy")}
-            </p>
-          )}
-        </div>
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-2 pt-1">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={(e) => { e.stopPropagation(); onEdit(pkg); }}
-          >
-            <Pencil className="mr-1 h-3 w-3" />
-            Edit
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs text-destructive hover:text-destructive"
-            onClick={(e) => { e.stopPropagation(); onDelete(pkg); }}
-          >
-            <Trash2 className="mr-1 h-3 w-3" />
-            Delete
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Packages tab: NewPackageSheet ─────────────────────────────────────────────
+// ── Daycare operations ─────────────────────────────────────────────────────────
 
 type DaycareListPreset = "today" | "tomorrow" | "next7";
 type CollectionStatus = "not_collected" | "owner" | "pet_taxi";
@@ -2076,784 +1887,12 @@ function DaycareOperationsTab() {
   );
 }
 
-function NewPackageSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const createPackage = useCreateDaycarePackage();
-
-  const [ownerId,    setOwnerId]    = useState<string | null>(null);
-  const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
-  const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
-  const [form, setForm] = useState({
-    package_type_id: "",
-    purchase_date:  TODAY,
-    expiry_date:    "",
-    pickup:         false,
-    dropoff:        false,
-    transport_zone: "dubai_shared" as TransportZone,
-    price_override: "",
-    notes:          "",
-  });
-
-  const { data: pets } = usePets(ownerId ?? "");
-
-  const { data: packageTypes = [] } = useQuery<PkgTypeRow[]>({
-    queryKey: ["daycare_package_types"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daycare_package_types")
-        .select("id, name, total_days, base_price_aed, sort_order")
-        .eq("is_active", true)
-        .order("total_days");
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
-
-  useEffect(() => {
-    if (packageTypes.length === 1 && !form.package_type_id) {
-      setForm((prev) => ({ ...prev, package_type_id: packageTypes[0].id }));
-    }
-  }, [packageTypes, form.package_type_id]);
-
-  const { data: packageTransportPricing = [] } = useQuery<{ key: string; amount_aed: number }[]>({
-    queryKey: ["pricing", "transport_zones", "daycare"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("pricing")
-        .select("key, amount_aed")
-        .in("key", TRANSPORT_PRICING_KEYS as readonly string[] as string[]);
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
-
-  const selectedType = packageTypes.find(t => t.id === form.package_type_id) ?? null;
-
-  const transportRate = useMemo(() => {
-    const key = transportPricingKey(form.transport_zone);
-    return packageTransportPricing.find((r) => r.key === key)?.amount_aed ?? 0;
-  }, [packageTransportPricing, form.transport_zone]);
-
-  const [discountType, setDiscountType] = useState<"percentage" | "fixed">("percentage");
-  const [discountValue, setDiscountValue] = useState("");
-
-  const totalDays = selectedType?.total_days ?? 0;
-  const basePrice = selectedType?.base_price_aed ?? 0;
-  const pickupTotal = form.pickup ? totalDays * transportRate : 0;
-  const dropoffTotal = form.dropoff ? totalDays * transportRate : 0;
-  const calculatedPrice = basePrice + pickupTotal + dropoffTotal;
-  const priceBeforeDiscount = form.price_override ? parseFloat(form.price_override) || 0 : calculatedPrice;
-
-  const discountAmount = useMemo(() => {
-    const dv = parseFloat(discountValue) || 0;
-    if (dv <= 0) return 0;
-    if (discountType === "percentage") return Math.min(priceBeforeDiscount, priceBeforeDiscount * (dv / 100));
-    return Math.min(priceBeforeDiscount, dv);
-  }, [discountType, discountValue, priceBeforeDiscount]);
-
-  const displayPrice = Math.max(0, priceBeforeDiscount - discountAmount);
-
-  const setField = (field: string, value: unknown) =>
-    setForm(f => ({ ...f, [field]: value }));
-
-  const togglePetSelection = (petId: string, checked: boolean) => {
-    setSelectedPetIds((prev) => {
-      if (checked) {
-        if (prev.includes(petId)) return prev;
-        return [...prev, petId];
-      }
-      return prev.filter((id) => id !== petId);
-    });
-  };
-
-  const buildInvoiceLineItems = () => {
-    const lineItems: {
-      description: string;
-      quantity: number;
-      unitPrice: number;
-      pricingKey?: string;
-      serviceType?: string;
-      preserveUnitPrice?: boolean;
-    }[] = [{
-      description: `${selectedType!.name} — ${selectedType!.total_days} days`,
-      quantity: 1,
-      unitPrice: basePrice,
-      pricingKey: `daycare:${selectedType!.name.toLowerCase().replace(/\s+/g, "_")}`,
-      serviceType: "daycare",
-    }];
-    const zoneLabel = transportZoneLabel(form.transport_zone);
-    const transportKey = transportPricingKey(form.transport_zone);
-    const billPackageTransport = form.transport_zone !== "complimentary";
-    if (billPackageTransport && form.pickup) {
-      lineItems.push({
-        description: `Pickup transport (${zoneLabel}) × ${totalDays} days`,
-        quantity: totalDays,
-        unitPrice: transportRate,
-        pricingKey: transportKey,
-        serviceType: "transport",
-      });
-    }
-    if (billPackageTransport && form.dropoff) {
-      lineItems.push({
-        description: `Drop-off transport (${zoneLabel}) × ${totalDays} days`,
-        quantity: totalDays,
-        unitPrice: transportRate,
-        pricingKey: transportKey,
-        serviceType: "transport",
-      });
-    }
-    return lineItems;
-  };
-
-  const resetAndClose = () => {
-    setOwnerId(null);
-    setOwnerLabel(null);
-    setSelectedPetIds([]);
-    setForm({ package_type_id: "", purchase_date: TODAY, expiry_date: "", pickup: false, dropoff: false, transport_zone: "dubai_shared", price_override: "", notes: "" });
-    setDiscountType("percentage");
-    setDiscountValue("");
-    onClose();
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ownerId || selectedPetIds.length === 0) {
-      toast.error("Select a client and at least one pet");
-      return;
-    }
-    if (!selectedType) {
-      toast.error("Select a package type");
-      return;
-    }
-
-    const pricePaid = displayPrice;
-    const packagePayload = {
-      owner_id:        ownerId,
-      total_days:      selectedType.total_days,
-      purchase_date:   form.purchase_date,
-      expiry_date:     form.expiry_date || null,
-      price_paid:      pricePaid,
-      notes:           form.notes || null,
-      days_used:       0,
-      package_type_id: selectedType.id,
-      pickup_included: form.pickup,
-      dropoff_included: form.dropoff,
-      transport_zone:  (form.pickup || form.dropoff) ? form.transport_zone : null,
-    } as Omit<Parameters<typeof createPackage.mutateAsync>[0], "pet_id">;
-
-    try {
-      const created = await Promise.all(
-        selectedPetIds.map((petId) =>
-          createPackage.mutateAsync({ ...packagePayload, pet_id: petId }),
-        ),
-      );
-
-      const lineItems = buildInvoiceLineItems();
-      const invoiceResults = await Promise.allSettled(
-        created.map((pkg) =>
-          createServiceInvoice({
-            ownerId: ownerId!,
-            serviceType: "daycare",
-            referenceId: pkg.id,
-            lineItems,
-          }),
-        ),
-      );
-      const failedInvoices = invoiceResults.filter((r) => r.status === "rejected").length;
-      if (failedInvoices > 0) {
-        console.error("Some daycare auto-invoices failed:", invoiceResults);
-        toast.error(`${failedInvoices} draft invoice(s) could not be created`);
-      }
-
-      toast.success(
-        `Created ${created.length} package${created.length !== 1 ? "s" : ""}` +
-          (failedInvoices === 0 ? " and draft invoice(s)" : ""),
-      );
-      resetAndClose();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create packages");
-    }
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o) resetAndClose(); }}>
-      <SheetContent className="overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>New Daycare Package</SheetTitle>
-          <SheetDescription>Sell prepaid daycare package(s) for one or more pets on the same account.</SheetDescription>
-        </SheetHeader>
-
-        <form onSubmit={handleSave} className="mt-6 space-y-4">
-          <div className="space-y-1.5">
-            <Label>Client <span className="text-destructive">*</span></Label>
-            <OwnerCombobox
-              selectedId={ownerId}
-              selectedLabel={ownerLabel}
-              onSelect={(id, label) => { setOwnerId(id); setOwnerLabel(label); setSelectedPetIds([]); }}
-              onClear={() => { setOwnerId(null); setOwnerLabel(null); setSelectedPetIds([]); }}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-              Pet(s) <span className="text-destructive">*</span>
-            </Label>
-            {!ownerId ? (
-              <p className="text-sm text-muted-foreground">Select a client first.</p>
-            ) : !pets?.length ? (
-              <p className="text-sm text-muted-foreground">No pets found for this client.</p>
-            ) : (
-              <div className="rounded-lg border divide-y">
-                {pets.map((pet) => (
-                  <div key={pet.id} className="flex items-center gap-2 p-3">
-                    <Checkbox
-                      id={`pkg_pet_${pet.id}`}
-                      checked={selectedPetIds.includes(pet.id)}
-                      onCheckedChange={(v) => togglePetSelection(pet.id, v === true)}
-                    />
-                    <Label htmlFor={`pkg_pet_${pet.id}`} className="font-medium">
-                      {pet.name}
-                    </Label>
-                  </div>
-                ))}
-              </div>
-            )}
-            {selectedPetIds.length > 1 && (
-              <p className="text-xs text-muted-foreground">
-                {selectedPetIds.length} pets selected — one package will be created per pet with the same settings.
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="pkg_type">Package <span className="text-destructive">*</span></Label>
-            <PackageTypeCombobox
-              id="pkg_type"
-              options={packageTypes}
-              value={form.package_type_id}
-              onChange={(v) => {
-                setField("package_type_id", v);
-                setField("price_override", "");
-              }}
-              disabled={packageTypes.length === 0}
-              placeholder={packageTypes.length === 0 ? "No package types available" : "Select package type"}
-            />
-          </div>
-
-          {selectedType && (
-            <>
-              <Separator />
-              <div className="space-y-3">
-                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Transport</h4>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="pkg_pickup"
-                      checked={form.pickup}
-                      onCheckedChange={(v) => setField("pickup", v === true)}
-                    />
-                    <Label htmlFor="pkg_pickup" className="text-sm">Pickup</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="pkg_dropoff"
-                      checked={form.dropoff}
-                      onCheckedChange={(v) => setField("dropoff", v === true)}
-                    />
-                    <Label htmlFor="pkg_dropoff" className="text-sm">Drop-off</Label>
-                  </div>
-                </div>
-                {(form.pickup || form.dropoff) && (
-                  <div className="space-y-1.5">
-                    <Label>Transport option</Label>
-                    <Select
-                      value={form.transport_zone}
-                      onValueChange={(v) => setField("transport_zone", v as TransportZone)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TRANSPORT_ZONE_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {(() => {
-                      const opt = TRANSPORT_ZONE_OPTIONS.find((o) => o.value === form.transport_zone);
-                      if (form.transport_zone === "complimentary") {
-                        return (
-                          <p className="text-xs text-muted-foreground">
-                            Complimentary transport — no charge on this invoice.
-                          </p>
-                        );
-                      }
-                      if (form.transport_zone === "free") {
-                        return (
-                          <p className="text-xs text-muted-foreground">
-                            Free transport — AED 0
-                          </p>
-                        );
-                      }
-                      return (
-                        <p className="text-xs text-muted-foreground">
-                          AED {transportRate.toFixed(2)}/trip × {totalDays} days
-                          {form.pickup && form.dropoff ? " × 2 (pickup + drop-off)" : ""}
-                          {opt ? ` — ${opt.helper}` : ""}
-                        </p>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
-              <Separator />
-            </>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="pkg_purchase">Purchase date <span className="text-destructive">*</span></Label>
-              <Input
-                id="pkg_purchase"
-                type="date"
-                value={form.purchase_date}
-                onChange={(e) => setField("purchase_date", e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="pkg_expiry">Expiry date</Label>
-              <Input
-                id="pkg_expiry"
-                type="date"
-                value={form.expiry_date}
-                onChange={(e) => setField("expiry_date", e.target.value)}
-              />
-            </div>
-          </div>
-
-          {selectedType && (
-            <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>{selectedType.name}</span>
-                <span>AED {basePrice.toFixed(2)}</span>
-              </div>
-              {form.pickup && (
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Pickup ({totalDays} trips)</span>
-                  <span>AED {pickupTotal.toFixed(2)}</span>
-                </div>
-              )}
-              {form.dropoff && (
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Drop-off ({totalDays} trips)</span>
-                  <span>AED {dropoffTotal.toFixed(2)}</span>
-                </div>
-              )}
-              <Separator />
-              <div className="flex justify-between font-semibold">
-                <span>Total</span>
-                <span>AED {calculatedPrice.toFixed(2)}</span>
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="pkg_price_override">Custom Price (AED)</Label>
-            <Input
-              id="pkg_price_override"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder={calculatedPrice ? calculatedPrice.toFixed(2) : "0.00"}
-              value={form.price_override || (calculatedPrice ? calculatedPrice.toFixed(2) : "")}
-              onChange={(e) => setField("price_override", e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">Pre-filled with calculated price. Edit to set a custom amount.</p>
-          </div>
-
-          {/* Discount section */}
-          <div className="space-y-3">
-            <Label className="text-sm font-semibold">Discount</Label>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant={discountType === "percentage" ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => { setDiscountType("percentage"); setDiscountValue(""); }}
-              >
-                Percentage %
-              </Button>
-              <Button
-                type="button"
-                variant={discountType === "fixed" ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => { setDiscountType("fixed"); setDiscountValue(""); }}
-              >
-                Fixed Amount AED
-              </Button>
-            </div>
-
-            {discountType === "percentage" && (
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-1.5">
-                  {[10, 15, 20, 25, 30, 40, 50].map((pct) => (
-                    <Button
-                      key={pct}
-                      type="button"
-                      variant={discountValue === String(pct) ? "default" : "outline"}
-                      size="sm"
-                      className="h-7 text-xs px-2.5"
-                      onClick={() => setDiscountValue(String(pct))}
-                    >
-                      {pct}%
-                    </Button>
-                  ))}
-                </div>
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="1"
-                  placeholder="Custom %"
-                  value={discountValue}
-                  onChange={(e) => setDiscountValue(e.target.value)}
-                />
-              </div>
-            )}
-
-            {discountType === "fixed" && (
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Discount amount (AED)"
-                value={discountValue}
-                onChange={(e) => setDiscountValue(e.target.value)}
-              />
-            )}
-
-            {discountAmount > 0 && (
-              <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span>Subtotal</span>
-                  <span>AED {priceBeforeDiscount.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-red-600">
-                  <span>
-                    Discount{discountType === "percentage" ? ` (${discountValue}%)` : ""}
-                  </span>
-                  <span>- AED {discountAmount.toFixed(2)}</span>
-                </div>
-                <Separator />
-                <div className="flex justify-between font-semibold">
-                  <span>Total</span>
-                  <span>AED {displayPrice.toFixed(2)}</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="pkg_notes">Notes</Label>
-            <Textarea
-              id="pkg_notes"
-              rows={3}
-              value={form.notes}
-              onChange={(e) => setField("notes", e.target.value)}
-            />
-          </div>
-
-          <Separator />
-
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={createPackage.isPending || !selectedType || selectedPetIds.length === 0}
-          >
-            {createPackage.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {selectedPetIds.length > 1
-              ? `Save ${selectedPetIds.length} packages`
-              : "Save Package"}
-            {displayPrice > 0 ? ` — AED ${displayPrice.toFixed(2)} each` : ""}
-          </Button>
-        </form>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-// ── TAB 2: PackagesTab ────────────────────────────────────────────────────────
-
-type PkgFilter = "all" | "low" | "exhausted";
-type TierFilter = "all" | "standard" | "silver" | "gold";
-
-const TIER_FILTER_OPTIONS: { value: TierFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "standard", label: "Standard" },
-  { value: "silver", label: "Silver" },
-  { value: "gold", label: "Gold" },
-];
-
-function packageMatchesTier(pkg: PackageWithDetails, tier: TierFilter): boolean {
-  if (tier === "all") return true;
-  const memberType = (pkg.owners?.member_type ?? "standard").toLowerCase();
-  return memberType === tier;
-}
-
-function packageMatchesSearch(pkg: PackageWithDetails, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const ownerName = pkg.owners
-    ? ownerDisplayName(pkg.owners.first_name, pkg.owners.last_name).toLowerCase()
-    : "";
-  const petName = (pkg.pets?.name ?? "").toLowerCase();
-  const tier = (pkg.owners?.member_type ?? "standard").toLowerCase();
-  return ownerName.includes(q) || petName.includes(q) || tier.includes(q);
-}
-
-function PackagesTab() {
-  const [filter, setFilter] = useState<PkgFilter>("all");
-  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [editPkg, setEditPkg] = useState<PackageWithDetails | null>(null);
-  const [deletePkg, setDeletePkg] = useState<PackageWithDetails | null>(null);
-
-  const { data: packages, isLoading } = useAllDaycarePackages();
-  const updatePackage = useUpdateDaycarePackage();
-  const deletePackage = useDeleteDaycarePackage();
-
-  const [editForm, setEditForm] = useState({ total_days: 0, price_paid: "", expiry_date: "", notes: "", pickup_included: false, dropoff_included: false });
-
-  const openEdit = (pkg: PackageWithDetails) => {
-    setEditForm({
-      total_days: pkg.total_days,
-      price_paid: pkg.price_paid != null ? String(pkg.price_paid) : "",
-      expiry_date: pkg.expiry_date ?? "",
-      notes: pkg.notes ?? "",
-      pickup_included: pkg.pickup_included,
-      dropoff_included: pkg.dropoff_included,
-    });
-    setEditPkg(pkg);
-  };
-
-  const handleEditSave = () => {
-    if (!editPkg) return;
-    updatePackage.mutate(
-      {
-        id: editPkg.id,
-        total_days: editForm.total_days,
-        price_paid: editForm.price_paid ? parseFloat(editForm.price_paid) : null,
-        expiry_date: editForm.expiry_date || null,
-        notes: editForm.notes || null,
-        pickup_included: editForm.pickup_included,
-        dropoff_included: editForm.dropoff_included,
-      },
-      {
-        onSuccess: () => { toast.success("Package updated"); setEditPkg(null); },
-        onError: (err) => toast.error(`Update failed: ${(err as Error).message}`),
-      }
-    );
-  };
-
-  const handleDelete = () => {
-    if (!deletePkg) return;
-    deletePackage.mutate(deletePkg.id, {
-      onSuccess: () => {
-        toast.success("Package deleted");
-        setDeletePkg(null);
-      },
-      onError: (err) => toast.error(`Delete failed: ${(err as Error).message}`),
-    });
-  };
-
-  const filtered = useMemo(() => {
-    return (packages ?? []).filter((pkg) => {
-      const remaining = pkg.total_days - pkg.days_used;
-      if (filter === "low" && !(remaining > 0 && remaining <= 2)) return false;
-      if (filter === "exhausted" && remaining > 0) return false;
-      if (!packageMatchesTier(pkg, tierFilter)) return false;
-      if (!packageMatchesSearch(pkg, searchQuery)) return false;
-      return true;
-    });
-  }, [packages, filter, tierFilter, searchQuery]);
-
-  const hasActiveFilters =
-    filter !== "all" || tierFilter !== "all" || searchQuery.trim().length > 0;
-
-  return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-3 min-w-0 flex-1">
-          <h3 className="text-base font-semibold">Packages</h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={filter} onValueChange={(v) => setFilter(v as PkgFilter)}>
-              <SelectTrigger className="h-8 w-48 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Packages</SelectItem>
-                <SelectItem value="low">Low Credits (≤2 remaining)</SelectItem>
-                <SelectItem value="exhausted">Exhausted</SelectItem>
-              </SelectContent>
-            </Select>
-            {TIER_FILTER_OPTIONS.map(({ value, label }) => (
-              <Button
-                key={value}
-                type="button"
-                size="sm"
-                variant={tierFilter === value ? "default" : "outline"}
-                className="h-8 text-xs"
-                onClick={() => setTierFilter(value)}
-              >
-                {label}
-              </Button>
-            ))}
-            <div className="relative w-full sm:w-56">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-              <Input
-                className="h-8 pl-8 text-xs"
-                placeholder="Search owner, pet, or tier…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-          </div>
-        </div>
-        <Button size="sm" className="shrink-0" onClick={() => setSheetOpen(true)}>
-          <Plus className="mr-1.5 h-4 w-4" />
-          New Package
-        </Button>
-      </div>
-
-      {/* List */}
-      {isLoading ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[1,2,3].map(i => <Skeleton key={i} className="h-28 rounded-xl" />)}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
-          <Package className="h-8 w-8 mb-2 opacity-40" />
-          <p className="text-sm">
-            {hasActiveFilters ? "No packages match these filters" : "No packages yet"}
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map(pkg => <PackageCard key={pkg.id} pkg={pkg} onEdit={openEdit} onDelete={setDeletePkg} />)}
-        </div>
-      )}
-
-      <NewPackageSheet open={sheetOpen} onClose={() => setSheetOpen(false)} />
-
-      {/* Edit Package Dialog */}
-      <Dialog open={!!editPkg} onOpenChange={(o) => { if (!o) setEditPkg(null); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Edit Package</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label>Total Days</Label>
-              <Input
-                type="number"
-                min={1}
-                value={editForm.total_days}
-                onChange={(e) => setEditForm((f) => ({ ...f, total_days: parseInt(e.target.value) || 0 }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Price Paid (AED)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={editForm.price_paid}
-                onChange={(e) => setEditForm((f) => ({ ...f, price_paid: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Expiry Date</Label>
-              <Input
-                type="date"
-                value={editForm.expiry_date}
-                onChange={(e) => setEditForm((f) => ({ ...f, expiry_date: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Notes</Label>
-              <Textarea
-                value={editForm.notes}
-                onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
-                rows={3}
-              />
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="edit-pickup"
-                  checked={editForm.pickup_included}
-                  onCheckedChange={(c) => setEditForm((f) => ({ ...f, pickup_included: !!c }))}
-                />
-                <Label htmlFor="edit-pickup" className="cursor-pointer text-sm">Pickup included</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="edit-dropoff"
-                  checked={editForm.dropoff_included}
-                  onCheckedChange={(c) => setEditForm((f) => ({ ...f, dropoff_included: !!c }))}
-                />
-                <Label htmlFor="edit-dropoff" className="cursor-pointer text-sm">Dropoff included</Label>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditPkg(null)}>Cancel</Button>
-            <Button onClick={handleEditSave} disabled={updatePackage.isPending}>
-              {updatePackage.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Package Dialog */}
-      <AlertDialog open={!!deletePkg} onOpenChange={(o) => { if (!o) setDeletePkg(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Package</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently deletes the package. Linked session history is kept but will no
-              longer reference this package.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeletePkg(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deletePackage.isPending}
-              onClick={(e) => { e.preventDefault(); handleDelete(); }}
-            >
-              {deletePackage.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const DaycarePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
-  const tab = requestedTab === "packages" || requestedTab === "operations" ? requestedTab : "planner";
+  const tab = requestedTab === "operations" ? requestedTab : "planner";
 
   const setTab = (value: string) => {
     setSearchParams(
@@ -2874,7 +1913,6 @@ const DaycarePage = () => {
           <TabsList>
             <TabsTrigger value="planner">Planner</TabsTrigger>
             <TabsTrigger value="operations">Operations</TabsTrigger>
-            <TabsTrigger value="packages">Packages</TabsTrigger>
           </TabsList>
 
           <TabsContent value="planner" className="mt-0">
@@ -2885,9 +1923,6 @@ const DaycarePage = () => {
             <DaycareOperationsTab />
           </TabsContent>
 
-          <TabsContent value="packages" className="mt-0">
-            <PackagesTab />
-          </TabsContent>
         </Tabs>
       </main>
     </>

@@ -14,38 +14,206 @@ export type Database = {
   }
   public: {
     Tables: {
-      addon_rates: {
+      agent_capability_requests: {
         Row: {
-          addon_type: Database["public"]["Enums"]["addon_type"]
-          applicable_services: string[]
+          attempted_capability: string
+          attempted_kind: string
+          attempted_payload: Json | null
+          chat_id: string | null
+          created_at: string
           id: string
-          is_active: boolean
-          label: string
-          price_aed: number
-          unit: string
+          status: string
+          tenant_id: string | null
+          trigger_message: string | null
+        }
+        Insert: {
+          attempted_capability: string
+          attempted_kind?: string
+          attempted_payload?: Json | null
+          chat_id?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          tenant_id?: string | null
+          trigger_message?: string | null
+        }
+        Update: {
+          attempted_capability?: string
+          attempted_kind?: string
+          attempted_payload?: Json | null
+          chat_id?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          tenant_id?: string | null
+          trigger_message?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_capability_requests_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_conversations: {
+        Row: {
+          draft_booking: Json | null
+          facts: Json
+          history: Json
+          mode: string
+          outcome: string | null
+          owner_id: string | null
+          owner_profile: string | null
+          phone_number: string
+          state: string
+          tenant_id: string | null
           updated_at: string
         }
         Insert: {
-          addon_type: Database["public"]["Enums"]["addon_type"]
-          applicable_services?: string[]
-          id?: string
-          is_active?: boolean
-          label: string
-          price_aed?: number
-          unit?: string
+          draft_booking?: Json | null
+          facts?: Json
+          history?: Json
+          mode?: string
+          outcome?: string | null
+          owner_id?: string | null
+          owner_profile?: string | null
+          phone_number: string
+          state?: string
+          tenant_id?: string | null
           updated_at?: string
         }
         Update: {
-          addon_type?: Database["public"]["Enums"]["addon_type"]
-          applicable_services?: string[]
-          id?: string
-          is_active?: boolean
-          label?: string
-          price_aed?: number
-          unit?: string
+          draft_booking?: Json | null
+          facts?: Json
+          history?: Json
+          mode?: string
+          outcome?: string | null
+          owner_id?: string | null
+          owner_profile?: string | null
+          phone_number?: string
+          state?: string
+          tenant_id?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "agent_conversations_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_conversations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_events: {
+        Row: {
+          chat_id: string | null
+          created_at: string
+          event: string
+          id: string
+          payload: Json
+          tenant_id: string | null
+        }
+        Insert: {
+          chat_id?: string | null
+          created_at?: string
+          event: string
+          id?: string
+          payload?: Json
+          tenant_id?: string | null
+        }
+        Update: {
+          chat_id?: string | null
+          created_at?: string
+          event?: string
+          id?: string
+          payload?: Json
+          tenant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_turns: {
+        Row: {
+          blocked_reason: string | null
+          chat_id: string
+          conversation_phone: string | null
+          escalated: boolean
+          id: string
+          input_tokens: number | null
+          latency_ms: number | null
+          message_in: string | null
+          message_out: string | null
+          metadata: Json
+          outcome: string | null
+          output_tokens: number | null
+          staff_notification: string | null
+          started_at: string
+          tenant_id: string | null
+          tool_trace: string | null
+        }
+        Insert: {
+          blocked_reason?: string | null
+          chat_id: string
+          conversation_phone?: string | null
+          escalated?: boolean
+          id?: string
+          input_tokens?: number | null
+          latency_ms?: number | null
+          message_in?: string | null
+          message_out?: string | null
+          metadata?: Json
+          outcome?: string | null
+          output_tokens?: number | null
+          staff_notification?: string | null
+          started_at?: string
+          tenant_id?: string | null
+          tool_trace?: string | null
+        }
+        Update: {
+          blocked_reason?: string | null
+          chat_id?: string
+          conversation_phone?: string | null
+          escalated?: boolean
+          id?: string
+          input_tokens?: number | null
+          latency_ms?: number | null
+          message_in?: string | null
+          message_out?: string | null
+          metadata?: Json
+          outcome?: string | null
+          output_tokens?: number | null
+          staff_notification?: string | null
+          started_at?: string
+          tenant_id?: string | null
+          tool_trace?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_turns_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       billing_adjustments: {
         Row: {
@@ -118,6 +286,7 @@ export type Database = {
           notes: string | null
           quantity: number
           scheduled_date: string | null
+          service_code: Database["public"]["Enums"]["service_code"] | null
           total_price: number | null
           unit_price: number | null
         }
@@ -130,6 +299,7 @@ export type Database = {
           notes?: string | null
           quantity?: number
           scheduled_date?: string | null
+          service_code?: Database["public"]["Enums"]["service_code"] | null
           total_price?: number | null
           unit_price?: number | null
         }
@@ -142,6 +312,7 @@ export type Database = {
           notes?: string | null
           quantity?: number
           scheduled_date?: string | null
+          service_code?: Database["public"]["Enums"]["service_code"] | null
           total_price?: number | null
           unit_price?: number | null
         }
@@ -251,14 +422,17 @@ export type Database = {
         Row: {
           actual_check_in_at: string | null
           actual_check_out_at: string | null
+          add_ons: string[] | null
+          agent_notes: string | null
           booking_ref: string | null
           booking_type: Database["public"]["Enums"]["booking_type"] | null
           camera_link: string | null
+          cancelled_reason: string | null
           check_in_date: string
           check_out_date: string
           created_at: string
+          created_by: string | null
           do_not_move: boolean
-          dog_size: string | null
           dropoff_required: boolean
           extended_from_booking_id: string | null
           id: string
@@ -268,7 +442,7 @@ export type Database = {
           original_room_type: Database["public"]["Enums"]["room_type"] | null
           owner_id: string
           pickup_required: boolean
-          room_id: string
+          room_id: string | null
           staff_id: string | null
           status: Database["public"]["Enums"]["booking_status"]
           updated_at: string
@@ -278,14 +452,17 @@ export type Database = {
         Insert: {
           actual_check_in_at?: string | null
           actual_check_out_at?: string | null
+          add_ons?: string[] | null
+          agent_notes?: string | null
           booking_ref?: string | null
           booking_type?: Database["public"]["Enums"]["booking_type"] | null
           camera_link?: string | null
+          cancelled_reason?: string | null
           check_in_date: string
           check_out_date: string
           created_at?: string
+          created_by?: string | null
           do_not_move?: boolean
-          dog_size?: string | null
           dropoff_required?: boolean
           extended_from_booking_id?: string | null
           id?: string
@@ -295,7 +472,7 @@ export type Database = {
           original_room_type?: Database["public"]["Enums"]["room_type"] | null
           owner_id: string
           pickup_required?: boolean
-          room_id: string
+          room_id?: string | null
           staff_id?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
           updated_at?: string
@@ -307,14 +484,17 @@ export type Database = {
         Update: {
           actual_check_in_at?: string | null
           actual_check_out_at?: string | null
+          add_ons?: string[] | null
+          agent_notes?: string | null
           booking_ref?: string | null
           booking_type?: Database["public"]["Enums"]["booking_type"] | null
           camera_link?: string | null
+          cancelled_reason?: string | null
           check_in_date?: string
           check_out_date?: string
           created_at?: string
+          created_by?: string | null
           do_not_move?: boolean
-          dog_size?: string | null
           dropoff_required?: boolean
           extended_from_booking_id?: string | null
           id?: string
@@ -324,7 +504,7 @@ export type Database = {
           original_room_type?: Database["public"]["Enums"]["room_type"] | null
           owner_id?: string
           pickup_required?: boolean
-          room_id?: string
+          room_id?: string | null
           staff_id?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
           updated_at?: string
@@ -416,140 +596,12 @@ export type Database = {
           },
         ]
       }
-      dog_breeds: {
-        Row: {
-          created_at: string
-          id: string
-          name: string
-          sort_order: number
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          name: string
-          sort_order?: number
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          name?: string
-          sort_order?: number
-        }
-        Relationships: []
-      }
-      daycare_package_types: {
-        Row: {
-          base_price_aed: number
-          id: string
-          is_active: boolean
-          name: string
-          num_dogs: number
-          sort_order: number
-          total_days: number
-          updated_at: string
-        }
-        Insert: {
-          base_price_aed: number
-          id?: string
-          is_active?: boolean
-          name: string
-          num_dogs?: number
-          sort_order?: number
-          total_days: number
-          updated_at?: string
-        }
-        Update: {
-          base_price_aed?: number
-          id?: string
-          is_active?: boolean
-          name?: string
-          num_dogs?: number
-          sort_order?: number
-          total_days?: number
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      daycare_packages: {
-        Row: {
-          created_at: string
-          days_used: number
-          dropoff_included: boolean
-          expiry_date: string | null
-          id: string
-          notes: string | null
-          owner_id: string
-          package_type_id: string | null
-          pet_id: string
-          pickup_included: boolean
-          price_paid: number | null
-          purchase_date: string
-          total_days: number
-          transport_zone: string | null
-        }
-        Insert: {
-          created_at?: string
-          days_used?: number
-          dropoff_included?: boolean
-          expiry_date?: string | null
-          id?: string
-          notes?: string | null
-          owner_id: string
-          package_type_id?: string | null
-          pet_id: string
-          pickup_included?: boolean
-          price_paid?: number | null
-          purchase_date: string
-          total_days: number
-          transport_zone?: string | null
-        }
-        Update: {
-          created_at?: string
-          days_used?: number
-          dropoff_included?: boolean
-          expiry_date?: string | null
-          id?: string
-          notes?: string | null
-          owner_id?: string
-          package_type_id?: string | null
-          pet_id?: string
-          pickup_included?: boolean
-          price_paid?: number | null
-          purchase_date?: string
-          total_days?: number
-          transport_zone?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "daycare_packages_owner_id_fkey"
-            columns: ["owner_id"]
-            isOneToOne: false
-            referencedRelation: "owners"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "daycare_packages_package_type_id_fkey"
-            columns: ["package_type_id"]
-            isOneToOne: false
-            referencedRelation: "daycare_package_types"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "daycare_packages_pet_id_fkey"
-            columns: ["pet_id"]
-            isOneToOne: false
-            referencedRelation: "pets"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       daycare_sessions: {
         Row: {
           checked_in: boolean
           checked_in_at: string | null
           checked_out_at: string | null
           created_at: string
-          dog_size: string | null
           dropoff_used: boolean
           id: string
           logged_by: string | null
@@ -567,7 +619,6 @@ export type Database = {
           checked_in_at?: string | null
           checked_out_at?: string | null
           created_at?: string
-          dog_size?: string | null
           dropoff_used?: boolean
           id?: string
           logged_by?: string | null
@@ -585,7 +636,6 @@ export type Database = {
           checked_in_at?: string | null
           checked_out_at?: string | null
           created_at?: string
-          dog_size?: string | null
           dropoff_used?: boolean
           id?: string
           logged_by?: string | null
@@ -604,13 +654,6 @@ export type Database = {
             columns: ["owner_id"]
             isOneToOne: false
             referencedRelation: "owners"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "daycare_sessions_package_id_fkey"
-            columns: ["package_id"]
-            isOneToOne: false
-            referencedRelation: "daycare_packages"
             referencedColumns: ["id"]
           },
           {
@@ -730,11 +773,9 @@ export type Database = {
           appointment_date: string
           appointment_time: string | null
           booking_id: string | null
-          checked_in_at: string | null
           coat_type: string | null
           completed_at: string | null
           created_at: string
-          dog_size: string | null
           duration_minutes: number | null
           groomer_id: string | null
           grooming_notes: string | null
@@ -743,7 +784,6 @@ export type Database = {
           no_show: boolean
           notes: string | null
           owner_id: string
-          paid_at: string | null
           payment_method: string | null
           pet_id: string
           price: number | null
@@ -755,11 +795,9 @@ export type Database = {
           appointment_date: string
           appointment_time?: string | null
           booking_id?: string | null
-          checked_in_at?: string | null
           coat_type?: string | null
           completed_at?: string | null
           created_at?: string
-          dog_size?: string | null
           duration_minutes?: number | null
           groomer_id?: string | null
           grooming_notes?: string | null
@@ -768,7 +806,6 @@ export type Database = {
           no_show?: boolean
           notes?: string | null
           owner_id: string
-          paid_at?: string | null
           payment_method?: string | null
           pet_id: string
           price?: number | null
@@ -780,11 +817,9 @@ export type Database = {
           appointment_date?: string
           appointment_time?: string | null
           booking_id?: string | null
-          checked_in_at?: string | null
           coat_type?: string | null
           completed_at?: string | null
           created_at?: string
-          dog_size?: string | null
           duration_minutes?: number | null
           groomer_id?: string | null
           grooming_notes?: string | null
@@ -793,7 +828,6 @@ export type Database = {
           no_show?: boolean
           notes?: string | null
           owner_id?: string
-          paid_at?: string | null
           payment_method?: string | null
           pet_id?: string
           price?: number | null
@@ -864,105 +898,6 @@ export type Database = {
           },
         ]
       }
-      grooming_appointment_deletion_log: {
-        Row: {
-          appointment_date: string | null
-          appointment_id: string | null
-          deleted_at: string
-          deleted_by: string | null
-          id: string
-          owner_name: string | null
-          pet_name: string | null
-          price: number | null
-          reason: string | null
-          service: string | null
-        }
-        Insert: {
-          appointment_date?: string | null
-          appointment_id?: string | null
-          deleted_at?: string
-          deleted_by?: string | null
-          id?: string
-          owner_name?: string | null
-          pet_name?: string | null
-          price?: number | null
-          reason?: string | null
-          service?: string | null
-        }
-        Update: {
-          appointment_date?: string | null
-          appointment_id?: string | null
-          deleted_at?: string
-          deleted_by?: string | null
-          id?: string
-          owner_name?: string | null
-          pet_name?: string | null
-          price?: number | null
-          reason?: string | null
-          service?: string | null
-        }
-        Relationships: []
-      }
-      grooming_package_rates: {
-        Row: {
-          amount_aed: number
-          id: string
-          notes: string | null
-          package: Database["public"]["Enums"]["grooming_package"]
-          size: Database["public"]["Enums"]["pet_size_category"]
-          updated_at: string
-          updated_by: string | null
-        }
-        Insert: {
-          amount_aed?: number
-          id?: string
-          notes?: string | null
-          package: Database["public"]["Enums"]["grooming_package"]
-          size: Database["public"]["Enums"]["pet_size_category"]
-          updated_at?: string
-          updated_by?: string | null
-        }
-        Update: {
-          amount_aed?: number
-          id?: string
-          notes?: string | null
-          package?: Database["public"]["Enums"]["grooming_package"]
-          size?: Database["public"]["Enums"]["pet_size_category"]
-          updated_at?: string
-          updated_by?: string | null
-        }
-        Relationships: []
-      }
-      grooming_service_rates: {
-        Row: {
-          duration_minutes: number | null
-          id: string
-          is_active: boolean
-          label: string
-          price_aed: number
-          service: Database["public"]["Enums"]["grooming_service"]
-          updated_at: string
-        }
-        Insert: {
-          duration_minutes?: number | null
-          id?: string
-          is_active?: boolean
-          label: string
-          price_aed?: number
-          service: Database["public"]["Enums"]["grooming_service"]
-          updated_at?: string
-        }
-        Update: {
-          duration_minutes?: number | null
-          id?: string
-          is_active?: boolean
-          label?: string
-          price_aed?: number
-          service?: Database["public"]["Enums"]["grooming_service"]
-          updated_at?: string
-        }
-        Relationships: []
-      }
       handover_logs: {
         Row: {
           created_at: string
@@ -994,6 +929,47 @@ export type Database = {
             columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_deletion_log: {
+        Row: {
+          deleted_at: string
+          deleted_by: string | null
+          id: string
+          invoice_id: string | null
+          invoice_row_id: string | null
+          owner_name: string | null
+          reason: string | null
+          total_amount: number | null
+        }
+        Insert: {
+          deleted_at?: string
+          deleted_by?: string | null
+          id?: string
+          invoice_id?: string | null
+          invoice_row_id?: string | null
+          owner_name?: string | null
+          reason?: string | null
+          total_amount?: number | null
+        }
+        Update: {
+          deleted_at?: string
+          deleted_by?: string | null
+          id?: string
+          invoice_id?: string | null
+          invoice_row_id?: string | null
+          owner_name?: string | null
+          reason?: string | null
+          total_amount?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_deletion_log_invoice_row_id_fkey"
+            columns: ["invoice_row_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
             referencedColumns: ["id"]
           },
         ]
@@ -1048,36 +1024,6 @@ export type Database = {
           },
         ]
       }
-      invoice_deletion_log: {
-        Row: {
-          deleted_at: string
-          deleted_by: string | null
-          id: string
-          invoice_id: string | null
-          owner_name: string | null
-          reason: string | null
-          total_amount: number | null
-        }
-        Insert: {
-          deleted_at?: string
-          deleted_by?: string | null
-          id?: string
-          invoice_id?: string | null
-          owner_name?: string | null
-          reason?: string | null
-          total_amount?: number | null
-        }
-        Update: {
-          deleted_at?: string
-          deleted_by?: string | null
-          id?: string
-          invoice_id?: string | null
-          owner_name?: string | null
-          reason?: string | null
-          total_amount?: number | null
-        }
-        Relationships: []
-      }
       invoices: {
         Row: {
           amount_paid: number
@@ -1101,8 +1047,8 @@ export type Database = {
           subtotal_aed: number | null
           total: number
           total_aed: number | null
-          vat_aed: number | null
           updated_at: string
+          vat_aed: number | null
           voided_at: string | null
           voided_reason: string | null
         }
@@ -1128,8 +1074,8 @@ export type Database = {
           subtotal_aed?: number | null
           total?: number
           total_aed?: number | null
-          vat_aed?: number | null
           updated_at?: string
+          vat_aed?: number | null
           voided_at?: string | null
           voided_reason?: string | null
         }
@@ -1155,8 +1101,8 @@ export type Database = {
           subtotal_aed?: number | null
           total?: number
           total_aed?: number | null
-          vat_aed?: number | null
           updated_at?: string
+          vat_aed?: number | null
           voided_at?: string | null
           voided_reason?: string | null
         }
@@ -1240,14 +1186,10 @@ export type Database = {
           first_name: string
           how_heard: string | null
           id: string
-          is_msh_owned: boolean
           is_vip: boolean
+          is_woof_owned: boolean
           last_name: string | null
           low_balance_threshold_override: number | null
-          member_type: Database["public"]["Enums"]["member_type"]
-          membership_date: string | null
-          membership_fee_paid: boolean
-          nationality: string | null
           notes: string | null
           notify_birthday: boolean
           notify_boarding: boolean
@@ -1281,14 +1223,10 @@ export type Database = {
           first_name: string
           how_heard?: string | null
           id?: string
-          is_msh_owned?: boolean
           is_vip?: boolean
+          is_woof_owned?: boolean
           last_name?: string | null
           low_balance_threshold_override?: number | null
-          member_type?: Database["public"]["Enums"]["member_type"]
-          membership_date?: string | null
-          membership_fee_paid?: boolean
-          nationality?: string | null
           notes?: string | null
           notify_birthday?: boolean
           notify_boarding?: boolean
@@ -1322,14 +1260,10 @@ export type Database = {
           first_name?: string
           how_heard?: string | null
           id?: string
-          is_msh_owned?: boolean
           is_vip?: boolean
+          is_woof_owned?: boolean
           last_name?: string | null
           low_balance_threshold_override?: number | null
-          member_type?: Database["public"]["Enums"]["member_type"]
-          membership_date?: string | null
-          membership_fee_paid?: boolean
-          nationality?: string | null
           notes?: string | null
           notify_birthday?: boolean
           notify_boarding?: boolean
@@ -1348,130 +1282,173 @@ export type Database = {
         }
         Relationships: []
       }
-      park_bookings: {
+      package_credit_grants: {
         Row: {
-          created_at: string
+          exclusive_group: string | null
           id: string
-          is_assessment: boolean
-          notes: string | null
-          owner_id: string | null
-          owner_name_raw: string | null
-          pet_id: string | null
-          pet_name_raw: string | null
-          price: number | null
-          size_lane: Database["public"]["Enums"]["park_size"]
-          slot_end: string
-          slot_start: string
-          staff_id: string | null
-          visit_date: string
+          is_bonus: boolean
+          package_def_id: string
+          service_code: Database["public"]["Enums"]["service_code"]
+          sort_order: number
+          units: number
         }
         Insert: {
-          created_at?: string
+          exclusive_group?: string | null
           id?: string
-          is_assessment?: boolean
-          notes?: string | null
-          owner_id?: string | null
-          owner_name_raw?: string | null
-          pet_id?: string | null
-          pet_name_raw?: string | null
-          price?: number | null
-          size_lane: Database["public"]["Enums"]["park_size"]
-          slot_end: string
-          slot_start: string
-          staff_id?: string | null
-          visit_date: string
+          is_bonus?: boolean
+          package_def_id: string
+          service_code: Database["public"]["Enums"]["service_code"]
+          sort_order?: number
+          units: number
         }
         Update: {
-          created_at?: string
+          exclusive_group?: string | null
           id?: string
-          is_assessment?: boolean
-          notes?: string | null
-          owner_id?: string | null
-          owner_name_raw?: string | null
-          pet_id?: string | null
-          pet_name_raw?: string | null
-          price?: number | null
-          size_lane?: Database["public"]["Enums"]["park_size"]
-          slot_end?: string
-          slot_start?: string
-          staff_id?: string | null
-          visit_date?: string
+          is_bonus?: boolean
+          package_def_id?: string
+          service_code?: Database["public"]["Enums"]["service_code"]
+          sort_order?: number
+          units?: number
         }
         Relationships: [
           {
-            foreignKeyName: "park_bookings_owner_id_fkey"
-            columns: ["owner_id"]
+            foreignKeyName: "package_credit_grants_package_def_id_fkey"
+            columns: ["package_def_id"]
             isOneToOne: false
-            referencedRelation: "owners"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "park_bookings_pet_id_fkey"
-            columns: ["pet_id"]
-            isOneToOne: false
-            referencedRelation: "pets"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "park_bookings_staff_id_fkey"
-            columns: ["staff_id"]
-            isOneToOne: false
-            referencedRelation: "staff"
+            referencedRelation: "package_definitions"
             referencedColumns: ["id"]
           },
         ]
       }
-      park_day_flags: {
+      package_definitions: {
         Row: {
+          applicable_species: Database["public"]["Enums"]["species"][]
+          category: string
+          code: string
           created_at: string
+          description: string | null
+          display_name: string
           id: string
-          notes: string | null
-          status: Database["public"]["Enums"]["park_day_status"]
-          visit_date: string
+          is_active: boolean
+          multi_pet_discount_pct: number
+          sort_order: number
+          updated_at: string
+          validity_months: number
         }
         Insert: {
+          applicable_species?: Database["public"]["Enums"]["species"][]
+          category: string
+          code: string
           created_at?: string
+          description?: string | null
+          display_name: string
           id?: string
-          notes?: string | null
-          status?: Database["public"]["Enums"]["park_day_status"]
-          visit_date: string
+          is_active?: boolean
+          multi_pet_discount_pct?: number
+          sort_order?: number
+          updated_at?: string
+          validity_months: number
         }
         Update: {
+          applicable_species?: Database["public"]["Enums"]["species"][]
+          category?: string
+          code?: string
           created_at?: string
+          description?: string | null
+          display_name?: string
           id?: string
-          notes?: string | null
-          status?: Database["public"]["Enums"]["park_day_status"]
-          visit_date?: string
+          is_active?: boolean
+          multi_pet_discount_pct?: number
+          sort_order?: number
+          updated_at?: string
+          validity_months?: number
         }
         Relationships: []
       }
-      park_rates: {
+      package_pricing: {
         Row: {
+          amount_aed: number
+          coat_type: Database["public"]["Enums"]["coat_type"] | null
+          effective_from: string | null
+          effective_to: string | null
           id: string
           is_active: boolean
-          label: string
-          price_per_slot_aed: number
+          package_def_id: string
+          pet_size: Database["public"]["Enums"]["pet_size"] | null
           updated_at: string
         }
         Insert: {
+          amount_aed: number
+          coat_type?: Database["public"]["Enums"]["coat_type"] | null
+          effective_from?: string | null
+          effective_to?: string | null
           id?: string
           is_active?: boolean
-          label?: string
-          price_per_slot_aed?: number
+          package_def_id: string
+          pet_size?: Database["public"]["Enums"]["pet_size"] | null
           updated_at?: string
         }
         Update: {
+          amount_aed?: number
+          coat_type?: Database["public"]["Enums"]["coat_type"] | null
+          effective_from?: string | null
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          package_def_id?: string
+          pet_size?: Database["public"]["Enums"]["pet_size"] | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "package_pricing_package_def_id_fkey"
+            columns: ["package_def_id"]
+            isOneToOne: false
+            referencedRelation: "package_definitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      peak_periods: {
+        Row: {
+          created_at: string
+          end_day: number
+          end_month: number
+          id: string
+          is_active: boolean
+          label: string
+          notes: string | null
+          start_day: number
+          start_month: number
+        }
+        Insert: {
+          created_at?: string
+          end_day: number
+          end_month: number
+          id?: string
+          is_active?: boolean
+          label: string
+          notes?: string | null
+          start_day: number
+          start_month: number
+        }
+        Update: {
+          created_at?: string
+          end_day?: number
+          end_month?: number
           id?: string
           is_active?: boolean
           label?: string
-          price_per_slot_aed?: number
-          updated_at?: string
+          notes?: string | null
+          start_day?: number
+          start_month?: number
         }
         Relationships: []
       }
       pets: {
         Row: {
           active: boolean
+          allergies: string | null
           assessed_by: string | null
           assessment_date: string | null
           assessment_notes: string | null
@@ -1479,24 +1456,26 @@ export type Database = {
           behavioural_notes: string | null
           breed: string | null
           camera_preferred: boolean
+          coat_type: Database["public"]["Enums"]["coat_type"] | null
           colour: string | null
           created_at: string
           date_of_birth: string | null
           feeding_instructions: string | null
+          feeding_notes: string | null
           gender: Database["public"]["Enums"]["pet_gender"] | null
           grooming_notes: string | null
           id: string
           medical_conditions: string | null
+          medical_notes: string | null
           medications: string | null
           microchip_number: string | null
           name: string
           other_notes: string | null
           owner_id: string
           photo_url: string | null
-          registration_invoiced: boolean
-          size_category: Database["public"]["Enums"]["pet_size_category"] | null
-          special_alerts: Json | null
+          size: Database["public"]["Enums"]["pet_size"] | null
           spayed_neutered: boolean | null
+          special_alerts: Json | null
           species: Database["public"]["Enums"]["species"]
           updated_at: string
           vaccicheck_cav_value: number | null
@@ -1517,6 +1496,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          allergies?: string | null
           assessed_by?: string | null
           assessment_date?: string | null
           assessment_notes?: string | null
@@ -1524,26 +1504,26 @@ export type Database = {
           behavioural_notes?: string | null
           breed?: string | null
           camera_preferred?: boolean
+          coat_type?: Database["public"]["Enums"]["coat_type"] | null
           colour?: string | null
           created_at?: string
           date_of_birth?: string | null
           feeding_instructions?: string | null
+          feeding_notes?: string | null
           gender?: Database["public"]["Enums"]["pet_gender"] | null
           grooming_notes?: string | null
           id?: string
           medical_conditions?: string | null
+          medical_notes?: string | null
           medications?: string | null
           microchip_number?: string | null
           name: string
           other_notes?: string | null
           owner_id: string
           photo_url?: string | null
-          registration_invoiced?: boolean
-          size_category?:
-            | Database["public"]["Enums"]["pet_size_category"]
-            | null
-          special_alerts?: Json | null
+          size?: Database["public"]["Enums"]["pet_size"] | null
           spayed_neutered?: boolean | null
+          special_alerts?: Json | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
           vaccicheck_cav_value?: number | null
@@ -1564,6 +1544,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          allergies?: string | null
           assessed_by?: string | null
           assessment_date?: string | null
           assessment_notes?: string | null
@@ -1571,26 +1552,26 @@ export type Database = {
           behavioural_notes?: string | null
           breed?: string | null
           camera_preferred?: boolean
+          coat_type?: Database["public"]["Enums"]["coat_type"] | null
           colour?: string | null
           created_at?: string
           date_of_birth?: string | null
           feeding_instructions?: string | null
+          feeding_notes?: string | null
           gender?: Database["public"]["Enums"]["pet_gender"] | null
           grooming_notes?: string | null
           id?: string
           medical_conditions?: string | null
+          medical_notes?: string | null
           medications?: string | null
           microchip_number?: string | null
           name?: string
           other_notes?: string | null
           owner_id?: string
           photo_url?: string | null
-          registration_invoiced?: boolean
-          size_category?:
-            | Database["public"]["Enums"]["pet_size_category"]
-            | null
-          special_alerts?: Json | null
+          size?: Database["public"]["Enums"]["pet_size"] | null
           spayed_neutered?: boolean | null
+          special_alerts?: Json | null
           species?: Database["public"]["Enums"]["species"]
           updated_at?: string
           vaccicheck_cav_value?: number | null
@@ -1619,137 +1600,57 @@ export type Database = {
           },
         ]
       }
-      pricing: {
+      purchase_groups: {
         Row: {
-          amount_aed: number
-          category: string
-          id: string
-          key: string
-          label: string
-          updated_at: string | null
-          updated_by: string | null
-        }
-        Insert: {
-          amount_aed?: number
-          category: string
-          id?: string
-          key: string
-          label: string
-          updated_at?: string | null
-          updated_by?: string | null
-        }
-        Update: {
-          amount_aed?: number
-          category?: string
-          id?: string
-          key?: string
-          label?: string
-          updated_at?: string | null
-          updated_by?: string | null
-        }
-        Relationships: []
-      }
-      pricing_legacy_archive: {
-        Row: {
-          amount_aed: number
-          archived_at: string
-          archived_reason: string
-          category: string
-          key: string
-          label: string
-          updated_at: string | null
-        }
-        Insert: {
-          amount_aed: number
-          archived_at?: string
-          archived_reason: string
-          category: string
-          key: string
-          label: string
-          updated_at?: string | null
-        }
-        Update: {
-          amount_aed?: number
-          archived_at?: string
-          archived_reason?: string
-          category?: string
-          key?: string
-          label?: string
-          updated_at?: string | null
-        }
-        Relationships: []
-      }
-      rooms: {
-        Row: {
-          cam_host: string | null
-          cam_id: string | null
-          cam_number: string | null
-          cam_password: string | null
-          cam_username: string | null
-          camera_recording: boolean
-          capacity_type: Database["public"]["Enums"]["capacity_type"]
           created_at: string
-          display_name: string
           id: string
-          is_active: boolean
-          label_color: string | null
-          max_pets: number
-          nightly_rate: number | null
-          notes: string | null
-          pricing_category: string | null
-          pricing_size_tier: string | null
-          room_number: string
-          room_type: Database["public"]["Enums"]["room_type"]
-          street_name: string | null
-          wing: Database["public"]["Enums"]["room_wing"]
+          invoice_id: string | null
+          multi_pet_discount_applied: number
+          owner_id: string
+          package_def_id: string
+          pet_count: number
         }
         Insert: {
-          cam_host?: string | null
-          cam_id?: string | null
-          cam_number?: string | null
-          cam_password?: string | null
-          cam_username?: string | null
-          camera_recording?: boolean
-          capacity_type?: Database["public"]["Enums"]["capacity_type"]
           created_at?: string
-          display_name: string
           id?: string
-          is_active?: boolean
-          label_color?: string | null
-          max_pets?: number
-          nightly_rate?: number | null
-          notes?: string | null
-          pricing_category?: string | null
-          pricing_size_tier?: string | null
-          room_number: string
-          room_type: Database["public"]["Enums"]["room_type"]
-          street_name?: string | null
-          wing: Database["public"]["Enums"]["room_wing"]
+          invoice_id?: string | null
+          multi_pet_discount_applied?: number
+          owner_id: string
+          package_def_id: string
+          pet_count: number
         }
         Update: {
-          cam_host?: string | null
-          cam_id?: string | null
-          cam_number?: string | null
-          cam_password?: string | null
-          cam_username?: string | null
-          camera_recording?: boolean
-          capacity_type?: Database["public"]["Enums"]["capacity_type"]
           created_at?: string
-          display_name?: string
           id?: string
-          is_active?: boolean
-          label_color?: string | null
-          max_pets?: number
-          nightly_rate?: number | null
-          notes?: string | null
-          pricing_category?: string | null
-          pricing_size_tier?: string | null
-          room_number?: string
-          room_type?: Database["public"]["Enums"]["room_type"]
-          street_name?: string | null
-          wing?: Database["public"]["Enums"]["room_wing"]
+          invoice_id?: string | null
+          multi_pet_discount_applied?: number
+          owner_id?: string
+          package_def_id?: string
+          pet_count?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "purchase_groups_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_groups_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_groups_package_def_id_fkey"
+            columns: ["package_def_id"]
+            isOneToOne: false
+            referencedRelation: "package_definitions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       room_types: {
         Row: {
@@ -1771,6 +1672,227 @@ export type Database = {
           slug?: string
         }
         Relationships: []
+      }
+      rooms: {
+        Row: {
+          cam_host: string | null
+          cam_id: string | null
+          cam_number: string | null
+          cam_password: string | null
+          cam_username: string | null
+          camera_recording: boolean | null
+          capacity_type: Database["public"]["Enums"]["capacity_type"]
+          created_at: string
+          display_name: string
+          id: string
+          is_active: boolean
+          label_color: string | null
+          max_pets: number
+          nightly_rate: number | null
+          notes: string | null
+          pet_type: string | null
+          room_number: string
+          room_type: Database["public"]["Enums"]["room_type"]
+          street_name: string | null
+          wing: Database["public"]["Enums"]["room_wing"]
+        }
+        Insert: {
+          cam_host?: string | null
+          cam_id?: string | null
+          cam_number?: string | null
+          cam_password?: string | null
+          cam_username?: string | null
+          camera_recording?: boolean | null
+          capacity_type?: Database["public"]["Enums"]["capacity_type"]
+          created_at?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          label_color?: string | null
+          max_pets?: number
+          nightly_rate?: number | null
+          notes?: string | null
+          pet_type?: string | null
+          room_number: string
+          room_type: Database["public"]["Enums"]["room_type"]
+          street_name?: string | null
+          wing: Database["public"]["Enums"]["room_wing"]
+        }
+        Update: {
+          cam_host?: string | null
+          cam_id?: string | null
+          cam_number?: string | null
+          cam_password?: string | null
+          cam_username?: string | null
+          camera_recording?: boolean | null
+          capacity_type?: Database["public"]["Enums"]["capacity_type"]
+          created_at?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          label_color?: string | null
+          max_pets?: number
+          nightly_rate?: number | null
+          notes?: string | null
+          pet_type?: string | null
+          room_number?: string
+          room_type?: Database["public"]["Enums"]["room_type"]
+          street_name?: string | null
+          wing?: Database["public"]["Enums"]["room_wing"]
+        }
+        Relationships: []
+      }
+      service_code_meta: {
+        Row: {
+          applicable_species: Database["public"]["Enums"]["species"][]
+          description: string | null
+          display_name: string
+          is_active: boolean
+          service_code: Database["public"]["Enums"]["service_code"]
+          unit: Database["public"]["Enums"]["service_unit"]
+          updated_at: string
+          updated_by: string | null
+          vat_included: boolean
+        }
+        Insert: {
+          applicable_species: Database["public"]["Enums"]["species"][]
+          description?: string | null
+          display_name: string
+          is_active?: boolean
+          service_code: Database["public"]["Enums"]["service_code"]
+          unit: Database["public"]["Enums"]["service_unit"]
+          updated_at?: string
+          updated_by?: string | null
+          vat_included?: boolean
+        }
+        Update: {
+          applicable_species?: Database["public"]["Enums"]["species"][]
+          description?: string | null
+          display_name?: string
+          is_active?: boolean
+          service_code?: Database["public"]["Enums"]["service_code"]
+          unit?: Database["public"]["Enums"]["service_unit"]
+          updated_at?: string
+          updated_by?: string | null
+          vat_included?: boolean
+        }
+        Relationships: []
+      }
+      service_credits: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          is_bonus: boolean
+          pet_id: string
+          purchase_group_id: string | null
+          redemption_group_id: string | null
+          service_code: Database["public"]["Enums"]["service_code"]
+          source_ref_id: string | null
+          source_type: string
+          status: string
+          units_consumed: number
+          units_total: number
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          is_bonus?: boolean
+          pet_id: string
+          purchase_group_id?: string | null
+          redemption_group_id?: string | null
+          service_code: Database["public"]["Enums"]["service_code"]
+          source_ref_id?: string | null
+          source_type: string
+          status?: string
+          units_consumed?: number
+          units_total: number
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          is_bonus?: boolean
+          pet_id?: string
+          purchase_group_id?: string | null
+          redemption_group_id?: string | null
+          service_code?: Database["public"]["Enums"]["service_code"]
+          source_ref_id?: string | null
+          source_type?: string
+          status?: string
+          units_consumed?: number
+          units_total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_credits_pet_id_fkey"
+            columns: ["pet_id"]
+            isOneToOne: false
+            referencedRelation: "pets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_credits_purchase_group_id_fkey"
+            columns: ["purchase_group_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_rates: {
+        Row: {
+          amount_aed: number
+          coat_type: Database["public"]["Enums"]["coat_type"] | null
+          effective_from: string | null
+          effective_to: string | null
+          id: string
+          is_active: boolean
+          notes: string | null
+          pet_size: Database["public"]["Enums"]["pet_size"] | null
+          season: Database["public"]["Enums"]["rate_season"] | null
+          service_code: Database["public"]["Enums"]["service_code"]
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          amount_aed: number
+          coat_type?: Database["public"]["Enums"]["coat_type"] | null
+          effective_from?: string | null
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          pet_size?: Database["public"]["Enums"]["pet_size"] | null
+          season?: Database["public"]["Enums"]["rate_season"] | null
+          service_code: Database["public"]["Enums"]["service_code"]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          amount_aed?: number
+          coat_type?: Database["public"]["Enums"]["coat_type"] | null
+          effective_from?: string | null
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          pet_size?: Database["public"]["Enums"]["pet_size"] | null
+          season?: Database["public"]["Enums"]["rate_season"] | null
+          service_code?: Database["public"]["Enums"]["service_code"]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_rates_service_code_fkey"
+            columns: ["service_code"]
+            isOneToOne: false
+            referencedRelation: "service_code_meta"
+            referencedColumns: ["service_code"]
+          },
+        ]
       }
       staff: {
         Row: {
@@ -1802,6 +1924,33 @@ export type Database = {
           last_name?: string
           phone?: string | null
           role?: Database["public"]["Enums"]["staff_role"]
+        }
+        Relationships: []
+      }
+      staff_sessions: {
+        Row: {
+          created_at: string
+          history: Json
+          id: string
+          staff_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          history?: Json
+          id?: string
+          staff_id: string
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          history?: Json
+          id?: string
+          staff_id?: string
+          title?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -1856,6 +2005,171 @@ export type Database = {
           },
         ]
       }
+      system_context: {
+        Row: {
+          content: string
+          key: string
+          tenant_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          content: string
+          key: string
+          tenant_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          content?: string
+          key?: string
+          tenant_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "system_context_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_prompts: {
+        Row: {
+          created_at: string
+          fallback_strings: Json
+          id: string
+          is_active: boolean
+          rules_markdown: string | null
+          system_prompt_template: string
+          tenant_id: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          fallback_strings?: Json
+          id?: string
+          is_active?: boolean
+          rules_markdown?: string | null
+          system_prompt_template: string
+          tenant_id: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          fallback_strings?: Json
+          id?: string
+          is_active?: boolean
+          rules_markdown?: string | null
+          system_prompt_template?: string
+          tenant_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_prompts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_tools: {
+        Row: {
+          config: Json
+          created_at: string
+          description_override: string | null
+          enabled: boolean
+          id: string
+          permissions: string
+          schema_override: Json | null
+          tenant_id: string
+          tool_name: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          description_override?: string | null
+          enabled?: boolean
+          id?: string
+          permissions?: string
+          schema_override?: Json | null
+          tenant_id: string
+          tool_name: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          description_override?: string | null
+          enabled?: boolean
+          id?: string
+          permissions?: string
+          schema_override?: Json | null
+          tenant_id?: string
+          tool_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_tools_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenants: {
+        Row: {
+          booking_ref_prefix: string | null
+          created_at: string
+          daily_token_cap: number | null
+          default_mode: string
+          display_name: string
+          escalation_policy: Json
+          id: string
+          language: string
+          metadata: Json
+          slug: string
+          staff_group_id: string | null
+          timezone: string
+          updated_at: string
+          wa_session_client_id: string | null
+        }
+        Insert: {
+          booking_ref_prefix?: string | null
+          created_at?: string
+          daily_token_cap?: number | null
+          default_mode?: string
+          display_name: string
+          escalation_policy?: Json
+          id?: string
+          language?: string
+          metadata?: Json
+          slug: string
+          staff_group_id?: string | null
+          timezone?: string
+          updated_at?: string
+          wa_session_client_id?: string | null
+        }
+        Update: {
+          booking_ref_prefix?: string | null
+          created_at?: string
+          daily_token_cap?: number | null
+          default_mode?: string
+          display_name?: string
+          escalation_policy?: Json
+          id?: string
+          language?: string
+          metadata?: Json
+          slug?: string
+          staff_group_id?: string | null
+          timezone?: string
+          updated_at?: string
+          wa_session_client_id?: string | null
+        }
+        Relationships: []
+      }
       vaccinations: {
         Row: {
           administered_date: string | null
@@ -1896,6 +2210,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      vet_clinics: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          phone: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          phone?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          phone?: string | null
+        }
+        Relationships: []
       }
       waiting_list: {
         Row: {
@@ -1959,30 +2297,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      vet_clinics: {
-        Row: {
-          created_at: string
-          id: string
-          is_active: boolean
-          name: string
-          phone: string | null
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          name: string
-          phone?: string | null
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          name?: string
-          phone?: string | null
-        }
-        Relationships: []
       }
       wallet_topup_requests: {
         Row: {
@@ -2103,16 +2417,90 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      agent_capability_gaps: {
+        Row: {
+          blocked_reason: string | null
+          chat_id: string | null
+          day: string | null
+          gap_type: string | null
+          message_in: string | null
+          started_at: string | null
+          tool_trace: string | null
+        }
+        Insert: {
+          blocked_reason?: string | null
+          chat_id?: string | null
+          day?: never
+          gap_type?: never
+          message_in?: string | null
+          started_at?: string | null
+          tool_trace?: string | null
+        }
+        Update: {
+          blocked_reason?: string | null
+          chat_id?: string | null
+          day?: never
+          gap_type?: never
+          message_in?: string | null
+          started_at?: string | null
+          tool_trace?: string | null
+        }
+        Relationships: []
+      }
+      agent_open_capability_requests: {
+        Row: {
+          attempted_capability: string | null
+          attempted_kind: string | null
+          first_seen: string | null
+          hits: number | null
+          last_seen: string | null
+          sample_message: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      apply_member_discount: {
-        Args: { p_owner_id: string; p_subtotal: number }
-        Returns: {
-          discount_aed: number
-          discount_pct: number
-          final_aed: number
-        }[]
+      _agent_owner_for_phone: { Args: { p_phone: string }; Returns: string }
+      agent_add_booking_addon: {
+        Args: { p_addon: Json; p_booking_id: string; p_phone: string }
+        Returns: Json
+      }
+      agent_book_grooming: {
+        Args: { p_grooming: Json; p_pet_id: string; p_phone: string }
+        Returns: Json
+      }
+      agent_check_room_availability: {
+        Args: { p_check_in: string; p_check_out: string; p_room_id: string }
+        Returns: Json
+      }
+      agent_create_daycare_session: {
+        Args: { p_pet_id: string; p_phone: string; p_session: Json }
+        Returns: Json
+      }
+      agent_create_owner: {
+        Args: { p_phone: string; p_profile: Json }
+        Returns: Json
+      }
+      agent_create_pet: {
+        Args: { p_pet: Json; p_phone: string }
+        Returns: Json
+      }
+      agent_introspect: { Args: never; Returns: Json }
+      agent_record_vaccination: {
+        Args: { p_pet_id: string; p_phone: string; p_vacc: Json }
+        Returns: Json
+      }
+      agent_record_wallet_transaction: {
+        Args: { p_phone: string; p_txn: Json }
+        Returns: Json
+      }
+      agent_update_pet: {
+        Args: { p_pet_id: string; p_phone: string; p_updates: Json }
+        Returns: Json
+      }
+      apply_double_occupancy_discount: {
+        Args: { p_booking_id: string }
+        Returns: string
       }
       calculate_cancellation_refund: {
         Args: {
@@ -2128,9 +2516,41 @@ export type Database = {
           refund_pct: number
         }[]
       }
+      calculate_double_occupancy_discount: {
+        Args: { p_booking_id: string }
+        Returns: number
+      }
+      consume_service_credit: {
+        Args: {
+          p_consumed_for_ref_id?: string
+          p_consumed_for_ref_type?: string
+          p_credit_id: string
+          p_units?: number
+        }
+        Returns: {
+          credit_id: string
+          new_status: string
+          units_remaining: number
+        }[]
+      }
+      create_assessment_booking: {
+        Args: {
+          p_notes?: string
+          p_pet_id: string
+          p_session_date: string
+          p_session_start_time: string
+          p_staff_id?: string
+        }
+        Returns: {
+          amount_aed: number
+          booking_id: string
+          invoice_id: string
+        }[]
+      }
       create_room_type: { Args: { p_label: string }; Returns: string }
       flag_overdue_invoices: { Args: never; Returns: number }
-      get_price: { Args: { p_key: string }; Returns: number }
+      generate_booking_ref: { Args: never; Returns: string }
+      get_dashboard_metrics: { Args: { p_as_of?: string }; Returns: Json }
       get_statement_of_account: {
         Args: { p_owner_id: string }
         Returns: {
@@ -2144,72 +2564,64 @@ export type Database = {
           total_aed: number
         }[]
       }
-      get_dashboard_metrics: {
-        Args: { p_as_of?: string }
-        Returns: Json
-      }
-      is_off_peak: {
-        Args: { check_in_date: string; check_out_date: string }
+      is_import_placeholder_room_id: {
+        Args: { p_room_id: string }
         Returns: boolean
+      }
+      is_peak_date: { Args: { p_date: string }; Returns: boolean }
+      list_active_credits_for_pet: {
+        Args: {
+          p_pet_id: string
+          p_service_code?: Database["public"]["Enums"]["service_code"]
+        }
+        Returns: {
+          credit_id: string
+          expires_at: string
+          is_bonus: boolean
+          package_name: string
+          service_code: Database["public"]["Enums"]["service_code"]
+          source_type: string
+          units_remaining: number
+        }[]
       }
       process_wallet_payment: {
         Args: { p_invoice_id: string; p_performed_by: string }
         Returns: Json
       }
-      resolve_boarding_line_price: {
+      purchase_package: {
         Args: {
-          p_base_key: string
-          p_check_in_date: string
-          p_check_out_date: string
-          p_quantity: number
-          p_tier?: string
+          p_owner_id: string
+          p_package_code: string
+          p_payment_method?: Database["public"]["Enums"]["payment_method"]
+          p_pet_ids: string[]
         }
         Returns: {
-          discount_amount: number
-          discount_pct: number
-          pricing_key: string
-          subtotal: number
-          total: number
-          unit_price: number
-          vat: number
+          credits_granted: number
+          discount_applied_aed: number
+          invoice_id: string
+          purchase_group_id: string
+          total_amount_aed: number
         }[]
       }
-      resolve_boarding_pricing_key: {
+      resolve_woof_service_rate: {
         Args: {
-          p_base_key: string
-          p_check_in_date: string
-          p_check_out_date: string
-        }
-        Returns: string
-      }
-      resolve_grooming_price: {
-        Args: {
-          p_package: Database["public"]["Enums"]["grooming_package"]
-          p_quantity?: number
-          p_size: Database["public"]["Enums"]["pet_size_category"]
-          p_tier?: string
+          p_booking_date?: string
+          p_coat_type?: Database["public"]["Enums"]["coat_type"]
+          p_pet_size?: Database["public"]["Enums"]["pet_size"]
+          p_service_code: Database["public"]["Enums"]["service_code"]
         }
         Returns: {
-          discount_amount: number
-          discount_pct: number
-          subtotal: number
-          total: number
-          unit_price: number
-          vat: number
+          amount_aed: number
+          is_peak: boolean
+          matched_season: Database["public"]["Enums"]["rate_season"]
+          notes: string
+          rate_id: string
+          service_code: Database["public"]["Enums"]["service_code"]
+          unit: Database["public"]["Enums"]["service_unit"]
         }[]
       }
-      resolve_line_price: {
-        Args: { p_pricing_key: string; p_quantity: number; p_tier?: string }
-        Returns: {
-          discount_amount: number
-          discount_pct: number
-          subtotal: number
-          total: number
-          unit_price: number
-          vat: number
-        }[]
-      }
-      tier_discount_pct: { Args: { tier: string }; Returns: number }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       addon_type:
@@ -2229,6 +2641,7 @@ export type Database = {
         | "checked_out"
         | "cancelled"
         | "no_show"
+        | "draft"
       booking_type:
         | "boarding"
         | "daycare"
@@ -2238,6 +2651,7 @@ export type Database = {
         | "training"
         | "assessment"
       capacity_type: "single" | "twin" | "twin_plus" | "multiple"
+      coat_type: "short" | "mid_length" | "long"
       grooming_package:
         | "grande"
         | "bijoux"
@@ -2261,12 +2675,10 @@ export type Database = {
         | "outstanding"
         | "overdue"
         | "voided"
-      member_type: "standard" | "silver" | "gold" | "platinum"
-      park_day_status: "open" | "closed" | "assessment_only"
-      park_size: "small" | "big"
       payment_method: "wallet" | "card" | "cash"
       pet_gender: "male" | "female"
-      pet_size_category: "S" | "M" | "L" | "XL"
+      pet_size: "small" | "medium" | "large"
+      rate_season: "peak" | "off_peak"
       room_type:
         | "presidential_super"
         | "presidential_standard"
@@ -2282,6 +2694,22 @@ export type Database = {
         | "park_lane"
         | "pall_mall"
         | "kennels"
+        | "presidential_single"
+        | "presidential_double"
+        | "deluxe"
+        | "standard"
+        | "standard_glass"
+        | "lg_deluxe"
+        | "lg_royal"
+        | "lg_standard"
+        | "lg_presidential"
+        | "lg_presidential_double"
+        | "lg_royal_double"
+        | "lg_standard_luxury"
+        | "lg_resting_nook"
+        | "standard_deluxe"
+        | "kitchen"
+        | "royal"
       room_wing:
         | "oxford"
         | "piccadilly"
@@ -2293,7 +2721,52 @@ export type Database = {
         | "bond_rooms"
         | "dluxe"
         | "standard_room"
+        | "Royal Suite"
+        | "bond_suite"
+        | "royal_annex"
+        | "royal_suite"
+        | "pall_mall"
+        | "little_gems"
+        | "standard_suite"
+        | "grooming_room"
+        | "training_room"
+        | "deluxe_annex"
+        | "deluxe_suite"
+        | "lg_resting_nook"
+        | "lg_grooming_room"
+        | "furrari_lounge"
+        | "kitchen"
         | "import_placeholder"
+      service_code:
+        | "boarding_night"
+        | "daycare_full_day"
+        | "daycare_hourly"
+        | "grooming_full_service"
+        | "cat_grooming_full_no_bath"
+        | "cat_grooming_full_with_bath"
+        | "grooming_bath_brush_tidy"
+        | "grooming_nail_ear_teeth"
+        | "cat_grooming_nail_ear"
+        | "grooming_hair_no_more"
+        | "cat_grooming_hair_no_more"
+        | "grooming_splash"
+        | "cat_grooming_splash"
+        | "addon_nails"
+        | "addon_glands"
+        | "addon_dematting"
+        | "addon_teeth_cleaning"
+        | "addon_flea_tick_bath"
+        | "addon_specialised_shampoo"
+        | "treadmill_daycare_addon"
+        | "treadmill_hourly_addon"
+        | "assessment_with_first_hour"
+      service_unit:
+        | "per_night"
+        | "per_day"
+        | "per_hour"
+        | "per_half_hour"
+        | "per_session"
+        | "each"
       species: "dog" | "cat" | "other"
       staff_role:
         | "booking_coordinator"
@@ -2456,6 +2929,7 @@ export const Constants = {
         "checked_out",
         "cancelled",
         "no_show",
+        "draft",
       ],
       booking_type: [
         "boarding",
@@ -2467,6 +2941,7 @@ export const Constants = {
         "assessment",
       ],
       capacity_type: ["single", "twin", "twin_plus", "multiple"],
+      coat_type: ["short", "mid_length", "long"],
       grooming_package: [
         "grande",
         "bijoux",
@@ -2493,12 +2968,10 @@ export const Constants = {
         "overdue",
         "voided",
       ],
-      member_type: ["standard", "silver", "gold", "platinum"],
-      park_day_status: ["open", "closed", "assessment_only"],
-      park_size: ["small", "big"],
       payment_method: ["wallet", "card", "cash"],
       pet_gender: ["male", "female"],
-      pet_size_category: ["S", "M", "L", "XL"],
+      pet_size: ["small", "medium", "large"],
+      rate_season: ["peak", "off_peak"],
       room_type: [
         "presidential_super",
         "presidential_standard",
@@ -2514,6 +2987,22 @@ export const Constants = {
         "park_lane",
         "pall_mall",
         "kennels",
+        "presidential_single",
+        "presidential_double",
+        "deluxe",
+        "standard",
+        "standard_glass",
+        "lg_deluxe",
+        "lg_royal",
+        "lg_standard",
+        "lg_presidential",
+        "lg_presidential_double",
+        "lg_royal_double",
+        "lg_standard_luxury",
+        "lg_resting_nook",
+        "standard_deluxe",
+        "kitchen",
+        "royal",
       ],
       room_wing: [
         "oxford",
@@ -2526,7 +3015,54 @@ export const Constants = {
         "bond_rooms",
         "dluxe",
         "standard_room",
+        "Royal Suite",
+        "bond_suite",
+        "royal_annex",
+        "royal_suite",
+        "pall_mall",
+        "little_gems",
+        "standard_suite",
+        "grooming_room",
+        "training_room",
+        "deluxe_annex",
+        "deluxe_suite",
+        "lg_resting_nook",
+        "lg_grooming_room",
+        "furrari_lounge",
+        "kitchen",
         "import_placeholder",
+      ],
+      service_code: [
+        "boarding_night",
+        "daycare_full_day",
+        "daycare_hourly",
+        "grooming_full_service",
+        "cat_grooming_full_no_bath",
+        "cat_grooming_full_with_bath",
+        "grooming_bath_brush_tidy",
+        "grooming_nail_ear_teeth",
+        "cat_grooming_nail_ear",
+        "grooming_hair_no_more",
+        "cat_grooming_hair_no_more",
+        "grooming_splash",
+        "cat_grooming_splash",
+        "addon_nails",
+        "addon_glands",
+        "addon_dematting",
+        "addon_teeth_cleaning",
+        "addon_flea_tick_bath",
+        "addon_specialised_shampoo",
+        "treadmill_daycare_addon",
+        "treadmill_hourly_addon",
+        "assessment_with_first_hour",
+      ],
+      service_unit: [
+        "per_night",
+        "per_day",
+        "per_hour",
+        "per_half_hour",
+        "per_session",
+        "each",
       ],
       species: ["dog", "cat", "other"],
       staff_role: [

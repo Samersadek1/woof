@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { format, parse, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,16 +11,11 @@ import {
   useOwnerGroomingAppointments,
   type GroomingAppointmentWithJoins,
 } from "@/hooks/useGrooming";
-import {
-  useOwnerParkBookings,
-  type ParkBookingWithJoins,
-} from "@/hooks/usePark";
 import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { usePets, useCreatePet, useDeletePet, getVaccinationStatus } from "@/hooks/usePets";
 import { petVaccinationSummaryLine } from "@/lib/vaccinationsDisplay";
-import { useDaycarePackages } from "@/hooks/useDaycare";
 import { useManualTopUpWallet, useTopUpWallet } from "@/hooks/useWallet";
 import type { PetWithVaccinations } from "@/hooks/usePets";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
@@ -111,20 +107,44 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
+import { PurchasePackageDialog } from "@/components/packages/PurchasePackageDialog";
 
-type MemberType = Database["public"]["Enums"]["member_type"];
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
-type ParkSize = Database["public"]["Enums"]["park_size"];
 type OwnerUpdate = Database["public"]["Tables"]["owners"]["Update"];
 type PetInsert = Database["public"]["Tables"]["pets"]["Insert"];
 type Vaccination = Database["public"]["Tables"]["vaccinations"]["Row"];
-
-const MEMBER_BADGE_CLASSES: Record<MemberType, string> = {
-  standard: "bg-slate-100 text-slate-700 border-slate-200",
-  silver: "bg-blue-50 text-blue-700 border-blue-200",
-  gold: "bg-amber-50 text-amber-700 border-amber-200",
-  platinum: "bg-violet-50 text-violet-700 border-violet-200",
+type ActiveCreditRow = Database["public"]["Functions"]["list_active_credits_for_pet"]["Returns"][number] & {
+  pet_id: string;
+  pet_name: string;
 };
+
+function serviceCodeLabel(serviceCode: Database["public"]["Enums"]["service_code"]): string {
+  const labels: Record<Database["public"]["Enums"]["service_code"], string> = {
+    boarding_night: "boarding nights",
+    daycare_full_day: "daycare days",
+    daycare_hourly: "daycare hourly credits",
+    grooming_full_service: "grooming full service sessions",
+    cat_grooming_full_no_bath: "cat full service (no bath)",
+    cat_grooming_full_with_bath: "cat full service (with bath)",
+    grooming_bath_brush_tidy: "bath, brush and tidy sessions",
+    grooming_nail_ear_teeth: "nail/ear/teeth sessions",
+    cat_grooming_nail_ear: "cat nail/ear sessions",
+    grooming_hair_no_more: "hair-no-more sessions",
+    cat_grooming_hair_no_more: "cat hair-no-more sessions",
+    grooming_splash: "grooming splash sessions",
+    cat_grooming_splash: "cat grooming splash sessions",
+    addon_nails: "nail add-ons",
+    addon_glands: "gland add-ons",
+    addon_dematting: "dematting add-ons",
+    addon_teeth_cleaning: "teeth cleaning add-ons",
+    addon_flea_tick_bath: "flea/tick bath add-ons",
+    addon_specialised_shampoo: "specialised shampoo add-ons",
+    treadmill_daycare_addon: "treadmill sessions",
+    treadmill_hourly_addon: "treadmill hourly sessions",
+    assessment_with_first_hour: "assessment sessions",
+  };
+  return labels[serviceCode] ?? serviceCode;
+}
 
 const STATUS_DOT: Record<string, string> = {
   valid: "bg-green-500",
@@ -141,6 +161,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const BOOKING_STATUS_BADGE: Record<BookingStatus, string> = {
+  draft: "bg-slate-100 text-slate-600 border-slate-200",
   confirmed: "bg-blue-100 text-blue-800 border-blue-200",
   checked_in: "bg-emerald-100 text-emerald-800 border-emerald-200",
   checked_out: "bg-slate-100 text-slate-600 border-slate-200",
@@ -184,10 +205,6 @@ function formatGroomSlotTime(t: string | null): string {
   }
 }
 
-function parkLaneLabel(lane: ParkSize): string {
-  return lane === "small" ? "Small dog" : "Big dog";
-}
-
 function groomerLine(g: GroomingAppointmentWithJoins): string {
   if (g.grooming_notes?.trim()) return g.grooming_notes.trim();
   return "—";
@@ -198,7 +215,7 @@ function groomingStatusLabel(status: string, noShow: boolean): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-type HistoryServiceFilter = "all" | "boarding" | "grooming" | "park";
+type HistoryServiceFilter = "all" | "boarding" | "grooming";
 
 function historyFilterEmptyMessage(filter: HistoryServiceFilter): string {
   switch (filter) {
@@ -206,8 +223,6 @@ function historyFilterEmptyMessage(filter: HistoryServiceFilter): string {
       return "No boarding stays in this history.";
     case "grooming":
       return "No grooming appointments in this history.";
-    case "park":
-      return "No park visits in this history.";
     default:
       return "No bookings yet.";
   }
@@ -215,8 +230,7 @@ function historyFilterEmptyMessage(filter: HistoryServiceFilter): string {
 
 type BookingDetailSelection =
   | { kind: "stay"; stay: BookingWithDetails }
-  | { kind: "grooming"; groom: GroomingAppointmentWithJoins }
-  | { kind: "park"; park: ParkBookingWithJoins };
+  | { kind: "grooming"; groom: GroomingAppointmentWithJoins };
 
 function overallVaccinationStatus(
   vaccinations: Vaccination[]
@@ -737,12 +751,9 @@ const OwnerProfilePage = () => {
 
   const { data: owner, isLoading: ownerLoading } = useOwner(id!);
   const { data: pets, isLoading: petsLoading } = usePets(id!);
-  const { data: daycarePackages, isLoading: packagesLoading } = useDaycarePackages(id!);
   const { data: ownerBookings = [], isLoading: bookingsLoading } = useOwnerBookings(id!);
   const { data: ownerGrooming = [], isLoading: groomingHistoryLoading } =
     useOwnerGroomingAppointments(id!);
-  const { data: ownerParkBookings = [], isLoading: parkHistoryLoading } =
-    useOwnerParkBookings(id!);
   const ownerStatement = useOwnerStatement(id!);
   const updateOwner = useUpdateOwner();
   const deleteOwner = useDeleteOwner();
@@ -759,7 +770,32 @@ const OwnerProfilePage = () => {
   const [addBalanceOpen, setAddBalanceOpen] = useState(false);
   const [addBalanceAmount, setAddBalanceAmount] = useState("");
   const [addBalanceNote, setAddBalanceNote] = useState("");
+  const [packageDialogOpen, setPackageDialogOpen] = useState(false);
   const manualTopUp = useManualTopUpWallet();
+
+  const { data: ownerActiveCredits = [], isLoading: creditsLoading } = useQuery({
+    queryKey: ["owner_active_credits", id, pets?.map((p) => p.id).join(",") ?? ""],
+    enabled: !!id && (pets?.length ?? 0) > 0,
+    queryFn: async () => {
+      const rows = await Promise.all(
+        (pets ?? []).map(async (pet) => {
+          const { data, error } = await supabase.rpc("list_active_credits_for_pet", {
+            p_pet_id: pet.id,
+            p_service_code: null,
+          });
+          if (error) throw error;
+          return ((data ?? []) as Database["public"]["Functions"]["list_active_credits_for_pet"]["Returns"]).map(
+            (row) => ({
+              ...row,
+              pet_id: pet.id,
+              pet_name: pet.name,
+            }),
+          );
+        }),
+      );
+      return rows.flat() as ActiveCreditRow[];
+    },
+  });
 
   const [ownerForm, setOwnerForm] = useState<OwnerUpdate & { id: string }>({
     id: id!,
@@ -803,8 +839,6 @@ const OwnerProfilePage = () => {
         last_name: owner.last_name,
         phone: owner.phone,
         email: owner.email,
-        nationality: owner.nationality,
-        member_type: owner.member_type,
         notes: owner.notes,
         address: owner.address,
         emergency_contact_name: owner.emergency_contact_name,
@@ -885,8 +919,7 @@ const OwnerProfilePage = () => {
   const bookingTimeline = useMemo(() => {
     type Row =
       | { kind: "stay"; sortKey: string; id: string; stay: BookingWithDetails }
-      | { kind: "grooming"; sortKey: string; id: string; groom: GroomingAppointmentWithJoins }
-      | { kind: "park"; sortKey: string; id: string; park: ParkBookingWithJoins };
+      | { kind: "grooming"; sortKey: string; id: string; groom: GroomingAppointmentWithJoins };
 
     const rows: Row[] = [];
 
@@ -909,19 +942,9 @@ const OwnerProfilePage = () => {
       });
     });
 
-    ownerParkBookings.forEach((p) => {
-      const tt = (p.slot_start || "00:00:00").slice(0, 8);
-      rows.push({
-        kind: "park",
-        sortKey: `${p.visit_date}T${tt}`,
-        id: p.id,
-        park: p,
-      });
-    });
-
     rows.sort((a, b) => (a.sortKey < b.sortKey ? 1 : a.sortKey > b.sortKey ? -1 : 0));
     return rows;
-  }, [ownerBookings, ownerGrooming, ownerParkBookings]);
+  }, [ownerBookings, ownerGrooming]);
 
   const filteredBookingTimeline = useMemo(() => {
     if (historyServiceFilter === "all") return bookingTimeline;
@@ -929,8 +952,6 @@ const OwnerProfilePage = () => {
       switch (historyServiceFilter) {
         case "grooming":
           return row.kind === "grooming";
-        case "park":
-          return row.kind === "park";
         case "boarding":
           return row.kind === "stay";
         default:
@@ -939,7 +960,7 @@ const OwnerProfilePage = () => {
     });
   }, [bookingTimeline, historyServiceFilter]);
 
-  const historyLoading = bookingsLoading || groomingHistoryLoading || parkHistoryLoading;
+  const historyLoading = bookingsLoading || groomingHistoryLoading;
 
   if (ownerLoading) {
     return (
@@ -993,10 +1014,9 @@ const OwnerProfilePage = () => {
               )}
               <Badge
                 variant="outline"
-                className={MEMBER_BADGE_CLASSES[owner.member_type]}
+                className="bg-slate-100 text-slate-700 border-slate-200"
               >
-                {owner.member_type.charAt(0).toUpperCase() +
-                  owner.member_type.slice(1)}
+                Woof
               </Badge>
               {owner.pets && owner.pets.length > 0 && (
                 <p className="text-sm text-muted-foreground pt-1 max-w-xl">
@@ -1197,7 +1217,7 @@ const OwnerProfilePage = () => {
           )}
         </section>
 
-        {/* ─── Booking history (stays, grooming, park) ─── */}
+        {/* ─── Booking history (stays, grooming) ─── */}
         <section>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
             <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -1228,14 +1248,6 @@ const OwnerProfilePage = () => {
                 onClick={() => setHistoryServiceFilter("grooming")}
               >
                 Grooming
-              </Button>
-              <Button
-                variant={historyServiceFilter === "park" ? "default" : "outline"}
-                size="sm"
-                aria-pressed={historyServiceFilter === "park"}
-                onClick={() => setHistoryServiceFilter("park")}
-              >
-                Park
               </Button>
             </div>
           </div>
@@ -1308,61 +1320,33 @@ const OwnerProfilePage = () => {
                         </TableRow>
                       );
                     }
-                    if (row.kind === "grooming") {
-                      const g = row.groom;
-                      const dateLine = `${format(parseISO(g.appointment_date), "d MMM yyyy")}${
-                        g.appointment_time
-                          ? ` · ${formatGroomSlotTime(g.appointment_time)}`
-                          : ""
-                      }`;
-                      return (
-                        <TableRow
-                          key={`groom-${g.id}`}
-                          className="cursor-pointer hover:bg-muted/40"
-                          onClick={() => setBookingDetail({ kind: "grooming", groom: g })}
-                        >
-                          <TableCell className="font-mono text-xs whitespace-nowrap">
-                            {g.id.slice(0, 8)}
-                          </TableCell>
-                          <TableCell className="text-sm font-medium">Grooming</TableCell>
-                          <TableCell className="text-sm whitespace-nowrap">{dateLine}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="capitalize">
-                              {groomingStatusLabel(g.status, g.no_show)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell
-                            className="text-sm max-w-[220px] truncate"
-                            title={`${g.pets?.name ?? "—"} · ${labelForGroomingService(g.service)}`}
-                          >
-                            {g.pets?.name ?? "—"} · {labelForGroomingService(g.service)}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    }
-                    const p = row.park;
-                    const dateLine = `${format(parseISO(p.visit_date), "d MMM yyyy")} · ${formatGroomSlotTime(p.slot_start)}`;
+                    const g = row.groom;
+                    const dateLine = `${format(parseISO(g.appointment_date), "d MMM yyyy")}${
+                      g.appointment_time
+                        ? ` · ${formatGroomSlotTime(g.appointment_time)}`
+                        : ""
+                    }`;
                     return (
                       <TableRow
-                        key={`park-${p.id}`}
+                        key={`groom-${g.id}`}
                         className="cursor-pointer hover:bg-muted/40"
-                        onClick={() => setBookingDetail({ kind: "park", park: p })}
+                        onClick={() => setBookingDetail({ kind: "grooming", groom: g })}
                       >
                         <TableCell className="font-mono text-xs whitespace-nowrap">
-                          {p.id.slice(0, 8)}
+                          {g.id.slice(0, 8)}
                         </TableCell>
-                        <TableCell className="text-sm font-medium">Park</TableCell>
+                        <TableCell className="text-sm font-medium">Grooming</TableCell>
                         <TableCell className="text-sm whitespace-nowrap">{dateLine}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">
-                            {p.is_assessment ? "Assessment" : "Booked"}
+                          <Badge variant="outline" className="capitalize">
+                            {groomingStatusLabel(g.status, g.no_show)}
                           </Badge>
                         </TableCell>
                         <TableCell
                           className="text-sm max-w-[220px] truncate"
-                          title={`${p.pets?.name ?? "—"} · ${parkLaneLabel(p.size_lane)}`}
+                          title={`${g.pets?.name ?? "—"} · ${labelForGroomingService(g.service)}`}
                         >
-                          {p.pets?.name ?? "—"} · {parkLaneLabel(p.size_lane)}
+                          {g.pets?.name ?? "—"} · {labelForGroomingService(g.service)}
                         </TableCell>
                       </TableRow>
                     );
@@ -1375,115 +1359,84 @@ const OwnerProfilePage = () => {
 
         <Separator />
 
-        {/* ─── Daycare Packages ─── */}
+        {/* ─── Active Packages ─── */}
         <section>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold flex items-center gap-2">
               <CalendarDays className="h-5 w-5" />
-              Daycare Packages
+              Active Packages
             </h3>
             <Button
               size="sm"
               variant="outline"
-              onClick={() =>
-                navigate(`/daycare?tab=packages`)
-              }
+              onClick={() => setPackageDialogOpen(true)}
             >
               <Plus className="mr-1.5 h-4 w-4" />
-              New Package
+              Purchase Package
             </Button>
           </div>
 
-          {packagesLoading ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {[1, 2].map((i) => <Skeleton key={i} className="h-24 rounded-lg" />)}
-            </div>
-          ) : !daycarePackages || daycarePackages.length === 0 ? (
+          {creditsLoading ? (
+            <Skeleton className="h-20 w-full rounded-lg" />
+          ) : ownerActiveCredits.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-10 text-muted-foreground">
                 <CalendarDays className="h-7 w-7 mb-2" />
-                <p className="text-sm">No daycare packages yet.</p>
+                <p className="text-sm">No active packages.</p>
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {daycarePackages.map((pkg) => {
-                const petName   = pets?.find((p) => p.id === pkg.pet_id)?.name ?? "Unknown Pet";
-                const remaining = pkg.total_days - pkg.days_used;
-                const pct       = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
-                const isExhausted = remaining <= 0;
-                const creditColour = remaining <= 1
-                  ? "text-red-600"
-                  : remaining <= 3
-                  ? "text-amber-600"
-                  : "text-emerald-600";
-                const barColour = remaining <= 1
-                  ? "bg-red-500"
-                  : remaining <= 3
-                  ? "bg-amber-500"
-                  : "bg-emerald-500";
-
-                return (
-                  <Card
-                    key={pkg.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isExhausted ? "opacity-60" : ""}`}
-                    onClick={() =>
-                      navigate(
-                        `/daycare?tab=planner&ownerId=${id}&packageId=${pkg.id}`
+            <div className="space-y-3">
+              <Card>
+                <CardContent className="pt-4 space-y-2">
+                  {Object.entries(
+                    ownerActiveCredits.reduce<Record<string, { total: number; byPet: Record<string, number> }>>(
+                      (acc, row) => {
+                        const key = row.service_code;
+                        if (!acc[key]) acc[key] = { total: 0, byPet: {} };
+                        acc[key].total += row.units_remaining;
+                        acc[key].byPet[row.pet_name] = (acc[key].byPet[row.pet_name] ?? 0) + row.units_remaining;
+                        return acc;
+                      },
+                      {},
+                    ),
+                  ).map(([serviceCode, info]) => (
+                    <p key={serviceCode} className="text-sm">
+                      <span className="font-medium">{info.total} {serviceCodeLabel(serviceCode as Database["public"]["Enums"]["service_code"])}</span>
+                      {" "}(
+                      {Object.entries(info.byPet)
+                        .map(([petName, units]) => `${petName}: ${units}`)
+                        .join(", ")}
                       )
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        navigate(
-                          `/daycare?tab=planner&ownerId=${id}&packageId=${pkg.id}`
-                        );
-                      }
-                    }}
-                  >
-                    <CardContent className="p-4 space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="space-y-0.5 min-w-0">
-                          <p className="font-semibold text-sm truncate">{petName}</p>
-                          <div className="flex items-center gap-1.5">
-                            {isExhausted ? (
-                              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-[10px]">Exhausted</Badge>
-                            ) : (
-                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">Active</Badge>
-                            )}
-                            {pkg.expiry_date && (
-                              <span className="text-[10px] text-muted-foreground">
-                                Exp {pkg.expiry_date}
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                    </p>
+                  ))}
+                </CardContent>
+              </Card>
 
-                        <div className={`text-right shrink-0 ${creditColour}`}>
-                          {remaining <= 3 && !isExhausted && (
-                            <AlertTriangle className="h-3.5 w-3.5 ml-auto mb-0.5" />
-                          )}
-                          <p className="text-xl font-bold tabular-nums leading-none">
-                            {pkg.days_used}
-                            <span className="text-sm font-normal text-muted-foreground">/{pkg.total_days}</span>
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">{remaining} left</p>
-                        </div>
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer text-sm font-medium">Per-pet details</summary>
+                <div className="mt-3 space-y-3">
+                  {(pets ?? []).map((pet) => {
+                    const petCredits = ownerActiveCredits.filter((row) => row.pet_id === pet.id);
+                    return (
+                      <div key={pet.id} className="rounded border p-2">
+                        <p className="font-medium text-sm">{pet.name}</p>
+                        {petCredits.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No active credits.</p>
+                        ) : (
+                          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                            {petCredits.map((row) => (
+                              <li key={row.credit_id}>
+                                {row.package_name ?? "Package"} · {row.units_remaining} {serviceCodeLabel(row.service_code)} · exp {row.expires_at}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
-
-                      {/* Progress bar */}
-                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${barColour}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              </details>
             </div>
           )}
         </section>
@@ -1690,57 +1643,6 @@ const OwnerProfilePage = () => {
               </>
             )}
 
-            {bookingDetail?.kind === "park" && (
-              <>
-                <SheetHeader>
-                  <SheetTitle>Park visit</SheetTitle>
-                  <SheetDescription>
-                    {format(parseISO(bookingDetail.park.visit_date), "EEEE, d MMMM yyyy")}
-                  </SheetDescription>
-                </SheetHeader>
-                <div className="mt-6 space-y-4">
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Time slot</p>
-                    <p className="text-sm">{formatGroomSlotTime(bookingDetail.park.slot_start)}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Lane</p>
-                    <p className="text-sm">{parkLaneLabel(bookingDetail.park.size_lane)}</p>
-                  </div>
-                  <Badge variant="outline">
-                    {bookingDetail.park.is_assessment ? "Assessment" : "Standard visit"}
-                  </Badge>
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Pet</p>
-                    {bookingDetail.park.pet_id ? (
-                      <button
-                        type="button"
-                        className="flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                        onClick={() =>
-                          navigate(`/customers/${id}/pets/${bookingDetail.park.pet_id}`)
-                        }
-                      >
-                        {bookingDetail.park.pets?.name ?? "—"}
-                        <ExternalLink className="h-3 w-3" />
-                      </button>
-                    ) : (
-                      <p className="text-sm">—</p>
-                    )}
-                  </div>
-                  {bookingDetail.park.notes && (
-                    <div className="space-y-1">
-                      <p className="text-xs uppercase text-muted-foreground font-medium">Notes</p>
-                      <p className="text-sm whitespace-pre-line">{bookingDetail.park.notes}</p>
-                    </div>
-                  )}
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link to={`/park?date=${bookingDetail.park.visit_date}`}>
-                      Open park schedule
-                    </Link>
-                  </Button>
-                </div>
-              </>
-            )}
           </SheetContent>
         </Sheet>
 
@@ -1779,33 +1681,8 @@ const OwnerProfilePage = () => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="edit_nationality">Nationality</Label>
-                <Input
-                  id="edit_nationality"
-                  value={ownerForm.nationality ?? ""}
-                  onChange={(e) => handleOwnerField("nationality", e.target.value)}
-                  placeholder="e.g. UAE, British, Indian"
-                  autoComplete="country-name"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit_member_type">Member type</Label>
-                  <Select value={ownerForm.member_type ?? "standard"} onValueChange={(v) => handleOwnerField("member_type", v)}>
-                    <SelectTrigger id="edit_member_type"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="standard">Standard</SelectItem>
-                      <SelectItem value="silver">Silver</SelectItem>
-                      <SelectItem value="gold">Gold</SelectItem>
-                      <SelectItem value="platinum">Platinum</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit_emirates_id">Emirates ID</Label>
-                  <Input id="edit_emirates_id" value={ownerForm.emirates_id ?? ""} onChange={(e) => handleOwnerField("emirates_id", e.target.value)} />
-                </div>
+                <Label htmlFor="edit_emirates_id">Emirates ID</Label>
+                <Input id="edit_emirates_id" value={ownerForm.emirates_id ?? ""} onChange={(e) => handleOwnerField("emirates_id", e.target.value)} />
               </div>
 
               <div className="space-y-2">
@@ -2054,7 +1931,7 @@ const OwnerProfilePage = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="pet_other_notes">Other notes (bookings &amp; appointments)</Label>
-                <Textarea id="pet_other_notes" rows={2} value={(petForm.other_notes as string) ?? ""} onChange={(e) => handlePetField("other_notes", e.target.value)} placeholder="Shown on boarding, grooming, park…" />
+                <Textarea id="pet_other_notes" rows={2} value={(petForm.other_notes as string) ?? ""} onChange={(e) => handlePetField("other_notes", e.target.value)} placeholder="Shown on boarding, grooming…" />
               </div>
 
               <div className="space-y-2">
@@ -2088,6 +1965,15 @@ const OwnerProfilePage = () => {
           </SheetContent>
         </Sheet>
       </main>
+
+      <PurchasePackageDialog
+        ownerId={id!}
+        isOpen={packageDialogOpen}
+        onClose={() => setPackageDialogOpen(false)}
+        onSuccess={() => {
+          setPackageDialogOpen(false);
+        }}
+      />
 
       {/* ─── Delete Confirmation Dialog ─── */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>

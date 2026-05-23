@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   addMinutes,
   addDays,
@@ -11,8 +12,11 @@ import {
 import TopBar from "@/components/dashboard/TopBar";
 import { useAuth } from "@/contexts/AuthContext";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
+import { groomingServiceToPricingKey } from "@/lib/addonPricing";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import {
   useGroomingAppointments,
   useGroomingHistoryList,
@@ -39,7 +43,6 @@ import {
   type GroomingWorkflowStatus,
 } from "@/lib/groomingWorkflow";
 import { grandTotalFromNet, invoiceDisplayTotals, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
-import { memberTierBadgeClassName, memberTierBadgeLabel, memberTierDiscountPct } from "@/lib/memberTier";
 import {
   GROOMING_PAYMENT_METHOD_NONE,
   GROOMING_PAYMENT_METHOD_OPTIONS,
@@ -761,6 +764,7 @@ const GroomingPage = () => {
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
+  const [useCreditByPet, setUseCreditByPet] = useState<Record<string, boolean>>({});
   const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
   ]);
@@ -839,9 +843,9 @@ const GroomingPage = () => {
   useEffect(() => {
     if (!sheetOpen || !ownerId || !ownerForGroomingPref || ownerForGroomingPref.id !== ownerId) return;
     if (!discountAutoFromMemberRef.current) return;
-    const pct = memberTierDiscountPct(ownerForGroomingPref.member_type);
+    const pct = 0;
     setDiscountPct(pct > 0 ? String(pct) : "");
-  }, [sheetOpen, ownerId, ownerForGroomingPref?.id, ownerForGroomingPref?.member_type]);
+  }, [sheetOpen, ownerId, ownerForGroomingPref?.id]);
 
   useEffect(() => {
     if (!ownerId) {
@@ -956,6 +960,57 @@ const GroomingPage = () => {
   }, [selectedServices, dogSize]);
 
   const isComplimentaryPayment = paymentMethod === "complimentary";
+  const selectedPrimaryServiceCode = useMemo(() => {
+    const primaryCb = resolvePrimaryGroomingCheckbox(
+      selectedServices.filter(isGroomingPricingCheckbox),
+    );
+    const primaryService = primaryCb ? groomingPricingCheckboxToDbService(primaryCb) : null;
+    return (primaryService ? groomingServiceToPricingKey(primaryService) : null) as
+      | Database["public"]["Enums"]["service_code"]
+      | null;
+  }, [selectedServices]);
+
+  const { data: groomingCreditsByPet = {} } = useQuery<Record<string, {
+    credit_id: string;
+    package_name: string;
+    units_remaining: number;
+    expires_at: string;
+  } | null>>({
+    queryKey: [
+      "grooming_credits",
+      selectedPrimaryServiceCode,
+      selectedPetsOrdered.map((p) => p.id).join(","),
+    ],
+    enabled: !!selectedPrimaryServiceCode && selectedPetsOrdered.length > 0,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        selectedPetsOrdered.map(async (pet) => {
+          const { data, error } = await supabase.rpc("list_active_credits_for_pet", {
+            p_pet_id: pet.id,
+            p_service_code: selectedPrimaryServiceCode,
+          });
+          if (error) throw error;
+          const first = (data ?? [])[0] as
+            | { credit_id: string; package_name: string; units_remaining: number; expires_at: string }
+            | undefined;
+          return [pet.id, first ?? null] as const;
+        }),
+      );
+      return Object.fromEntries(entries);
+    },
+  });
+
+  useEffect(() => {
+    setUseCreditByPet((prev) => {
+      const next = { ...prev };
+      for (const pet of selectedPetsOrdered) {
+        if (groomingCreditsByPet[pet.id] && next[pet.id] === undefined) {
+          next[pet.id] = true;
+        }
+      }
+      return next;
+    });
+  }, [selectedPetsOrdered, groomingCreditsByPet]);
 
   useEffect(() => {
     if (!sheetOpen) return;
@@ -1218,12 +1273,25 @@ const GroomingPage = () => {
 
     try {
       const createdRows = [];
+      const consumedCreditByPet: Record<string, { package_name: string }> = {};
       for (const pid of petIdsToBook) {
         const appt = await createAppt.mutateAsync({
           ...insertBase,
           pet_id: pid,
         });
         createdRows.push(appt);
+        const credit = groomingCreditsByPet[pid];
+        const useCredit = (useCreditByPet[pid] ?? false) && !!credit;
+        if (useCredit && credit) {
+          const { error } = await supabase.rpc("consume_service_credit", {
+            p_credit_id: credit.credit_id,
+            p_units: 1,
+            p_consumed_for_ref_id: appt.id,
+            p_consumed_for_ref_type: "grooming_appointment",
+          });
+          if (error) throw error;
+          consumedCreditByPet[pid] = { package_name: credit.package_name ?? "package credit" };
+        }
       }
 
       toast.success(
@@ -1244,10 +1312,13 @@ const GroomingPage = () => {
         lineItems: createdRows.map((appt) => {
           const petName =
             pets.find((p) => p.id === appt.pet_id)?.name ?? "Pet";
+          const consumed = consumedCreditByPet[appt.pet_id];
           return {
-            description: `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")}`,
+            description: consumed
+              ? `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")} (covered by ${consumed.package_name})`
+              : `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")}`,
             quantity: 1,
-            unitPrice: finalPrice,
+            unitPrice: consumed ? 0 : finalPrice,
             serviceType: "grooming",
             preserveUnitPrice: true,
           };
@@ -1421,7 +1492,7 @@ const GroomingPage = () => {
                           <TableCell className="max-w-[200px] truncate text-xs">
                             {appointmentServiceLabels(a).join(" · ")}
                           </TableCell>
-                          <TableCell>{a.dog_size ?? "—"}</TableCell>
+                          <TableCell>—</TableCell>
                           <TableCell className="text-right tabular-nums">
                             {a.price != null ? formatAed(a.price) : "—"}
                           </TableCell>
@@ -2346,16 +2417,7 @@ const GroomingPage = () => {
                     setSelectedPetIds([]);
                   }}
                 />
-                {ownerForGroomingPref &&
-                ownerForGroomingPref.id === ownerId &&
-                memberTierBadgeLabel(ownerForGroomingPref.member_type) ? (
-                  <Badge
-                    variant="outline"
-                    className={`w-fit ${memberTierBadgeClassName(ownerForGroomingPref.member_type)}`}
-                  >
-                    {memberTierBadgeLabel(ownerForGroomingPref.member_type)}
-                  </Badge>
-                ) : null}
+                {ownerForGroomingPref && ownerForGroomingPref.id === ownerId ? null : null}
               </div>
               {ownerId && pets.length === 0 && (
                 <p className="text-sm text-muted-foreground">Loading pets…</p>
@@ -2423,6 +2485,28 @@ const GroomingPage = () => {
                           <p className="text-xs text-muted-foreground -mt-1 mb-2">
                             {formatLastGroomedDisplayLine(lastGroomMap.get(pet.id))}
                           </p>
+                        ) : null}
+                        {groomingCreditsByPet[pet.id] ? (
+                          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs text-emerald-900">
+                                Available: {groomingCreditsByPet[pet.id]?.units_remaining} credit(s), exp{" "}
+                                {groomingCreditsByPet[pet.id]?.expires_at}
+                              </p>
+                              <label className="flex items-center gap-2 text-xs font-medium text-emerald-900">
+                                <Switch
+                                  checked={useCreditByPet[pet.id] ?? true}
+                                  onCheckedChange={(checked) =>
+                                    setUseCreditByPet((prev) => ({ ...prev, [pet.id]: checked }))
+                                  }
+                                />
+                                Use credit
+                              </label>
+                            </div>
+                            <p className="text-[11px] text-emerald-800">
+                              When enabled, invoice line is recorded as covered by package credit.
+                            </p>
+                          </div>
                         ) : null}
                         <PetSpecialAlertsBanner specialAlerts={pet.special_alerts} />
                         <p>

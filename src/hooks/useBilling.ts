@@ -15,12 +15,7 @@ import {
   useRefundWallet,
   type WalletMutationPayload,
 } from "@/hooks/useWallet";
-import {
-  grandTotalFromNet,
-  invoiceAmountDue,
-  invoiceDisplayTotals,
-  vatAmountFromNet,
-} from "@/lib/vatConfig";
+import { grandTotalFromNet, invoiceAmountDue, invoiceDisplayTotals, vatAmountFromNet } from "@/lib/vatConfig";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -169,6 +164,7 @@ export const billingKeys = {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface PricingRow {
+  id: string;
   key: string;
   amount_aed: number;
   /** Display name for the rate (DB column `label`; UI calls this "Item name"). */
@@ -185,11 +181,16 @@ export type PricingItemInput = {
 };
 
 function pricingRowPayload(item: PricingItemInput) {
+  const key = item.key.trim();
+  const [serviceCode, petSizeRaw, coatTypeRaw, seasonRaw] = key.split(":");
   return {
-    key: item.key.trim(),
-    label: item.label.trim(),
-    category: item.category.trim(),
+    service_code: serviceCode,
+    pet_size: petSizeRaw && petSizeRaw !== "*" ? petSizeRaw : null,
+    coat_type: coatTypeRaw && coatTypeRaw !== "*" ? coatTypeRaw : null,
+    season: seasonRaw && seasonRaw !== "*" ? seasonRaw : null,
     amount_aed: item.amount_aed,
+    updated_at: new Date().toISOString(),
+    is_active: true,
   };
 }
 
@@ -204,12 +205,37 @@ export function usePricing() {
     queryKey: billingKeys.pricing(),
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("pricing")
-        .select("key, amount_aed, label, category, updated_at")
-        .order("category")
-        .order("key");
+        .from("service_rates")
+        .select(
+          "id, service_code, amount_aed, pet_size, coat_type, season, updated_at, service_code_meta!inner(display_name)",
+        )
+        .eq("is_active", true)
+        .order("service_code");
       if (error) throw error;
-      return data as PricingRow[];
+      return (data ?? []).map((r) => {
+        const category = r.service_code.startsWith("boarding")
+          ? "boarding"
+          : r.service_code.startsWith("daycare")
+            ? "daycare"
+            : r.service_code.startsWith("grooming") || r.service_code.startsWith("cat_grooming")
+              ? "grooming"
+              : r.service_code.startsWith("addon")
+                ? "addon"
+                : r.service_code.startsWith("treadmill")
+                  ? "treadmill"
+                  : r.service_code.startsWith("assessment")
+                    ? "assessment"
+                    : "service";
+        const key = `${r.service_code}:${r.pet_size ?? "*"}:${r.coat_type ?? "*"}:${r.season ?? "*"}`;
+        return {
+          id: r.id,
+          key,
+          amount_aed: r.amount_aed,
+          label: r.service_code_meta?.display_name ?? r.service_code,
+          category,
+          updated_at: r.updated_at,
+        } satisfies PricingRow;
+      });
     },
   });
 
@@ -222,31 +248,42 @@ export function usePricing() {
   const getPrice = (key: string): number => prices[key] ?? 0;
 
   const updatePrice = async (key: string, amount: number) => {
+    const existing = (query.data ?? []).find((r) => r.key === key);
+    if (!existing) throw new Error(`Rate not found for ${key}`);
     const { error } = await supabase
-      .from("pricing")
+      .from("service_rates")
       .update({ amount_aed: amount, updated_at: new Date().toISOString() })
-      .eq("key", key);
+      .eq("id", existing.id);
     if (error) throw error;
     queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
   };
 
   /** Update price, or insert the row when the key is not in the database yet. */
   const upsertPricingPrice = async (item: PricingItemInput) => {
+    const [serviceCode] = item.key.trim().split(":");
+    if (!serviceCode) throw new Error("Service code is required");
+    const { error: metaError } = await supabase
+      .from("service_code_meta")
+      .upsert({
+        service_code: serviceCode,
+        display_name: item.label.trim() || serviceCode,
+        unit: "each",
+        applicable_species: ["dog"],
+      } as never);
+    if (metaError) throwPricingError(metaError, "Failed to save service code metadata");
+
     const { error } = await supabase
-      .from("pricing")
-      .upsert(pricingRowPayload(item), { onConflict: "key" });
+      .from("service_rates")
+      .upsert(pricingRowPayload(item) as never, {
+        onConflict: "service_code,pet_size,coat_type,season",
+      });
     if (error) throwPricingError(error, "Failed to save pricing item");
     queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
   };
 
   const updatePrices = async (updates: Record<string, number>) => {
-    const now = new Date().toISOString();
     for (const [key, amount_aed] of Object.entries(updates)) {
-      const { error } = await supabase
-        .from("pricing")
-        .update({ amount_aed, updated_at: now })
-        .eq("key", key);
-      if (error) throw new Error(`Failed to update "${key}": ${error.message}`);
+      await updatePrice(key, amount_aed);
     }
     queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
     toast.success("Pricing saved");
@@ -258,7 +295,9 @@ export function usePricing() {
   };
 
   const deletePricingItem = async (key: string) => {
-    const { error } = await supabase.from("pricing").delete().eq("key", key);
+    const existing = (query.data ?? []).find((r) => r.key === key);
+    if (!existing) return;
+    const { error } = await supabase.from("service_rates").delete().eq("id", existing.id);
     if (error) throwPricingError(error, "Failed to delete pricing item");
     queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
     toast.success("Pricing item deleted");
@@ -283,7 +322,6 @@ export function usePricing() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface GroomingRateRow { id: string; service: string; label: string; price_aed: number; duration_minutes: number | null; is_active: boolean }
-export interface ParkRateRow { id: string; label: string; price_per_slot_aed: number; is_active: boolean }
 export interface DaycarePackageTypeRow { id: string; name: string; total_days: number; num_dogs: number; base_price_aed: number; is_active: boolean; sort_order: number }
 export interface AddonRateRow { id: string; addon_type: string; label: string; price_aed: number; unit: string; applicable_services: string[]; is_active: boolean }
 
@@ -291,63 +329,97 @@ export function useServiceRates() {
   const groomingQuery = useQuery({
     queryKey: ["grooming_service_rates"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("grooming_service_rates").select("*").order("service");
+      const { data, error } = await supabase
+        .from("service_rates")
+        .select("id, service_code, amount_aed, is_active, service_code_meta!inner(display_name)")
+        .or("service_code.like.grooming_%,service_code.like.cat_grooming_%")
+        .eq("is_active", true)
+        .order("service_code");
       if (error) throw error;
-      return data as GroomingRateRow[];
-    },
-  });
-
-  const parkQuery = useQuery({
-    queryKey: ["park_rates"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("park_rates").select("*");
-      if (error) throw error;
-      return data as ParkRateRow[];
+      return (data ?? []).map((r) => ({
+        id: r.id,
+        service: r.service_code,
+        label: r.service_code_meta?.display_name ?? r.service_code,
+        price_aed: r.amount_aed,
+        duration_minutes: null,
+        is_active: r.is_active,
+      })) as GroomingRateRow[];
     },
   });
 
   const daycareQuery = useQuery({
-    queryKey: ["daycare_package_types"],
+    queryKey: ["package_definitions", "rates_view"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("daycare_package_types").select("*").order("sort_order");
-      if (error) throw error;
-      return data as DaycarePackageTypeRow[];
+      const [{ data: defs, error: defsErr }, { data: pricing, error: pricingErr }] = await Promise.all([
+        supabase
+          .from("package_definitions")
+          .select("id, display_name, validity_months, sort_order, is_active, category")
+          .eq("category", "daycare")
+          .order("sort_order"),
+        supabase
+          .from("package_pricing")
+          .select("package_def_id, amount_aed")
+          .eq("is_active", true),
+      ]);
+      if (defsErr) throw defsErr;
+      if (pricingErr) throw pricingErr;
+
+      return (defs ?? []).map((row) => {
+        const packagePrices = (pricing ?? []).filter((p) => p.package_def_id === row.id).map((p) => p.amount_aed);
+        const minPrice = packagePrices.length ? Math.min(...packagePrices) : 0;
+        return {
+          id: row.id,
+          name: row.display_name,
+          total_days: 0,
+          num_dogs: 1,
+          base_price_aed: minPrice,
+          is_active: row.is_active,
+          sort_order: row.sort_order,
+        };
+      }) as DaycarePackageTypeRow[];
     },
   });
 
   const addonQuery = useQuery({
     queryKey: ["addon_rates"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("addon_rates").select("*").order("addon_type");
+      const { data, error } = await supabase
+        .from("service_rates")
+        .select("id, service_code, amount_aed, is_active, service_code_meta!inner(display_name)")
+        .like("service_code", "addon_%")
+        .eq("is_active", true)
+        .order("service_code");
       if (error) throw error;
-      return data as AddonRateRow[];
+      return (data ?? []).map((r) => ({
+        id: r.id,
+        addon_type: r.service_code,
+        label: r.service_code_meta?.display_name ?? r.service_code,
+        price_aed: r.amount_aed,
+        unit: "each",
+        applicable_services: ["grooming", "boarding"],
+        is_active: r.is_active,
+      })) as AddonRateRow[];
     },
   });
 
   const queryClient = useQueryClient();
 
   const updateGroomingRate = async (id: string, price_aed: number) => {
-    const { error } = await supabase.from("grooming_service_rates").update({ price_aed, updated_at: new Date().toISOString() }).eq("id", id);
+    const { error } = await supabase
+      .from("service_rates")
+      .update({ amount_aed: price_aed, updated_at: new Date().toISOString() })
+      .eq("id", id);
     if (error) throw error;
     queryClient.invalidateQueries({ queryKey: ["grooming_service_rates"] });
-  };
-
-  const updateParkRate = async (id: string, price_per_slot_aed: number) => {
-    const { error } = await supabase.from("park_rates").update({ price_per_slot_aed, updated_at: new Date().toISOString() }).eq("id", id);
-    if (error) throw error;
-    queryClient.invalidateQueries({ queryKey: ["park_rates"] });
   };
 
   const updateDaycarePackageType = async (
     id: string,
     fields: { name: string; total_days: number; base_price_aed: number },
   ) => {
-    const { error } = await supabase
-      .from("daycare_package_types")
-      .update({ ...fields, updated_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) throw error;
-    queryClient.invalidateQueries({ queryKey: ["daycare_package_types"] });
+    void id;
+    void fields;
+    throw new Error("Package definitions are managed via Phase 3 package settings.");
   };
 
   const createDaycarePackageType = async (input: {
@@ -355,37 +427,30 @@ export function useServiceRates() {
     total_days: number;
     base_price_aed: number;
   }) => {
-    const existing = queryClient.getQueryData<DaycarePackageTypeRow[]>(["daycare_package_types"]) ?? [];
-    const maxSort = existing.reduce((max, t) => Math.max(max, t.sort_order), 0);
-    const { error } = await supabase.from("daycare_package_types").insert({
-      name: input.name,
-      total_days: input.total_days,
-      base_price_aed: input.base_price_aed,
-      sort_order: maxSort + 1,
-      is_active: true,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) throw error;
-    queryClient.invalidateQueries({ queryKey: ["daycare_package_types"] });
+    void input;
+    throw new Error("Package definitions are managed via Phase 3 package settings.");
   };
 
   const updateAddonRate = async (id: string, price_aed: number) => {
-    const { error } = await supabase.from("addon_rates").update({ price_aed, updated_at: new Date().toISOString() }).eq("id", id);
+    const { error } = await supabase
+      .from("service_rates")
+      .update({ amount_aed: price_aed, updated_at: new Date().toISOString() })
+      .eq("id", id);
     if (error) throw error;
     queryClient.invalidateQueries({ queryKey: ["addon_rates"] });
   };
 
   return {
     groomingRates: groomingQuery.data ?? [],
-    parkRates: parkQuery.data ?? [],
+    parkRates: [],
     daycarePackageTypes: daycareQuery.data ?? [],
     addonRates: addonQuery.data ?? [],
     updateGroomingRate,
-    updateParkRate,
+    updateParkRate: async (_id: string, _price_per_slot_aed: number) => {},
     updateDaycarePackageType,
     createDaycarePackageType,
     updateAddonRate,
-    isLoading: groomingQuery.isLoading || parkQuery.isLoading || daycareQuery.isLoading || addonQuery.isLoading,
+    isLoading: groomingQuery.isLoading || daycareQuery.isLoading || addonQuery.isLoading,
   };
 }
 
@@ -403,7 +468,7 @@ type ServiceParams =
     }
   | { type: "grooming"; service: string }
   | { type: "park"; slots?: number }
-  | { type: "daycare_package"; packageTypeId: string; pickup?: boolean; dropoff?: boolean; transportZone?: TransportZone | string | null }
+  | { type: "package_purchase"; packageTypeId: string; pickup?: boolean; dropoff?: boolean; transportZone?: TransportZone | string | null }
   | { type: "membership"; pricingKey: string };
 
 export function useBillingCalculator(
@@ -436,37 +501,45 @@ export function useBillingCalculator(
           break;
         }
         case "grooming": {
-          const { data: rate } = await supabase
-            .from("grooming_service_rates")
-            .select("price_aed, label")
-            .eq("service", params.service as Database["public"]["Enums"]["grooming_service"])
-            .single();
-          let p = rate?.price_aed ?? 0;
-          let label = rate?.label ?? params.service;
-          const pk = groomingServiceToPricingKey(params.service);
-          if (pk) {
-            const live = await getPricingAmountByKey(pk);
-            if (live != null) {
-              p = live;
-              if (!rate?.label) label = pk.replace(/^grooming_/, "").replace(/_/g, " ");
-            }
+          const serviceCode = groomingServiceToPricingKey(params.service);
+          let p = 0;
+          if (serviceCode) {
+            const { data, error } = await supabase.rpc("resolve_woof_service_rate", {
+              p_service_code: serviceCode as Database["public"]["Enums"]["service_code"],
+            });
+            if (error) throw error;
+            p = (data as { amount_aed: number }[] | null)?.[0]?.amount_aed ?? 0;
           }
-          lineItems.push({ pricingKey: `grooming:${params.service}`, label, quantity: 1, unitPrice: p, total: p });
+          lineItems.push({ pricingKey: serviceCode ?? params.service, label: params.service, quantity: 1, unitPrice: p, total: p });
           break;
         }
         case "park": {
-          const slotFromPricing = await getPricingAmountByKey("park_slot");
-          const { data: rates } = await supabase.from("park_rates").select("price_per_slot_aed").eq("is_active", true).limit(1);
-          const p = slotFromPricing ?? rates?.[0]?.price_per_slot_aed ?? 0;
           const slots = params.slots ?? 1;
-          lineItems.push({ pricingKey: "park:slot", label: "Park slot", quantity: slots, unitPrice: p, total: p * slots });
+          lineItems.push({ pricingKey: "park:slot", label: "Park slot", quantity: slots, unitPrice: 0, total: 0 });
           break;
         }
-        case "daycare_package": {
-          const { data: pkgType } = await supabase
-            .from("daycare_package_types").select("name, total_days, base_price_aed").eq("id", params.packageTypeId).single();
-          if (pkgType) {
-            lineItems.push({ pricingKey: `daycare:${pkgType.name}`, label: pkgType.name, quantity: 1, unitPrice: pkgType.base_price_aed, total: pkgType.base_price_aed });
+        case "package_purchase": {
+          const { data: pkgDef, error: pkgErr } = await supabase
+            .from("package_definitions")
+            .select("id, display_name")
+            .eq("id", params.packageTypeId)
+            .single();
+          if (pkgErr) throw pkgErr;
+
+          const { data: pkgPrices, error: pkgPriceErr } = await supabase
+            .from("package_pricing")
+            .select("amount_aed")
+            .eq("package_def_id", params.packageTypeId)
+            .eq("is_active", true);
+          if (pkgPriceErr) throw pkgPriceErr;
+
+          const basePrice = (pkgPrices ?? []).reduce<number | null>(
+            (acc, row) => (acc === null ? row.amount_aed : Math.min(acc, row.amount_aed)),
+            null,
+          ) ?? 0;
+
+          if (pkgDef) {
+            lineItems.push({ pricingKey: `package:${pkgDef.id}`, label: pkgDef.display_name, quantity: 1, unitPrice: basePrice, total: basePrice });
             if (params.pickup || params.dropoff) {
               const zone: TransportZone =
                 normalizeStoredTransportZone(params.transportZone ?? null) ?? "dubai_shared";
@@ -478,18 +551,18 @@ export function useBillingCalculator(
                 if (params.pickup)
                   lineItems.push({
                     pricingKey: tKey,
-                    label: `Pickup (${zoneLabel}) × ${pkgType.total_days}`,
-                    quantity: pkgType.total_days,
+                    label: `Pickup (${zoneLabel})`,
+                    quantity: 1,
                     unitPrice: tp,
-                    total: tp * pkgType.total_days,
+                    total: tp,
                   });
                 if (params.dropoff)
                   lineItems.push({
                     pricingKey: tKey,
-                    label: `Drop-off (${zoneLabel}) × ${pkgType.total_days}`,
-                    quantity: pkgType.total_days,
+                    label: `Drop-off (${zoneLabel})`,
+                    quantity: 1,
                     unitPrice: tp,
-                    total: tp * pkgType.total_days,
+                    total: tp,
                   });
               }
             }
@@ -506,22 +579,13 @@ export function useBillingCalculator(
 
       const subtotal = lineItems.reduce((s, li) => s + li.total, 0);
 
-      let disc = { discount_pct: 0, discount_aed: 0, final_aed: subtotal };
-      try {
-        const { data: discData } = await supabase.rpc("apply_member_discount", { p_owner_id: ownerId, p_subtotal: subtotal });
-        const row = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
-        if (row) disc = row;
-      } catch { /* proceed without discount */ }
-
-      const { data: ownerData } = await supabase.from("owners").select("member_type").eq("id", ownerId).single();
-
       return {
         lineItems,
         subtotal,
-        discountPct: disc.discount_pct,
-        discountAed: disc.discount_aed,
-        total: disc.final_aed,
-        memberType: ownerData?.member_type ?? "standard",
+        discountPct: 0,
+        discountAed: 0,
+        total: subtotal,
+        memberType: "none",
       } satisfies BillingBreakdown;
     },
   });
@@ -533,10 +597,7 @@ export function useBillingCalculator(
 }
 
 async function loadPricingMap() {
-  const { data } = await supabase.from("pricing").select("key, amount_aed");
-  const map: Record<string, number> = {};
-  for (const r of data ?? []) map[r.key] = r.amount_aed;
-  return { getPrice: (k: string) => map[k] ?? 0 };
+  return { getPrice: (_k: string) => 0 };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -559,21 +620,7 @@ export function useCreateInvoice() {
       const normalizedItems: LineItem[] = [];
       for (const li of input.breakdown.lineItems) {
         const qty = Math.max(1, li.quantity);
-        let unitPrice = li.unitPrice;
-        if (li.pricingKey) {
-          try {
-            const { data } = await supabase.rpc("resolve_line_price", {
-              p_pricing_key: li.pricingKey,
-              p_quantity: qty,
-            });
-            const row = (data as { unit_price: number; total: number }[])?.[0];
-            if (row && typeof row.unit_price === "number" && typeof row.total === "number") {
-              unitPrice = row.unit_price;
-            }
-          } catch {
-            // Keep client-provided prices when RPC isn't available for a key.
-          }
-        }
+        const unitPrice = li.unitPrice;
         normalizedItems.push({
           ...li,
           quantity: qty,
@@ -583,23 +630,9 @@ export function useCreateInvoice() {
       }
 
       const normalizedSubtotal = normalizedItems.reduce((sum, li) => sum + li.total, 0);
-      let normalizedDiscountAed = 0;
-      let normalizedDiscountPct = 0;
-      let normalizedTotal = normalizedSubtotal;
-      try {
-        const { data: discData } = await supabase.rpc("apply_member_discount", {
-          p_owner_id: input.ownerId,
-          p_subtotal: normalizedSubtotal,
-        });
-        const row = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
-        if (row) {
-          normalizedDiscountPct = row.discount_pct;
-          normalizedDiscountAed = row.discount_aed;
-          normalizedTotal = row.final_aed;
-        }
-      } catch {
-        // Leave raw totals if discount RPC unavailable.
-      }
+      const normalizedDiscountAed = 0;
+      const normalizedDiscountPct = 0;
+      const normalizedTotal = normalizedSubtotal;
 
       const netExVat = normalizedTotal;
       const vatAed = vatAmountFromNet(netExVat);

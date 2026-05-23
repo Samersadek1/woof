@@ -116,9 +116,8 @@ export function useUpdatePet() {
 const PET_REFERENCE_CHECKS = [
   { table: "booking_pets" as const, label: "boarding bookings" },
   { table: "grooming_appointments" as const, label: "grooming appointments" },
-  { table: "daycare_packages" as const, label: "daycare packages" },
+  { table: "service_credits" as const, label: "active service credits" },
   { table: "daycare_sessions" as const, label: "daycare sessions" },
-  { table: "park_bookings" as const, label: "park bookings" },
   { table: "waiting_list" as const, label: "waiting list entries" },
   { table: "feeding_schedules" as const, label: "feeding schedules" },
   { table: "daily_notes" as const, label: "daily notes" },

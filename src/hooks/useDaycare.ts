@@ -3,123 +3,183 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
 
-type DaycarePackage = Database["public"]["Tables"]["daycare_packages"]["Row"];
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
 type DaycareSessionInsert = Database["public"]["Tables"]["daycare_sessions"]["Insert"];
+type ServiceCode = Database["public"]["Enums"]["service_code"];
 
-export type { DaycarePackage, DaycareSession };
+export type DaycareCredit = Database["public"]["Tables"]["service_credits"]["Row"] & {
+  package_name?: string | null;
+};
 
-// ── Query keys ────────────────────────────────────────────────────────────────
+export type DaycarePackage = {
+  id: string;
+  owner_id: string;
+  pet_id: string;
+  total_days: number;
+  days_used: number;
+  expiry_date: string | null;
+  purchase_date: string | null;
+  package_name: string | null;
+  service_code: ServiceCode;
+  is_bonus: boolean;
+  units_remaining: number;
+  source_ref_id: string | null;
+  redemption_group_id: string | null;
+};
+
+export type { DaycareSession };
+
+const DAYCARE_CREDIT_CODES: ServiceCode[] = ["daycare_full_day", "daycare_hourly"];
+
+type CreditRpcRow = Database["public"]["Functions"]["list_active_credits_for_pet"]["Returns"][number];
 
 export const daycareQueryKeys = {
-  packages:         (ownerId?: string) => ["daycare_packages", ownerId ?? "all"] as const,
-  packagesByPet:    (petId: string)    => ["daycare_packages", "pet", petId]     as const,
-  sessions:         (date?: string)    => ["daycare_sessions",  date  ?? "all"]   as const,
-  sessionsByPet:    (petId: string)    => ["daycare_sessions",  "pet", petId]     as const,
-  sessionsByOwner:  (ownerId: string)  => ["daycare_sessions",  "owner", ownerId] as const,
+  packages: (ownerId?: string) => ["service_credits", "daycare", ownerId ?? "all"] as const,
+  packagesByPet: (petId: string) => ["service_credits", "daycare", "pet", petId] as const,
+  sessions: (date?: string) => ["daycare_sessions", date ?? "all"] as const,
+  sessionsByPet: (petId: string) => ["daycare_sessions", "pet", petId] as const,
+  sessionsByOwner: (ownerId: string) => ["daycare_sessions", "owner", ownerId] as const,
+  creditsByPet: (petId: string) => ["service_credits", "active", petId] as const,
 };
-
-// ── Enriched types ────────────────────────────────────────────────────────────
 
 export type DaycareSessionWithDetails = DaycareSession & {
-  pets:            { name: string; species: string } | null;
-  owners:          { first_name: string; last_name: string } | null;
-  daycare_packages:{ total_days: number; days_used: number } | null;
+  pets: { name: string; species: string } | null;
+  owners: { first_name: string; last_name: string } | null;
 };
-
-// ── Shared attendance payload ─────────────────────────────────────────────────
-//
-//   remark        → notes  (DB column name)
-//   pickup_used   → pickup_used  (BOOLEAN — column added to daycare_sessions)
-//   dropoff_used  → dropoff_used (BOOLEAN — column added to daycare_sessions)
-//   logged_by     → logged_by   (TEXT    — column added to daycare_sessions)
-//
-// NOTE: The local types.ts was generated before these three columns were added.
-// Insert/update objects are cast via `as unknown as DaycareSessionInsert` until
-// types are regenerated from Supabase, at which point the cast can be removed.
 
 export type AttendancePayload = {
-  pickup_used?:  boolean;
+  pickup_used?: boolean;
   dropoff_used?: boolean;
-  /** Free-text name of the staff member who logged the session */
-  logged_by?:    string | null;
-  /** Saved to `notes` column */
-  remark?:       string | null;
+  logged_by?: string | null;
+  remark?: string | null;
 };
 
-// ── Internal helper: increment days_used on a package by delta ────────────────
-
-async function adjustPackageDaysUsed(packageId: string, delta: 1 | -1): Promise<void> {
-  const { data: pkg, error: fetchErr } = await supabase
-    .from("daycare_packages")
-    .select("days_used")
-    .eq("id", packageId)
-    .single();
-
-  if (fetchErr) throw fetchErr;
-
-  const newCount = Math.max(0, (pkg.days_used ?? 0) + delta);
-
-  const { error: updateErr } = await supabase
-    .from("daycare_packages")
-    .update({ days_used: newCount })
-    .eq("id", packageId);
-
-  if (updateErr) throw updateErr;
-}
-
-// ── Base read hooks ───────────────────────────────────────────────────────────
-
-/** All active packages for an owner, with remaining days computed */
 export function useDaycarePackages(ownerId: string) {
   return useQuery({
     queryKey: daycareQueryKeys.packages(ownerId),
-    enabled:  !!ownerId,
-    queryFn:  async () => {
-      const { data, error } = await supabase
-        .from("daycare_packages")
-        .select("*")
-        .eq("owner_id", ownerId)
-        .order("purchase_date", { ascending: false });
+    enabled: !!ownerId,
+    queryFn: async () => {
+      const { data: petRows, error: petsErr } = await supabase
+        .from("pets")
+        .select("id")
+        .eq("owner_id", ownerId);
+      if (petsErr) throw petsErr;
 
+      const petIds = (petRows ?? []).map((p) => p.id);
+      if (petIds.length === 0) return [] as DaycarePackage[];
+
+      const { data, error } = await supabase
+        .from("service_credits")
+        .select("*, purchase_groups(package_definitions(display_name))")
+        .in("pet_id", petIds)
+        .in("service_code", DAYCARE_CREDIT_CODES)
+        .eq("status", "active")
+        .gte("expires_at", new Date().toISOString().slice(0, 10))
+        .order("expires_at", { ascending: true });
       if (error) throw error;
-      return data as DaycarePackage[];
+      return (data ?? []).map((row) => {
+        const packageName =
+          (
+            row as unknown as {
+              purchase_groups?: { package_definitions?: { display_name?: string | null } | null } | null;
+            }
+          ).purchase_groups?.package_definitions?.display_name ?? null;
+        return {
+          id: row.id,
+          owner_id: ownerId,
+          pet_id: row.pet_id,
+          total_days: row.units_total,
+          days_used: row.units_consumed,
+          expiry_date: row.expires_at,
+          purchase_date: row.created_at,
+          package_name: packageName,
+          service_code: row.service_code,
+          is_bonus: row.is_bonus,
+          units_remaining: row.units_total - row.units_consumed,
+          source_ref_id: row.source_ref_id,
+          redemption_group_id: row.redemption_group_id,
+        };
+      }) as DaycarePackage[];
     },
   });
 }
 
-/** All sessions for a given calendar date, joined with pet + owner details */
+export function usePetDaycareCredits(petId: string) {
+  return useQuery({
+    queryKey: daycareQueryKeys.creditsByPet(petId),
+    enabled: !!petId,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("list_active_credits_for_pet", {
+        p_pet_id: petId,
+        p_service_code: null,
+      });
+      if (error) throw error;
+      return ((data ?? []) as CreditRpcRow[]).filter((row) =>
+        DAYCARE_CREDIT_CODES.includes(row.service_code),
+      );
+    },
+  });
+}
+
+export function useConsumeServiceCredit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      creditId,
+      units = 1,
+      consumedForRefId = null,
+      consumedForRefType = null,
+    }: {
+      creditId: string;
+      units?: number;
+      consumedForRefId?: string | null;
+      consumedForRefType?: string | null;
+    }) => {
+      const { data, error } = await supabase.rpc("consume_service_credit", {
+        p_credit_id: creditId,
+        p_units: units,
+        p_consumed_for_ref_id: consumedForRefId,
+        p_consumed_for_ref_type: consumedForRefType,
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+      queryClient.invalidateQueries({ queryKey: ["owners"] });
+      queryClient.invalidateQueries({ queryKey: ["pets"] });
+    },
+  });
+}
+
 export function useDaycareSessionsByDate(date: string) {
   return useQuery({
     queryKey: daycareQueryKeys.sessions(date),
-    enabled:  !!date,
-    queryFn:  async () => {
+    enabled: !!date,
+    queryFn: async () => {
       const { data, error } = await supabase
         .from("daycare_sessions")
-        .select("*, pets(name, species), owners(first_name, last_name), daycare_packages(total_days, days_used)")
+        .select("*, pets(name, species), owners(first_name, last_name)")
         .eq("session_date", date)
         .order("checked_in_at", { ascending: true });
-
       if (error) throw error;
       return data as DaycareSessionWithDetails[];
     },
   });
 }
 
-/** All sessions for a pet, most recent first */
 export function useDaycareSessionsByPet(petId: string) {
   return useQuery({
     queryKey: daycareQueryKeys.sessionsByPet(petId),
-    enabled:  !!petId,
-    queryFn:  async () => {
+    enabled: !!petId,
+    queryFn: async () => {
       const { data, error } = await supabase
         .from("daycare_sessions")
-        .select("*, daycare_packages(total_days, days_used)")
+        .select("*")
         .eq("pet_id", petId)
         .order("session_date", { ascending: false });
-
       if (error) throw error;
-      return data as DaycareSession[];
+      return (data ?? []) as DaycareSession[];
     },
   });
 }
@@ -168,16 +228,11 @@ export function useMarkSessionAttended() {
 
       if (sessionErr) throw sessionErr;
 
-      // Increment package days used (use the supplied package_id or the
-      // one stored on the session row we just updated)
-      const pkgId = package_id ?? session.package_id;
-      if (pkgId) await adjustPackageDaysUsed(pkgId, 1);
-
       return session as DaycareSession;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"]  });
-      queryClient.invalidateQueries({ queryKey: ["daycare_packages"]  });
+      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
     },
   });
 }
@@ -194,10 +249,7 @@ export type AddDaycareDayPayload = AttendancePayload & {
 };
 
 /**
- * Inserts a new daycare_session row already marked as attended (checked_in=true),
- * then increments days_used on the linked package by 1.
- *
- * Useful for logging a drop-in day or back-filling missed check-ins.
+ * Inserts a new daycare_session row already marked as attended (checked_in=true).
  */
 export function useAddDaycareDay() {
   const queryClient = useQueryClient();
@@ -248,13 +300,11 @@ export function useAddDaycareDay() {
 
       if (error) throw error;
 
-      if (package_id) await adjustPackageDaysUsed(package_id, 1);
-
       return session as DaycareSession;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"]  });
-      queryClient.invalidateQueries({ queryKey: ["daycare_packages"]  });
+      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
     },
   });
 }
@@ -342,7 +392,7 @@ export function useRescheduleDaycareSession() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["daycare_packages"] });
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
     },
   });
 }
@@ -382,64 +432,82 @@ export type PackageWithDetails = DaycarePackage & {
 
 export function useAllDaycarePackages() {
   return useQuery({
-    queryKey: ["daycare_packages", "all_with_details"] as const,
-    queryFn:  async () => {
+    queryKey: ["service_credits", "daycare", "all_with_details"] as const,
+    queryFn: async () => {
       const { data, error } = await supabase
-        .from("daycare_packages")
-        .select("*, pets(name), owners(first_name, last_name, member_type)")
-        .order("purchase_date", { ascending: false });
-
+        .from("service_credits")
+        .select("*, pets!inner(name, owner_id), purchase_groups(package_definitions(display_name))")
+        .in("service_code", DAYCARE_CREDIT_CODES)
+        .order("created_at", { ascending: false });
       if (error) throw error;
-      return data as unknown as PackageWithDetails[];
+      const mapped = (data ?? []).map((row) => {
+        const ownerId = (row as unknown as { pets: { owner_id: string } | null }).pets?.owner_id ?? "";
+        const petName = (row as unknown as { pets: { name: string } | null }).pets?.name ?? "Pet";
+        const pkgName = (row as unknown as { purchase_groups?: { package_definitions?: { display_name?: string | null } | null } | null })
+          .purchase_groups?.package_definitions?.display_name;
+        return {
+          id: row.id,
+          owner_id: ownerId,
+          pet_id: row.pet_id,
+          total_days: row.units_total,
+          days_used: row.units_consumed,
+          expiry_date: row.expires_at,
+          purchase_date: row.created_at,
+          package_name: pkgName ?? null,
+          service_code: row.service_code,
+          is_bonus: row.is_bonus,
+          units_remaining: row.units_total - row.units_consumed,
+          source_ref_id: row.source_ref_id,
+          redemption_group_id: row.redemption_group_id,
+          pets: { name: petName },
+          owners: null,
+        };
+      });
+      return mapped as unknown as PackageWithDetails[];
     },
   });
 }
 
 // ── useCreateDaycarePackage ───────────────────────────────────────────────────
 
-type DaycarePackageInsert = Database["public"]["Tables"]["daycare_packages"]["Insert"];
+type DaycarePackageInsert = {
+  owner_id: string;
+  package_code?: string;
+  pet_ids?: string[];
+  payment_method?: Database["public"]["Enums"]["payment_method"];
+} & Record<string, unknown>;
 
 export function useCreateDaycarePackage() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (pkg: DaycarePackageInsert) => {
-      const { data, error } = await supabase
-        .from("daycare_packages")
-        .insert(pkg)
-        .select()
-        .single();
-
+      if (!pkg.package_code || !Array.isArray(pkg.pet_ids) || pkg.pet_ids.length === 0) {
+        throw new Error("Package sale requires package code and selected pet(s).");
+      }
+      const { data, error } = await supabase.rpc("purchase_package", {
+        p_owner_id: pkg.owner_id,
+        p_package_code: pkg.package_code,
+        p_pet_ids: pkg.pet_ids,
+        p_payment_method: pkg.payment_method ?? "card",
+      });
       if (error) throw error;
-      return data as DaycarePackage;
+      return data?.[0] ?? null;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["daycare_packages"] });
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
     },
   });
 }
 
 // ── useUpdateDaycarePackage ───────────────────────────────────────────────────
 
-type DaycarePackageUpdate = Database["public"]["Tables"]["daycare_packages"]["Update"];
+type DaycarePackageUpdate = Record<string, never>;
 
 export function useUpdateDaycarePackage() {
-  const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: async ({ id, ...updates }: DaycarePackageUpdate & { id: string }) => {
-      const { data, error } = await supabase
-        .from("daycare_packages")
-        .update(updates)
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data as DaycarePackage;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["daycare_packages"] });
+    mutationFn: async (_payload: DaycarePackageUpdate & { id: string }) => {
+      throw new Error("Package updates are no longer supported. Please purchase a new package.");
     },
   });
 }
@@ -447,25 +515,9 @@ export function useUpdateDaycarePackage() {
 // ── useDeleteDaycarePackage ──────────────────────────────────────────────────
 
 export function useDeleteDaycarePackage() {
-  const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: async (packageId: string) => {
-      const { error: unlinkErr } = await supabase
-        .from("daycare_sessions")
-        .update({ package_id: null })
-        .eq("package_id", packageId);
-      if (unlinkErr) throw unlinkErr;
-
-      const { error: deleteErr } = await supabase
-        .from("daycare_packages")
-        .delete()
-        .eq("id", packageId);
-
-      if (deleteErr) throw deleteErr;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["daycare_packages"] });
+    mutationFn: async (_packageId: string) => {
+      throw new Error("Package deletion is not supported.");
     },
   });
 }
@@ -478,8 +530,7 @@ export type DeleteSessionPayload = {
 };
 
 /**
- * Deletes a daycare session by id, then decrements days_used on the linked
- * package by 1 (floor 0). Useful for correcting accidental check-ins.
+ * Deletes a daycare session by id.
  */
 export function useDeleteDaycareSession() {
   const queryClient = useQueryClient();
@@ -502,12 +553,12 @@ export function useDeleteDaycareSession() {
 
       if (deleteErr) throw deleteErr;
 
-      const pkgId = package_id ?? session.package_id;
-      if (pkgId) await adjustPackageDaysUsed(pkgId, -1);
+      void package_id;
+      void session.package_id;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"]  });
-      queryClient.invalidateQueries({ queryKey: ["daycare_packages"]  });
+      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
     },
   });
 }
