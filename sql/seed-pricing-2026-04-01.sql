@@ -1,5 +1,5 @@
 -- =============================================================================
--- MSH Pricing Seed (adapted to current system schema)
+-- woof Pricing Seed (adapted to current system schema)
 -- Effective 2026-04-01
 --
 -- Current DB schema for pricing:

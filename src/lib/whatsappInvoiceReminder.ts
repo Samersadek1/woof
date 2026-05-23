@@ -16,6 +16,6 @@ export function buildOverdueInvoiceWhatsAppUrl(options: {
   const name = options.ownerName.trim() || "Client";
   const amt = options.amountAed.toFixed(2);
   const message =
-    `Dear ${name}, this is a friendly reminder that invoice ${inv} for AED ${amt} is overdue. Please contact us to arrange payment. Thank you, My Second Home Team.`;
+    `Dear ${name}, this is a friendly reminder that invoice ${inv} for AED ${amt} is overdue. Please contact us to arrange payment. Thank you, woof Team.`;
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }

@@ -1,11 +1,11 @@
 {
-  "slug": "msh",
-  "display_name": "MySecondHome",
+  "slug": "woof",
+  "display_name": "woof",
   "language": "en",
   "timezone": "Asia/Dubai",
-  "staff_group_id": "120363408763975833@g.us",
-  "wa_session_client_id": "msh-whatsapp-main",
-  "booking_ref_prefix": "MSH",
+  "staff_group_id": "REPLACE_WITH_WHATSAPP_GROUP_ID@g.us",
+  "wa_session_client_id": "woof-whatsapp-main",
+  "booking_ref_prefix": "WOOF",
   "default_mode": "human",
   "daily_token_cap": 500000,
   "prompt": {

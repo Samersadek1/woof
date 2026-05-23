@@ -91,11 +91,11 @@ export function inferImportTier(
 }
 
 export function placeholderTierForRoom(
-  room: Pick<Room, "pricing_category" | "room_type" | "notes">,
+  room: Pick<Room, "room_type" | "notes">,
   species: "dog" | "cat",
 ): DogUnknownTier | CatUnknownTier | null {
   const fromNotes = (room.notes ?? "").match(/import_placeholder_tier=([a-z0-9_]+)/i)?.[1];
-  const tier = (fromNotes ?? room.pricing_category ?? room.room_type ?? "").toLowerCase();
+  const tier = (fromNotes ?? room.room_type ?? "").toLowerCase();
   if (species === "cat") {
     if (tier.includes("super")) return "cattery_super_presidential";
     if (tier.includes("presidential")) return "cattery_presidential";

@@ -46,7 +46,7 @@ async function main() {
   const SUPABASE_KEY =
     process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-  const TENANT_SLUG = process.env.TENANT_SLUG || "msh";
+  const TENANT_SLUG = process.env.TENANT_SLUG || "woof";
 
   if (!SUPABASE_URL || !SUPABASE_KEY || !ANTHROPIC_API_KEY) {
     console.error("Missing env: SUPABASE_URL, SUPABASE_SERVICE_KEY, ANTHROPIC_API_KEY required.");

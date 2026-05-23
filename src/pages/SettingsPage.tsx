@@ -181,7 +181,7 @@ const SettingsPage = () => {
               <div className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold">Business rules</h2>
                 <p className="text-sm text-muted-foreground">
-                  Controls how the AI understands MSH pricing, seasons, membership tiers, and service rules.
+                  Controls how the AI understands woof pricing, seasons, membership tiers, and service rules.
                   Changes take effect immediately on the next conversation.
                 </p>
                 {formattedUpdatedAt && (

@@ -1,16 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type { ParkSlotItem, ScheduleItem, TodaySchedule } from "@/types/dashboard";
+import type { ScheduleItem, TodaySchedule } from "@/types/dashboard";
 
 function ownerName(firstName?: string | null, lastName?: string | null) {
   const full = [firstName, lastName].filter(Boolean).join(" ").trim();
   return full || "Unknown owner";
-}
-
-function ownerInitials(firstName?: string | null, lastName?: string | null) {
-  const a = firstName?.[0] ?? "";
-  const b = lastName?.[0] ?? "";
-  return (a + b || "?").toUpperCase();
 }
 
 type BookingScheduleRow = {
@@ -40,18 +34,6 @@ type GroomingScheduleRow = {
   owners: { first_name: string | null; last_name: string | null } | null;
 };
 
-type ParkScheduleRow = {
-  id: string;
-  slot_start: string;
-  slot_end: string;
-  size_lane: "small" | "big";
-  is_assessment: boolean | null;
-  pet_id: string | null;
-  owner_id: string | null;
-  pets: { name: string | null } | null;
-  owners: { first_name: string | null; last_name: string | null } | null;
-};
-
 function toScheduleItem(row: BookingScheduleRow): ScheduleItem {
   const firstPet = row.booking_pets?.[0];
   return {
@@ -77,7 +59,7 @@ export function useTodaySchedule(asOf: string) {
   return useQuery({
     queryKey: ["today-schedule", asOf],
     queryFn: async () => {
-      const [bookingsRes, groomingRes, parkRes] = await Promise.all([
+      const [bookingsRes, groomingRes] = await Promise.all([
         supabase
           .from("bookings")
           .select(
@@ -92,20 +74,13 @@ export function useTodaySchedule(asOf: string) {
           .eq("appointment_date", asOf)
           .neq("status", "cancelled")
           .order("appointment_time", { ascending: true, nullsFirst: false }),
-        supabase
-          .from("park_bookings")
-          .select("id, slot_start, slot_end, size_lane, is_assessment, pet_id, owner_id, pets(name), owners(first_name, last_name)")
-          .eq("visit_date", asOf)
-          .order("slot_start", { ascending: true }),
       ]);
 
       if (bookingsRes.error) throw bookingsRes.error;
       if (groomingRes.error) throw groomingRes.error;
-      if (parkRes.error) throw parkRes.error;
 
       const bookings = (bookingsRes.data ?? []) as BookingScheduleRow[];
       const grooming = (groomingRes.data ?? []) as GroomingScheduleRow[];
-      const park = (parkRes.data ?? []) as ParkScheduleRow[];
 
       const checkIns = bookings
         .filter((b) => b.booking_type === "boarding" && b.check_in_date === asOf)
@@ -133,25 +108,13 @@ export function useTodaySchedule(asOf: string) {
         sortKey: g.appointment_time ?? g.pets?.name?.toLowerCase?.() ?? "zzzz",
       }));
 
-      const parkRows: ParkSlotItem[] = park.map((p) => ({
-        id: p.id,
-        slotStart: p.slot_start,
-        slotEnd: p.slot_end,
-        sizeLane: p.size_lane,
-        isAssessment: Boolean(p.is_assessment),
-        petId: p.pet_id ?? null,
-        ownerId: p.owner_id ?? null,
-        petName: p.pets?.name ?? "Walk-in",
-        ownerInitials: ownerInitials(p.owners?.first_name, p.owners?.last_name),
-      }));
-
       return {
         check_ins: checkIns,
         check_outs: checkOuts,
         daycare,
-        park: parkRows.filter((p) => !p.isAssessment),
+        park: [],
         grooming: groomingRows,
-        assessments: parkRows.filter((p) => p.isAssessment),
+        assessments: [],
       } satisfies TodaySchedule;
     },
   });

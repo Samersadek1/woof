@@ -3,7 +3,6 @@ import {
   Users,
   Hotel,
   Sun,
-  TreePine,
   Scissors,
   Wallet,
   ClipboardList,
@@ -23,7 +22,6 @@ const navItems = [
   { icon: Users, label: "Customers & Pets", path: "/customers" },
   { icon: Hotel, label: "Boarding", path: "/boarding" },
   { icon: Sun, label: "Daycare", path: "/daycare" },
-  { icon: TreePine, label: "Park Visitation", path: "/park" },
   { icon: Scissors, label: "Grooming", path: "/grooming" },
   { icon: Wallet, label: "Billing & Wallets", path: "/billing" },
   { icon: ClipboardList, label: "User Management", path: "/staff" },
@@ -46,7 +44,7 @@ const AppSidebar = () => {
       <div className="flex h-16 items-center gap-2.5 px-5 border-b border-sidebar-border">
         <PawPrint className="h-6 w-6 text-sidebar-primary" />
         <span className="text-base font-bold tracking-tight text-sidebar-accent-foreground">
-          MySecondHome
+          woof
         </span>
       </div>
 

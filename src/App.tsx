@@ -26,7 +26,6 @@ const OwnerStatementPage = lazy(() => import("@/pages/billing/OwnerStatement"));
 const DaycarePage = lazy(() => import("@/pages/Daycare"));
 const ServiceCheckinsPage = lazy(() => import("@/pages/ServiceCheckins"));
 const AgentPage = lazy(() => import("@/pages/Agent"));
-const ParkPage = lazy(() => import("@/pages/Park"));
 const GroomingPage = lazy(() => import("@/pages/Grooming"));
 const StaffPage = lazy(() => import("@/pages/Staff"));
 const ProfilePage = lazy(() => import("@/pages/Profile"));
@@ -126,7 +125,6 @@ const App = () => (
                 <Route path="daycare" element={<DaycarePage />} />
                 <Route path="dashboard/checkins" element={<ServiceCheckinsPage />} />
                 <Route path="agent" element={<AgentPage />} />
-                <Route path="park" element={<ParkPage />} />
                 <Route path="grooming" element={<GroomingPage />} />
                 <Route path="billing" element={<BillingPage />} />
                 <Route path="billing/invoices" element={<InvoiceListPage />} />

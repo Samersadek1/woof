@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
  * CREATE TABLE IF NOT EXISTS invoice_deletion_log (
  *   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
  *   invoice_id text,
+ *   invoice_row_id uuid REFERENCES invoices(id) ON DELETE SET NULL,
  *   owner_name text,
  *   total_amount numeric,
  *   deleted_at timestamptz DEFAULT now(),
@@ -55,6 +56,7 @@ export async function deleteInvoiceWithLog(input: DeleteInvoiceWithLogInput): Pr
 
   const { error: logErr } = await supabase.from("invoice_deletion_log").insert({
     invoice_id: invoiceNumberDisplay,
+    invoice_row_id: invoiceUuid,
     owner_name: ownerName,
     total_amount: totalAmount,
     deleted_by: deletedByEmail,

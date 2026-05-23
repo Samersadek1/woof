@@ -100,9 +100,7 @@ const VACCICHECK_FIELD_KEYS = [
 ] as const;
 
 type VaccicheckFieldKey = (typeof VACCICHECK_FIELD_KEYS)[number];
-type VaccicheckSaveValues = Partial<
-  Record<VaccicheckFieldKey, string | number | null>
->;
+type VaccicheckSaveValues = Partial<Pick<PetUpdate, VaccicheckFieldKey>>;
 
 function folder(petId: string) {
   return `vaccicheck/${petId}`;

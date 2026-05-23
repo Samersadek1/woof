@@ -48,7 +48,7 @@ export type GroomingPrintRow = {
   pets: {
     name: string;
     breed: string | null;
-    size_category: "S" | "M" | "L" | "XL" | null;
+    size: "small" | "medium" | "large" | null;
     grooming_notes: string | null;
     medical_conditions: string | null;
   } | null;
@@ -60,7 +60,7 @@ export type GroomingPrintRow = {
 const GROOMING_APPOINTMENT_PRINT_SELECT = `
   id, appointment_date, appointment_time, duration_minutes, service, grooming_notes, notes, visit_notes, pet_id, owner_id, price, booking_id,
   owners(first_name, last_name, phone, phone2, email, address),
-  pets(name, breed, size_category, grooming_notes, medical_conditions),
+  pets(name, breed, size, grooming_notes, medical_conditions),
   bookings(booking_ref)
 `;
 
@@ -104,7 +104,7 @@ export async function fetchGroomingRowsForDateRange(
     .order("appointment_time", { ascending: true, nullsFirst: false });
 
   if (error) throw error;
-  const appointments = (data ?? []) as GroomingPrintRow[];
+  const appointments = (data ?? []) as unknown as GroomingPrintRow[];
   return enrichGroomingRows(appointments);
 }
 
@@ -132,7 +132,7 @@ export async function fetchGroomingRowById(
     .single();
 
   if (error) throw error;
-  const row = data as GroomingPrintRow;
+  const row = data as unknown as GroomingPrintRow;
 
   const enriched = await enrichGroomingRows([row]);
   return {
@@ -421,7 +421,7 @@ export function GroomingCardBlock({
       <header className="mb-3 border-b border-black pb-2">
         <h1 className="text-2xl font-bold">{appointment.pets?.name ?? "Unknown pet"}</h1>
         <p>
-          {appointment.pets?.breed ?? "Unknown breed"} · {appointment.pets?.size_category ?? "—"}
+          {appointment.pets?.breed ?? "Unknown breed"} · {appointment.pets?.size ? `${appointment.pets.size.charAt(0).toUpperCase()}${appointment.pets.size.slice(1)}` : "—"}
         </p>
         <p className="print-sans text-xs">
           {format(parseISO(appointment.appointment_date), "d MMM yyyy")} ·{" "}

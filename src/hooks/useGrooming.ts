@@ -212,7 +212,7 @@ export function useDeleteGroomingAppointment() {
       if (appointmentError) throw appointmentError;
 
       // Audit log (do not fail the mutation if logging is unavailable).
-      const { error: logError } = await supabase.from("grooming_appointment_deletion_log").insert({
+      const { error: logError } = await supabase.from("grooming_appointment_deletion_log" as never).insert({
         appointment_id: input.appointmentId,
         appointment_date: input.appointmentDate,
         pet_name: input.petName,
@@ -221,7 +221,7 @@ export function useDeleteGroomingAppointment() {
         price: input.price,
         deleted_by: input.deletedByEmail,
         reason: trimmedReason,
-      });
+      } as never);
       if (logError) {
         console.error("grooming_appointment_deletion_log insert failed:", logError);
       }

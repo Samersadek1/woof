@@ -1,6 +1,6 @@
 # agent-chat edge function
 
-Proxies Claude API calls from the MSH admin UI.
+Proxies Claude API calls from the woof admin UI.
 Requires an authenticated Supabase session.
 
 ## Setup (run once)

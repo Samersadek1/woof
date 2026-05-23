@@ -86,7 +86,6 @@ import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKenne
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
-import { memberTierBadgeClassName, memberTierBadgeLabel } from "@/lib/memberTier";
 import {
   BOARDING_TRANSPORT_REGION_OPTIONS,
   TRANSPORT_PRICING_KEYS,
@@ -130,6 +129,7 @@ import { supabase } from "@/integrations/supabase/client";
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
 type RoomWing = Database["public"]["Enums"]["room_wing"];
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
+type BillingAdjustmentRow = Database["public"]["Tables"]["billing_adjustments"]["Row"];
 type CatRoomType =
   | "cattery_super_presidential"
   | "cattery_presidential"
@@ -166,6 +166,23 @@ function showCreateBookingErrorToast(options: {
         }
       : undefined,
   });
+}
+
+async function applyDoubleOccupancyDiscountRpc(bookingId: string): Promise<number> {
+  const { data: adjustmentId, error } = await supabase.rpc("apply_double_occupancy_discount", {
+    p_booking_id: bookingId,
+  });
+  if (error) throw error;
+  if (!adjustmentId) return 0;
+
+  const { data: row, error: fetchError } = await supabase
+    .from("billing_adjustments")
+    .select("adjusted_amount")
+    .eq("id", adjustmentId)
+    .single();
+  if (fetchError) throw fetchError;
+
+  return Math.abs((row as Pick<BillingAdjustmentRow, "adjusted_amount">).adjusted_amount ?? 0);
 }
 
 const DAYS = 14;
@@ -238,6 +255,7 @@ const CAT_TIER_LABELS: Record<CatRoomType, string> = {
 };
 
 const STATUS_CLASSES: Record<BookingStatus, string> = {
+  draft: "bg-slate-300 text-white hover:bg-slate-400",
   confirmed: "bg-blue-500 text-white hover:bg-blue-600",
   checked_in: "bg-emerald-500 text-white hover:bg-emerald-600",
   checked_out: "bg-slate-400 text-white hover:bg-slate-500",
@@ -247,6 +265,7 @@ const STATUS_CLASSES: Record<BookingStatus, string> = {
 };
 
 const STATUS_BADGE: Record<BookingStatus, string> = {
+  draft: "bg-slate-100 text-slate-600 border-slate-200",
   confirmed: "bg-blue-100 text-blue-800 border-blue-200",
   checked_in: "bg-emerald-100 text-emerald-800 border-emerald-200",
   checked_out: "bg-slate-100 text-slate-600 border-slate-200",
@@ -683,7 +702,7 @@ async function printKennelCard(booking: BookingWithDetails) {
   await printKennelCards([booking], `Kennel Card ${bookingRef}`);
 }
 
-const BOARDING_OPERATIONS_PRINT_TIME = "12:00 PM (My Second Home DIP-2)";
+const BOARDING_OPERATIONS_PRINT_TIME = "12:00 PM (woof DIP-2)";
 
 async function hydrateBookingsForComingGoingPrint(
   bookings: BookingWithDetails[],
@@ -1061,12 +1080,10 @@ export function DogBoardingCalendar({
   const { data: transportRates = [] } = useQuery({
     queryKey: ["pricing", "transport_zones", "boarding"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("pricing")
-        .select("key, amount_aed")
-        .in("key", TRANSPORT_PRICING_KEYS as readonly string[] as string[]);
-      if (error) throw error;
-      return data ?? [];
+      return (TRANSPORT_PRICING_KEYS as readonly string[]).map((key) => ({
+        key,
+        amount_aed: 0,
+      }));
     },
   });
 
@@ -1206,37 +1223,38 @@ export function DogBoardingCalendar({
     dogManualAddonTotal,
   ]);
 
+  const dogBoardingSubtotal = useMemo(() => {
+    if (!dogRatePreview.data || dogNights <= 0) return 0;
+    return dogRatePreview.data.unitPrice * dogNights;
+  }, [dogRatePreview.data, dogNights]);
+
+  const dogDoubleOccupancyDiscount = useMemo(() => {
+    if (form.pet_ids.length < 2) return 0;
+    return Number((dogBoardingSubtotal * 0.15).toFixed(2));
+  }, [form.pet_ids.length, dogBoardingSubtotal]);
+
+  const dogSubtotalAfterDoubleOccupancy = useMemo(
+    () => Math.max(0, dogBookingEstimateTotal - dogDoubleOccupancyDiscount),
+    [dogBookingEstimateTotal, dogDoubleOccupancyDiscount],
+  );
+
   const { data: dogMemberDiscountPreview } = useQuery<{
     discount_pct: number;
     discount_aed: number;
     final_aed: number;
   }>({
-    queryKey: ["boarding", "dog", "member-discount-preview", form.owner_id, dogBookingEstimateTotal],
-    enabled: Boolean(newBookingOpen && form.owner_id && dogBookingEstimateTotal > 0),
+    queryKey: ["boarding", "dog", "member-discount-preview", form.owner_id, dogSubtotalAfterDoubleOccupancy],
+    enabled: Boolean(newBookingOpen && form.owner_id && dogSubtotalAfterDoubleOccupancy > 0),
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("apply_member_discount", {
-        p_owner_id: form.owner_id,
-        p_subtotal: dogBookingEstimateTotal,
-      });
-      if (error) {
-        return {
-          discount_pct: 0,
-          discount_aed: 0,
-          final_aed: dogBookingEstimateTotal,
-        };
-      }
-      const first = (data as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
-      return (
-        first ?? {
-          discount_pct: 0,
-          discount_aed: 0,
-          final_aed: dogBookingEstimateTotal,
-        }
-      );
+      return {
+        discount_pct: 0,
+        discount_aed: 0,
+        final_aed: dogSubtotalAfterDoubleOccupancy,
+      };
     },
   });
 
-  const dogNetAfterMember = dogMemberDiscountPreview?.final_aed ?? dogBookingEstimateTotal;
+  const dogNetAfterMember = dogMemberDiscountPreview?.final_aed ?? dogSubtotalAfterDoubleOccupancy;
   const dogBookingVatEstimate = useMemo(() => vatAmountFromNet(dogNetAfterMember), [dogNetAfterMember]);
   const dogBookingGrossEstimate = useMemo(
     () => grandTotalFromNet(dogNetAfterMember),
@@ -1393,7 +1411,6 @@ export function DogBoardingCalendar({
       staff_id: null,
       status: "confirmed",
       booking_type: "boarding",
-      dog_size: form.dog_size,
     };
 
     createBooking.mutate(payload, {
@@ -1456,12 +1473,19 @@ export function DogBoardingCalendar({
           checkOutDate: form.check_out_date,
           roomRateType: form.room_rate_type,
           addons: addonItems,
-        }).then(() => {
-          toast.success("Draft invoice created");
-        }).catch((err) => {
-          console.error("Auto-invoice failed:", err);
-          toast.error("Invoice not created: " + (err?.message ?? "unknown error"));
-        });
+        })
+          .then(async () => {
+            const discountApplied = await applyDoubleOccupancyDiscountRpc(booking.id);
+            if (discountApplied > 0) {
+              toast.success(`Draft invoice created with AED ${discountApplied.toFixed(2)} double-occupancy discount`);
+            } else {
+              toast.success("Draft invoice created");
+            }
+          })
+          .catch((err) => {
+            console.error("Auto-invoice failed:", err);
+            toast.error("Invoice not created: " + (err?.message ?? "unknown error"));
+          });
       },
       onError: (err) =>
         showCreateBookingErrorToast({
@@ -1753,16 +1777,7 @@ export function DogBoardingCalendar({
                     </PopoverContent>
                   )}
                 </Popover>
-                {dogBoardingOwnerProfile &&
-                dogBoardingOwnerProfile.id === form.owner_id &&
-                memberTierBadgeLabel(dogBoardingOwnerProfile.member_type) ? (
-                  <Badge
-                    variant="outline"
-                    className={`w-fit shrink-0 ${memberTierBadgeClassName(dogBoardingOwnerProfile.member_type)}`}
-                  >
-                    {memberTierBadgeLabel(dogBoardingOwnerProfile.member_type)}
-                  </Badge>
-                ) : null}
+                {dogBoardingOwnerProfile && dogBoardingOwnerProfile.id === form.owner_id ? null : null}
               </div>
             </div>
 
@@ -2261,6 +2276,20 @@ export function DogBoardingCalendar({
                         </span>
                       </div>
                     )}
+                    {dogBookingEstimateTotal > 0 && (
+                      <div className="flex justify-between gap-4 font-medium">
+                        <span>Subtotal</span>
+                        <span className="tabular-nums">{formatAed(dogBookingEstimateTotal)}</span>
+                      </div>
+                    )}
+                    {dogDoubleOccupancyDiscount > 0 && (
+                      <div className="flex justify-between gap-4 text-emerald-700">
+                        <span>Double occupancy 15% discount</span>
+                        <span className="tabular-nums font-medium">
+                          −{formatAed(dogDoubleOccupancyDiscount)}
+                        </span>
+                      </div>
+                    )}
                     {(dogMemberDiscountPreview?.discount_aed ?? 0) > 0 && (
                       <div className="flex justify-between gap-4 text-emerald-700">
                         <span>
@@ -2272,6 +2301,12 @@ export function DogBoardingCalendar({
                         <span className="tabular-nums font-medium">
                           −{formatAed(dogMemberDiscountPreview!.discount_aed)}
                         </span>
+                      </div>
+                    )}
+                    {dogBookingEstimateTotal > 0 && (
+                      <div className="flex justify-between gap-4 font-medium">
+                        <span>Total</span>
+                        <span className="tabular-nums">{formatAed(dogNetAfterMember)}</span>
                       </div>
                     )}
                     {dogBookingEstimateTotal > 0 && (
@@ -2289,6 +2324,11 @@ export function DogBoardingCalendar({
                   <p className="text-[11px] text-muted-foreground leading-snug">
                     Includes room (when resolved), transport (if selected), grooming add-ons, and VAT.
                   </p>
+                  {form.pet_ids.length >= 2 ? (
+                    <p className="text-[11px] text-emerald-700 leading-snug">
+                      15% double-occupancy discount will apply.
+                    </p>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -2769,12 +2809,10 @@ function CatBoardingCalendar({
   const { data: catTransportRates = [] } = useQuery({
     queryKey: ["pricing", "transport_zones", "boarding"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("pricing")
-        .select("key, amount_aed")
-        .in("key", TRANSPORT_PRICING_KEYS as readonly string[] as string[]);
-      if (error) throw error;
-      return data ?? [];
+      return (TRANSPORT_PRICING_KEYS as readonly string[]).map((key) => ({
+        key,
+        amount_aed: 0,
+      }));
     },
   });
 
@@ -2905,37 +2943,38 @@ function CatBoardingCalendar({
     catManualAddonTotal,
   ]);
 
+  const catBoardingSubtotal = useMemo(() => {
+    if (!catRatePreview.data || catNights <= 0) return 0;
+    return catRatePreview.data.unitPrice * catNights;
+  }, [catRatePreview.data, catNights]);
+
+  const catDoubleOccupancyDiscount = useMemo(() => {
+    if (form.pet_ids.length < 2) return 0;
+    return Number((catBoardingSubtotal * 0.15).toFixed(2));
+  }, [form.pet_ids.length, catBoardingSubtotal]);
+
+  const catSubtotalAfterDoubleOccupancy = useMemo(
+    () => Math.max(0, catBookingEstimateTotal - catDoubleOccupancyDiscount),
+    [catBookingEstimateTotal, catDoubleOccupancyDiscount],
+  );
+
   const { data: catMemberDiscountPreview } = useQuery<{
     discount_pct: number;
     discount_aed: number;
     final_aed: number;
   }>({
-    queryKey: ["boarding", "cat", "member-discount-preview", form.owner_id, catBookingEstimateTotal],
-    enabled: Boolean(newBookingOpen && form.owner_id && catBookingEstimateTotal > 0),
+    queryKey: ["boarding", "cat", "member-discount-preview", form.owner_id, catSubtotalAfterDoubleOccupancy],
+    enabled: Boolean(newBookingOpen && form.owner_id && catSubtotalAfterDoubleOccupancy > 0),
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("apply_member_discount", {
-        p_owner_id: form.owner_id,
-        p_subtotal: catBookingEstimateTotal,
-      });
-      if (error) {
-        return {
-          discount_pct: 0,
-          discount_aed: 0,
-          final_aed: catBookingEstimateTotal,
-        };
-      }
-      const first = (data as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
-      return (
-        first ?? {
-          discount_pct: 0,
-          discount_aed: 0,
-          final_aed: catBookingEstimateTotal,
-        }
-      );
+      return {
+        discount_pct: 0,
+        discount_aed: 0,
+        final_aed: catSubtotalAfterDoubleOccupancy,
+      };
     },
   });
 
-  const catNetAfterMember = catMemberDiscountPreview?.final_aed ?? catBookingEstimateTotal;
+  const catNetAfterMember = catMemberDiscountPreview?.final_aed ?? catSubtotalAfterDoubleOccupancy;
   const catBookingVatEstimate = useMemo(() => vatAmountFromNet(catNetAfterMember), [catNetAfterMember]);
   const catBookingGrossEstimate = useMemo(
     () => grandTotalFromNet(catNetAfterMember),
@@ -3135,12 +3174,19 @@ function CatBoardingCalendar({
           checkOutDate: form.check_out_date,
           roomRateType: form.room_rate_type,
           addons: addonItems,
-        }).then(() => {
-          toast.success("Draft invoice created");
-        }).catch((err) => {
-          console.error("Auto-invoice failed:", err);
-          toast.error("Invoice not created: " + (err?.message ?? "unknown error"));
-        });
+        })
+          .then(async () => {
+            const discountApplied = await applyDoubleOccupancyDiscountRpc(booking.id);
+            if (discountApplied > 0) {
+              toast.success(`Draft invoice created with AED ${discountApplied.toFixed(2)} double-occupancy discount`);
+            } else {
+              toast.success("Draft invoice created");
+            }
+          })
+          .catch((err) => {
+            console.error("Auto-invoice failed:", err);
+            toast.error("Invoice not created: " + (err?.message ?? "unknown error"));
+          });
       },
       onError: (err) =>
         showCreateBookingErrorToast({
@@ -3354,16 +3400,7 @@ function CatBoardingCalendar({
                     </PopoverContent>
                   )}
                 </Popover>
-                {catBoardingOwnerProfile &&
-                catBoardingOwnerProfile.id === form.owner_id &&
-                memberTierBadgeLabel(catBoardingOwnerProfile.member_type) ? (
-                  <Badge
-                    variant="outline"
-                    className={`w-fit shrink-0 ${memberTierBadgeClassName(catBoardingOwnerProfile.member_type)}`}
-                  >
-                    {memberTierBadgeLabel(catBoardingOwnerProfile.member_type)}
-                  </Badge>
-                ) : null}
+                {catBoardingOwnerProfile && catBoardingOwnerProfile.id === form.owner_id ? null : null}
               </div>
             </div>
 
@@ -3763,6 +3800,20 @@ function CatBoardingCalendar({
                         </span>
                       </div>
                     )}
+                    {catBookingEstimateTotal > 0 && (
+                      <div className="flex justify-between gap-4 font-medium">
+                        <span>Subtotal</span>
+                        <span className="tabular-nums">{formatAed(catBookingEstimateTotal)}</span>
+                      </div>
+                    )}
+                    {catDoubleOccupancyDiscount > 0 && (
+                      <div className="flex justify-between gap-4 text-emerald-700">
+                        <span>Double occupancy 15% discount</span>
+                        <span className="tabular-nums font-medium">
+                          −{formatAed(catDoubleOccupancyDiscount)}
+                        </span>
+                      </div>
+                    )}
                     {(catMemberDiscountPreview?.discount_aed ?? 0) > 0 && (
                       <div className="flex justify-between gap-4 text-emerald-700">
                         <span>
@@ -3774,6 +3825,12 @@ function CatBoardingCalendar({
                         <span className="tabular-nums font-medium">
                           −{formatAed(catMemberDiscountPreview!.discount_aed)}
                         </span>
+                      </div>
+                    )}
+                    {catBookingEstimateTotal > 0 && (
+                      <div className="flex justify-between gap-4 font-medium">
+                        <span>Total</span>
+                        <span className="tabular-nums">{formatAed(catNetAfterMember)}</span>
                       </div>
                     )}
                     {catBookingEstimateTotal > 0 && (
@@ -3791,6 +3848,11 @@ function CatBoardingCalendar({
                   <p className="text-[11px] text-muted-foreground leading-snug">
                     Includes room (when resolved), transport (if selected), grooming add-ons, and VAT.
                   </p>
+                  {form.pet_ids.length >= 2 ? (
+                    <p className="text-[11px] text-emerald-700 leading-snug">
+                      15% double-occupancy discount will apply.
+                    </p>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -3981,16 +4043,6 @@ function occupancySuiteGroupLabel(room: Room, species: Species): string {
     if (room.room_type === "cattery_deluxe") return "Deluxe Suite";
     return "Other";
   }
-  const pc = (room.pricing_category ?? "").trim().toLowerCase();
-  if (pc === "standard") return "Standard Suite";
-  if (pc === "deluxe") return "Deluxe Suite";
-  if (pc === "royal") return "Royal Suite";
-  if (pc === "presidential") return "Presidential Suite";
-  if (pc === "little_gems_chalet") return "Little Gems Chalet";
-  if (pc === "little_gems_community") return "Little Gems Community Board";
-  if (pc === "family") return "Family Room";
-  if (pc.startsWith("cattery")) return "Other";
-
   if (room.wing === "bond_rooms") return "Little Gems Chalet";
   if (room.wing === "dluxe" || room.wing === "standard_room") return "Little Gems Community Board";
   if (room.room_type === "family_room") return "Family Room";

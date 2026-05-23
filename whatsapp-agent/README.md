@@ -2,7 +2,7 @@
 
 Multi-tenant WhatsApp agent runtime. Each business runs its own Railway service
 configured by a row in `public.tenants` plus its own active prompt and tool
-allow-list. The first tenant in this repo is `msh` (MySecondHome).
+allow-list. The first tenant in this repo is `woof`.
 
 ## Setup
 
@@ -16,7 +16,7 @@ cp .env.example .env
 - `ANTHROPIC_API_KEY`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`)
-- `TENANT_SLUG` (matches `public.tenants.slug`, defaults to `msh`)
+- `TENANT_SLUG` (matches `public.tenants.slug`, defaults to `woof`)
 
 ## Optional environment variables
 
@@ -95,7 +95,7 @@ FROM public.tenants WHERE slug = '<your-slug>';
 ## Replay a conversation against the current prompt/tools
 
 ```
-TENANT_SLUG=msh SUPABASE_URL=... SUPABASE_SERVICE_KEY=... ANTHROPIC_API_KEY=... \
+TENANT_SLUG=woof SUPABASE_URL=... SUPABASE_SERVICE_KEY=... ANTHROPIC_API_KEY=... \
   npm run tenant:replay -- --phone "<conversation_phone>"
 ```
 

@@ -10,7 +10,7 @@
 --   Matches app: Grooming.tsx timeToDb() → "HH:mm:ss" for Supabase insert.
 -- PostgreSQL VALUES ... AS v(col1, col2) allows only names, not col types (no "off int").
 -- Duration, price, groomer are in the notes text for demo purposes.
--- grooming_service in DB (msh-management): full_groom, full_bath, nail_clip,
+-- grooming_service in DB (woof): full_groom, full_bath, nail_clip,
 -- deshedding, brushing, pawdicure — no ear_cleaning / teeth_brushing.
 -- Re-check: SELECT enumlabel FROM pg_enum e JOIN pg_type t ON e.enumtypid = t.oid
 --   WHERE t.typname = 'grooming_service' ORDER BY enumsortorder;

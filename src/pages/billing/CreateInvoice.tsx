@@ -14,9 +14,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
-import { memberTierBadgeClassName, memberTierBadgeLabel } from "@/lib/memberTier";
 
-type PricingRow = Database["public"]["Tables"]["pricing"]["Row"];
+type PricingRow = {
+  key: Database["public"]["Enums"]["service_code"];
+  label: string;
+  amount_aed: number;
+};
 type InvoiceInsert = Database["public"]["Tables"]["invoices"]["Insert"];
 type InvoiceLineInsert = Database["public"]["Tables"]["invoice_line_items"]["Insert"];
 type AdjustmentInsert = Database["public"]["Tables"]["billing_adjustments"]["Insert"];
@@ -81,11 +84,22 @@ export default function CreateInvoicePage() {
   useMemo(() => {
     (async () => {
       const { data, error } = await supabase
-        .from("pricing")
-        .select("*")
-        .order("category")
-        .order("label");
-      if (!error) setPricingRows(data ?? []);
+        .from("service_rates")
+        .select("service_code, amount_aed, service_code_meta!inner(display_name)")
+        .is("pet_size", null)
+        .is("coat_type", null)
+        .is("season", null)
+        .eq("is_active", true)
+        .order("service_code");
+      if (!error) {
+        setPricingRows(
+          (data ?? []).map((r) => ({
+            key: r.service_code,
+            label: r.service_code_meta?.display_name ?? r.service_code,
+            amount_aed: r.amount_aed,
+          })),
+        );
+      }
     })();
   }, []);
 
@@ -119,41 +133,35 @@ export default function CreateInvoicePage() {
       return;
     }
     if (!line.pricingKey || !line.quantity) return;
-    const tier = owner?.member_type ?? "standard";
-    const { data, error } = await supabase.rpc("resolve_line_price", {
-      p_pricing_key: line.pricingKey,
-      p_quantity: line.quantity,
-      p_tier: tier,
+    const { data, error } = await supabase.rpc("resolve_woof_service_rate", {
+      p_service_code: line.pricingKey as Database["public"]["Enums"]["service_code"],
     });
     if (error) {
       toast.error(error.message);
       return;
     }
-    const row = (data as Database["public"]["Functions"]["resolve_line_price"]["Returns"])[0];
+    const row = (data as Database["public"]["Functions"]["resolve_woof_service_rate"]["Returns"])[0];
     if (!row) return;
     patchLine(line.id, {
-      unitPrice: row.unit_price,
-      total: row.total,
-      discount: row.discount_amount,
-      vat: row.vat,
+      unitPrice: row.amount_aed,
+      total: row.amount_aed * line.quantity,
+      discount: 0,
+      vat: 0,
     });
   };
 
   useEffect(() => {
     if (!ownerId || !owner) return;
-    const tier = owner.member_type ?? "standard";
     let cancelled = false;
     (async () => {
       for (const line of linesRef.current) {
         if (cancelled) return;
         if (line.customMode || !line.pricingKey || !line.quantity) continue;
-        const { data, error } = await supabase.rpc("resolve_line_price", {
-          p_pricing_key: line.pricingKey,
-          p_quantity: line.quantity,
-          p_tier: tier,
+        const { data, error } = await supabase.rpc("resolve_woof_service_rate", {
+          p_service_code: line.pricingKey as Database["public"]["Enums"]["service_code"],
         });
         if (error || cancelled) continue;
-        const row = (data as Database["public"]["Functions"]["resolve_line_price"]["Returns"])[0];
+        const row = (data as Database["public"]["Functions"]["resolve_woof_service_rate"]["Returns"])[0];
         if (!row) continue;
         if (cancelled) return;
         setLines((prev) =>
@@ -161,10 +169,10 @@ export default function CreateInvoicePage() {
             l.id === line.id
               ? {
                   ...l,
-                  unitPrice: row.unit_price,
-                  total: row.total,
-                  discount: row.discount_amount,
-                  vat: row.vat,
+                  unitPrice: row.amount_aed,
+                  total: row.amount_aed * line.quantity,
+                  discount: 0,
+                  vat: 0,
                 }
               : l,
           ),
@@ -174,7 +182,7 @@ export default function CreateInvoicePage() {
     return () => {
       cancelled = true;
     };
-  }, [ownerId, owner?.member_type]);
+  }, [ownerId, owner?.id]);
 
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
   const lineDiscount = lines.reduce((s, l) => s + l.discount, 0);
@@ -296,14 +304,6 @@ export default function CreateInvoicePage() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-muted-foreground">Selected client</span>
                 <span className="text-sm font-semibold">{ownerLabel}</span>
-                {memberTierBadgeLabel(owner.member_type) ? (
-                  <Badge
-                    variant="outline"
-                    className={memberTierBadgeClassName(owner.member_type)}
-                  >
-                    {memberTierBadgeLabel(owner.member_type)}
-                  </Badge>
-                ) : null}
               </div>
             )}
 
@@ -321,18 +321,8 @@ export default function CreateInvoicePage() {
                 <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
               </div>
               <div className="space-y-1">
-                <Label>Owner tier</Label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input className="max-w-[10rem]" value={owner?.member_type ?? "standard"} disabled />
-                  {owner && memberTierBadgeLabel(owner.member_type) ? (
-                    <Badge
-                      variant="outline"
-                      className={memberTierBadgeClassName(owner.member_type)}
-                    >
-                      {memberTierBadgeLabel(owner.member_type)}
-                    </Badge>
-                  ) : null}
-                </div>
+                <Label>Pricing basis</Label>
+                <Input className="max-w-[14rem]" value="Woof service rates" disabled />
               </div>
             </div>
           </CardContent>
@@ -363,7 +353,11 @@ export default function CreateInvoicePage() {
                       }}
                     >
                       <option value="">Select key</option>
-                      {pricingRows.map((p) => <option key={p.key} value={p.key}>{p.key}</option>)}
+                      {pricingRows.map((p) => (
+                        <option key={p.key} value={p.key}>
+                          {p.label} ({p.key})
+                        </option>
+                      ))}
                       <option value="__custom__">Custom</option>
                     </select>
                   </div>

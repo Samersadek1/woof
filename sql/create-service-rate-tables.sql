@@ -1,5 +1,5 @@
 -- =============================================================================
--- MSH Room -> Price Type Mapping (v2)
+-- woof Room -> Price Type Mapping (v2)
 -- Effective 2026-04-01
 --
 -- Rule:

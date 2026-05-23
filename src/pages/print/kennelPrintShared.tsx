@@ -38,7 +38,7 @@ export type KennelCardBooking = {
       name: string;
       photo_url: string | null;
       breed: string | null;
-      size_category: "S" | "M" | "L" | "XL" | null;
+      size: "small" | "medium" | "large" | null;
       date_of_birth: string | null;
       microchip_number: string | null;
       feeding_instructions: string | null;
@@ -235,7 +235,7 @@ export function KennelCardBlock({
     >
       <header className="mb-3 grid grid-cols-[1fr_auto_auto] items-end gap-3 border-b border-black pb-2">
         <div>
-          <p className="print-label text-sm font-semibold tracking-wide">MSH</p>
+          <p className="print-label text-sm font-semibold tracking-wide">woof</p>
           <p className="text-[11px]">Kennel Card</p>
         </div>
         <div className="print-label text-center text-2xl font-bold">{roomLabel}</div>
@@ -263,7 +263,7 @@ export function KennelCardBlock({
           )}
           <h2 className="text-xl font-bold">{primaryPet?.name ?? "Unknown pet"}</h2>
           <p>
-            {primaryPet?.breed ?? "Unknown breed"} · {primaryPet?.size_category ?? "—"} ·{" "}
+            {primaryPet?.breed ?? "Unknown breed"} · {primaryPet?.size ? `${primaryPet.size.charAt(0).toUpperCase()}${primaryPet.size.slice(1)}` : "—"} ·{" "}
             {ageFromDob(primaryPet?.date_of_birth ?? null)}
           </p>
           <p>Microchip: {primaryPet?.microchip_number ?? "—"}</p>
@@ -447,7 +447,7 @@ export async function fetchKennelCardData(bookingId: string) {
       booking_pets(
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
-          id, name, photo_url, breed, size_category, date_of_birth, microchip_number,
+          id, name, photo_url, breed, size, date_of_birth, microchip_number,
           feeding_instructions, medications, medical_conditions, behavioural_notes, other_notes, vet_name, vet_phone
         )
       )
@@ -457,7 +457,7 @@ export async function fetchKennelCardData(bookingId: string) {
     .single();
 
   if (error) throw error;
-  return data as KennelCardBooking;
+  return data as unknown as KennelCardBooking;
 }
 
 export async function fetchKennelCardsAsOf(asOfDate: string) {
@@ -472,7 +472,7 @@ export async function fetchKennelCardsAsOf(asOfDate: string) {
       booking_pets(
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
-          id, name, photo_url, breed, size_category, date_of_birth, microchip_number,
+          id, name, photo_url, breed, size, date_of_birth, microchip_number,
           feeding_instructions, medications, medical_conditions, behavioural_notes, other_notes, vet_name, vet_phone
         )
       )
@@ -485,5 +485,5 @@ export async function fetchKennelCardsAsOf(asOfDate: string) {
     .order("check_in_date", { ascending: true });
 
   if (error) throw error;
-  return (data ?? []) as KennelCardBooking[];
+  return (data ?? []) as unknown as KennelCardBooking[];
 }

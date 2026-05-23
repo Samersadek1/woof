@@ -44,7 +44,7 @@ function resolveBaseUrl(req) {
     return withProtocol.replace(/\/+$/, "");
   }
   const host = req.headers.host;
-  if (!host) return "https://admin-essentials.vercel.app";
+  if (!host) return "https://woof.vercel.app";
   return `${host.includes("localhost") ? "http" : "https"}://${host}`;
 }
 

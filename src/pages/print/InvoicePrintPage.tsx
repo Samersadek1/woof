@@ -134,11 +134,11 @@ export default function InvoicePrintPage() {
           <header className="relative z-[1] mb-4 border-b border-black pb-2">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="print-label text-xl font-bold">MSH / MySecondHome</p>
+                <p className="print-label text-xl font-bold">woof</p>
                 <p className="print-sans text-xs">
-                  Al Quoz, Dubai · TRN: TBD · +971 00 000 0000
+                  Dubai · TRN: TBD · +971 00 000 0000
                 </p>
-                <p className="print-sans text-xs">hello@mysecondhome.ae</p>
+                <p className="print-sans text-xs">hello@woof.ae</p>
               </div>
               <div className="print-sans text-right text-xs">
                 <p>Invoice: {invoice.invoice_number ?? invoice.id.slice(0, 8)}</p>
@@ -267,9 +267,9 @@ export default function InvoicePrintPage() {
           ) : null}
 
           <footer className="relative z-[1] border-t border-black pt-2 print-sans text-[11px]">
-            <p>Thank you for choosing MSH.</p>
+            <p>Thank you for choosing woof.</p>
             {outstanding > 0 ? <p>Payment terms: payable upon receipt.</p> : null}
-            <p>VAT registration: TBD · www.mysecondhome.ae</p>
+            <p>VAT registration: TBD · www.woof.ae</p>
           </footer>
         </article>
       ) : null}

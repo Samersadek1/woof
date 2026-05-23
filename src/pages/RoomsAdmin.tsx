@@ -71,6 +71,7 @@ type RoomInsert = Database["public"]["Tables"]["rooms"]["Insert"];
 type RoomWing = Database["public"]["Enums"]["room_wing"];
 type RoomType = Database["public"]["Enums"]["room_type"];
 type CapacityType = Database["public"]["Enums"]["capacity_type"];
+type RoomPetType = NonNullable<RoomInsert["pet_type"]>;
 
 // ── Display labels ────────────────────────────────────────────────────────────
 
@@ -515,7 +516,7 @@ type RoomEditForm = {
   display_name: string;
   room_number: string;
   wing: RoomWing;
-  room_type: string;
+  room_type: RoomType;
   capacity_type: CapacityType;
   max_pets: number;
 };
@@ -1315,7 +1316,7 @@ const RoomsAdminPage = () => {
                 <Label>Room type</Label>
                 <Select
                   value={editForm.room_type}
-                  onValueChange={(v) => setEditForm((f) => ({ ...f, room_type: v }))}
+                  onValueChange={(v) => setEditForm((f) => ({ ...f, room_type: v as RoomType }))}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -1471,8 +1472,8 @@ const RoomsAdminPage = () => {
               <div className="grid gap-2">
                 <Label>Pet Type</Label>
                 <Select
-                  value={(newRoom as any).pet_type ?? "dog"}
-                  onValueChange={(v) => setNewRoom((f) => ({ ...f, pet_type: v }))}
+                  value={newRoom.pet_type ?? "dog"}
+                  onValueChange={(v) => setNewRoom((f) => ({ ...f, pet_type: v as RoomPetType }))}
                 >
                   <SelectTrigger>
                     <SelectValue />

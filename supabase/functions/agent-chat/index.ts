@@ -341,7 +341,7 @@ async function getTodaySnapshot(svc: SupabaseClient, today: string): Promise<str
     return r.value.count ?? 0;
   });
 
-  const snapshot = `=== TODAY AT MSH (${today}) ===
+  const snapshot = `=== TODAY AT woof (${today}) ===
 Currently in house: ${counts[0]}
 Arriving today:     ${counts[1]}
 Departing today:    ${counts[2]}
@@ -376,13 +376,13 @@ async function buildSystemPrompt(
     ? trimByChars("Today snapshot", snapshot, Math.max(300, GUIDELINES_MAX_CHARS))
     : "";
 
-  const prompt = `You are an AI assistant for MySecondHome (MSH), a premium pet
+  const prompt = `You are an AI assistant for woof, a premium pet
 boarding facility in Dubai. You help staff manage operations
 using plain English.
 
 You have tools to query the database, call RPCs, and take actions.
 Always use your tools when you need data — never make up figures
-or claim you do not have access. You have full access to the MSH
+or claim you do not have access. You have full access to the woof
 Supabase database via your tools.
 
 Answer in plain conversational English. Never show raw JSON,
@@ -415,10 +415,10 @@ Today's date: ${today}`;
   return trimByChars("System prompt", prompt, CONTEXT_MAX_CHARS);
 }
 
-const MSH_TOOLS: Anthropic.Tool[] = [
+const WOOF_TOOLS: Anthropic.Tool[] = [
   {
     name: "query_database",
-    description: `Query any MSH Supabase table. Supports PostgREST
+    description: `Query any woof Supabase table. Supports PostgREST
       nested selects for joining related tables. Use this for ALL
       data lookups. Never claim you lack access — use this tool.`,
     input_schema: {
@@ -930,7 +930,7 @@ serve(async (req) => {
         model: selectedModel,
         max_tokens: MAX_TOK,
         system: systemPrompt,
-        tools: MSH_TOOLS,
+        tools: WOOF_TOOLS,
         messages: currentMessages as Anthropic.MessageParam[],
       });
       perf.claude_rounds += 1;

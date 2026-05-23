@@ -555,7 +555,6 @@ SELECT v.name FROM (VALUES
 ('Matts Veterinary Clinic'),
 ('Mike''s Vet'),
 ('Modern Veterinary Clinic'),
-('My Second Home Dubai'),
 ('My Vet is not listed'),
 ('N/A'),
 ('Nad Al Shiba Veterinary Hospital'),

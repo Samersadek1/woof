@@ -1,4 +1,4 @@
--- MSH pricing consistency fixes (idempotent):
+-- woof pricing consistency fixes (idempotent):
 -- 1) Add platinum membership tier support
 -- 2) Make membership discounts data-driven via pricing keys
 -- 3) Normalize room pricing_category mappings to match live rate-card keys

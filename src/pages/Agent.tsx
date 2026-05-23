@@ -322,7 +322,7 @@ const AgentPage = () => {
       <div className="shrink-0 border-t border-border bg-card p-4">
         <div className="mx-auto flex max-w-3xl gap-2">
           <Textarea
-            placeholder="Message MSH AI…"
+            placeholder="Message woof AI…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}

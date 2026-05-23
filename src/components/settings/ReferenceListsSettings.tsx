@@ -61,7 +61,7 @@ export function ReferenceListsSettings() {
           </AlertDescription>
         </Alert>
       )}
-      <motionBreedForm
+      <MotionBreedForm
         breedNew={breedNew}
         setBreedNew={setBreedNew}
         submitBreed={submitBreed}
@@ -114,7 +114,7 @@ export function ReferenceListsSettings() {
   );
 }
 
-function motionBreedForm({
+function MotionBreedForm({
   breedNew,
   setBreedNew,
   submitBreed,

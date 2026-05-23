@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   endOfDay,
   endOfMonth,
@@ -22,6 +22,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
 import {
@@ -35,7 +36,6 @@ import {
   RefreshCw,
   Scissors,
   Sun,
-  TreePine,
   TrendingDown,
   TrendingUp,
   Printer,
@@ -76,6 +76,7 @@ function rowHref(ownerId: string, petId: string | null) {
 }
 
 type InvSumRow = { total: number; total_aed: number | null; vat_aed: number | null };
+type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
 
 function invoiceGrand(r: InvSumRow) {
   return invoiceDisplayTotals({
@@ -141,7 +142,6 @@ type DashboardInsights = {
     activeBoardings: number;
     groomingToday: number;
     daycareToday: number;
-    parkVisitsToday: number;
     overdueInvoices: number;
   };
 };
@@ -176,13 +176,11 @@ async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
     groomingRows,
     boardingCount,
     daycareCount,
-    parkCount,
     paidMonthByOwner,
     finMonthByOwner,
     activeBoardings,
     groomingToday,
     daycareToday,
-    parkToday,
     overdueInvoices,
   ] = await Promise.all([
     sumPaidFinalWindow(dayStart, dayEnd, todayStr, todayStr),
@@ -210,12 +208,6 @@ async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
       .gte("session_date", fmt(monthStart))
       .lte("session_date", fmt(monthEnd)),
     supabase
-      .from("park_bookings")
-      .select("id", { count: "exact", head: true })
-      .eq("is_assessment", false)
-      .gte("visit_date", fmt(monthStart))
-      .lte("visit_date", fmt(monthEnd)),
-    supabase
       .from("invoices")
       .select("owner_id, total, total_aed, vat_aed")
       .eq("status", "paid")
@@ -242,11 +234,6 @@ async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
       .select("id", { count: "exact", head: true })
       .eq("session_date", todayStr),
     supabase
-      .from("park_bookings")
-      .select("id", { count: "exact", head: true })
-      .eq("is_assessment", false)
-      .eq("visit_date", todayStr),
-    supabase
       .from("invoices")
       .select("id", { count: "exact", head: true })
       .eq("status", "overdue"),
@@ -255,13 +242,11 @@ async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
   if (groomingRows.error) throw groomingRows.error;
   if (boardingCount.error) throw boardingCount.error;
   if (daycareCount.error) throw daycareCount.error;
-  if (parkCount.error) throw parkCount.error;
   if (paidMonthByOwner.error) throw paidMonthByOwner.error;
   if (finMonthByOwner.error) throw finMonthByOwner.error;
   if (activeBoardings.error) throw activeBoardings.error;
   if (groomingToday.error) throw groomingToday.error;
   if (daycareToday.error) throw daycareToday.error;
-  if (parkToday.error) throw parkToday.error;
   if (overdueInvoices.error) throw overdueInvoices.error;
 
   let fullGroom = 0;
@@ -298,18 +283,6 @@ async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
   if (dcErr) throw dcErr;
   for (const r of dcOwners ?? []) {
     visitByOwner.set(r.owner_id, (visitByOwner.get(r.owner_id) ?? 0) + 1);
-  }
-
-  const { data: parkOwners, error: pkErr } = await supabase
-    .from("park_bookings")
-    .select("owner_id")
-    .eq("is_assessment", false)
-    .gte("visit_date", fmt(monthStart))
-    .lte("visit_date", fmt(monthEnd));
-  if (pkErr) throw pkErr;
-  for (const r of parkOwners ?? []) {
-    if (r.owner_id)
-      visitByOwner.set(r.owner_id, (visitByOwner.get(r.owner_id) ?? 0) + 1);
   }
 
   const spentByOwner = new Map<string, number>();
@@ -360,7 +333,6 @@ async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
     { name: "Bath only", count: bathOnly },
     { name: "Boarding", count: boardingCount.count ?? 0 },
     { name: "Daycare", count: daycareCount.count ?? 0 },
-    { name: "Park visitation", count: parkCount.count ?? 0 },
     { name: "Other grooming", count: otherGroom },
   ];
   const serviceChart = [...chartRaw].sort((a, b) => b.count - a.count);
@@ -380,7 +352,6 @@ async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
       activeBoardings: activeBoardings.count ?? 0,
       groomingToday: groomingToday.count ?? 0,
       daycareToday: daycareToday.count ?? 0,
-      parkVisitsToday: parkToday.count ?? 0,
       overdueInvoices: overdueInvoices.count ?? 0,
     },
   };
@@ -391,19 +362,6 @@ function TrendGlyph({ kind }: { kind: TrendKind }) {
   if (kind === "down") return <TrendingDown className="h-3.5 w-3.5 text-red-600" aria-hidden />;
   return <Minus className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />;
 }
-
-const SLOT_TIMES = [
-  "08:00",
-  "09:00",
-  "10:00",
-  "11:00",
-  "12:00",
-  "13:00",
-  "14:00",
-  "15:00",
-  "16:00",
-  "17:00",
-];
 
 const DashboardPage = () => {
   const queryClient = useQueryClient();
@@ -425,7 +383,14 @@ const DashboardPage = () => {
   const { data: dueTodayOverdue = [], isLoading: dueTodayLoading } = useQuery({
     queryKey: ["dashboard-due-today-overdue", asOf],
     queryFn: async () => {
-      const UNPAID = ["draft", "issued", "finalised", "outstanding", "overdue", "partially_paid"];
+      const UNPAID: InvoiceStatus[] = [
+        "draft",
+        "issued",
+        "finalised",
+        "outstanding",
+        "overdue",
+        "partially_paid",
+      ];
       const { data, error } = await supabase
         .from("invoices")
         .select("id, owner_id, total, total_aed, vat_aed, amount_paid, due_date, status, owners(first_name, last_name)")
@@ -466,14 +431,6 @@ const DashboardPage = () => {
     metrics?.occupancy.cattery_occupied ?? 0,
     metrics?.occupancy.cattery_total_rooms ?? 0,
   );
-
-  const allParkRows = useMemo(
-    () => [...(schedule?.park ?? []), ...(schedule?.assessments ?? [])],
-    [schedule?.assessments, schedule?.park],
-  );
-
-  const parkCell = (hour: string, lane: "small" | "big") =>
-    allParkRows.find((slot) => slot.slotStart.startsWith(hour) && slot.sizeLane === lane);
 
   const alerts = [
     {
@@ -548,22 +505,10 @@ const DashboardPage = () => {
       href: "/daycare?tab=operations",
     },
     {
-      label: "Park bookings",
-      value: metrics?.today.park_bookings ?? 0,
-      icon: TreePine,
-      href: `/park?date=${asOf}`,
-    },
-    {
       label: "Grooming",
       value: metrics?.today.grooming_appointments ?? 0,
       icon: Scissors,
       href: `/grooming?date=${asOf}`,
-    },
-    {
-      label: "Assessments",
-      value: metrics?.today.assessments_scheduled ?? 0,
-      icon: ClipboardCheck,
-      href: `/park?date=${asOf}&type=assessment`,
     },
   ];
 
@@ -688,10 +633,10 @@ const DashboardPage = () => {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Quick stats (today)</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Calendar today · Boarding = checked-in stays · Park excludes assessments
+                  Calendar today · Boarding = checked-in stays
                 </p>
               </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-md border bg-muted/20 px-3 py-2">
                   <p className="text-xs text-muted-foreground">Active boardings</p>
                   <p className="text-xl font-semibold tabular-nums">{insights.quickStats.activeBoardings}</p>
@@ -703,10 +648,6 @@ const DashboardPage = () => {
                 <div className="rounded-md border bg-muted/20 px-3 py-2">
                   <p className="text-xs text-muted-foreground">Daycare sessions</p>
                   <p className="text-xl font-semibold tabular-nums">{insights.quickStats.daycareToday}</p>
-                </div>
-                <div className="rounded-md border bg-muted/20 px-3 py-2">
-                  <p className="text-xs text-muted-foreground">Park visits</p>
-                  <p className="text-xl font-semibold tabular-nums">{insights.quickStats.parkVisitsToday}</p>
                 </div>
                 <div className="rounded-md border bg-muted/20 px-3 py-2">
                   <p className="text-xs text-muted-foreground">Overdue invoices</p>
@@ -796,8 +737,7 @@ const DashboardPage = () => {
             <Card className="md:col-span-4"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
             <Card className="md:col-span-4"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
             <Card className="md:col-span-4"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
-            <Card className="md:col-span-6"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
-            <Card className="md:col-span-6"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
+            <Card className="md:col-span-12"><CardContent className="p-4"><Skeleton className="h-56 w-full" /></CardContent></Card>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
@@ -805,7 +745,7 @@ const DashboardPage = () => {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Today&apos;s activity</CardTitle>
               </CardHeader>
-              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {activityTiles.map((tile) => {
                   const Icon = tile.icon;
                   return (
@@ -1030,43 +970,7 @@ const DashboardPage = () => {
               </CardContent>
             </Card>
 
-            <Card className="md:col-span-6">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Today&apos;s park & assessments</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-[72px_1fr_1fr] items-center gap-1 text-xs text-muted-foreground">
-                  <span />
-                  <span className="text-center">Small</span>
-                  <span className="text-center">Big</span>
-                </div>
-                <div className="mt-1 space-y-1">
-                  {SLOT_TIMES.map((hour) => {
-                    const small = parkCell(hour, "small");
-                    const big = parkCell(hour, "big");
-                    return (
-                      <div key={hour} className="grid grid-cols-[72px_1fr_1fr] items-center gap-1">
-                        <span className="text-xs text-muted-foreground">{hour}</span>
-                        {[small, big].map((cell, idx) => (
-                          <div
-                            key={`${hour}-${idx}`}
-                            className={[
-                              "min-h-9 rounded-md border px-2 py-1 text-xs",
-                              cell ? "bg-muted/20" : "text-muted-foreground",
-                              cell?.isAssessment ? "border-amber-400" : "",
-                            ].join(" ")}
-                          >
-                            {cell ? `${cell.petName} · ${cell.ownerInitials}` : "—"}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="md:col-span-6">
+            <Card className="md:col-span-12">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Financial 7d</CardTitle>
               </CardHeader>

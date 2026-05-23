@@ -45,7 +45,7 @@ const LoginPage = () => {
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center gap-2">
             <PawPrint className="h-8 w-8 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">MySecondHome</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">woof</h1>
           </div>
           <p className="text-sm text-muted-foreground">Staff Management Portal</p>
         </div>
@@ -56,7 +56,7 @@ const LoginPage = () => {
             <Input
               id="email"
               type="email"
-              placeholder="you@mysecondhomedubai.com"
+              placeholder="you@woof.ae"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required

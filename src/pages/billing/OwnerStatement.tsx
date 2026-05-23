@@ -81,8 +81,7 @@ export default function OwnerStatementPage() {
                 <p className="text-sm text-muted-foreground">Owner</p>
                 <p className="text-xl font-semibold">{owner ? `${owner.first_name} ${owner.last_name ?? ""}`.trim() : "—"}</p>
                 <div className="flex items-center gap-2 mt-2">
-                  <Badge variant="outline">{owner?.member_type ?? "standard"}</Badge>
-                  {owner?.membership_date && <span className="text-xs text-muted-foreground">Since {owner.membership_date}</span>}
+                  <Badge variant="outline">Woof</Badge>
                 </div>
               </div>
               <div className="text-right">

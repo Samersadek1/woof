@@ -1,8 +1,6 @@
-# Woof
+# woof
 
-Kennel admin app — **separate codebase** copied from [admin-essentials](https://github.com/Samersadek1/admin-essentials). Uses its **own Supabase project** (no MSH customer data).
-
-Setup: [docs/WOOF_SETUP.md](docs/WOOF_SETUP.md)
+Kennel admin app with its own Supabase project. Setup: [docs/WOOF_SETUP.md](docs/WOOF_SETUP.md).
 
 ---
 

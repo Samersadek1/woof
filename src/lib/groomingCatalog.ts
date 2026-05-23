@@ -1,7 +1,7 @@
 import type { Database } from "@/integrations/supabase/types";
 import type { ServiceType } from "@/hooks/useBilling";
 import {
-  GROOMING_SERVICE_TO_PRICING_KEY,
+  GROOMING_SERVICE_TO_SERVICE_CODE,
   groomingServiceToPricingKey,
 } from "./addonPricing";
 
@@ -28,20 +28,17 @@ export function labelForGroomingService(service: string): string {
   return LABEL_BY_SERVICE[service as GroomingService] ?? service.replace(/_/g, " ");
 }
 
-/** All `pricing.key` values used for base grooming services (not transport / boarding extras). */
-const GROOMING_PRICING_KEY_SET = new Set(Object.values(GROOMING_SERVICE_TO_PRICING_KEY));
+/** All service codes used for base grooming services (not transport extras). */
+const GROOMING_PRICING_KEY_SET: ReadonlySet<string> = new Set<string>(
+  Object.values(GROOMING_SERVICE_TO_SERVICE_CODE),
+);
 
 /**
- * True when this resolvable key is the same catalog as the Grooming page / `grooming_service_rates`
- * (e.g. `grooming_full_groom`, or invoice key `grooming:full_groom`).
+ * True when this resolvable key is the same catalog as the Grooming page.
  */
 export function isGroomingPricedAddonKey(key: string): boolean {
   if (!key) return false;
   if (GROOMING_PRICING_KEY_SET.has(key)) return true;
-  if (key.startsWith("grooming:")) {
-    const svc = key.slice("grooming:".length);
-    return svc in GROOMING_SERVICE_TO_PRICING_KEY;
-  }
   return false;
 }
 
@@ -53,7 +50,7 @@ export function serviceTypeForBoardingAddonKey(key: string): ServiceType {
 }
 
 /**
- * How to group rows from `addon_rates` in the Billing → Pricing admin UI.
+ * How to group rows from service-coded addon-like records in Billing → Pricing.
  * Grooming add-ons = anything that charges under the grooming line item catalog.
  * Transport = shuttles / boarding-stay transport lines.
  */

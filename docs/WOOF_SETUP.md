@@ -1,45 +1,66 @@
-# Woof — setup (copied from admin-essentials)
+# woof — setup
 
-Woof is a **separate codebase** and **separate Supabase project**. It does not share data with MSH / admin-essentials.
+woof is a **separate codebase** and **separate Supabase project**. It does not
+share data or credentials with any other deployment.
 
-## 1. Cursor project
+## 1. Open in Cursor / your editor
 
-Open this folder as its own project:
+**File → Open Folder →** `~/Desktop/woof` (or wherever the repo lives).
 
-**File → Open Folder →** `~/Desktop/woof`
+## 2. Supabase project
 
-Do not reuse `admin-essentials` `.env` or Supabase keys.
+A Supabase project for woof has already been created and the baseline schema
+has been applied (45 tables, 19 enums, 30 user functions, 15 triggers, 36 RLS
+policies). `supabase/migrations/` is intentionally empty — the baseline lives
+on the remote and is tracked by Supabase.
 
-## 2. New Supabase project
+To add new schema changes:
 
-1. [Supabase Dashboard](https://supabase.com/dashboard) → **New project** (e.g. `woof`).
-2. Copy **Project URL**, **publishable/anon key**, and **service role key**.
-3. From this folder:
+The woof project ref is `wineliuwejkxwsdbrthb` (also pinned in
+`supabase/config.toml`).
+
+```bash
+# Make sure you are linked to the woof project (one-time per machine):
+npx supabase link --project-ref wineliuwejkxwsdbrthb
+
+# Create a new migration and push:
+npx supabase migration new add_<thing>
+# Edit the generated .sql under supabase/migrations/
+npx supabase db push
+```
+
+If you ever need a local snapshot of the live schema, run
+`npx supabase db pull --schema public` after linking.
+
+### Environment
 
 ```bash
 cd ~/Desktop/woof
 cp .env.example .env
-# Edit .env with woof project values only
-
-npx supabase login
-npx supabase link --project-ref YOUR_WOOF_PROJECT_REF
-npx supabase db push
+# Fill in:
+#   VITE_SUPABASE_URL / SUPABASE_URL
+#   VITE_SUPABASE_PUBLISHABLE_KEY / SUPABASE_PUBLISHABLE_KEY
+#   SUPABASE_SERVICE_ROLE_KEY (server-only)
 ```
 
-That applies `supabase/migrations/` to an **empty** database (schema only, no MSH customers).
+### Optional seed data
 
-### Do not run on woof (unless you want demo data)
+The repo contains a few SQL files for demos and reference:
 
-| Item | Why |
-|------|-----|
-| MSH `output/` / `staging/` | PetExec import artifacts |
-| `npm run msh:import:*` | Loads Main Branch customer/boarding data |
-| `seed.sql` | Dummy owners/pets (optional for local demos only) |
-| `admin-essentials` `.env` | Points at production MSH data |
+| File | Purpose |
+|------|---------|
+| `seed.sql` | Dummy owners / pets / bookings (uses `WOOF-YYYY-NNNNN` refs) |
+| `seed-grooming-today.sql` | Adds a handful of same-day grooming slots |
+| `sql/seed-reference-lists.sql` | Vet clinics and similar dropdowns |
+| `sql/seed-pricing-2026-04-01.sql` | Reference pricing seed |
+
+Run them via the Supabase SQL editor or `psql` against the woof project. They
+are **not** auto-applied.
 
 ### Staff login
 
-Create staff users in the **woof** project under **Authentication**. MSH `auth.users` are not copied.
+Create staff users in the **woof** Supabase project under **Authentication →
+Users**. No accounts are inherited from any other project.
 
 ## 3. Install and run
 
@@ -48,25 +69,25 @@ npm install
 npm run dev
 ```
 
-## 4. Git remote (new repo)
+## 4. Git remote
 
-This copy has **no `origin`** (detached from admin-essentials). Create a new GitHub repo and:
+This copy has no `origin` by default. To push to a new GitHub repo:
 
 ```bash
 git remote add origin git@github.com:YOUR_ORG/woof.git
 git push -u origin main
 ```
 
-## 5. MSH-only code (removed in this fork)
+## 5. Deployments
 
-PetExec / Main Branch import UI, scripts, CSV data, and `msh:import:*` npm scripts were removed from woof. MSH continues to use those in `admin-essentials` only.
-
-Keep shared base: hooks, rooms, boarding calendar patterns, pricing tables, UI components — then change flows and pricing for woof.
-
-## 6. Deployments
-
-| Service | Woof |
+| Service | Notes |
 |---------|------|
-| Vercel | New project, env from woof Supabase |
-| Supabase Functions | `supabase functions deploy` linked to woof |
-| `whatsapp-agent/` | New Railway service + woof env (if used) |
+| Vercel | Deploy root React/Vite project. Env from woof Supabase. |
+| Supabase Functions | `npx supabase functions deploy agent-chat` linked to woof. |
+| `whatsapp-agent/` | New Railway service. Env at `whatsapp-agent/.env.example`. |
+
+## 6. Branding
+
+woof uses the `WOOF-YYYY-NNNNN` booking-ref format (set in
+`public.generate_booking_ref` / `public.generate_booking_ref_trigger`). Change
+those two functions if you want a different prefix.

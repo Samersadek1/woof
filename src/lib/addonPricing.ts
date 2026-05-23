@@ -1,109 +1,140 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
-/**
- * Maps `grooming_service` enum / UI values → `pricing.key` (April 2026 rate card).
- * Labels and service lists for the app live in `groomingCatalog.ts` — keep keys in sync
- * with Boarding “groom on checkout” (see `boardCheckoutGroomingAddon`).
- */
-export const GROOMING_SERVICE_TO_PRICING_KEY: Record<string, string> = {
-  full_groom: "grooming_grande_s",
-  full_bath: "grooming_full_bath",
-  nail_clip: "grooming_nail_clip",
-  deshedding: "grooming_deshed_smooth_s",
-  pawdicure: "grooming_pawdicure",
-  // brushing: no single rate-card line — use `grooming_service_rates` only
+export const GROOMING_SERVICE_TO_SERVICE_CODE: Record<
+  string,
+  Database["public"]["Enums"]["service_code"]
+> = {
+  full_groom: "grooming_full_service",
+  full_bath: "grooming_bath_brush_tidy",
+  nail_clip: "addon_nails",
+  deshedding: "grooming_hair_no_more",
+  brushing: "grooming_bath_brush_tidy",
 };
 
-export const GROOMING_PRICING_FALLBACK_KEYS = [...new Set(Object.values(GROOMING_SERVICE_TO_PRICING_KEY))];
+export const GROOMING_PRICING_FALLBACK_KEYS = [
+  ...new Set(Object.values(GROOMING_SERVICE_TO_SERVICE_CODE)),
+];
 
 export function groomingServiceToPricingKey(service: string): string | undefined {
-  return GROOMING_SERVICE_TO_PRICING_KEY[service];
+  return GROOMING_SERVICE_TO_SERVICE_CODE[service];
 }
 
-/** Legacy `addon_rates.addon_type` values that differ from `pricing.key` naming. */
-const ADDON_TYPE_FALLBACK: Record<string, string> = {
-  grooming_full_groom: "grooming_full",
-  grooming_full_bath: "grooming_bath",
+const LEGACY_KEY_TO_SERVICE_CODE: Record<
+  string,
+  Database["public"]["Enums"]["service_code"]
+> = {
+  boarding_addon_full_groom_checkout: "grooming_full_service",
+  boarding_addon_full_bath: "grooming_bath_brush_tidy",
+  boarding_addon_bath_only: "grooming_bath_brush_tidy",
+  boarding_addon_nail_clipping: "addon_nails",
+  boarding_addon_teeth_brushing: "addon_teeth_cleaning",
+  boarding_addon_anal_gland_expression: "addon_glands",
+  boarding_addon_de_shedding: "grooming_hair_no_more",
+  boarding_addon_de_matting: "addon_dematting",
+  grooming_grande_s: "grooming_full_service",
+  grooming_grande_m: "grooming_full_service",
+  grooming_grande_l: "grooming_full_service",
+  grooming_grande_xl: "grooming_full_service",
+  grooming_full_bath: "grooming_bath_brush_tidy",
+  grooming_nail_clip: "addon_nails",
+  grooming_deshed_smooth_s: "grooming_hair_no_more",
+  grooming_deshed_smooth_m: "grooming_hair_no_more",
+  grooming_deshed_smooth_l: "grooming_hair_no_more",
+  addon_nails: "addon_nails",
+  addon_glands: "addon_glands",
+  addon_dematting: "addon_dematting",
+  addon_teeth_cleaning: "addon_teeth_cleaning",
+  addon_flea_tick_bath: "addon_flea_tick_bath",
+  addon_specialised_shampoo: "addon_specialised_shampoo",
+  treadmill_daycare_addon: "treadmill_daycare_addon",
+  treadmill_hourly_addon: "treadmill_hourly_addon",
 };
 
-type AddonType = Database["public"]["Enums"]["addon_type"];
-const VALID_ADDON_TYPES = new Set<AddonType>([
+const DROP_KEYS = new Set([
+  "registration_member",
+  "park_1_dog",
+  "park_2_dogs",
+  "park_3_dogs",
+  "park_slot",
+  "park:slot",
+  "daycare_hourly_family_per_dog",
+  "daycare_hourly_3_dogs",
+  "daycare_family_per_dog",
+  "daycare_3_dogs",
+  "boarding_addon_blow_dry",
+  "boarding_addon_fur_brushing",
+  "boarding_addon_pawdicure",
+  "boarding_addon_paw_wash",
+  "boarding_addon_body_trimming",
+  "boarding_addon_ear_cleaning",
+  "boarding_addon_malaseb_bath",
+  "grooming_pawdicure",
+  "transport_dubai_shared",
   "transport_dubai",
   "transport_abudhabi",
-  "grooming_full",
-  "grooming_bath",
-  "grooming_nail",
-  "grooming_deshedding",
-  "grooming_brushing",
-  "other",
+  "transport_complimentary",
+  "transport_free",
+  "transport_dubai_private",
+  "transport:pickup",
+  "transport:dropoff",
 ]);
 
-function isAddonType(value: string): value is AddonType {
-  return VALID_ADDON_TYPES.has(value as AddonType);
+function petSizeFromLegacyKey(
+  key: string,
+): Database["public"]["Enums"]["pet_size"] | null {
+  if (key.endsWith("_s")) return "small";
+  if (key.endsWith("_m")) return "medium";
+  if (key.endsWith("_l")) return "large";
+  if (key.endsWith("_xl")) return "large";
+  return null;
 }
 
-/**
- * Canonical amounts live in `pricing` (rate card / Billing → legacy pricing keys).
- * `addon_rates` is a fallback when a key exists only there (older data).
- */
+function coatTypeFromLegacyKey(
+  key: string,
+): Database["public"]["Enums"]["coat_type"] | null {
+  if (key.includes("deshed_smooth")) return "short";
+  return null;
+}
+
+async function resolveServiceRate(
+  serviceCode: Database["public"]["Enums"]["service_code"],
+  key?: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc("resolve_woof_service_rate", {
+    p_service_code: serviceCode,
+    p_pet_size: key ? petSizeFromLegacyKey(key) : null,
+    p_coat_type: key ? coatTypeFromLegacyKey(key) : null,
+  });
+  if (error) throw error;
+  const row = (data ?? [])[0];
+  return typeof row?.amount_aed === "number" ? row.amount_aed : 0;
+}
+
 export async function resolveAddonPricesForKeys(keys: string[]): Promise<Map<string, number>> {
   const uniq = [...new Set(keys.filter(Boolean))];
   const out = new Map<string, number>();
   if (uniq.length === 0) return out;
 
-  const pricingLookupKeys = uniq.flatMap((k) => [k, ADDON_TYPE_FALLBACK[k]].filter(Boolean));
-  const { data: pricingRows, error: pErr } = await supabase
-    .from("pricing")
-    .select("key, amount_aed")
-    .in("key", [...new Set(pricingLookupKeys)] as string[]);
-  if (pErr) throw pErr;
-
-  const priceByKey = new Map((pricingRows ?? []).map((r) => [r.key, r.amount_aed]));
-
   for (const k of uniq) {
-    const direct = priceByKey.get(k);
-    if (typeof direct === "number") {
-      out.set(k, direct);
+    if (DROP_KEYS.has(k)) {
+      out.set(k, 0);
       continue;
     }
-    const mapped = ADDON_TYPE_FALLBACK[k] ? priceByKey.get(ADDON_TYPE_FALLBACK[k]) : undefined;
-    if (typeof mapped === "number") out.set(k, mapped);
-  }
-
-  const missing = uniq.filter((k) => !out.has(k));
-  if (missing.length === 0) return out;
-
-  const addonTypes = missing
-    .flatMap((k) => [k, ADDON_TYPE_FALLBACK[k]].filter(Boolean))
-    .filter(isAddonType);
-  if (addonTypes.length === 0) return out;
-  const { data: addonRows, error: aErr } = await supabase
-    .from("addon_rates")
-    .select("addon_type, price_aed")
-    .in("addon_type", [...new Set(addonTypes)])
-    .eq("is_active", true);
-  if (aErr) throw aErr;
-
-  const addonMap = new Map((addonRows ?? []).map((r) => [r.addon_type, r.price_aed]));
-
-  for (const k of missing) {
-    const v1 = addonMap.get(k as never);
-    if (typeof v1 === "number") {
-      out.set(k, v1);
+    const serviceCode = LEGACY_KEY_TO_SERVICE_CODE[k];
+    if (!serviceCode) {
+      out.set(k, 0);
       continue;
     }
-    const alt = ADDON_TYPE_FALLBACK[k];
-    const v2 = alt ? addonMap.get(alt as never) : undefined;
-    if (typeof v2 === "number") out.set(k, v2);
+    out.set(k, await resolveServiceRate(serviceCode, k));
   }
 
   return out;
 }
 
-/** Single-key helper (e.g. park_slot, membership). */
 export async function getPricingAmountByKey(key: string): Promise<number | null> {
-  const { data, error } = await supabase.from("pricing").select("amount_aed").eq("key", key).maybeSingle();
-  if (error) throw error;
-  return typeof data?.amount_aed === "number" ? data.amount_aed : null;
+  if (!key || DROP_KEYS.has(key)) return 0;
+  const serviceCode = LEGACY_KEY_TO_SERVICE_CODE[key];
+  if (!serviceCode) return 0;
+  return resolveServiceRate(serviceCode, key);
 }

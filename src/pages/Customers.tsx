@@ -3,8 +3,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { useOwners, useCreateOwner } from "@/hooks/useOwners";
 import { useCreatePet } from "@/hooks/usePets";
-import { useCreateParkBooking } from "@/hooks/usePark";
-import { useUpdateAssessment } from "@/hooks/useAssessment";
 import type { OwnerWithPetCount } from "@/hooks/useOwners";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -41,26 +39,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
 import { Search, Plus, Eye, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
 
-type MemberType = Database["public"]["Enums"]["member_type"];
 type OwnerInsert = Database["public"]["Tables"]["owners"]["Insert"];
 type PetInsert = Database["public"]["Tables"]["pets"]["Insert"];
 type CustomerFilter =
@@ -78,27 +75,6 @@ type OnboardingPetDraft = {
   weight_kg: string;
 };
 
-const ASSESSMENT_SLOTS = Array.from({ length: 20 }, (_, i) => {
-  const totalMinutes = 8 * 60 + i * 30;
-  const endMinutes = totalMinutes + 30;
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  const eh = Math.floor(endMinutes / 60);
-  const em = endMinutes % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return {
-    start: `${pad(h)}:${pad(m)}:00`,
-    end: `${pad(eh)}:${pad(em)}:00`,
-    label: `${pad(h)}:${pad(m)} - ${pad(eh)}:${pad(em)}`,
-  };
-});
-
-const MEMBER_BADGE_CLASSES: Record<MemberType, string> = {
-  standard: "bg-slate-100 text-slate-700 border-slate-200",
-  silver: "bg-blue-50 text-blue-700 border-blue-200",
-  gold: "bg-amber-50 text-amber-700 border-amber-200",
-  platinum: "bg-violet-50 text-violet-700 border-violet-200",
-};
 const LOW_WALLET_THRESHOLD = 500;
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -115,7 +91,6 @@ const INITIAL_FORM: OwnerInsert = {
   last_name: "",
   phone: "",
   email: "",
-  member_type: "standard",
   notes: "",
   address: "",
   emergency_contact_name: "",
@@ -129,12 +104,11 @@ const INITIAL_FORM: OwnerInsert = {
   camera_required: false,
 };
 
-function inferSizeCategory(weightKg: number | null): Database["public"]["Enums"]["pet_size_category"] | null {
+function inferPetSize(weightKg: number | null): Database["public"]["Enums"]["pet_size"] | null {
   if (weightKg == null || Number.isNaN(weightKg)) return null;
-  if (weightKg < 10) return "S";
-  if (weightKg < 20) return "M";
-  if (weightKg < 35) return "L";
-  return "XL";
+  if (weightKg < 10) return "small";
+  if (weightKg < 20) return "medium";
+  return "large";
 }
 
 const CustomersPage = () => {
@@ -149,14 +123,11 @@ const CustomersPage = () => {
   const [form, setForm] = useState<OwnerInsert>({ ...INITIAL_FORM });
   const [wizardOwner, setWizardOwner] = useState<OwnerInsert>({
     ...INITIAL_FORM,
-    member_type: "standard",
   });
   const [wizardPets, setWizardPets] = useState<OnboardingPetDraft[]>([
     { id: crypto.randomUUID(), name: "", species: "dog", breed: "", date_of_birth: "", weight_kg: "" },
   ]);
   const [createdOwnerId, setCreatedOwnerId] = useState<string | null>(null);
-  const [createdPetIds, setCreatedPetIds] = useState<Array<{ id: string; name: string }>>([]);
-  const [assessmentPlan, setAssessmentPlan] = useState<Record<string, { date: string; slot: string }>>({});
   const [pendingDelete, setPendingDelete] = useState<OwnerWithPetCount | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -233,8 +204,6 @@ const CustomersPage = () => {
   }, [owners, activeFilter, filteredOwnerIds]);
   const createOwner = useCreateOwner();
   const createPet = useCreatePet();
-  const createParkBooking = useCreateParkBooking();
-  const updateAssessment = useUpdateAssessment();
 
   const handleField = (field: keyof OwnerInsert, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -295,17 +264,14 @@ const CustomersPage = () => {
 
   const resetWizard = () => {
     setWizardStep(1);
-    setWizardOwner({ ...INITIAL_FORM, member_type: "standard" });
+    setWizardOwner({ ...INITIAL_FORM });
     setWizardPets([{ id: crypto.randomUUID(), name: "", species: "dog", breed: "", date_of_birth: "", weight_kg: "" }]);
     setCreatedOwnerId(null);
-    setCreatedPetIds([]);
-    setAssessmentPlan({});
   };
 
   const saveWizardOwner = async () => {
     const owner = await createOwner.mutateAsync({
       ...wizardOwner,
-      member_type: "standard",
     });
     setCreatedOwnerId(owner.id);
     setWizardStep(2);
@@ -315,7 +281,6 @@ const CustomersPage = () => {
     if (!createdOwnerId) throw new Error("Owner not ready.");
     const validPets = wizardPets.filter((p) => p.name.trim());
     if (validPets.length === 0) throw new Error("Add at least one pet.");
-    const created: Array<{ id: string; name: string }> = [];
     for (const draft of validPets) {
       const weight = draft.weight_kg ? Number(draft.weight_kg) : null;
       const payload: PetInsert = {
@@ -326,45 +291,13 @@ const CustomersPage = () => {
         date_of_birth: draft.date_of_birth || null,
         weight_kg: weight,
         assessment_status: "not_assessed",
-        size_category: inferSizeCategory(weight),
+        size: inferPetSize(weight),
       };
-      const pet = await createPet.mutateAsync(payload);
-      created.push({ id: pet.id, name: pet.name });
+      await createPet.mutateAsync(payload);
     }
-    const nowDate = new Date().toISOString().slice(0, 10);
-    const defaultSlot = ASSESSMENT_SLOTS[2].start;
-    const nextPlan: Record<string, { date: string; slot: string }> = {};
-    created.forEach((pet) => {
-      nextPlan[pet.id] = { date: nowDate, slot: defaultSlot };
-    });
-    setAssessmentPlan(nextPlan);
-    setCreatedPetIds(created);
-    setWizardStep(3);
-  };
-
-  const saveAssessmentBookings = async () => {
-    if (!createdOwnerId || createdPetIds.length === 0) throw new Error("Pets not ready.");
-    for (const pet of createdPetIds) {
-      const plan = assessmentPlan[pet.id];
-      const slot = ASSESSMENT_SLOTS.find((s) => s.start === plan.slot) ?? ASSESSMENT_SLOTS[2];
-      await createParkBooking.mutateAsync({
-        owner_id: createdOwnerId,
-        pet_id: pet.id,
-        visit_date: plan.date,
-        slot_start: slot.start,
-        slot_end: slot.end,
-        size_lane: "big",
-        is_assessment: true,
-        notes: "Assessment booking (new client onboarding)",
-        price: 0,
-      });
-      await updateAssessment.mutateAsync({
-        pet_id: pet.id,
-        status: "scheduled",
-        date: plan.date,
-      });
-    }
-    setWizardStep(4);
+    toast.success("New client onboarding completed.");
+    setWizardOpen(false);
+    resetWizard();
   };
 
   return (
@@ -440,13 +373,7 @@ const CustomersPage = () => {
                       </TableCell>
                       <TableCell>{owner.phone}</TableCell>
                       <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={MEMBER_BADGE_CLASSES[owner.member_type]}
-                        >
-                          {owner.member_type.charAt(0).toUpperCase() +
-                            owner.member_type.slice(1)}
-                        </Badge>
+                        <Badge variant="outline">Woof</Badge>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {owner.wallet_balance.toFixed(2)}
@@ -527,23 +454,9 @@ const CustomersPage = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="member_type">Member type</Label>
-                  <Select value={form.member_type ?? "standard"} onValueChange={(v) => handleField("member_type", v)}>
-                    <SelectTrigger id="member_type"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="standard">Standard</SelectItem>
-                      <SelectItem value="silver">Silver</SelectItem>
-                      <SelectItem value="gold">Gold</SelectItem>
-                      <SelectItem value="platinum">Platinum</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="emirates_id">Emirates ID</Label>
-                  <Input id="emirates_id" value={form.emirates_id ?? ""} onChange={(e) => handleField("emirates_id", e.target.value)} />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="emirates_id">Emirates ID</Label>
+                <Input id="emirates_id" value={form.emirates_id ?? ""} onChange={(e) => handleField("emirates_id", e.target.value)} />
               </div>
 
               <div className="space-y-2">
@@ -636,12 +549,12 @@ const CustomersPage = () => {
             <DialogHeader>
               <DialogTitle>New Client Onboarding</DialogTitle>
               <DialogDescription>
-                Owner → Pets → Assessment slots → Summary
+                Owner → Pets
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="text-xs text-muted-foreground">
-                Step {wizardStep} of 4
+                Step {wizardStep} of 2
               </div>
 
               {wizardStep === 1 && (
@@ -773,81 +686,9 @@ const CustomersPage = () => {
                       disabled={createPet.isPending}
                     >
                       {createPet.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Continue
+                      Finish
                     </Button>
                   </div>
-                </div>
-              )}
-
-              {wizardStep === 3 && (
-                <div className="space-y-3">
-                  {createdPetIds.map((pet) => (
-                    <div key={pet.id} className="rounded-md border p-3">
-                      <p className="text-sm font-medium mb-2">{pet.name}</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input
-                          type="date"
-                          value={assessmentPlan[pet.id]?.date ?? ""}
-                          onChange={(e) =>
-                            setAssessmentPlan((prev) => ({
-                              ...prev,
-                              [pet.id]: { ...(prev[pet.id] ?? { slot: ASSESSMENT_SLOTS[2].start }), date: e.target.value },
-                            }))
-                          }
-                        />
-                        <Select
-                          value={assessmentPlan[pet.id]?.slot ?? ASSESSMENT_SLOTS[2].start}
-                          onValueChange={(v) =>
-                            setAssessmentPlan((prev) => ({
-                              ...prev,
-                              [pet.id]: { ...(prev[pet.id] ?? { date: new Date().toISOString().slice(0, 10) }), slot: v },
-                            }))
-                          }
-                        >
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {ASSESSMENT_SLOTS.map((slot) => (
-                              <SelectItem key={slot.start} value={slot.start}>
-                                {slot.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  ))}
-                  <Button
-                    onClick={async () => {
-                      try {
-                        await saveAssessmentBookings();
-                      } catch (err: unknown) {
-                        toast.error(err instanceof Error ? err.message : "Could not schedule assessments.");
-                      }
-                    }}
-                    disabled={createParkBooking.isPending || updateAssessment.isPending}
-                  >
-                    {(createParkBooking.isPending || updateAssessment.isPending) && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    )}
-                    Continue
-                  </Button>
-                </div>
-              )}
-
-              {wizardStep === 4 && (
-                <div className="space-y-3">
-                  <p className="text-sm">
-                    Assessment scheduled for selected slots. Registration fee (500 AED × dogs, 3rd free) will be invoiced when each dog is marked as passed.
-                  </p>
-                  <Button
-                    onClick={() => {
-                      toast.success("New client onboarding completed.");
-                      setWizardOpen(false);
-                      resetWizard();
-                    }}
-                  >
-                    Finish
-                  </Button>
                 </div>
               )}
             </div>

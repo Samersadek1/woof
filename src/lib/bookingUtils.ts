@@ -118,8 +118,8 @@ export interface CreateServiceInvoiceParams {
 
 /**
  * Shared invoice creator used by all service flows (boarding, grooming, park,
- * daycare). Applies member discount, writes both `_aed` and non-suffixed
- * columns for backwards compatibility, and creates line items.
+ * daycare). Writes both `_aed` and non-suffixed columns for backwards
+ * compatibility, and creates line items.
  */
 export async function createServiceInvoice(params: CreateServiceInvoiceParams): Promise<string> {
   const {
@@ -135,27 +135,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   const normalizedLines: ServiceInvoiceLineItem[] = [];
   for (const li of lineItems) {
     const qty = Math.max(1, li.quantity);
-    let unitPrice = li.unitPrice;
-
-    // Prefer DB-side pricing math when we have a canonical key (VAT/rule support).
-    if (li.pricingKey && !li.preserveUnitPrice) {
-      try {
-        const { data } = await supabase.rpc("resolve_line_price", {
-          p_pricing_key: li.pricingKey,
-          p_quantity: qty,
-        });
-        const row = (data as {
-          unit_price: number;
-          subtotal: number;
-          total: number;
-        }[])?.[0];
-        if (row && typeof row.unit_price === "number" && typeof row.total === "number") {
-          unitPrice = row.unit_price;
-        }
-      } catch {
-        // Keep caller-provided values when RPC is unavailable for a key.
-      }
-    }
+    const unitPrice = li.unitPrice;
 
     normalizedLines.push({
       ...li,
@@ -166,27 +146,10 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   }
 
   const subtotal = normalizedLines.reduce((s, li) => s + li.unitPrice * li.quantity, 0);
-
-  let discountPct = 0;
-  let discountAed = 0;
-  let total = subtotal;
-
-  if (!skipMemberDiscount) {
-    try {
-      const { data: discData } = await supabase.rpc("apply_member_discount", {
-        p_owner_id: ownerId,
-        p_subtotal: subtotal,
-      });
-      const disc = (discData as { discount_pct: number; discount_aed: number; final_aed: number }[])?.[0];
-      if (disc) {
-        discountPct = disc.discount_pct;
-        discountAed = disc.discount_aed;
-        total = disc.final_aed;
-      }
-    } catch {
-      // RPC may not exist yet — proceed without discount
-    }
-  }
+  void skipMemberDiscount;
+  const discountPct = 0;
+  const discountAed = 0;
+  const total = subtotal;
 
   const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
   const isBoardingReference = serviceType === "boarding";

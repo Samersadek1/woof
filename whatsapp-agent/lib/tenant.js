@@ -1,12 +1,12 @@
 // Tenant config loader. Reads the active tenant + active prompt + enabled tools
-// from Supabase based on TENANT_SLUG. Used at startup so MSH (and any future
+// from Supabase based on TENANT_SLUG. Used at startup so woof (and any future
 // business) is just a row in the tenants table.
 
 export async function loadTenant(supabase, slug) {
   const tenantSlug = (slug ?? "").trim();
   if (!tenantSlug) {
     throw new Error(
-      "Missing TENANT_SLUG env. Set TENANT_SLUG to the tenants.slug for this deployment (e.g. 'msh')."
+      "Missing TENANT_SLUG env. Set TENANT_SLUG to the tenants.slug for this deployment (e.g. 'woof')."
     );
   }
 

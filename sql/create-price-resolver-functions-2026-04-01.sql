@@ -1,5 +1,5 @@
 -- =============================================================================
--- MSH Price Resolver Functions (adapted to current schema)
+-- woof Price Resolver Functions (adapted to current schema)
 -- =============================================================================
 --
 -- Current pricing schema in this repo:

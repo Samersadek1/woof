@@ -13,7 +13,6 @@ export interface InvoiceDetailAggregate {
       id: string;
       first_name: string;
       last_name: string | null;
-      member_type: Database["public"]["Enums"]["member_type"];
       wallet_balance: number;
     } | null;
   }) | null;
@@ -33,7 +32,7 @@ export function useInvoiceDetail(invoiceId?: string) {
         supabase
           .from("invoices")
           .select(
-            "*, owners(id, first_name, last_name, member_type, wallet_balance)",
+            "*, owners(id, first_name, last_name, wallet_balance)",
           )
           .eq("id", id)
           .maybeSingle(),
@@ -61,7 +60,7 @@ export function useInvoiceDetail(invoiceId?: string) {
       if (paymentsRes.error) throw paymentsRes.error;
 
       return {
-        invoice: (invoiceRes.data as InvoiceDetailAggregate["invoice"]) ?? null,
+        invoice: (invoiceRes.data as unknown as InvoiceDetailAggregate["invoice"]) ?? null,
         lines: (linesRes.data ?? []) as LineRow[],
         adjustments: (adjustmentsRes.data ?? []) as AdjustmentRow[],
         payments: (paymentsRes.data ?? []) as PaymentRow[],

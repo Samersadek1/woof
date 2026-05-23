@@ -297,47 +297,47 @@ BEGIN
     -- B1: Rex + Luna — checked_in (Apr 01–08)
     (b1, o1, room1, '2026-04-01', '2026-04-08',
      'checked_in', 'Rex on lower platform. Luna needs extra blanket.', true,
-     'MSH-2026-00001', '2026-04-01T10:30:00Z', NULL),
+     'WOOF-2026-00001', '2026-04-01T10:30:00Z', NULL),
 
     -- B2: Bruno — confirmed future (Apr 10–17)
     (b2, o1, room2, '2026-04-10', '2026-04-17',
      'confirmed', 'Owner dropping off after 9am.', false,
-     'MSH-2026-00002', NULL, NULL),
+     'WOOF-2026-00002', NULL, NULL),
 
     -- B3: Max — confirmed future (Apr 05–12)
     (b3, o2, room3, '2026-04-05', '2026-04-12',
      'confirmed', 'Ear drops packed in drop-off bag.', false,
-     'MSH-2026-00003', NULL, NULL),
+     'WOOF-2026-00003', NULL, NULL),
 
     -- B4: Thor — checked_out (Mar 18–27)
     (b4, o4, room4, '2026-03-18', '2026-03-27',
      'checked_out', 'Camera access active — send daily link to owner.', false,
-     'MSH-2026-00004', '2026-03-18T09:00:00Z', '2026-03-27T11:00:00Z'),
+     'WOOF-2026-00004', '2026-03-18T09:00:00Z', '2026-03-27T11:00:00Z'),
 
     -- B5: Thor — confirmed future (Apr 12–19)
     (b5, o4, room4, '2026-04-12', '2026-04-19',
      'confirmed', 'Same room as last stay — Do Not Move flag.', true,
-     'MSH-2026-00005', NULL, NULL),
+     'WOOF-2026-00005', NULL, NULL),
 
     -- B6: Mochi + Nala + Leo — confirmed (Apr 07–14)
     (b6, o5, room5, '2026-04-07', '2026-04-14',
      'confirmed', 'Keep Nala and Mochi in separate rooms if Nala shows stress.', false,
-     'MSH-2026-00006', NULL, NULL),
+     'WOOF-2026-00006', NULL, NULL),
 
     -- B7: Duke — checked_in (Mar 31–Apr 06)
     (b7, o7, room2, '2026-03-31', '2026-04-06',
      'checked_in', 'Cardiac supplement in morning food — see vet notes.', true,
-     'MSH-2026-00007', '2026-03-31T11:00:00Z', NULL),
+     'WOOF-2026-00007', '2026-03-31T11:00:00Z', NULL),
 
     -- B8: Lady — confirmed future (Apr 08–13)
     (b8, o7, room6, '2026-04-08', '2026-04-13',
      'confirmed', 'Full groom on checkout booked with grooming team.', false,
-     'MSH-2026-00008', NULL, NULL),
+     'WOOF-2026-00008', NULL, NULL),
 
     -- B9: Simba — enquiry (Apr 15–21)
     (b9, o9, room5, '2026-04-15', '2026-04-21',
      'enquiry', 'Cattery preferred. Owner still confirming exact dates.', false,
-     'MSH-2026-00009', NULL, NULL);
+     'WOOF-2026-00009', NULL, NULL);
 
   -- ==========================================================================
   -- 5. BOOKING PETS (junction)

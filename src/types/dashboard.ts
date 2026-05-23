@@ -4,7 +4,6 @@ export type DashboardMetrics = {
     check_ins: number;
     check_outs: number;
     daycare_attending: number;
-    park_bookings: number;
     grooming_appointments: number;
     assessments_scheduled: number;
   };

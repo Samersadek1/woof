@@ -1,5 +1,5 @@
 -- ============================================================
--- MSH Admin Essentials — Invoice System Schema Migration
+-- woof — Invoice System Schema Migration
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor)
 -- Safe to run multiple times (uses IF NOT EXISTS / DO NOTHING)
 -- ============================================================
