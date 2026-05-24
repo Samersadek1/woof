@@ -132,8 +132,9 @@ const CustomersPage = () => {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const { data: owners, isLoading } = useOwners(debouncedSearch || undefined);
+  const filterParam = searchParams.get("filter");
   const activeFilter = useMemo(() => {
-    const raw = searchParams.get("filter");
+    const raw = filterParam;
     if (
       raw === "low-wallet" ||
       raw === "unassessed" ||
@@ -143,7 +144,7 @@ const CustomersPage = () => {
       return raw as CustomerFilter;
     }
     return null;
-  }, [searchParams]);
+  }, [filterParam]);
   const { data: filteredOwnerIds = [], isLoading: filterLoading } = useQuery({
     queryKey: ["customers", "filter-owner-ids", activeFilter],
     enabled: !!activeFilter && activeFilter !== "low-wallet",

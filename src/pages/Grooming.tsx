@@ -737,17 +737,20 @@ const GroomingPage = () => {
   const [searchParams] = useSearchParams();
   const [day, setDay] = useState(() => new Date());
 
+  const dateParam = searchParams.get("date");
   useEffect(() => {
-    const d = searchParams.get("date");
-    if (!d) return;
-    if (d === "today") {
-      setDay(new Date());
+    if (!dateParam) return;
+    if (dateParam === "today") {
+      setDay((prev) => {
+        const next = new Date();
+        return format(prev, "yyyy-MM-dd") === format(next, "yyyy-MM-dd") ? prev : next;
+      });
       return;
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-      setDay(parseISO(d));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      setDay(parseISO(dateParam));
     }
-  }, [searchParams]);
+  }, [dateParam]);
 
   const dateStr = format(day, "yyyy-MM-dd");
   const todayStr = format(new Date(), "yyyy-MM-dd");
@@ -1006,13 +1009,15 @@ const GroomingPage = () => {
 
   useEffect(() => {
     setUseCreditByPet((prev) => {
+      let changed = false;
       const next = { ...prev };
       for (const pet of selectedPetsOrdered) {
         if (groomingCreditsByPet[pet.id] && next[pet.id] === undefined) {
           next[pet.id] = true;
+          changed = true;
         }
       }
-      return next;
+      return changed ? next : prev;
     });
   }, [selectedPetsOrdered, groomingCreditsByPet]);
 

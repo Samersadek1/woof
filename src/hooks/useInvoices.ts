@@ -50,9 +50,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
   return useQuery({
     queryKey: ["invoices", "list", filters],
     queryFn: async () => {
-      const withBranchSelect =
-        "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name, phone), branches(code)";
-      const legacySelect =
+      const invoiceSelect =
         "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name, phone)";
       const applyFilters = <T,>(query: T): T => {
         let next = query as T & {
@@ -71,31 +69,12 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         return next;
       };
 
-      let q = applyFilters(
+      const { data, error } = await applyFilters(
         supabase
           .from("invoices")
-          .select(withBranchSelect)
+          .select(invoiceSelect)
           .order("created_at", { ascending: false }),
       );
-
-      let { data, error } = await q;
-      if (error) {
-        const msg = error.message.toLowerCase();
-        const missingBranchRelation =
-          msg.includes("branches") ||
-          msg.includes("branch_id") ||
-          msg.includes("relationship");
-        if (!missingBranchRelation) throw error;
-        q = applyFilters(
-          supabase
-            .from("invoices")
-            .select(legacySelect)
-            .order("created_at", { ascending: false }),
-        );
-        const fallbackResult = await q;
-        data = fallbackResult.data;
-        error = fallbackResult.error;
-      }
 
       if (error) throw error;
 
@@ -114,7 +93,6 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         due_date: string | null;
         created_at: string;
         owners: { first_name: string | null; last_name: string | null; phone: string | null } | null;
-        branches?: { code: string | null } | null;
       };
 
       return ((data ?? []) as InvoiceListRow[]).map((row) => {
@@ -134,7 +112,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         return {
           id: row.id,
           invoice_number: row.invoice_number,
-          branch_code: row.branches?.code ?? deriveBranchCodeFromInvoiceNumber(row.invoice_number),
+          branch_code: deriveBranchCodeFromInvoiceNumber(row.invoice_number),
           owner_id: row.owner_id,
           owner_name: ownerDisplayName(owner?.first_name, owner?.last_name),
           owner_phone: owner?.phone ?? null,

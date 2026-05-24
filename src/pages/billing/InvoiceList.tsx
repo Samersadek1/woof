@@ -113,8 +113,9 @@ export default function InvoiceListPage() {
     setStatus((prev) => (prev.includes(s) ? prev.filter((v) => v !== s) : [...prev, s]));
   };
 
+  const statusParam = searchParams.get("status");
   useEffect(() => {
-    const raw = (searchParams.get("status") ?? "").trim();
+    const raw = (statusParam ?? "").trim();
     if (!raw) {
       setStatus([]);
       return;
@@ -123,8 +124,12 @@ export default function InvoiceListPage() {
       .split(",")
       .map((s) => s.trim() as InvoiceStatus)
       .filter((s): s is InvoiceStatus => STATUSES.includes(s));
-    setStatus(Array.from(new Set(next)));
-  }, [searchParams]);
+    setStatus((prev) => {
+      const same =
+        prev.length === next.length && prev.every((s, i) => s === next[i]);
+      return same ? prev : Array.from(new Set(next));
+    });
+  }, [statusParam]);
 
   useEffect(() => {
     const handler = (event: PointerEvent) => {

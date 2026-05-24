@@ -13,7 +13,6 @@ This document is the first section of the full platform QA suite and focuses on:
 - Key targets reached from Dashboard:
   - `src/pages/Boarding.tsx`
   - `src/pages/Daycare.tsx`
-  - `src/pages/Park.tsx`
   - `src/pages/Grooming.tsx`
   - `src/pages/billing/InvoiceList.tsx`
   - `src/pages/Customers.tsx`
@@ -28,7 +27,6 @@ This document is the first section of the full platform QA suite and focuses on:
   - 2 boarding check-ins today
   - 1 boarding check-out today
   - 2 daycare attendances today
-  - 2 park visits today
   - 2 grooming appointments today
   - 1 overdue invoice
   - 1 outstanding invoice
@@ -88,32 +86,26 @@ This document is the first section of the full platform QA suite and focuses on:
 - Expected:
   - Exact match.
 
-### DASH-CALC-004 Park Count
-- Steps:
-  1. Validate park tile count against today park records.
-- Expected:
-  - Exact match.
-
-### DASH-CALC-005 Grooming Count
+### DASH-CALC-004 Grooming Count
 - Steps:
   1. Validate grooming tile count against non-cancelled appointments for today.
 - Expected:
   - Exact match.
 
-### DASH-CALC-006 Assessments Needed Count
+### DASH-CALC-005 Assessments Needed Count
 - Steps:
   1. Validate count against pets flagged as unassessed/pending by business rules.
 - Expected:
   - Exact match, no false positives.
 
-### DASH-CALC-007 Day Boundary Correctness
+### DASH-CALC-006 Day Boundary Correctness
 - Preconditions: Records around local midnight.
 - Steps:
   1. Validate tile counts before and after day transition.
 - Expected:
   - Counts move with local business day, no off-by-one date drift.
 
-### DASH-CALC-008 Alert Counter Consistency
+### DASH-CALC-007 Alert Counter Consistency
 - Steps:
   1. Validate each alert number against direct record count from target domain.
 - Expected:
@@ -133,39 +125,36 @@ This document is the first section of the full platform QA suite and focuses on:
 ### DASH-LINK-003 Daycare Tile Link
 - Expected URL: `/daycare?date=today`.
 
-### DASH-LINK-004 Park Tile Link
-- Expected URL: `/park?date=today`.
+### DASH-LINK-004 Grooming Tile Link
+- Expected URL: `/grooming?date=today` (dashboard uses ISO date: `/grooming?date=YYYY-MM-DD`).
 
-### DASH-LINK-005 Grooming Tile Link
-- Expected URL: `/grooming?date=today`.
+### DASH-LINK-005 Assessment Alert Link
+- Expected URL: `/customers?filter=unassessed` (park module removed; assessments via customer filter + pet profile).
 
-### DASH-LINK-006 Assessment Tile Link
-- Expected URL: `/park?date=today&type=assessment`.
-
-### DASH-LINK-007 Print Today's Kennel Cards
+### DASH-LINK-006 Print Today's Kennel Cards
 - Steps:
   1. Click "Print today's kennel cards" (dashboard action).
 - Expected:
   - New tab opens with `/print/kennel-cards?date=YYYY-MM-DD`.
   - Date is a concrete ISO date, not `today`.
 
-### DASH-LINK-008 Overdue Invoice Alert Link
+### DASH-LINK-007 Overdue Invoice Alert Link
 - Expected URL: `/billing/invoices?status=overdue`.
 
-### DASH-LINK-009 Outstanding/Overdue Invoice Alert Link
+### DASH-LINK-008 Outstanding/Overdue Invoice Alert Link
 - Expected URL: `/billing/invoices?status=outstanding,overdue`.
 
-### DASH-LINK-010 Customer Filter Alert Links
+### DASH-LINK-009 Customer Filter Alert Links
 - Expected URL patterns:
   - `/customers?filter=low-wallet`
   - `/customers?filter=unassessed`
   - `/customers?filter=vax-expired`
   - `/customers?filter=vax-expiring`
 
-### DASH-LINK-011 Schedule Owner Link
+### DASH-LINK-010 Schedule Owner Link
 - Expected URL: `/customers/:ownerId`.
 
-### DASH-LINK-012 Schedule Pet Link
+### DASH-LINK-011 Schedule Pet Link
 - Expected URL: `/customers/:ownerId/pets/:petId`.
 
 ## D. Link Intent Semantics (Behavior-Level)
@@ -186,26 +175,19 @@ These tests confirm target behavior matches the query/hash intent, not just that
 - Observe and log:
   - Whether non-ISO `today` token is ignored.
 
-### DASH-SEM-003 Park Date and Type Semantics
-- Input link: `/park?date=today&type=assessment`
+### DASH-SEM-003 Daycare Tab Semantics
+- Input link: `/daycare?tab=operations`
 - Expected:
-  - Park date context and assessment mode intent are applied.
+  - Daycare opens on the operations tab.
 - Observe and log:
-  - Whether date/type query are ignored by target page logic.
+  - Whether `tab=operations` is honored on load.
 
-### DASH-SEM-004 Daycare Date Semantics
-- Input link: `/daycare?date=today`
-- Expected:
-  - Date context is applied in downstream day-based views.
-- Observe and log:
-  - Whether `date` query has no effect.
-
-### DASH-SEM-005 Invoice Status Prefilter Semantics
+### DASH-SEM-004 Invoice Status Prefilter Semantics
 - Input link: `/billing/invoices?status=overdue`
 - Expected:
   - Invoice list initializes with overdue filter active.
 
-### DASH-SEM-006 Customer Filter Prefilter Semantics
+### DASH-SEM-005 Customer Filter Prefilter Semantics
 - Input link: `/customers?filter=low-wallet`
 - Expected:
   - Customers view initializes with low-wallet filter active.
@@ -252,29 +234,18 @@ These checks ensure dashboard entry points do not lead to hardcoded or mismapped
   - No random hardcoded amount.
   - Line math matches configured pricing logic.
 
-### DASH-PRICE-002 Dashboard -> Park (2 Dogs) Pricing Linkage
-- Preconditions:
-  - Owner with exactly 2 dogs.
-  - Pricing table contains `park_2_dogs`.
-- Steps:
-  1. Enter park from dashboard flow.
-  2. Execute park billing scenario for 2 dogs.
-  3. Validate invoice/service line.
-- Expected:
-  - 2-dog park pricing links to 2-dog key logic, not single-dog x2 hardcode.
-
-### DASH-PRICE-003 Dashboard -> Multi-Dog (4+) Escalation Logic
+### DASH-PRICE-002 Dashboard -> Multi-Dog (4+) Escalation Logic
 - Preconditions:
   - Owner with 4 dogs.
   - Pricing table includes base 3-dog and extra-dog pricing keys.
 - Steps:
-  1. Trigger daycare/park billing from dashboard path.
+  1. Trigger daycare billing from dashboard path.
   2. Inspect final charge decomposition.
 - Expected:
   - Total follows configured 3-dog base + extra-dog increment logic.
   - No flat hardcoded fallback replacing dynamic composition.
 
-### DASH-PRICE-004 Dashboard -> Invoice Print Totals Integrity
+### DASH-PRICE-003 Dashboard -> Invoice Print Totals Integrity
 - Steps:
   1. Start from dashboard alert to invoice list.
   2. Open invoice detail and print receipt flow.
@@ -283,7 +254,7 @@ These checks ensure dashboard entry points do not lead to hardcoded or mismapped
   - All totals align with stored invoice values and payment history.
   - No unexplained constant amount injection.
 
-### DASH-PRICE-005 Alert Threshold vs Price Constant Separation
+### DASH-PRICE-004 Alert Threshold vs Price Constant Separation
 - Steps:
   1. Validate low-wallet alert behavior near threshold values.
   2. Validate service invoice totals for same owners.

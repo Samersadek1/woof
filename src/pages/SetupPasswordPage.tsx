@@ -39,10 +39,6 @@ const SetupPasswordPage = () => {
         const url = new URL(window.location.href);
         const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
         const searchParams = url.searchParams;
-        // #region agent log
-        fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H4',location:'src/pages/SetupPasswordPage.tsx:resolveInviteSession:payloadShape',message:'invite payload shape detected',data:{hasCode:!!(searchParams.get('code')||hashParams.get('code')),hasTokenHash:!!(searchParams.get('token_hash')||hashParams.get('token_hash')),hasAccessToken:!!(searchParams.get('access_token')||hashParams.get('access_token')),hasRefreshToken:!!(searchParams.get('refresh_token')||hashParams.get('refresh_token')),type:(searchParams.get('type')||hashParams.get('type'))??null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-
         const code = searchParams.get("code") || hashParams.get("code");
         if (code) {
           const { data, error: codeError } = await supabase.auth.exchangeCodeForSession(code);
@@ -72,9 +68,6 @@ const SetupPasswordPage = () => {
           }
         }
       } catch (err: unknown) {
-        // #region agent log
-        fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H4',location:'src/pages/SetupPasswordPage.tsx:resolveInviteSession:catch',message:'invite resolution failed',data:{errorMessage:err instanceof Error ? err.message : 'unknown'},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Could not verify invite link.");
         }

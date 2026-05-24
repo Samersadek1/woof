@@ -1,5 +1,4 @@
 import { lazy, Suspense } from "react";
-import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -88,16 +87,6 @@ const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-const DebugCanary = () => {
-  const location = useLocation();
-  useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H5',location:'src/App.tsx:DebugCanary',message:'route mounted',data:{pathname:location.pathname,search:location.search?'<present>':'',hash:location.hash?'<present>':''},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-  }, [location.pathname, location.search, location.hash]);
-  return null;
-};
-
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
@@ -105,7 +94,6 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <DebugCanary />
           <Suspense fallback={<AuthLoadingScreen />}>
             <Routes>
               <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />

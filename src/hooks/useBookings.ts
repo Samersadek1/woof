@@ -281,9 +281,6 @@ export function useCreateBooking() {
       pet_care_by_pet_id,
       ...bookingData
     }: CreateBookingPayload) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H1',location:'src/hooks/useBookings.ts:useCreateBooking:entry',message:'create booking mutation started',data:{hasOwnerId:!!bookingData.owner_id,roomId:bookingData.room_id??null,bookingType:bookingData.booking_type??null,petCount:pet_ids.length,checkInDate:bookingData.check_in_date??null,checkOutDate:bookingData.check_out_date??null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const payload: BookingInsert = {
         ...withoutDogSizeColumn(bookingData),
         booking_type: bookingData.booking_type ?? "boarding",
@@ -295,9 +292,6 @@ export function useCreateBooking() {
         .single();
 
       if (bookingError) {
-        // #region agent log
-        fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H1',location:'src/hooks/useBookings.ts:useCreateBooking:bookingInsertError',message:'booking insert failed',data:{code:bookingError.code??null,message:bookingError.message??'unknown',details:bookingError.details??null,hint:bookingError.hint??null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         throw bookingError;
       }
 
@@ -315,9 +309,6 @@ export function useCreateBooking() {
           .insert(bookingPets);
 
         if (petsError) {
-          // #region agent log
-          fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H1',location:'src/hooks/useBookings.ts:useCreateBooking:bookingPetsInsertError',message:'booking pets insert failed',data:{bookingId:booking.id,petCount:bookingPets.length,code:petsError.code??null,message:petsError.message??'unknown',details:petsError.details??null},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           throw petsError;
         }
       }
