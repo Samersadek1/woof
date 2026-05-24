@@ -3,7 +3,8 @@ import type { Database } from "@/integrations/supabase/types";
 type RoomLike = Pick<
   Database["public"]["Tables"]["rooms"]["Row"],
   "room_number" | "display_name"
->;
+> &
+  Partial<Pick<Database["public"]["Tables"]["rooms"]["Row"], "id" | "room_type">>;
 
 /** Legacy / import rows that must not appear in boarding room pickers or calendars. */
 const EXCLUDED_ROOM_CODES = new Set(["F100", "D100"]);
@@ -68,11 +69,11 @@ export function sortRoomsBySectionNumber(
   return pa.roomNumber.localeCompare(pb.roomNumber, undefined, { numeric: true });
 }
 
-export function buildRoomsBySection(rooms: RoomLike[]): {
-  map: Map<string, RoomLike[]>;
+export function buildRoomsBySection<T extends RoomLike>(rooms: T[]): {
+  map: Map<string, T[]>;
   order: string[];
 } {
-  const map = new Map<string, RoomLike[]>();
+  const map = new Map<string, T[]>();
   for (const room of rooms) {
     const { section } = getRoomSectionParts(room);
     if (!map.has(section)) map.set(section, []);
