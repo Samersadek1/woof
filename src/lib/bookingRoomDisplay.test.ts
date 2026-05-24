@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assignmentCalendarColumnSpan,
   assignmentCoversDate,
   formatRoomAssignmentsSummary,
   roomAssignmentForDate,
@@ -17,6 +18,11 @@ describe("bookingRoomDisplay", () => {
     expect(assignmentCoversDate(slices[0], "2027-05-23")).toBe(true);
     expect(assignmentCoversDate(slices[0], "2027-05-24")).toBe(false);
     expect(assignmentCoversDate(slices[1], "2027-05-25")).toBe(true);
+  });
+
+  it("assignmentCalendarColumnSpan counts inclusive nights", () => {
+    expect(assignmentCalendarColumnSpan("2027-05-23", "2027-05-23")).toBe(1);
+    expect(assignmentCalendarColumnSpan("2027-05-24", "2027-05-25")).toBe(2);
   });
 
   it("roomAssignmentForDate picks the segment for that day", () => {

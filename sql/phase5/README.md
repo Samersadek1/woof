@@ -10,6 +10,8 @@ Run each script in the Supabase SQL editor as **one transaction** (`BEGIN` … `
 | `phase5c_contact_cleanup.sql` | Applied 2026-05-24 | 429 owners staged; POST-CHECK: vet_clinics=41, phone2=258, slash_in_phone=0, text_in_phone=2 (review) |
 | `phase5c_contact_cleanup_exec.sql` | Same run | Comment-stripped copy used with `npx supabase db query --linked --file` |
 | `phase5f_recover_daycare_sessions.sql` | Applied 2026-05-24 | POST-CHECK: recovered=1130, MULTI_DATE_REVIEW=24, total_legacy_sessions=4952 |
+| `phase5g_add_d_wing_rooms.sql` | Applied 2026-05-24 | Step 2a: D4/D5/D10/D11 added; POST-CHECK: 13 D-wing rooms (D1–D13) |
+| `phase5g_rebuild_bra.sql` | Applied 2026-05-24 | Step 2b: bra 1366→1404; 2059 spans staged; 398 orphans; `_bra_backup` retained |
 
 ## Phase 5f — dropped daycare usage recovery
 
@@ -23,6 +25,22 @@ Phase 4c originally skipped ~463 usage rows with unparseable `UsageDateRaw`. Pha
 
 - **owners:** `phone`, `phone2`, `vet_name`, `vet_phone`, `emergency_contact_*` — no `vet_clinic_id`
 - **vet_clinics:** reference list; upsert by unique `name`
+
+## Phase 5g — room assignments reshuffle
+
+**Step 2a** (`phase5g_add_d_wing_rooms.sql`): additive D4/D5/D10/D11 rooms.
+
+**Step 2b** (`phase5g_rebuild_bra.sql`): truncates and rebuilds `booking_room_assignments` from XLSX spans. Does not touch `rooms` (except 2a), bookings, or pets.
+
+Generator fixes baked into the applied script (do not paste the Cowork draft verbatim):
+
+- `bookings.check_in_date` / `check_out_date` (not `start_date` / `end_date`)
+- Inclusive `bra.end_date` = `end_date_exclusive - 1`
+- One booking per span: narrowest stay that fully contains the span
+- Per-booking segment trim (same as `boarding_room_segments_ops` migration)
+- `DISABLE TRIGGER trg_enforce_boarding_assignment_room_overlap` during bulk insert (legacy data already has cross-owner overlaps)
+
+**Rollback:** `INSERT INTO booking_room_assignments SELECT * FROM _bra_backup;` (after truncating current bra) if needed.
 
 ## Phase 5e generator scripts
 

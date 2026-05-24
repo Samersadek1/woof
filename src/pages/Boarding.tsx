@@ -25,6 +25,7 @@ import type {
   CreateBookingPayload,
 } from "@/hooks/useBookings";
 import {
+  assignmentCalendarColumnSpan,
   formatRoomAssignmentsSummary,
   roomLabelForBooking,
   sortedAssignmentSlices,
@@ -1684,10 +1685,13 @@ export function DogBoardingCalendar({
           const isFirst = dayStr === segStart || idx === 0;
           if (isFirst) {
             const chipEnd = segEnd < endOfWindow ? segEnd : endOfWindow;
-            const span = differenceInCalendarDays(
-              parseISO(chipEnd),
-              parseISO(dayStr === segStart ? segStart : dayStr),
-            );
+            const span =
+              segment.kind === "assignment"
+                ? assignmentCalendarColumnSpan(segStart, chipEnd)
+                : differenceInCalendarDays(
+                    parseISO(chipEnd),
+                    parseISO(dayStr === segStart ? segStart : dayStr),
+                  );
             dayBookingMap.set(dayStr, { booking, span: Math.max(span, 1), isFirst: true });
           } else if (!dayBookingMap.has(dayStr)) {
             dayBookingMap.set(dayStr, { booking, span: 1, isFirst: false });

@@ -1,3 +1,5 @@
+import { differenceInCalendarDays, parseISO } from "date-fns";
+
 import type { Database } from "@/integrations/supabase/types";
 
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
@@ -81,6 +83,11 @@ export function roomLabelForBooking(
 export function formatAssignmentDateRange(start: string, end: string): string {
   if (start === end) return start;
   return `${start} – ${end}`;
+}
+
+/** Calendar chip width: assignment end_date is inclusive (both start and end count). */
+export function assignmentCalendarColumnSpan(startDate: string, endDate: string): number {
+  return differenceInCalendarDays(parseISO(endDate), parseISO(startDate)) + 1;
 }
 
 export function formatRoomAssignmentsSummary(
