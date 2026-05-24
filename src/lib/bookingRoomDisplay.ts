@@ -26,6 +26,15 @@ export function assignmentCoversDate(
   return slice.start_date <= asOf && slice.end_date >= asOf;
 }
 
+/** Whether a boarding stay includes `asOf` (`check_out_date` is exclusive). */
+export function bookingOccupiesDate(
+  checkIn: string,
+  checkOutExclusive: string,
+  asOf: string,
+): boolean {
+  return checkIn <= asOf && checkOutExclusive > asOf;
+}
+
 export function roomAssignmentForDate(
   assignments: BookingRoomAssignmentSlice[] | null | undefined,
   asOf: string,
@@ -98,51 +107,59 @@ export function bookingLastOccupiedNight(checkIn: string, checkOutExclusive: str
   return format(last, "yyyy-MM-dd");
 }
 
-export type RoomCalendarDayCell<T> = {
-  payload: T;
-  span: number;
-  isFirst: boolean;
-};
-
-export type RoomCalendarSegment<T> = {
-  kind: "assignment" | "booking";
+export type RoomCalendarLayoutSegment<T> = {
   segStart: string;
   segEnd: string;
   payload: T;
 };
 
+/** One guest bar in a room row — positioned with CSS grid column span (no flex overflow). */
+export type RoomCalendarGridEvent<T> = {
+  key: string;
+  payload: T;
+  colStart: number;
+  colSpan: number;
+  /** First visible day of this segment (for detail drawer context). */
+  segStart: string;
+};
+
 /**
- * Maps each visible day in a room row to the guest chip shown that day.
- * Span is measured from the first *visible* day of the segment (not idx 0),
- * so a clipped multi-day stay does not paint over the next room guest.
+ * Lay out stay segments on a fixed day column grid.
+ * Each segment becomes one bar; clipped to the visible window; no per-day merge map.
  */
-export function buildRoomCalendarDayMap<T>(
-  segments: RoomCalendarSegment<T>[],
+export function layoutRoomCalendarEvents<T>(
+  segments: RoomCalendarLayoutSegment<T>[],
   dayStrs: string[],
   windowStartStr: string,
-  endOfWindowStr: string,
-): Map<string, RoomCalendarDayCell<T>> {
-  const dayMap = new Map<string, RoomCalendarDayCell<T>>();
+  eventKey: (payload: T, segStart: string, segEnd: string) => string,
+): RoomCalendarGridEvent<T>[] {
+  if (dayStrs.length === 0) return [];
 
-  for (const segment of segments) {
-    const { kind, segStart, segEnd, payload } = segment;
-    const visibleSegStart = segStart < windowStartStr ? windowStartStr : segStart;
+  const windowEndStr = dayStrs[dayStrs.length - 1]!;
+  const events: RoomCalendarGridEvent<T>[] = [];
 
-    for (const dayStr of dayStrs) {
-      if (dayStr < segStart || dayStr > segEnd) continue;
+  for (const { segStart, segEnd, payload } of segments) {
+    if (segEnd < dayStrs[0]! || segStart > windowEndStr) continue;
 
-      const isFirst = dayStr === visibleSegStart;
-      if (isFirst) {
-        const chipEnd = segEnd < endOfWindowStr ? segEnd : endOfWindowStr;
-        const span = assignmentCalendarColumnSpan(dayStr, chipEnd);
-        dayMap.set(dayStr, { payload, span, isFirst: true });
-      } else if (!dayMap.has(dayStr)) {
-        dayMap.set(dayStr, { payload, span: 1, isFirst: false });
-      }
-    }
+    const visibleStart = segStart < windowStartStr ? windowStartStr : segStart;
+    const visibleEnd = segEnd > windowEndStr ? windowEndStr : segEnd;
+
+    const startIdx = dayStrs.indexOf(visibleStart);
+    const endIdx = dayStrs.indexOf(visibleEnd);
+    if (startIdx < 0 || endIdx < 0) continue;
+
+    events.push({
+      key: eventKey(payload, segStart, segEnd),
+      payload,
+      colStart: startIdx + 1,
+      colSpan: endIdx - startIdx + 1,
+      segStart: visibleStart,
+    });
   }
 
-  return dayMap;
+  return events.sort(
+    (a, b) => a.colStart - b.colStart || a.segStart.localeCompare(b.segStart),
+  );
 }
 
 export function formatRoomAssignmentsSummary(

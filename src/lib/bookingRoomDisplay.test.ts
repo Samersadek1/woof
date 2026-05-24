@@ -4,8 +4,8 @@ import {
   assignmentCalendarColumnSpan,
   assignmentCoversDate,
   bookingLastOccupiedNight,
-  buildRoomCalendarDayMap,
   formatRoomAssignmentsSummary,
+  layoutRoomCalendarEvents,
   roomAssignmentForDate,
   roomLabelForBooking,
 } from "./bookingRoomDisplay";
@@ -57,36 +57,35 @@ describe("bookingRoomDisplay", () => {
     ]);
   });
 
-  it("buildRoomCalendarDayMap clips span when the window starts mid-segment", () => {
+  it("layoutRoomCalendarEvents clips bars when the window starts mid-segment", () => {
     const days = ["2026-05-25", "2026-05-26", "2026-05-27"];
-    const map = buildRoomCalendarDayMap(
+    const events = layoutRoomCalendarEvents(
       [
-        {
-          kind: "assignment",
-          segStart: "2026-05-24",
-          segEnd: "2026-05-25",
-          payload: "bertie",
-        },
-        {
-          kind: "assignment",
-          segStart: "2026-05-26",
-          segEnd: "2026-05-26",
-          payload: "beirut",
-        },
-        {
-          kind: "assignment",
-          segStart: "2026-05-27",
-          segEnd: "2026-05-27",
-          payload: "tweed",
-        },
+        { segStart: "2026-05-24", segEnd: "2026-05-25", payload: "bertie" },
+        { segStart: "2026-05-26", segEnd: "2026-05-26", payload: "beirut" },
+        { segStart: "2026-05-27", segEnd: "2026-05-27", payload: "tweed" },
       ],
       days,
       "2026-05-25",
-      "2026-06-15",
+      (p, s, e) => `${p}:${s}:${e}`,
     );
 
-    expect(map.get("2026-05-25")).toEqual({ payload: "bertie", span: 1, isFirst: true });
-    expect(map.get("2026-05-26")).toEqual({ payload: "beirut", span: 1, isFirst: true });
-    expect(map.get("2026-05-27")).toEqual({ payload: "tweed", span: 1, isFirst: true });
+    expect(events).toEqual([
+      expect.objectContaining({ payload: "bertie", colStart: 1, colSpan: 1 }),
+      expect.objectContaining({ payload: "beirut", colStart: 2, colSpan: 1 }),
+      expect.objectContaining({ payload: "tweed", colStart: 3, colSpan: 1 }),
+    ]);
+  });
+
+  it("layoutRoomCalendarEvents spans multiple visible columns for a multi-night stay", () => {
+    const days = ["2026-05-24", "2026-05-25", "2026-05-26"];
+    const events = layoutRoomCalendarEvents(
+      [{ segStart: "2026-05-24", segEnd: "2026-05-25", payload: "bertie" }],
+      days,
+      "2026-05-24",
+      (p) => p,
+    );
+    expect(events[0]?.colStart).toBe(1);
+    expect(events[0]?.colSpan).toBe(2);
   });
 });

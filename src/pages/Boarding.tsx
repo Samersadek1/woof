@@ -25,13 +25,15 @@ import type {
   CreateBookingPayload,
 } from "@/hooks/useBookings";
 import {
-  bookingLastOccupiedNight,
-  buildRoomCalendarDayMap,
   formatRoomAssignmentsSummary,
   roomLabelForBooking,
   sortedAssignmentSlices,
   type BookingRoomAssignmentSlice,
 } from "@/lib/bookingRoomDisplay";
+import {
+  BoardingRoomCalendarRow,
+  type BoardingCalendarSegment,
+} from "@/components/boarding/BoardingRoomCalendarRow";
 import { computeBoardingOccupancyStats } from "@/lib/boardingOccupancy";
 import {
   buildBoardingRoomCalendarDayHtml,
@@ -1652,131 +1654,31 @@ export function DogBoardingCalendar({
     });
   };
 
-  // ─── calendar rendering helpers ───────────────────────────────────────────
-
-  type CalendarSegment =
-    | { kind: "assignment"; assignment: CalendarRoomAssignment }
-    | { kind: "booking"; booking: BookingWithDetails };
-
-  const calendarSegmentsForMap = (segments: CalendarSegment[]) =>
-    segments.map((segment) => {
-      const booking =
-        segment.kind === "assignment" ? segment.assignment.bookings : segment.booking;
-      const segStart =
-        segment.kind === "assignment"
-          ? segment.assignment.start_date
-          : segment.booking.check_in_date;
-      const segEnd =
-        segment.kind === "assignment"
-          ? segment.assignment.end_date
-          : bookingLastOccupiedNight(
-              segment.booking.check_in_date,
-              segment.booking.check_out_date,
-            );
-      return {
-        kind: segment.kind,
-        segStart,
-        segEnd,
-        payload: booking,
-      };
-    });
+  const windowStartStr = toDateStr(windowStart);
 
   const renderCalendarCells = (
-    segments: CalendarSegment[],
+    segments: BoardingCalendarSegment[],
     options?: { prefillRoomOnEmptyCell?: string; isPlaceholder?: boolean },
-  ) => {
-    const windowStartStr = toDateStr(windowStart);
-    const endOfWindow = toDateStr(addDays(windowStart, DAYS));
-    const dayStrs = days.map((day) => toDateStr(day));
-
-    const dayBookingMap = buildRoomCalendarDayMap(
-      calendarSegmentsForMap(segments),
-      dayStrs,
-      windowStartStr,
-      endOfWindow,
-    );
-    const prefillRoomOnEmptyCell = options?.prefillRoomOnEmptyCell;
-    const isPlaceholder = options?.isPlaceholder ?? false;
-
-    return (
-      <div className="flex">
-        {days.map((day) => {
-          const dayStr = toDateStr(day);
-          const cell = dayBookingMap.get(dayStr);
-          const todayHighlight = isToday(day);
-
-          if (!cell) {
-            return (
-              <div
-                key={dayStr}
-                style={{ minWidth: DAY_COL_W, width: DAY_COL_W }}
-                className={`h-12 border-r border-b border-border cursor-pointer transition-colors
-                  ${todayHighlight ? "bg-amber-50 hover:bg-amber-100" : "hover:bg-muted/50"}`}
-                onClick={() => openNewBooking(prefillRoomOnEmptyCell, dayStr)}
-              />
-            );
-          }
-
-          if (!cell.isFirst) {
-            // continuation cell — just a coloured bar, not clickable as chip
-            return (
-              <div
-                key={dayStr}
-                style={{ minWidth: DAY_COL_W, width: DAY_COL_W }}
-                className={`h-12 border-r border-b border-border ${todayHighlight ? "bg-amber-50" : ""}`}
-              />
-            );
-          }
-
-          const { payload: booking, span } = cell;
-          const label = [
-            booking.booking_pets?.[0]?.pets?.name?.toUpperCase() ?? "",
-            booking.owners?.last_name?.toUpperCase() ?? "",
-          ]
-            .filter(Boolean)
-            .join(" – ");
-          const chipPlaceholder =
-            isPlaceholder || isImportPlaceholderBooking(booking);
-
-          return (
-            <div
-              key={dayStr}
-              style={{
-                minWidth: DAY_COL_W * span - 4,
-                width: DAY_COL_W * span - 4,
-                marginLeft: 2,
-                marginRight: 2,
-              }}
-              className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1
-                cursor-pointer truncate z-10 select-none border border-dashed
-                ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
-              onClick={() => {
-                setDetailBooking(booking);
-                setDetailContext({ asOfDate: dayStr });
-              }}
-            >
-              <span className="truncate min-w-0 flex-1">{label || booking.booking_ref || "—"}</span>
-              {bookingAnyPetHasAlerts(booking) ? (
-                <TriangleAlert
-                  className="h-3.5 w-3.5 shrink-0 text-orange-100 drop-shadow-sm"
-                  aria-label="Pet alert"
-                />
-              ) : null}
-              {booking.booking_pets.length > 1 && (
-                <span className="shrink-0 opacity-80">+{booking.booking_pets.length - 1}</span>
-              )}
-              {bookingBelongingsCount(booking) > 0 ? (
-                <Luggage className="h-3 w-3 shrink-0 opacity-90" aria-hidden />
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
+  ) => (
+    <BoardingRoomCalendarRow
+      days={days}
+      dayColW={DAY_COL_W}
+      segments={segments}
+      windowStartStr={windowStartStr}
+      prefillRoomOnEmptyCell={options?.prefillRoomOnEmptyCell}
+      isPlaceholder={options?.isPlaceholder}
+      toDateStr={toDateStr}
+      onEmptyCellClick={(roomId, dayStr) => openNewBooking(roomId, dayStr)}
+      onGuestClick={(booking, asOfDate) => {
+        setDetailBooking(booking);
+        setDetailContext({ asOfDate });
+      }}
+      statusClassFor={(status) => STATUS_CLASSES[status]}
+    />
+  );
 
   const renderRoomRow = (roomId: string, isPlaceholder = false) => {
-    const segments: CalendarSegment[] = [
+    const segments: BoardingCalendarSegment[] = [
       ...(assignmentsByRoom.get(roomId) ?? []).map((assignment) => ({
         kind: "assignment" as const,
         assignment,
@@ -3287,20 +3189,70 @@ function BoardingHubPage() {
                 <p className="text-2xl font-semibold tabular-nums">{occupancyStats.total}</p>
               </div>
               <div className="rounded-lg border bg-muted/40 px-3 py-2">
-                <p className="text-xs text-muted-foreground">Occupied</p>
-                <p className="text-2xl font-semibold tabular-nums">{occupancyStats.occupiedCount}</p>
+                <p className="text-xs text-muted-foreground">Rooms occupied</p>
+                <p className="text-2xl font-semibold tabular-nums">{occupancyStats.roomOccupiedCount}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Unassigned guests</p>
+                <p className="text-2xl font-semibold tabular-nums">{occupancyStats.unassignedGuestCount}</p>
               </div>
               <div className="rounded-lg border bg-muted/40 px-3 py-2">
                 <p className="text-xs text-muted-foreground">Available</p>
                 <p className="text-2xl font-semibold tabular-nums">{occupancyStats.availableCount}</p>
               </div>
-              <div className="rounded-lg border bg-muted/40 px-3 py-2">
-                <p className="text-xs text-muted-foreground">Occupancy</p>
-                <p className="text-2xl font-semibold tabular-nums">
-                  {occLoading || occAssignmentsLoading ? "…" : `${occupancyStats.pct}%`}
-                </p>
-              </div>
             </div>
+            <div className="rounded-lg border bg-muted/40 px-3 py-2 max-w-xs">
+              <p className="text-xs text-muted-foreground">Occupancy (rooms + unassigned)</p>
+              <p className="text-2xl font-semibold tabular-nums">
+                {occLoading || occAssignmentsLoading ? "…" : `${occupancyStats.pct}%`}
+              </p>
+            </div>
+
+            {occupancyStats.unassignedGuestCount > 0 && (
+              <section className="space-y-2 rounded-lg border border-dashed p-3">
+                <h3 className="text-sm font-semibold">Unassigned (no kennel room this day)</h3>
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Pet</TableHead>
+                        <TableHead>Owner</TableHead>
+                        <TableHead>Check in</TableHead>
+                        <TableHead>Check out</TableHead>
+                        <TableHead>Ref</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {occupancyStats.unassignedGuests.map((booking) => {
+                        const petNames =
+                          booking.booking_pets
+                            .map((bp) => bp.pets?.name)
+                            .filter(Boolean)
+                            .join(", ") || "—";
+                        return (
+                          <TableRow key={booking.id}>
+                            <TableCell>{petNames}</TableCell>
+                            <TableCell>
+                              {ownerDisplayName(
+                                booking.owners?.first_name,
+                                booking.owners?.last_name,
+                              )}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-xs">
+                              {format(parseISO(booking.check_in_date), "d MMM yyyy")}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-xs">
+                              {format(parseISO(booking.check_out_date), "d MMM yyyy")}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{booking.booking_ref}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </section>
+            )}
 
             {occupancyStats.importedUnassignedCount > 0 && (
               <p className="text-sm rounded-md border border-amber-200 bg-amber-50/90 px-3 py-2 text-amber-900">

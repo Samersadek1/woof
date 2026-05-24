@@ -1,15 +1,15 @@
 import type { BookingWithDetails } from "@/hooks/useBookings";
 import type { Database } from "@/integrations/supabase/types";
-import { assignmentCoversDate } from "@/lib/bookingRoomDisplay";
 import {
   buildRoomsBySection,
   getRoomSectionParts,
   sortRoomsBySectionNumber,
-} from "@/lib/boardingRoomSections";
+} from "./boardingRoomSections";
+import { assignmentCoversDate, bookingOccupiesDate } from "./bookingRoomDisplay";
 import {
   isImportPlaceholderRoom,
   splitFacilityAndPlaceholderRooms,
-} from "@/lib/boardingUnknownKennel";
+} from "./boardingUnknownKennel";
 
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
 
@@ -23,18 +23,28 @@ export type OccupancyAssignmentRow = {
 
 export type OccupancyStats = {
   total: number;
+  /** Kennel rooms with a guest (physical room). */
+  roomOccupiedCount: number;
+  /** Boarding guests on site with no kennel room for this date. */
+  unassignedGuestCount: number;
+  /** Rooms occupied + unassigned guests (capacity used). */
   occupiedCount: number;
   availableCount: number;
   pct: number;
   byGroup: Map<string, { occupied: { room: Room; booking: BookingWithDetails }[]; available: Room[] }>;
   groupOrder: string[];
   importedUnassignedCount: number;
+  unassignedGuests: BookingWithDetails[];
 };
+
+/** Wings that are not overnight dog kennel inventory for occupancy %. */
+const NON_KENNEL_OCCUPANCY_WINGS = new Set(["cattery", "grooming_upstairs"]);
 
 function occupancyFacilityRooms(rooms: Room[]): Room[] {
   return rooms.filter((r) => {
     if (!r.is_active || isImportPlaceholderRoom(r)) return false;
-    return r.wing !== "cattery";
+    if (NON_KENNEL_OCCUPANCY_WINGS.has(r.wing)) return false;
+    return true;
   });
 }
 
@@ -57,39 +67,44 @@ export function computeBoardingOccupancyStats(args: {
   const placeholderIds = new Set(placeholderPool.map((r) => r.id));
   const total = roomsPool.length;
 
-  const bookingIdsWithSegmentOnDate = new Set<string>();
-  for (const row of assignments) {
-    if (!assignmentCoversDate(row, asOfDate)) continue;
-    bookingIdsWithSegmentOnDate.add(row.booking_id);
-  }
-
   const occupiedByRoomId = new Map<string, BookingWithDetails>();
+  const bookingIdsWithKennelAssignmentOnDate = new Set<string>();
   let importedUnassignedCount = 0;
 
   for (const row of assignments) {
     if (!assignmentCoversDate(row, asOfDate)) continue;
+
     if (placeholderIds.has(row.room_id)) {
       importedUnassignedCount += 1;
+      bookingIdsWithKennelAssignmentOnDate.add(row.booking_id);
       continue;
     }
+
     if (!poolIds.has(row.room_id)) continue;
+
+    bookingIdsWithKennelAssignmentOnDate.add(row.booking_id);
     if (!occupiedByRoomId.has(row.room_id)) {
       occupiedByRoomId.set(row.room_id, row.bookings);
     }
   }
 
+  const unassignedGuests: BookingWithDetails[] = [];
+
   for (const b of bookings) {
-    if (bookingIdsWithSegmentOnDate.has(b.id)) continue;
-    if (!b.room_id) continue;
-    if (placeholderIds.has(b.room_id)) {
-      importedUnassignedCount += 1;
+    if (!bookingOccupiesDate(b.check_in_date, b.check_out_date, asOfDate)) continue;
+    if (bookingIdsWithKennelAssignmentOnDate.has(b.id)) continue;
+
+    if (b.room_id && poolIds.has(b.room_id) && !placeholderIds.has(b.room_id)) {
+      if (!occupiedByRoomId.has(b.room_id)) occupiedByRoomId.set(b.room_id, b);
       continue;
     }
-    if (!poolIds.has(b.room_id)) continue;
-    if (!occupiedByRoomId.has(b.room_id)) occupiedByRoomId.set(b.room_id, b);
+
+    unassignedGuests.push(b);
   }
 
-  const occupiedCount = occupiedByRoomId.size;
+  const roomOccupiedCount = occupiedByRoomId.size;
+  const unassignedGuestCount = unassignedGuests.length;
+  const occupiedCount = roomOccupiedCount + unassignedGuestCount;
   const availableCount = Math.max(0, total - occupiedCount);
   const pct = total > 0 ? Math.round((occupiedCount / total) * 1000) / 10 : 0;
 
@@ -111,5 +126,16 @@ export function computeBoardingOccupancyStats(args: {
 
   const groupOrder = buildRoomsBySection(roomsPool).order.filter((k) => byGroup.has(k));
 
-  return { total, occupiedCount, availableCount, pct, byGroup, groupOrder, importedUnassignedCount };
+  return {
+    total,
+    roomOccupiedCount,
+    unassignedGuestCount,
+    occupiedCount,
+    availableCount,
+    pct,
+    byGroup,
+    groupOrder,
+    importedUnassignedCount,
+    unassignedGuests,
+  };
 }
