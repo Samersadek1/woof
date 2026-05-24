@@ -84,7 +84,6 @@ import {
 } from "@/lib/boardingUnknownKennel";
 import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
-import { resolveBoardingRate } from "@/lib/boardingPricing";
 import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
@@ -106,7 +105,12 @@ import {
 } from "@/lib/transportPricing";
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
 import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErrors";
-import { DEFAULT_DOG_SIZE, type DogSizeFormValue } from "@/lib/dogSizeForm";
+import {
+  largestDogSizeFormValue,
+  petSizeToDogSizeFormValue,
+  type DogSizeFormValue,
+} from "@/lib/dogSizeForm";
+import { resolveBoardingStayRates } from "@/lib/boardingPricing";
 import {
   Check,
   ChevronLeft,
@@ -134,11 +138,6 @@ type BookingStatus = Database["public"]["Enums"]["booking_status"];
 type RoomWing = Database["public"]["Enums"]["room_wing"];
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
 type BillingAdjustmentRow = Database["public"]["Tables"]["billing_adjustments"]["Row"];
-type CatRoomType =
-  | "cattery_super_presidential"
-  | "cattery_presidential"
-  | "cattery_deluxe";
-
 function showCreateBookingErrorToast(options: {
   err: unknown;
   navigate: ReturnType<typeof useNavigate>;
@@ -245,18 +244,6 @@ const WING_ORDER: string[] = [
   "dluxe",
   "standard_room",
 ];
-
-const CAT_TIER_ORDER: CatRoomType[] = [
-  "cattery_super_presidential",
-  "cattery_presidential",
-  "cattery_deluxe",
-];
-
-const CAT_TIER_LABELS: Record<CatRoomType, string> = {
-  cattery_super_presidential: "Super Presidential",
-  cattery_presidential: "Presidential",
-  cattery_deluxe: "Deluxe",
-};
 
 const STATUS_CLASSES: Record<BookingStatus, string> = {
   draft: "bg-slate-300 text-white hover:bg-slate-400",
@@ -930,7 +917,6 @@ type NewBookingForm = {
   addon_enabled: Record<string, boolean>;
   /** Staff-editable AED amounts per add-on (string for controlled inputs). */
   addon_price_aed: Record<string, string>;
-  room_rate_type: "peak" | "off_peak";
   pet_care_by_pet_id: Record<
     string,
     {
@@ -939,8 +925,8 @@ type NewBookingForm = {
       special_instructions: string;
     }
   >;
-  /** Client-selected size (Small / Medium / Large / Extra Large). */
-  dog_size: DogSizeFormValue;
+  /** From pet profile when set; required on save when any selected dog lacks `size`. */
+  dog_size: DogSizeFormValue | null;
 };
 
 const BLANK_FORM: NewBookingForm = {
@@ -960,9 +946,8 @@ const BLANK_FORM: NewBookingForm = {
   transport_dropoff_price_aed: "",
   addon_enabled: {},
   addon_price_aed: {},
-  room_rate_type: "off_peak",
   pet_care_by_pet_id: {},
-  dog_size: DEFAULT_DOG_SIZE,
+  dog_size: null,
 };
 
 export type DogBoardingCalendarProps = {
@@ -995,7 +980,7 @@ function AssignRealRoomPanel({
     <div className="rounded-md border border-amber-300 bg-amber-50/80 p-3 space-y-2">
       <p className="text-xs font-semibold text-amber-900">Imported — assign real room</p>
       <p className="text-xs text-amber-800/90">
-        This stay is on a tier placeholder. Choose a real kennel to move it off Unknown.
+        This stay is on an import placeholder. Choose a real kennel to move it off Unknown.
       </p>
       <Select value={pickedRoomId} onValueChange={setPickedRoomId}>
         <SelectTrigger>
@@ -1060,6 +1045,7 @@ export function DogBoardingCalendar({
   const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
   const [form, setForm] = useState<NewBookingForm>({ ...BLANK_FORM });
   const [roomPickerOpen, setRoomPickerOpen] = useState(false);
+  const [roomSearch, setRoomSearch] = useState("");
   const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
   const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
   const [belongingsReadOnly, setBelongingsReadOnly] = useState(false);
@@ -1122,16 +1108,28 @@ export function DogBoardingCalendar({
       dogRatePetCount,
       form.check_in_date,
       form.check_out_date,
-      form.room_rate_type,
     ],
-    enabled: !!form.room_id,
+    enabled: Boolean(form.room_id && form.check_in_date && form.check_out_date),
     queryFn: async () =>
-      resolveBoardingRate(form.room_id, dogRatePetCount, {
-        checkInDate: form.check_in_date || null,
-        checkOutDate: form.check_out_date || null,
-        rateType: form.room_rate_type,
-      }),
+      resolveBoardingStayRates(
+        form.room_id,
+        dogRatePetCount,
+        form.check_in_date,
+        form.check_out_date,
+      ),
   });
+
+  const dogsMissingProfileSize = useMemo(() => {
+    return form.pet_ids
+      .map((id) => dogBoardingPets.find((p) => p.id === id))
+      .filter((p): p is NonNullable<typeof p> => !!p && !p.size);
+  }, [form.pet_ids, dogBoardingPets]);
+
+  const dogSizeMissingHint = useMemo(() => {
+    if (dogsMissingProfileSize.length === 0) return null;
+    const names = dogsMissingProfileSize.map((p) => p.name ?? "Dog").join(", ");
+    return `${names} ${dogsMissingProfileSize.length === 1 ? "has" : "have"} no size on the pet profile — choose a size for this stay.`;
+  }, [dogsMissingProfileSize]);
 
   const dogTransportEstimate = useMemo(() => {
     if (!form.pickup_required && !form.dropoff_required) return 0;
@@ -1285,16 +1283,35 @@ export function DogBoardingCalendar({
 
   const assignableDogRooms = dogFacilityRooms;
 
+  const filteredAssignableDogRooms = useMemo(() => {
+    const q = roomSearch.trim().toLowerCase();
+    if (!q) return assignableDogRooms;
+    return assignableDogRooms.filter((r) => {
+      const wl = (WING_LABELS[r.wing] ?? r.wing.replace(/_/g, " ")).toLowerCase();
+      return (
+        r.display_name.toLowerCase().includes(q) ||
+        r.room_number.toLowerCase().includes(q) ||
+        wl.includes(q) ||
+        r.wing.toLowerCase().includes(q)
+      );
+    });
+  }, [assignableDogRooms, roomSearch]);
+
   // rooms grouped by wing (facility only — placeholders render in UnknownKennel section)
   const roomsByWing = useMemo(() => {
-    const map = new Map<string, typeof rooms>();
+    const map = new Map<string, Room[]>();
     WING_ORDER.forEach((w) => map.set(w, []));
-    dogFacilityRooms.forEach((r) => {
+    filteredAssignableDogRooms.forEach((r) => {
       if (!map.has(r.wing)) map.set(r.wing, []);
       map.get(r.wing)!.push(r);
     });
+    for (const list of map.values()) {
+      list.sort((a, b) =>
+        a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
+      );
+    }
     return map;
-  }, [dogFacilityRooms]);
+  }, [filteredAssignableDogRooms]);
 
   // booking lookup: roomId → bookings (for this window)
   const bookingsByRoom = useMemo(() => {
@@ -1321,8 +1338,21 @@ export function DogBoardingCalendar({
 
   // clear pets when owner changes
   useEffect(() => {
-    setForm((f) => ({ ...f, pet_ids: [], pet_care_by_pet_id: {} }));
+    setForm((f) => ({ ...f, pet_ids: [], pet_care_by_pet_id: {}, dog_size: null }));
   }, [form.owner_id]);
+
+  useEffect(() => {
+    if (!newBookingOpen || form.pet_ids.length === 0) return;
+    const profileSizes = form.pet_ids
+      .map((id) => dogBoardingPets.find((p) => p.id === id))
+      .filter((p): p is NonNullable<typeof p> => !!p)
+      .map((p) => petSizeToDogSizeFormValue(p.size))
+      .filter((s): s is DogSizeFormValue => s != null);
+    if (profileSizes.length === form.pet_ids.length) {
+      const derived = largestDogSizeFormValue(profileSizes);
+      if (derived) setForm((f) => ({ ...f, dog_size: derived }));
+    }
+  }, [newBookingOpen, form.pet_ids, dogBoardingPets]);
 
   const getInitialPetCare = (petId: string) => {
     const pet = ownerPets.find((p) => p.id === petId);
@@ -1358,6 +1388,10 @@ export function DogBoardingCalendar({
     }
     if (form.pet_ids.length === 0) {
       toast.error("Select at least one pet for this stay");
+      return;
+    }
+    if (!form.dog_size) {
+      toast.error("Select dog size for this stay (required when size is missing on the profile)");
       return;
     }
     const catInSelection = form.pet_ids.some(
@@ -1404,7 +1438,10 @@ export function DogBoardingCalendar({
       notes: [
         form.notes,
         form.staff_name.trim() ? `Created by: ${form.staff_name.trim()}` : "",
-        `Rate type: ${form.room_rate_type === "off_peak" ? "Off-peak" : "Peak"}`,
+        dogRatePreview.data
+          ? `Rate: ${dogRatePreview.data.seasonSummary}`
+          : "",
+        `Dog size: ${form.dog_size}`,
         addons ? `Add-ons: ${addons}` : "",
       ]
         .filter(Boolean)
@@ -1415,6 +1452,7 @@ export function DogBoardingCalendar({
       staff_id: null,
       status: "confirmed",
       booking_type: "boarding",
+      dog_size: form.dog_size,
     };
 
     createBooking.mutate(payload, {
@@ -1475,7 +1513,6 @@ export function DogBoardingCalendar({
           petCount: form.pet_ids.length,
           checkInDate: form.check_in_date,
           checkOutDate: form.check_out_date,
-          roomRateType: form.room_rate_type,
           addons: addonItems,
         })
           .then(async () => {
@@ -1898,7 +1935,13 @@ export function DogBoardingCalendar({
             {/* Room */}
             <div className="space-y-2">
               <Label>Room <span className="text-destructive">*</span></Label>
-              <Popover open={roomPickerOpen} onOpenChange={setRoomPickerOpen}>
+              <Popover
+                open={roomPickerOpen}
+                onOpenChange={(open) => {
+                  setRoomPickerOpen(open);
+                  if (!open) setRoomSearch("");
+                }}
+              >
                 <PopoverTrigger asChild>
                   <Button
                     data-testid="boarding-room-select"
@@ -1917,22 +1960,18 @@ export function DogBoardingCalendar({
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                  <Command filter={(value, search) => {
-                    const r = rooms.find((rm) => rm.id === value);
-                    if (!r) return 0;
-                    const q = search.toLowerCase();
-                    const wl = (WING_LABELS[r.wing] ?? r.wing.replace(/_/g, " ")).toLowerCase();
-                    if (
-                      r.display_name.toLowerCase().includes(q) ||
-                      r.room_number.toLowerCase().includes(q) ||
-                      wl.includes(q) ||
-                      r.wing.toLowerCase().includes(q)
-                    ) return 1;
-                    return 0;
-                  }}>
-                    <CommandInput placeholder="Search room name, number, or wing..." />
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      placeholder="Search room name, number, or wing..."
+                      value={roomSearch}
+                      onValueChange={setRoomSearch}
+                    />
                     <CommandList>
-                      <CommandEmpty>No rooms found.</CommandEmpty>
+                      <CommandEmpty>
+                        {assignableDogRooms.length === 0
+                          ? "No dog boarding rooms configured."
+                          : "No rooms match your search."}
+                      </CommandEmpty>
                       {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
                         const wingRooms = roomsByWing.get(wing) ?? [];
                         if (wingRooms.length === 0) return null;
@@ -1966,17 +2005,18 @@ export function DogBoardingCalendar({
                   ) : dogRatePreview.data ? (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        Resolved {form.room_rate_type === "off_peak" ? "off-peak" : "peak"} nightly price ({dogRatePetCount} pet{dogRatePetCount !== 1 ? "s" : ""})
+                        {dogRatePreview.data.seasonSummary} · {dogRatePetCount} pet{dogRatePetCount !== 1 ? "s" : ""}
+                        {dogNights > 0
+                          ? ` · ${dogNights} night${dogNights !== 1 ? "s" : ""}`
+                          : ""}
                       </p>
                       <p className="text-sm font-medium">
-                        {formatAed(dogRatePreview.data.unitPrice)} <span className="text-xs text-muted-foreground">({dogRatePreview.data.pricingKey})</span>
+                        {formatAed(dogRatePreview.data.totalAed)}{" "}
+                        <span className="text-xs text-muted-foreground">(boarding_night)</span>
                       </p>
-                      {dogNights > 0 ? (
+                      {dogRatePreview.data.peakNights > 0 && dogRatePreview.data.offPeakNights > 0 ? (
                         <p className="text-xs text-muted-foreground">
-                          {dogNights} night{dogNights !== 1 ? "s" : ""} total:{" "}
-                          <span className="font-medium text-foreground">
-                            {formatAed(dogRatePreview.data.unitPrice * dogNights)}
-                          </span>
+                          Peak and off-peak nights are priced separately on the invoice.
                         </p>
                       ) : null}
                     </>
@@ -1985,24 +2025,6 @@ export function DogBoardingCalendar({
                   )}
                 </div>
               )}
-            </div>
-
-            <div className="space-y-2">
-              <Label>Room rate type</Label>
-              <Select
-                value={form.room_rate_type}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, room_rate_type: v as "peak" | "off_peak" }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="peak">Peak rate</SelectItem>
-                  <SelectItem value="off_peak">Off peak rate</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             <Separator />
@@ -2070,6 +2092,8 @@ export function DogBoardingCalendar({
                 name="boarding-dog-new-booking"
                 value={form.dog_size}
                 onChange={(v) => setForm((f) => ({ ...f, dog_size: v }))}
+                required={dogsMissingProfileSize.length > 0 || !form.dog_size}
+                missingProfileHint={dogSizeMissingHint}
               />
             </div>
 
@@ -2706,7 +2730,6 @@ type CatBookingForm = {
   transport_dropoff_price_aed: string;
   addon_enabled: Record<string, boolean>;
   addon_price_aed: Record<string, string>;
-  room_rate_type: "peak" | "off_peak";
   cat_litter_type: string;
   cat_indoor_only: boolean;
   cat_ok_share_family: boolean;
@@ -2737,7 +2760,6 @@ const CAT_BLANK_FORM: CatBookingForm = {
   transport_dropoff_price_aed: "",
   addon_enabled: {},
   addon_price_aed: {},
-  room_rate_type: "off_peak",
   cat_litter_type: "",
   cat_indoor_only: false,
   cat_ok_share_family: true,
@@ -2787,15 +2809,25 @@ function CatBoardingCalendar({
 
   const catRooms = catFacilityRooms;
 
-  const roomsByTier = useMemo(() => {
-    const map = new Map<CatRoomType, Room[]>();
-    CAT_TIER_ORDER.forEach((t) => map.set(t, []));
+  const roomsByWing = useMemo(() => {
+    const map = new Map<string, Room[]>();
     catRooms.forEach((r) => {
-      const rt = r.room_type as CatRoomType;
-      if (map.has(rt)) map.get(rt)!.push(r);
+      if (!map.has(r.wing)) map.set(r.wing, []);
+      map.get(r.wing)!.push(r);
     });
+    for (const list of map.values()) {
+      list.sort((a, b) =>
+        a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
+      );
+    }
     return map;
   }, [catRooms]);
+
+  const catWingOrder = useMemo(() => {
+    const wings = Array.from(roomsByWing.keys());
+    const ordered = ["cattery", ...WING_ORDER.filter((w) => w !== "cattery" && wings.includes(w))];
+    return [...ordered, ...wings.filter((w) => !ordered.includes(w))];
+  }, [roomsByWing]);
 
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
@@ -2862,15 +2894,15 @@ function CatBoardingCalendar({
       catRatePetCount,
       form.check_in_date,
       form.check_out_date,
-      form.room_rate_type,
     ],
-    enabled: !!form.room_id,
+    enabled: Boolean(form.room_id && form.check_in_date && form.check_out_date),
     queryFn: async () =>
-      resolveBoardingRate(form.room_id, catRatePetCount, {
-        checkInDate: form.check_in_date || null,
-        checkOutDate: form.check_out_date || null,
-        rateType: form.room_rate_type,
-      }),
+      resolveBoardingStayRates(
+        form.room_id,
+        catRatePetCount,
+        form.check_in_date,
+        form.check_out_date,
+      ),
   });
 
   const catTransportEstimate = useMemo(() => {
@@ -3115,7 +3147,7 @@ function CatBoardingCalendar({
       notes: [
         form.notes,
         form.staff_name.trim() ? `Created by: ${form.staff_name.trim()}` : "",
-        `Rate type: ${form.room_rate_type === "off_peak" ? "Off-peak" : "Peak"}`,
+        catRatePreview.data ? `Rate: ${catRatePreview.data.seasonSummary}` : "",
         catBlock,
         addons ? `Add-ons: ${addons}` : "",
       ]
@@ -3187,7 +3219,6 @@ function CatBoardingCalendar({
           petCount: form.pet_ids.length,
           checkInDate: form.check_in_date,
           checkOutDate: form.check_out_date,
-          roomRateType: form.room_rate_type,
           addons: addonItems,
         })
           .then(async () => {
@@ -3333,15 +3364,17 @@ function CatBoardingCalendar({
                 })}
               </div>
 
-              {CAT_TIER_ORDER.map((tier) => {
-                const tierRooms = roomsByTier.get(tier) ?? [];
-                if (tierRooms.length === 0) return null;
+              {catWingOrder.map((wing) => {
+                const wingRooms = roomsByWing.get(wing) ?? [];
+                if (wingRooms.length === 0) return null;
                 return (
-                  <div key={tier}>
+                  <div key={wing}>
                     <div className="flex sticky left-0 bg-violet-50 border-b border-t border-border" style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}>
-                      <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-violet-900">{CAT_TIER_LABELS[tier]}</div>
+                      <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-violet-900">
+                        {WING_LABELS[wing] ?? wing.replace(/_/g, " ")}
+                      </div>
                     </div>
-                    {tierRooms.map((room) => (
+                    {wingRooms.map((room) => (
                       <div key={room.id} className="flex">
                         <div style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }} className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card">
                           <span className="truncate" title={`${room.room_number} — ${room.room_type?.replace(/_/g, " ")} (${room.capacity_type})`}>
@@ -3524,20 +3557,16 @@ function CatBoardingCalendar({
               <Select value={form.room_id} onValueChange={(v) => setForm((f) => ({ ...f, room_id: v }))}>
                 <SelectTrigger><SelectValue placeholder="Select room" /></SelectTrigger>
                 <SelectContent>
-                  {CAT_TIER_ORDER.map((tier) => {
-                    const tr = roomsByTier.get(tier) ?? [];
-                    if (tr.length === 0) return null;
-                    return (
-                      <div key={tier}>
-                        <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase">{CAT_TIER_LABELS[tier]}</div>
-                        {tr.map((r) => (
-                          <SelectItem key={r.id} value={r.id}>
-                            {r.room_number} — <span className="capitalize text-muted-foreground">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
-                          </SelectItem>
-                        ))}
-                      </div>
-                    );
-                  })}
+                  {catRooms
+                    .slice()
+                    .sort((a, b) =>
+                      a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
+                    )
+                    .map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.room_number} — <span className="capitalize text-muted-foreground">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
               {form.room_id && (
@@ -3547,17 +3576,18 @@ function CatBoardingCalendar({
                   ) : catRatePreview.data ? (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        Resolved {form.room_rate_type === "off_peak" ? "off-peak" : "peak"} nightly price ({catRatePetCount} pet{catRatePetCount !== 1 ? "s" : ""})
+                        {catRatePreview.data.seasonSummary} · {catRatePetCount} pet{catRatePetCount !== 1 ? "s" : ""}
+                        {catNights > 0
+                          ? ` · ${catNights} night${catNights !== 1 ? "s" : ""}`
+                          : ""}
                       </p>
                       <p className="text-sm font-medium">
-                        {formatAed(catRatePreview.data.unitPrice)} <span className="text-xs text-muted-foreground">({catRatePreview.data.pricingKey})</span>
+                        {formatAed(catRatePreview.data.totalAed)}{" "}
+                        <span className="text-xs text-muted-foreground">(boarding_night)</span>
                       </p>
-                      {catNights > 0 ? (
+                      {catRatePreview.data.peakNights > 0 && catRatePreview.data.offPeakNights > 0 ? (
                         <p className="text-xs text-muted-foreground">
-                          {catNights} night{catNights !== 1 ? "s" : ""} total:{" "}
-                          <span className="font-medium text-foreground">
-                            {formatAed(catRatePreview.data.unitPrice * catNights)}
-                          </span>
+                          Peak and off-peak nights are priced separately on the invoice.
                         </p>
                       ) : null}
                     </>
@@ -3566,24 +3596,6 @@ function CatBoardingCalendar({
                   )}
                 </div>
               )}
-            </div>
-
-            <div className="space-y-2">
-              <Label>Room rate type</Label>
-              <Select
-                value={form.room_rate_type}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, room_rate_type: v as "peak" | "off_peak" }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="peak">Peak rate</SelectItem>
-                  <SelectItem value="off_peak">Off peak rate</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -4019,17 +4031,6 @@ type BoardingListFocus = "all" | "check-ins" | "check-outs";
 const OCCUPANCY_BOOKING_SELECT =
   "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts))";
 
-const OCCUPANCY_SUITE_GROUPS: readonly string[] = [
-  "Standard Suite",
-  "Deluxe Suite",
-  "Royal Suite",
-  "Presidential Suite",
-  "Little Gems Chalet",
-  "Little Gems Community Board",
-  "Family Room",
-  "Other",
-];
-
 function boardingBookingOverlapsDate(
   b: Pick<BookingWithDetails, "check_in_date" | "check_out_date" | "status">,
   asOf: string,
@@ -4050,21 +4051,13 @@ function occupancyPlaceholderRooms(rooms: Room[], species: Species): Room[] {
   return placeholders.filter((r) => r.is_active);
 }
 
-function occupancySuiteGroupLabel(room: Room, species: Species): string {
-  if (species === "cat") {
-    if (room.wing !== "cattery") return "Other";
-    if (room.room_type === "cattery_super_presidential") return "Presidential Suite";
-    if (room.room_type === "cattery_presidential") return "Royal Suite";
-    if (room.room_type === "cattery_deluxe") return "Deluxe Suite";
-    return "Other";
-  }
-  if (room.wing === "bond_rooms") return "Little Gems Chalet";
-  if (room.wing === "dluxe" || room.wing === "standard_room") return "Little Gems Community Board";
-  if (room.room_type === "family_room") return "Family Room";
-  const rt = String(room.room_type ?? "");
-  if (rt.includes("presidential")) return "Presidential Suite";
-  if (rt.includes("royal") || room.room_type === "royal_annex") return "Royal Suite";
-  return "Standard Suite";
+function occupancyWingGroupLabel(wing: string): string {
+  return WING_LABELS[wing] ?? wing.replace(/_/g, " ");
+}
+
+function occupancyWingGroupOrder(species: Species): string[] {
+  if (species === "cat") return ["cattery"];
+  return [...WING_ORDER, "other"];
 }
 
 function BoardingOperationsList({
@@ -4285,17 +4278,14 @@ function BoardingHubPage() {
     const pct = total > 0 ? Math.round((occupiedCount / total) * 1000) / 10 : 0;
 
     const byGroup = new Map<string, { occupied: { room: Room; booking: BookingWithDetails }[]; available: Room[] }>();
-    for (const g of OCCUPANCY_SUITE_GROUPS) {
-      byGroup.set(g, { occupied: [], available: [] });
-    }
 
     const sortRooms = (a: Room, b: Room) =>
       a.room_number.localeCompare(b.room_number, undefined, { numeric: true });
 
     for (const room of roomsPool) {
-      const g = occupancySuiteGroupLabel(room, species);
-      const bucket = byGroup.get(g);
-      if (!bucket) continue;
+      const wingKey = room.wing;
+      if (!byGroup.has(wingKey)) byGroup.set(wingKey, { occupied: [], available: [] });
+      const bucket = byGroup.get(wingKey)!;
       const bk = occupiedByRoomId.get(room.id);
       if (bk) bucket.occupied.push({ room, booking: bk });
       else bucket.available.push(room);
@@ -4305,7 +4295,13 @@ function BoardingHubPage() {
       b.available.sort(sortRooms);
     }
 
-    return { total, occupiedCount, availableCount, pct, byGroup, importedUnassignedCount };
+    const preferredWings = occupancyWingGroupOrder(species);
+    const groupOrder = [
+      ...preferredWings.filter((w) => byGroup.has(w)),
+      ...Array.from(byGroup.keys()).filter((w) => !preferredWings.includes(w)),
+    ];
+
+    return { total, occupiedCount, availableCount, pct, byGroup, groupOrder, importedUnassignedCount };
   }, [occRaw, facilityRooms, species, occupancyDate]);
 
   return (
@@ -4358,16 +4354,17 @@ function BoardingHubPage() {
             {occupancyStats.importedUnassignedCount > 0 && (
               <p className="text-sm rounded-md border border-amber-200 bg-amber-50/90 px-3 py-2 text-amber-900">
                 <span className="font-medium">{occupancyStats.importedUnassignedCount}</span> imported stay
-                {occupancyStats.importedUnassignedCount !== 1 ? "s" : ""} on unknown tier placeholders (excluded from occupancy %).
+                {occupancyStats.importedUnassignedCount !== 1 ? "s" : ""} on import placeholders (excluded from occupancy %).
               </p>
             )}
 
-            {OCCUPANCY_SUITE_GROUPS.map((groupName) => {
-              const bucket = occupancyStats.byGroup.get(groupName);
+            {occupancyStats.groupOrder.map((wingKey) => {
+              const bucket = occupancyStats.byGroup.get(wingKey);
               if (!bucket) return null;
               if (bucket.occupied.length === 0 && bucket.available.length === 0) return null;
+              const groupName = occupancyWingGroupLabel(wingKey);
               return (
-                <section key={groupName} className="space-y-2 rounded-lg border p-3">
+                <section key={wingKey} className="space-y-2 rounded-lg border p-3">
                   <h3 className="text-sm font-semibold">{groupName}</h3>
                   {bucket.occupied.length > 0 ? (
                     <div className="space-y-1">

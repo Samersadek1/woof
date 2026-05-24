@@ -19,3 +19,32 @@ export const DOG_SIZE_FORM_OPTIONS = ["Small", "Medium", "Large", "Extra Large"]
 export type DogSizeFormValue = (typeof DOG_SIZE_FORM_OPTIONS)[number];
 
 export const DEFAULT_DOG_SIZE: DogSizeFormValue = "Medium";
+
+const PET_SIZE_TO_FORM: Record<string, DogSizeFormValue> = {
+  small: "Small",
+  medium: "Medium",
+  large: "Large",
+};
+
+const FORM_SIZE_RANK: Record<DogSizeFormValue, number> = {
+  Small: 0,
+  Medium: 1,
+  Large: 2,
+  "Extra Large": 3,
+};
+
+/** Map `pets.size` enum to the boarding/grooming form label, if set. */
+export function petSizeToDogSizeFormValue(
+  size: string | null | undefined,
+): DogSizeFormValue | null {
+  if (!size) return null;
+  return PET_SIZE_TO_FORM[size.toLowerCase()] ?? null;
+}
+
+/** When multiple dogs are on a stay, bill at the largest profile size present. */
+export function largestDogSizeFormValue(sizes: DogSizeFormValue[]): DogSizeFormValue | null {
+  if (sizes.length === 0) return null;
+  return sizes.reduce((max, cur) =>
+    FORM_SIZE_RANK[cur] > FORM_SIZE_RANK[max] ? cur : max,
+  );
+}

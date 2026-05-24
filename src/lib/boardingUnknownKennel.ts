@@ -116,27 +116,20 @@ export function splitFacilityAndPlaceholderRooms(rooms: Room[], species: "dog" |
   return { facility, placeholders };
 }
 
+/** Active import placeholder rows, sorted for calendar display (no tier grouping). */
+export function sortImportPlaceholderRooms(rooms: Room[]): Room[] {
+  return rooms
+    .filter(isImportPlaceholderRoom)
+    .sort((a, b) =>
+      a.display_name.localeCompare(b.display_name, undefined, { numeric: true }),
+    );
+}
+
+/** @deprecated Use sortImportPlaceholderRooms — woof UI no longer groups placeholders by tier. */
 export function groupPlaceholderRoomsByTier(rooms: Room[], species: "dog" | "cat") {
-  const order = species === "cat" ? CAT_UNKNOWN_TIER_ORDER : DOG_UNKNOWN_TIER_ORDER;
-  const labels = species === "cat" ? CAT_UNKNOWN_TIER_LABELS : DOG_UNKNOWN_TIER_LABELS;
-  const map = new Map<string, Room[]>();
-  for (const t of order) map.set(t, []);
-
-  for (const room of rooms.filter(isImportPlaceholderRoom)) {
-    const tier = placeholderTierForRoom(room, species) ?? "unknown";
-    if (!map.has(tier)) map.set(tier, []);
-    map.get(tier)!.push(room);
-  }
-
-  return order
-    .map((tier) => ({
-      tier,
-      label: labels[tier as keyof typeof labels] ?? tier,
-      rooms: (map.get(tier) ?? []).sort((a, b) =>
-        a.display_name.localeCompare(b.display_name),
-      ),
-    }))
-    .filter((g) => g.rooms.length > 0);
+  const sorted = sortImportPlaceholderRooms(rooms);
+  if (sorted.length === 0) return [];
+  return [{ tier: "unknown", label: "Imported", rooms: sorted }];
 }
 
 export const IMPORT_PLACEHOLDER_STATUS_CLASS =

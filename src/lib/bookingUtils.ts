@@ -1,7 +1,8 @@
 import { differenceInCalendarDays, addDays, format, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
-import { resolveBoardingRate } from "@/lib/boardingPricing";
+import { resolveBoardingStayRates } from "@/lib/boardingPricing";
+import { boardingRateSeasonLabel } from "@/lib/boardingSeason";
 import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import { serviceTypeForBoardingAddonKey } from "@/lib/groomingCatalog";
 import { netFromGrossInclusive, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
@@ -247,31 +248,50 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
   const nights = differenceInCalendarDays(parseISO(checkOutDate), parseISO(checkInDate));
   if (nights <= 0) return;
 
-  const [addonPriceMap, rateResolved] = await Promise.all([
+  const [addonPriceMap, stayRates] = await Promise.all([
     resolveAddonPricesForKeys(addons.map((a) => a.key)),
-    resolveBoardingRate(roomId, petCount, {
-      checkInDate,
-      checkOutDate,
-      rateType: roomRateType,
-    }),
+    resolveBoardingStayRates(roomId, petCount, checkInDate, checkOutDate),
   ]);
 
-  const occ = occupancyTag(petCount);
-  const nightlyRate = rateResolved.unitPrice;
+  void roomRateType;
 
+  const occ = occupancyTag(petCount);
   const typeLabel = roomType.replace(/_/g, " ");
   const occLabel = petCount > 1 ? ` (${occ})` : "";
-  const lineLabel = roomName
-    ? `${roomName} — ${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`
-    : `${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`;
+  const roomPrefix = roomName ? `${roomName} — ` : "";
 
-  const lineItems: ServiceInvoiceLineItem[] = [{
-    description: lineLabel,
-    quantity: nights,
-    unitPrice: nightlyRate,
-    pricingKey: rateResolved.pricingKey,
-    serviceType: "boarding",
-  }];
+  const lineItems: ServiceInvoiceLineItem[] = [];
+
+  const pushNightGroup = (
+    groupNights: typeof stayRates.nights,
+    season: "peak" | "off_peak",
+  ) => {
+    if (groupNights.length === 0) return;
+    const unitPrice = groupNights[0].unitPrice;
+    const seasonLabel = boardingRateSeasonLabel(season);
+    lineItems.push({
+      description: `${roomPrefix}${typeLabel}${occLabel} — ${groupNights.length} ${seasonLabel.toLowerCase()} night${groupNights.length !== 1 ? "s" : ""}`,
+      quantity: groupNights.length,
+      unitPrice,
+      pricingKey: groupNights[0].pricingKey,
+      serviceType: "boarding",
+    });
+  };
+
+  const peakGroup = stayRates.nights.filter((n) => n.isPeak);
+  const offPeakGroup = stayRates.nights.filter((n) => !n.isPeak);
+  pushNightGroup(peakGroup, "peak");
+  pushNightGroup(offPeakGroup, "off_peak");
+
+  if (lineItems.length === 0) {
+    lineItems.push({
+      description: `${roomPrefix}${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`,
+      quantity: nights,
+      unitPrice: 0,
+      pricingKey: "boarding_night",
+      serviceType: "boarding",
+    });
+  }
 
   for (const addon of addons) {
     const qty = Math.max(1, addon.quantity ?? 1);

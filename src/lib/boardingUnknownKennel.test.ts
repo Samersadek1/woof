@@ -3,7 +3,7 @@ import {
   inferImportTier,
   isImportPlaceholderRoom,
   splitFacilityAndPlaceholderRooms,
-  groupPlaceholderRoomsByTier,
+  sortImportPlaceholderRooms,
 } from "./boardingUnknownKennel";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -50,11 +50,10 @@ describe("boardingUnknownKennel", () => {
     expect(placeholders.map((r) => r.id)).toEqual(["p1"]);
   });
 
-  it("groups placeholders by tier label", () => {
-    const groups = groupPlaceholderRoomsByTier([placeholderStd], "dog");
-    expect(groups).toHaveLength(1);
-    expect(groups[0].tier).toBe("standard");
-    expect(groups[0].label).toBe("Standard Suite");
+  it("sorts placeholder rooms for flat calendar display", () => {
+    const sorted = sortImportPlaceholderRooms([placeholderStd]);
+    expect(sorted).toHaveLength(1);
+    expect(sorted[0].id).toBe("p1");
   });
 
   it("keeps import_placeholder wing out of facility dog pool", () => {
