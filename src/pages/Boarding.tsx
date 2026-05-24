@@ -25,7 +25,8 @@ import type {
   CreateBookingPayload,
 } from "@/hooks/useBookings";
 import {
-  assignmentCalendarColumnSpan,
+  bookingLastOccupiedNight,
+  buildRoomCalendarDayMap,
   formatRoomAssignmentsSummary,
   roomLabelForBooking,
   sortedAssignmentSlices,
@@ -206,9 +207,6 @@ function showCreateBookingErrorToast(options: {
 const DAYS = 14;
 const ROOM_COL_W = 160; // px
 const DAY_COL_W = 100;  // px
-/** Calendar row for bookings with no room assigned */
-const UNASSIGNED_CALENDAR_ROW = "__unassigned__";
-
 const WING_LABELS: Record<string, string> = {
   oxford: "Oxford Street",
   piccadilly: "Piccadilly",
@@ -1409,6 +1407,18 @@ export function DogBoardingCalendar({
       };
     }, [bookings, roomAssignments, facilityRoomIds]);
 
+  const sortedUnassignedBookings = useMemo(
+    () =>
+      [...unassignedBookings].sort((a, b) => {
+        const byCheckIn = a.check_in_date.localeCompare(b.check_in_date);
+        if (byCheckIn !== 0) return byCheckIn;
+        const petA = a.booking_pets?.[0]?.pets?.name ?? "";
+        const petB = b.booking_pets?.[0]?.pets?.name ?? "";
+        return petA.localeCompare(petB);
+      }),
+    [unassignedBookings],
+  );
+
   const assignmentsByBookingId = useMemo(() => {
     const map = new Map<string, CalendarRoomAssignment[]>();
     for (const row of roomAssignments) {
@@ -1648,66 +1658,54 @@ export function DogBoardingCalendar({
     | { kind: "assignment"; assignment: CalendarRoomAssignment }
     | { kind: "booking"; booking: BookingWithDetails };
 
-  // for a given room row, render booking chips + empty cells
-  const renderRoomRow = (roomId: string, isPlaceholder = false) => {
-    const segments: CalendarSegment[] =
-      roomId === UNASSIGNED_CALENDAR_ROW
-        ? unassignedBookings.map((booking) => ({ kind: "booking" as const, booking }))
-        : [
-            ...(assignmentsByRoom.get(roomId) ?? []).map((assignment) => ({
-              kind: "assignment" as const,
-              assignment,
-            })),
-            ...(bookingsByRoom.get(roomId) ?? []).map((booking) => ({
-              kind: "booking" as const,
-              booking,
-            })),
-          ];
-    const prefillRoomOnEmptyCell =
-      roomId !== UNASSIGNED_CALENDAR_ROW ? roomId : undefined;
-
-    const endOfWindow = toDateStr(addDays(windowStart, DAYS));
-
-    // build a day → booking map (only show chip on first visible day of each segment)
-    const dayBookingMap = new Map<string, { booking: BookingWithDetails; span: number; isFirst: boolean }>();
-
-    segments.forEach((segment) => {
+  const calendarSegmentsForMap = (segments: CalendarSegment[]) =>
+    segments.map((segment) => {
       const booking =
         segment.kind === "assignment" ? segment.assignment.bookings : segment.booking;
       const segStart =
-        segment.kind === "assignment" ? segment.assignment.start_date : segment.booking.check_in_date;
+        segment.kind === "assignment"
+          ? segment.assignment.start_date
+          : segment.booking.check_in_date;
       const segEnd =
-        segment.kind === "assignment" ? segment.assignment.end_date : segment.booking.check_out_date;
-
-      days.forEach((day, idx) => {
-        const dayStr = toDateStr(day);
-        if (dayStr >= segStart && dayStr <= segEnd) {
-          const isFirst = dayStr === segStart || idx === 0;
-          if (isFirst) {
-            const chipEnd = segEnd < endOfWindow ? segEnd : endOfWindow;
-            const span =
-              segment.kind === "assignment"
-                ? assignmentCalendarColumnSpan(segStart, chipEnd)
-                : differenceInCalendarDays(
-                    parseISO(chipEnd),
-                    parseISO(dayStr === segStart ? segStart : dayStr),
-                  );
-            dayBookingMap.set(dayStr, { booking, span: Math.max(span, 1), isFirst: true });
-          } else if (!dayBookingMap.has(dayStr)) {
-            dayBookingMap.set(dayStr, { booking, span: 1, isFirst: false });
-          }
-        }
-      });
+        segment.kind === "assignment"
+          ? segment.assignment.end_date
+          : bookingLastOccupiedNight(
+              segment.booking.check_in_date,
+              segment.booking.check_out_date,
+            );
+      return {
+        kind: segment.kind,
+        segStart,
+        segEnd,
+        payload: booking,
+      };
     });
+
+  const renderCalendarCells = (
+    segments: CalendarSegment[],
+    options?: { prefillRoomOnEmptyCell?: string; isPlaceholder?: boolean },
+  ) => {
+    const windowStartStr = toDateStr(windowStart);
+    const endOfWindow = toDateStr(addDays(windowStart, DAYS));
+    const dayStrs = days.map((day) => toDateStr(day));
+
+    const dayBookingMap = buildRoomCalendarDayMap(
+      calendarSegmentsForMap(segments),
+      dayStrs,
+      windowStartStr,
+      endOfWindow,
+    );
+    const prefillRoomOnEmptyCell = options?.prefillRoomOnEmptyCell;
+    const isPlaceholder = options?.isPlaceholder ?? false;
 
     return (
       <div className="flex">
         {days.map((day) => {
           const dayStr = toDateStr(day);
-          const entry = dayBookingMap.get(dayStr);
+          const cell = dayBookingMap.get(dayStr);
           const todayHighlight = isToday(day);
 
-          if (!entry) {
+          if (!cell) {
             return (
               <div
                 key={dayStr}
@@ -1719,7 +1717,7 @@ export function DogBoardingCalendar({
             );
           }
 
-          if (!entry.isFirst) {
+          if (!cell.isFirst) {
             // continuation cell — just a coloured bar, not clickable as chip
             return (
               <div
@@ -1730,7 +1728,7 @@ export function DogBoardingCalendar({
             );
           }
 
-          const { booking, span } = entry;
+          const { payload: booking, span } = cell;
           const label = [
             booking.booking_pets?.[0]?.pets?.name?.toUpperCase() ?? "",
             booking.owners?.last_name?.toUpperCase() ?? "",
@@ -1775,6 +1773,26 @@ export function DogBoardingCalendar({
         })}
       </div>
     );
+  };
+
+  const renderRoomRow = (roomId: string, isPlaceholder = false) => {
+    const segments: CalendarSegment[] = [
+      ...(assignmentsByRoom.get(roomId) ?? []).map((assignment) => ({
+        kind: "assignment" as const,
+        assignment,
+      })),
+      ...(bookingsByRoom.get(roomId) ?? []).map((booking) => ({
+        kind: "booking" as const,
+        booking,
+      })),
+    ];
+    return renderCalendarCells(segments, { prefillRoomOnEmptyCell: roomId, isPlaceholder });
+  };
+
+  const unassignedRowLabel = (booking: BookingWithDetails): string => {
+    const pet = booking.booking_pets?.[0]?.pets?.name ?? "";
+    const owner = booking.owners?.last_name ?? "";
+    return [pet, owner].filter(Boolean).join(" – ") || booking.booking_ref || "Unassigned";
   };
 
   const isLoading = bookingsLoading || assignmentsLoading || roomsLoading;
@@ -1911,15 +1929,32 @@ export function DogBoardingCalendar({
                     Unassigned
                   </div>
                 </div>
-                <div className="flex">
-                  <div
-                    style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
-                    className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
-                  >
-                    <span className="truncate text-muted-foreground italic">No room</span>
+                {sortedUnassignedBookings.length === 0 ? (
+                  <div className="flex">
+                    <div
+                      style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
+                      className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
+                    >
+                      <span className="truncate text-muted-foreground italic">No room</span>
+                    </div>
+                    {renderCalendarCells([])}
                   </div>
-                  {renderRoomRow(UNASSIGNED_CALENDAR_ROW)}
-                </div>
+                ) : (
+                  sortedUnassignedBookings.map((booking) => (
+                    <div key={booking.id} className="flex">
+                      <div
+                        style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
+                        className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
+                        title={unassignedRowLabel(booking)}
+                      >
+                        <span className="truncate text-muted-foreground italic">
+                          {unassignedRowLabel(booking)}
+                        </span>
+                      </div>
+                      {renderCalendarCells([{ kind: "booking", booking }])}
+                    </div>
+                  ))
+                )}
               </div>
 
               {/* Section groups + room rows (section from room name prefix, number = trailing digits) */}

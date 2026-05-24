@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, parseISO } from "date-fns";
+import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 
 import type { Database } from "@/integrations/supabase/types";
 
@@ -88,6 +88,61 @@ export function formatAssignmentDateRange(start: string, end: string): string {
 /** Calendar chip width: assignment end_date is inclusive (both start and end count). */
 export function assignmentCalendarColumnSpan(startDate: string, endDate: string): number {
   return differenceInCalendarDays(parseISO(endDate), parseISO(startDate)) + 1;
+}
+
+/** Last boarding night for calendar chips (`check_out_date` is exclusive). */
+export function bookingLastOccupiedNight(checkIn: string, checkOutExclusive: string): string {
+  const last = addDays(parseISO(checkOutExclusive), -1);
+  const checkInDate = parseISO(checkIn);
+  if (last < checkInDate) return checkIn;
+  return format(last, "yyyy-MM-dd");
+}
+
+export type RoomCalendarDayCell<T> = {
+  payload: T;
+  span: number;
+  isFirst: boolean;
+};
+
+export type RoomCalendarSegment<T> = {
+  kind: "assignment" | "booking";
+  segStart: string;
+  segEnd: string;
+  payload: T;
+};
+
+/**
+ * Maps each visible day in a room row to the guest chip shown that day.
+ * Span is measured from the first *visible* day of the segment (not idx 0),
+ * so a clipped multi-day stay does not paint over the next room guest.
+ */
+export function buildRoomCalendarDayMap<T>(
+  segments: RoomCalendarSegment<T>[],
+  dayStrs: string[],
+  windowStartStr: string,
+  endOfWindowStr: string,
+): Map<string, RoomCalendarDayCell<T>> {
+  const dayMap = new Map<string, RoomCalendarDayCell<T>>();
+
+  for (const segment of segments) {
+    const { kind, segStart, segEnd, payload } = segment;
+    const visibleSegStart = segStart < windowStartStr ? windowStartStr : segStart;
+
+    for (const dayStr of dayStrs) {
+      if (dayStr < segStart || dayStr > segEnd) continue;
+
+      const isFirst = dayStr === visibleSegStart;
+      if (isFirst) {
+        const chipEnd = segEnd < endOfWindowStr ? segEnd : endOfWindowStr;
+        const span = assignmentCalendarColumnSpan(dayStr, chipEnd);
+        dayMap.set(dayStr, { payload, span, isFirst: true });
+      } else if (!dayMap.has(dayStr)) {
+        dayMap.set(dayStr, { payload, span: 1, isFirst: false });
+      }
+    }
+  }
+
+  return dayMap;
 }
 
 export function formatRoomAssignmentsSummary(
