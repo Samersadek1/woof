@@ -25,23 +25,11 @@ export const DOG_UNKNOWN_TIER_LABELS: Record<DogUnknownTier, string> = {
   unknown: "Tier not set",
 };
 
-export const CAT_UNKNOWN_TIER_ORDER = [
-  "cattery_deluxe",
-  "cattery_presidential",
-  "cattery_super_presidential",
-  "unknown",
-] as const;
-
-export type CatUnknownTier = (typeof CAT_UNKNOWN_TIER_ORDER)[number];
-
-export const CAT_UNKNOWN_TIER_LABELS: Record<CatUnknownTier, string> = {
-  cattery_deluxe: "Deluxe",
-  cattery_presidential: "Presidential",
-  cattery_super_presidential: "Super Presidential",
-  unknown: "Tier not set",
-};
-
 const PLACEHOLDER_ROOM_NUMBER_PREFIX = "UNK-";
+
+export function isBoardingFacilityRoom(room: Pick<Room, "wing">): boolean {
+  return room.wing !== "cattery";
+}
 
 export function isImportPlaceholderRoom(room: Pick<Room, "wing" | "room_number" | "notes">): boolean {
   if (room.wing === IMPORT_PLACEHOLDER_WING) return true;
@@ -65,20 +53,10 @@ function normKennelText(...parts: (string | null | undefined)[]): string {
     .replace(/[^a-z0-9\s]/g, " ");
 }
 
-/** Infer suite tier from PetExec kennel / calendar room labels. */
-export function inferImportTier(
-  kennelText: string,
-  species: "dog" | "cat",
-): DogUnknownTier | CatUnknownTier {
+/** Infer suite tier from PetExec kennel / calendar room labels (dog boarding). */
+export function inferImportTier(kennelText: string): DogUnknownTier {
   const raw = normKennelText(kennelText);
   if (!raw || raw.includes("not assigned") || raw === "unknown" || raw === "n a") {
-    return "unknown";
-  }
-
-  if (species === "cat") {
-    if (raw.includes("super presidential")) return "cattery_super_presidential";
-    if (raw.includes("presidential")) return "cattery_presidential";
-    if (raw.includes("deluxe") || raw.includes("cattery")) return "cattery_deluxe";
     return "unknown";
   }
 
@@ -92,26 +70,19 @@ export function inferImportTier(
 
 export function placeholderTierForRoom(
   room: Pick<Room, "room_type" | "notes">,
-  species: "dog" | "cat",
-): DogUnknownTier | CatUnknownTier | null {
+): DogUnknownTier | null {
   const fromNotes = (room.notes ?? "").match(/import_placeholder_tier=([a-z0-9_]+)/i)?.[1];
   const tier = (fromNotes ?? room.room_type ?? "").toLowerCase();
-  if (species === "cat") {
-    if (tier.includes("super")) return "cattery_super_presidential";
-    if (tier.includes("presidential")) return "cattery_presidential";
-    if (tier.includes("deluxe")) return "cattery_deluxe";
-    return tier === "unknown" ? "unknown" : null;
-  }
   if (DOG_UNKNOWN_TIER_ORDER.includes(tier as DogUnknownTier)) return tier as DogUnknownTier;
   return null;
 }
 
-export function splitFacilityAndPlaceholderRooms(rooms: Room[], species: "dog" | "cat") {
+export function splitFacilityAndPlaceholderRooms(rooms: Room[]) {
   const placeholders = rooms.filter((r) => r.is_active && isImportPlaceholderRoom(r));
   const facility = rooms.filter((r) => {
     if (!r.is_active) return false;
     if (isImportPlaceholderRoom(r)) return false;
-    return species === "cat" ? r.wing === "cattery" : r.wing !== "cattery";
+    return isBoardingFacilityRoom(r);
   });
   return { facility, placeholders };
 }
@@ -126,7 +97,7 @@ export function sortImportPlaceholderRooms(rooms: Room[]): Room[] {
 }
 
 /** @deprecated Use sortImportPlaceholderRooms — woof UI no longer groups placeholders by tier. */
-export function groupPlaceholderRoomsByTier(rooms: Room[], species: "dog" | "cat") {
+export function groupPlaceholderRoomsByTier(rooms: Room[]) {
   const sorted = sortImportPlaceholderRooms(rooms);
   if (sorted.length === 0) return [];
   return [{ tier: "unknown", label: "Imported", rooms: sorted }];

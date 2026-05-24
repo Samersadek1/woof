@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import type { ReactNode } from "react";
 import type { Database } from "@/integrations/supabase/types";
 import {
@@ -9,7 +8,6 @@ import {
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
 
 type Props = {
-  species: "dog" | "cat";
   placeholderRooms: Room[];
   roomColW: number;
   dayColW: number;
@@ -18,7 +16,6 @@ type Props = {
 };
 
 export function UnknownKennelCalendarSection({
-  species,
   placeholderRooms,
   roomColW,
   dayColW,
@@ -55,11 +52,4 @@ export function UnknownKennelCalendarSection({
       ))}
     </div>
   );
-}
-
-export function isCatPlaceholderRoom(room: Pick<Room, "wing" | "room_number" | "notes">): boolean {
-  if (room.wing !== "import_placeholder") return false;
-  const n = room.room_number ?? "";
-  const notes = room.notes ?? "";
-  return n.startsWith("UNK-CAT") || notes.includes("species=cat");
 }

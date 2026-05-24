@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   inferImportTier,
+  isBoardingFacilityRoom,
   isImportPlaceholderRoom,
   splitFacilityAndPlaceholderRooms,
   sortImportPlaceholderRooms,
@@ -29,6 +30,16 @@ const facilityOxford = {
   is_active: true,
 } as Room;
 
+const catteryRoom = {
+  id: "c1",
+  wing: "cattery",
+  room_number: "1",
+  notes: "",
+  room_type: "cattery_deluxe",
+  display_name: "Cattery 1",
+  is_active: true,
+} as Room;
+
 describe("boardingUnknownKennel", () => {
   it("detects placeholder rooms", () => {
     expect(isImportPlaceholderRoom(placeholderStd)).toBe(true);
@@ -36,18 +47,22 @@ describe("boardingUnknownKennel", () => {
   });
 
   it("infers tier from kennel text", () => {
-    expect(inferImportTier("Not Assigned", "dog")).toBe("unknown");
-    expect(inferImportTier("Presidential Suite 1", "dog")).toBe("presidential");
-    expect(inferImportTier("Cattery Deluxe 2", "cat")).toBe("cattery_deluxe");
+    expect(inferImportTier("Not Assigned")).toBe("unknown");
+    expect(inferImportTier("Presidential Suite 1")).toBe("presidential");
   });
 
   it("splits facility vs placeholder pools", () => {
-    const { facility, placeholders } = splitFacilityAndPlaceholderRooms(
-      [placeholderStd, facilityOxford],
-      "dog",
-    );
+    const { facility, placeholders } = splitFacilityAndPlaceholderRooms([
+      placeholderStd,
+      facilityOxford,
+      catteryRoom,
+    ]);
     expect(facility.map((r) => r.id)).toEqual(["f1"]);
     expect(placeholders.map((r) => r.id)).toEqual(["p1"]);
+  });
+
+  it("excludes cattery wing from facility pool", () => {
+    expect(isBoardingFacilityRoom(catteryRoom)).toBe(false);
   });
 
   it("sorts placeholder rooms for flat calendar display", () => {
@@ -56,11 +71,8 @@ describe("boardingUnknownKennel", () => {
     expect(sorted[0].id).toBe("p1");
   });
 
-  it("keeps import_placeholder wing out of facility dog pool", () => {
-    const { facility } = splitFacilityAndPlaceholderRooms(
-      [placeholderStd, facilityOxford],
-      "dog",
-    );
+  it("keeps import_placeholder wing out of facility pool", () => {
+    const { facility } = splitFacilityAndPlaceholderRooms([placeholderStd, facilityOxford]);
     expect(facility.every((r) => r.wing !== "import_placeholder")).toBe(true);
   });
 });

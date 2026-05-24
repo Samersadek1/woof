@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   format,
@@ -75,7 +75,13 @@ import {
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { CheckInSheet } from "@/components/CheckInSheet";
 import { CheckOutSheet } from "@/components/CheckOutSheet";
-import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
+import {
+  buildRoomsBySection,
+  formatRoomSectionLabel,
+  getRoomSectionParts,
+  isExcludedBoardingRoom,
+  sortRoomsBySectionNumber,
+} from "@/lib/boardingRoomSections";
 import {
   splitFacilityAndPlaceholderRooms,
   isImportPlaceholderRoom,
@@ -198,7 +204,6 @@ const WING_LABELS: Record<string, string> = {
   park_lane: "Park Lane",
   fleet: "Fleet",
   back_kennels: "Back Kennels",
-  cattery: "Cat Boarding",
   grooming_upstairs: "Grooming Upstairs",
   bond_rooms: "Bond Rooms",
   dluxe: "Dluxe",
@@ -1277,41 +1282,34 @@ export function DogBoardingCalendar({
   }, [windowStart]);
 
   const { facility: dogFacilityRooms, placeholders: dogPlaceholderRooms } = useMemo(
-    () => splitFacilityAndPlaceholderRooms(rooms, "dog"),
+    () => splitFacilityAndPlaceholderRooms(rooms),
     [rooms],
   );
 
-  const assignableDogRooms = dogFacilityRooms;
+  const assignableDogRooms = useMemo(
+    () => dogFacilityRooms.filter((r) => !isExcludedBoardingRoom(r)),
+    [dogFacilityRooms],
+  );
 
   const filteredAssignableDogRooms = useMemo(() => {
     const q = roomSearch.trim().toLowerCase();
     if (!q) return assignableDogRooms;
     return assignableDogRooms.filter((r) => {
-      const wl = (WING_LABELS[r.wing] ?? r.wing.replace(/_/g, " ")).toLowerCase();
+      const { section, roomNumber, label } = getRoomSectionParts(r);
       return (
         r.display_name.toLowerCase().includes(q) ||
         r.room_number.toLowerCase().includes(q) ||
-        wl.includes(q) ||
-        r.wing.toLowerCase().includes(q)
+        label.toLowerCase().includes(q) ||
+        section.toLowerCase().includes(q) ||
+        roomNumber.includes(q)
       );
     });
   }, [assignableDogRooms, roomSearch]);
 
-  // rooms grouped by wing (facility only — placeholders render in UnknownKennel section)
-  const roomsByWing = useMemo(() => {
-    const map = new Map<string, Room[]>();
-    WING_ORDER.forEach((w) => map.set(w, []));
-    filteredAssignableDogRooms.forEach((r) => {
-      if (!map.has(r.wing)) map.set(r.wing, []);
-      map.get(r.wing)!.push(r);
-    });
-    for (const list of map.values()) {
-      list.sort((a, b) =>
-        a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
-      );
-    }
-    return map;
-  }, [filteredAssignableDogRooms]);
+  const { map: roomsBySection, order: roomSectionOrder } = useMemo(
+    () => buildRoomsBySection(filteredAssignableDogRooms),
+    [filteredAssignableDogRooms],
+  );
 
   // booking lookup: roomId → bookings (for this window)
   const bookingsByRoom = useMemo(() => {
@@ -1398,14 +1396,10 @@ export function DogBoardingCalendar({
       (id) => ownerPets.find((p) => p.id === id)?.species === "cat",
     );
     if (catInSelection) {
-      toast.error("Cats belong in Cat boarding — switch to Cats above");
+      toast.error("Cats cannot be booked for boarding in Woof");
       return;
     }
     const selectedRoom = assignableDogRooms.find((r) => r.id === form.room_id);
-    if (selectedRoom?.wing === "cattery") {
-      toast.error("Cannot book a dog into a cattery room");
-      return;
-    }
 
     const petAddonHintForNotes = selectedPetsSizeSummary(ownerPets, form.pet_ids);
     const transportLabel = transportRegionLabel(form.transport_region);
@@ -1715,32 +1709,29 @@ export function DogBoardingCalendar({
                 })}
               </div>
 
-              {/* Wing groups + room rows */}
-              {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
-                const wingRooms = roomsByWing.get(wing) ?? [];
-                if (wingRooms.length === 0) return null;
+              {/* Section groups + room rows (section from room name prefix, number = trailing digits) */}
+              {roomSectionOrder.map((sectionKey) => {
+                const sectionRooms = roomsBySection.get(sectionKey) ?? [];
+                if (sectionRooms.length === 0) return null;
                 return (
-                  <div key={wing}>
-                    {/* Wing header */}
+                  <div key={sectionKey}>
                     <div
                       className="flex sticky left-0 bg-slate-50 border-b border-t border-border"
                       style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}
                     >
                       <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {WING_LABELS[wing] ?? wing.replace(/_/g, " ")}
+                        {sectionKey}
                       </div>
                     </div>
 
-                    {/* Room rows */}
-                    {wingRooms.map((room) => (
+                    {sectionRooms.map((room) => (
                       <div key={room.id} className="flex">
-                        {/* Room label */}
                         <div
                           style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
                           className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
                         >
-                          <span className="truncate" title={`${room.room_number} — ${room.room_type?.replace(/_/g, " ")} (${room.capacity_type})`}>
-                            <span className="font-medium">{room.room_number}</span>
+                          <span className="truncate" title={`${formatRoomSectionLabel(room)} — ${room.room_type?.replace(/_/g, " ")} (${room.capacity_type})`}>
+                            <span className="font-medium">{formatRoomSectionLabel(room)}</span>
                             <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{room.room_type?.replace(/_/g, " ")} · {room.capacity_type}</span>
                           </span>
                         </div>
@@ -1753,7 +1744,6 @@ export function DogBoardingCalendar({
               })}
 
               <UnknownKennelCalendarSection
-                species="dog"
                 placeholderRooms={dogPlaceholderRooms}
                 roomColW={ROOM_COL_W}
                 dayColW={DAY_COL_W}
@@ -1773,7 +1763,7 @@ export function DogBoardingCalendar({
           <SheetHeader>
             <SheetTitle>New Booking</SheetTitle>
             <SheetDescription>
-              Dog boarding — only dogs (and non-cat pets) appear below. Pick a room in the kennel grid.
+              Boarding — dogs only. Pick a room in the kennel grid.
             </SheetDescription>
           </SheetHeader>
 
@@ -1831,7 +1821,7 @@ export function DogBoardingCalendar({
                   <p className="text-sm text-muted-foreground">No pets registered for this owner.</p>
                 ) : dogBoardingPets.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    This owner only has cats — use <strong>Cat boarding</strong> below for those stays.
+                    This owner only has cats — cats are not booked for boarding in Woof.
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -1952,8 +1942,7 @@ export function DogBoardingCalendar({
                     {form.room_id ? (() => {
                       const sel = assignableDogRooms.find((r) => r.id === form.room_id);
                       if (!sel) return "Select room";
-                      const wl = WING_LABELS[sel.wing] ?? sel.wing.replace(/_/g, " ");
-                      return `${wl} | ${sel.room_number} — ${sel.room_type?.replace(/_/g, " ")} · ${sel.capacity_type}`;
+                      return `${formatRoomSectionLabel(sel)} — ${sel.room_type?.replace(/_/g, " ")} · ${sel.capacity_type}`;
                     })() : "Select room"}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -1961,7 +1950,7 @@ export function DogBoardingCalendar({
                 <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
                   <Command shouldFilter={false}>
                     <CommandInput
-                      placeholder="Search room name, number, or wing..."
+                      placeholder="Search room name, number, or section..."
                       value={roomSearch}
                       onValueChange={setRoomSearch}
                     />
@@ -1971,13 +1960,12 @@ export function DogBoardingCalendar({
                           ? "No dog boarding rooms configured."
                           : "No rooms match your search."}
                       </CommandEmpty>
-                      {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
-                        const wingRooms = roomsByWing.get(wing) ?? [];
-                        if (wingRooms.length === 0) return null;
-                        const wingLabel = WING_LABELS[wing] ?? wing.replace(/_/g, " ");
+                      {roomSectionOrder.map((sectionKey) => {
+                        const sectionRooms = roomsBySection.get(sectionKey) ?? [];
+                        if (sectionRooms.length === 0) return null;
                         return (
-                          <CommandGroup key={wing} heading={wingLabel}>
-                            {wingRooms.map((r) => (
+                          <CommandGroup key={sectionKey} heading={sectionKey}>
+                            {sectionRooms.map((r) => (
                               <CommandItem
                                 key={r.id}
                                 value={r.id}
@@ -1987,7 +1975,7 @@ export function DogBoardingCalendar({
                                 }}
                               >
                                 <Check className={`mr-2 h-4 w-4 ${form.room_id === r.id ? "opacity-100" : "opacity-0"}`} />
-                                {r.room_number} — <span className="capitalize text-muted-foreground ml-1">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
+                                {formatRoomSectionLabel(r)} — <span className="capitalize text-muted-foreground ml-1">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -2711,1319 +2699,8 @@ export function DogBoardingCalendar({
   );
 }
 
-// ─── cat boarding form ────────────────────────────────────────────────────────
-
-type CatBookingForm = {
-  owner_id: string;
-  room_id: string;
-  check_in_date: string;
-  check_out_date: string;
-  pet_ids: string[];
-  notes: string;
-  staff_name: string;
-  do_not_move: boolean;
-  pickup_required: boolean;
-  dropoff_required: boolean;
-  transport_region: BoardingTransportRegion;
-  transport_pickup_price_aed: string;
-  transport_dropoff_price_aed: string;
-  addon_enabled: Record<string, boolean>;
-  addon_price_aed: Record<string, string>;
-  cat_litter_type: string;
-  cat_indoor_only: boolean;
-  cat_ok_share_family: boolean;
-  cat_special_diet: string;
-  pet_care_by_pet_id: Record<
-    string,
-    {
-      feeding_notes: string;
-      medication_notes: string;
-      special_instructions: string;
-    }
-  >;
-};
-
-const CAT_BLANK_FORM: CatBookingForm = {
-  owner_id: "",
-  room_id: "",
-  check_in_date: "",
-  check_out_date: "",
-  pet_ids: [],
-  notes: "",
-  staff_name: "",
-  do_not_move: false,
-  pickup_required: false,
-  dropoff_required: false,
-  transport_region: "dubai",
-  transport_pickup_price_aed: "",
-  transport_dropoff_price_aed: "",
-  addon_enabled: {},
-  addon_price_aed: {},
-  cat_litter_type: "",
-  cat_indoor_only: false,
-  cat_ok_share_family: true,
-  cat_special_diet: "",
-  pet_care_by_pet_id: {},
-};
-
-function buildCatPreferencesNote(f: CatBookingForm): string {
-  const lines = [
-    "Cat preferences:",
-    f.cat_litter_type.trim() ? `Litter type: ${f.cat_litter_type.trim()}` : null,
-    `Indoor only: ${f.cat_indoor_only ? "Yes" : "No"}`,
-    `OK to share with family cats: ${f.cat_ok_share_family ? "Yes" : "No"}`,
-    f.cat_special_diet.trim() ? `Special diet: ${f.cat_special_diet.trim()}` : null,
-  ].filter(Boolean) as string[];
-  return lines.join("\n");
-}
-
-// ─── cat boarding calendar ───────────────────────────────────────────────────
-
-type CatBoardingCalendarProps = {
-  windowStart: Date;
-  onWindowStartChange: React.Dispatch<React.SetStateAction<Date>>;
-  suppressToolbar?: boolean;
-};
-
-function CatBoardingCalendar({
-  windowStart,
-  onWindowStartChange,
-  suppressToolbar,
-}: CatBoardingCalendarProps) {
-  const navigate = useNavigate();
-  const today = new Date();
-
-  const windowEnd = addDays(windowStart, DAYS - 1);
-  const startStr = toDateStr(windowStart);
-  const endStr = toDateStr(windowEnd);
-
-  const queryClient = useQueryClient();
-  const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
-  const { data: roomsAll = [], isLoading: roomsLoading } = useRooms();
-
-  const { facility: catFacilityRooms, placeholders: catPlaceholderRooms } = useMemo(
-    () => splitFacilityAndPlaceholderRooms(roomsAll, "cat"),
-    [roomsAll],
-  );
-
-  const catRooms = catFacilityRooms;
-
-  const roomsByWing = useMemo(() => {
-    const map = new Map<string, Room[]>();
-    catRooms.forEach((r) => {
-      if (!map.has(r.wing)) map.set(r.wing, []);
-      map.get(r.wing)!.push(r);
-    });
-    for (const list of map.values()) {
-      list.sort((a, b) =>
-        a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
-      );
-    }
-    return map;
-  }, [catRooms]);
-
-  const catWingOrder = useMemo(() => {
-    const wings = Array.from(roomsByWing.keys());
-    const ordered = ["cattery", ...WING_ORDER.filter((w) => w !== "cattery" && wings.includes(w))];
-    return [...ordered, ...wings.filter((w) => !ordered.includes(w))];
-  }, [roomsByWing]);
-
-  const [newBookingOpen, setNewBookingOpen] = useState(false);
-  const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
-  const [form, setForm] = useState<CatBookingForm>({ ...CAT_BLANK_FORM });
-
-  const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
-  const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
-  const [belongingsReadOnly, setBelongingsReadOnly] = useState(false);
-
-  const [ownerSearch, setOwnerSearch] = useState("");
-  const [ownerPopOpen, setOwnerPopOpen] = useState(false);
-  const { data: ownerResults = [] } = useOwners(
-    ownerSearch.trim().length >= 2 ? ownerSearch : undefined,
-  );
-
-  const { data: ownerPets = [] } = usePets(form.owner_id);
-  const { data: catBoardingOwnerProfile } = useOwner(form.owner_id);
-  const catPets = useMemo(
-    () => ownerPets.filter((p) => p.species === "cat"),
-    [ownerPets],
-  );
-
-  const createBookingMut = useCreateBooking();
-  const updateBooking = useUpdateBooking();
-
-  const { data: catTransportRates = [] } = useQuery({
-    queryKey: ["pricing", "transport_zones", "boarding"],
-    queryFn: async () => {
-      return (TRANSPORT_PRICING_KEYS as readonly string[]).map((key) => ({
-        key,
-        amount_aed: 0,
-      }));
-    },
-  });
-
-  const resolvedCatTransportZone = useMemo(
-    () => regionToTransportZone(form.transport_region),
-    [form.transport_region],
-  );
-
-  const catActiveTransportRate = catTransportRates.find(
-    (r) => r.key === transportPricingKey(resolvedCatTransportZone),
-  );
-  const catRatePetCount = Math.max(1, form.pet_ids.length);
-  const catNights = nightsBetween(form.check_in_date, form.check_out_date);
-  const catTransportPromo = useMemo(
-    () => boardingTransportFreePromoFromRegion(catNights, form.transport_region),
-    [catNights, form.transport_region],
-  );
-  const catSuggestedTripTransportAed = useMemo(() => {
-    if (!catActiveTransportRate) return 0;
-    const qty = transportQuantityForPets(
-      resolvedCatTransportZone,
-      Math.max(1, form.pet_ids.length),
-    );
-    return catActiveTransportRate.amount_aed * qty;
-  }, [catActiveTransportRate, resolvedCatTransportZone, form.pet_ids.length]);
-
-  const catRatePreview = useQuery({
-    queryKey: [
-      "boarding_rate_preview",
-      "cat",
-      form.room_id,
-      catRatePetCount,
-      form.check_in_date,
-      form.check_out_date,
-    ],
-    enabled: Boolean(form.room_id && form.check_in_date && form.check_out_date),
-    queryFn: async () =>
-      resolveBoardingStayRates(
-        form.room_id,
-        catRatePetCount,
-        form.check_in_date,
-        form.check_out_date,
-      ),
-  });
-
-  const catTransportEstimate = useMemo(() => {
-    if (!form.pickup_required && !form.dropoff_required) return 0;
-    if (catTransportPromo.applies) return 0;
-    let sum = 0;
-    if (form.pickup_required) {
-      sum += parseBoardingTransportAed(form.transport_pickup_price_aed);
-    }
-    if (form.dropoff_required) {
-      sum += parseBoardingTransportAed(form.transport_dropoff_price_aed);
-    }
-    return sum;
-  }, [
-    catTransportPromo.applies,
-    form.pickup_required,
-    form.dropoff_required,
-    form.transport_pickup_price_aed,
-    form.transport_dropoff_price_aed,
-  ]);
-
-  useEffect(() => {
-    if (!newBookingOpen) return;
-    if (catTransportPromo.applies) {
-      setForm((f) => ({
-        ...f,
-        transport_pickup_price_aed: "0",
-        transport_dropoff_price_aed: "0",
-      }));
-      return;
-    }
-    const s =
-      catSuggestedTripTransportAed > 0
-        ? catSuggestedTripTransportAed.toFixed(2)
-        : "";
-    setForm((f) => ({
-      ...f,
-      transport_pickup_price_aed: s,
-      transport_dropoff_price_aed: s,
-    }));
-  }, [
-    newBookingOpen,
-    form.transport_region,
-    catSuggestedTripTransportAed,
-    catTransportPromo.applies,
-  ]);
-
-  const selectedCatSpecies = useMemo<BoardingAddonSpecies>(() => {
-    const hasDog = form.pet_ids.some((id) => ownerPets.find((p) => p.id === id)?.species !== "cat");
-    return hasDog ? "dog" : "cat";
-  }, [form.pet_ids, ownerPets]);
-
-  const visibleCatAddonOptions = useMemo(
-    () => addonOptionsForSpecies(selectedCatSpecies),
-    [selectedCatSpecies],
-  );
-
-  const selectedCatAddons = useMemo(
-    () =>
-      selectedAddonEntries(
-        form.addon_enabled,
-        form.addon_price_aed,
-        selectedCatSpecies,
-      ),
-    [form.addon_enabled, form.addon_price_aed, selectedCatSpecies],
-  );
-
-  const catManualAddonTotal = useMemo(
-    () => selectedCatAddons.reduce((sum, row) => sum + row.amount, 0),
-    [selectedCatAddons],
-  );
-
-  const catBookingEstimateTotal = useMemo(() => {
-    let total = 0;
-    if (catRatePreview.data && catNights > 0) {
-      total += catRatePreview.data.totalAed;
-    }
-    total += catTransportEstimate;
-    total += catManualAddonTotal;
-    return total;
-  }, [
-    catRatePreview.data,
-    catNights,
-    catTransportEstimate,
-    catManualAddonTotal,
-  ]);
-
-  const catBoardingSubtotal = useMemo(() => {
-    if (!catRatePreview.data || catNights <= 0) return 0;
-    return catRatePreview.data.totalAed;
-  }, [catRatePreview.data, catNights]);
-
-  const catDoubleOccupancyDiscount = useMemo(() => {
-    if (form.pet_ids.length < 2) return 0;
-    return Number((catBoardingSubtotal * 0.15).toFixed(2));
-  }, [form.pet_ids.length, catBoardingSubtotal]);
-
-  const catSubtotalAfterDoubleOccupancy = useMemo(
-    () => Math.max(0, catBookingEstimateTotal - catDoubleOccupancyDiscount),
-    [catBookingEstimateTotal, catDoubleOccupancyDiscount],
-  );
-
-  const { data: catMemberDiscountPreview } = useQuery<{
-    discount_pct: number;
-    discount_aed: number;
-    final_aed: number;
-  }>({
-    queryKey: ["boarding", "cat", "member-discount-preview", form.owner_id, catSubtotalAfterDoubleOccupancy],
-    enabled: Boolean(newBookingOpen && form.owner_id && catSubtotalAfterDoubleOccupancy > 0),
-    queryFn: async () => {
-      return {
-        discount_pct: 0,
-        discount_aed: 0,
-        final_aed: catSubtotalAfterDoubleOccupancy,
-      };
-    },
-  });
-
-  const catGrossAfterMember = catMemberDiscountPreview?.final_aed ?? catSubtotalAfterDoubleOccupancy;
-  const catBookingVatEstimate = useMemo(
-    () => vatAmountFromGrossInclusive(catGrossAfterMember),
-    [catGrossAfterMember],
-  );
-  const catBookingGrossEstimate = useMemo(() => Math.max(0, catGrossAfterMember), [catGrossAfterMember]);
-
-  const handleBelongingsFlowFinished = () => {
-    queryClient.invalidateQueries({ queryKey: ["bookings"] });
-    setDetailBooking(null);
-    setCheckInSheetOpen(false);
-    setCheckOutSheetOpen(false);
-    setBelongingsReadOnly(false);
-  };
-
-  const days = useMemo(() => {
-    return Array.from({ length: DAYS }, (_, i) => addDays(windowStart, i));
-  }, [windowStart]);
-
-  const bookingsByRoom = useMemo(() => {
-    const map = new Map<string, BookingWithDetails[]>();
-    bookings.forEach((b) => {
-      const list = map.get(b.room_id) ?? [];
-      list.push(b);
-      map.set(b.room_id, list);
-    });
-    return map;
-  }, [bookings]);
-
-  const openNewBooking = (roomId?: string, date?: string) => {
-    setForm({
-      ...CAT_BLANK_FORM,
-      room_id: roomId ?? "",
-      check_in_date: date ?? "",
-      check_out_date: date ? toDateStr(addDays(parseISO(date), 1)) : "",
-    });
-    setOwnerSearch("");
-    setNewBookingOpen(true);
-  };
-
-  useEffect(() => {
-    setForm((f) => ({ ...f, pet_ids: [], pet_care_by_pet_id: {} }));
-  }, [form.owner_id]);
-
-  const getInitialPetCare = (petId: string) => {
-    const pet = ownerPets.find((p) => p.id === petId);
-    return {
-      feeding_notes: pet?.feeding_instructions ?? "",
-      medication_notes: pet?.medications ?? "",
-      special_instructions: pet?.other_notes ?? "",
-    };
-  };
-
-  const togglePet = (petId: string) => {
-    setForm((f) => ({
-      ...f,
-      pet_ids: f.pet_ids.includes(petId)
-        ? f.pet_ids.filter((id) => id !== petId)
-        : [...f.pet_ids, petId],
-      pet_care_by_pet_id: f.pet_ids.includes(petId)
-        ? Object.fromEntries(
-            Object.entries(f.pet_care_by_pet_id).filter(([id]) => id !== petId),
-          )
-        : {
-            ...f.pet_care_by_pet_id,
-            [petId]: f.pet_care_by_pet_id[petId] ?? getInitialPetCare(petId),
-          },
-    }));
-  };
-
-  const handleCreateBooking = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.owner_id || !form.room_id || !form.check_in_date || !form.check_out_date) {
-      toast.error("Please fill in all required fields");
-      return;
-    }
-    if (form.pet_ids.length === 0) {
-      toast.error("Select at least one cat for this stay");
-      return;
-    }
-    const nonCat = form.pet_ids.some(
-      (id) => ownerPets.find((p) => p.id === id)?.species !== "cat",
-    );
-    if (nonCat) {
-      toast.error("Only cats can be added to cat boarding rooms");
-      return;
-    }
-    const selectedRoom = catRooms.find((r) => r.id === form.room_id);
-    if (!selectedRoom) {
-      toast.error("Please select a cat boarding room");
-      return;
-    }
-
-    const catTransportLabel = transportRegionLabel(form.transport_region);
-    const catTransportComplimentary = catTransportPromo.applies;
-    const catPetAddonHint = selectedPetsSizeSummary(ownerPets, form.pet_ids);
-    const selectedAddonsForInvoice = selectedAddonEntries(
-      form.addon_enabled,
-      form.addon_price_aed,
-      selectedCatSpecies,
-    );
-    const addons = [
-      form.pickup_required &&
-        `Pickup (${catTransportLabel})${catTransportComplimentary ? " — Free" : ""}`,
-      form.dropoff_required &&
-        `Drop-off (${catTransportLabel})${catTransportComplimentary ? " — Free" : ""}`,
-      ...selectedAddonsForInvoice.map(
-        ({ addon, amount }) =>
-          `${addon.label} (${formatAed(amount)}${catPetAddonHint ? ` · ${catPetAddonHint}` : ""})`,
-      ),
-    ]
-      .filter(Boolean)
-      .join(", ");
-
-    const catBlock = buildCatPreferencesNote(form);
-
-    const payload: CreateBookingPayload = {
-      owner_id: form.owner_id,
-      room_id: form.room_id,
-      check_in_date: form.check_in_date,
-      check_out_date: form.check_out_date,
-      pet_ids: form.pet_ids,
-      pet_care_by_pet_id: form.pet_care_by_pet_id,
-      notes: [
-        form.notes,
-        form.staff_name.trim() ? `Created by: ${form.staff_name.trim()}` : "",
-        catRatePreview.data ? `Rate: ${catRatePreview.data.seasonSummary}` : "",
-        catBlock,
-        addons ? `Add-ons: ${addons}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      do_not_move: form.do_not_move,
-      pickup_required: form.pickup_required,
-      dropoff_required: form.dropoff_required,
-      staff_id: null,
-      status: "confirmed",
-      booking_type: "boarding",
-    };
-
-    createBookingMut.mutate(payload, {
-      onSuccess: (booking) => {
-        toast.success("Booking created");
-        setNewBookingOpen(false);
-
-        const addonItems: {
-          key: string;
-          label: string;
-          quantity?: number;
-          unitPriceAed?: number;
-        }[] = [];
-        const catTKey = transportPricingKey(resolvedCatTransportZone);
-        const catTZone = transportRegionLabel(form.transport_region);
-        const catTQty = transportQuantityForPets(resolvedCatTransportZone, form.pet_ids.length);
-        const catTSuffix = catTQty > 1 ? ` × ${catTQty} cats` : "";
-        const catTComplimentary = catTransportPromo.applies;
-        if (form.pickup_required) {
-          const pickupTotal = catTComplimentary
-            ? 0
-            : parseBoardingTransportAed(form.transport_pickup_price_aed);
-          addonItems.push({
-            key: catTKey,
-            label: `Pickup — ${catTZone}${catTSuffix}${catTComplimentary ? " (complimentary)" : ""}`,
-            quantity: 1,
-            unitPriceAed: pickupTotal,
-          });
-        }
-        if (form.dropoff_required) {
-          const dropTotal = catTComplimentary
-            ? 0
-            : parseBoardingTransportAed(form.transport_dropoff_price_aed);
-          addonItems.push({
-            key: catTKey,
-            label: `Drop-off — ${catTZone}${catTSuffix}${catTComplimentary ? " (complimentary)" : ""}`,
-            quantity: 1,
-            unitPriceAed: dropTotal,
-          });
-        }
-        const catSizeHint = selectedPetsSizeSummary(ownerPets, form.pet_ids);
-        for (const { addon, amount } of selectedAddonsForInvoice) {
-          addonItems.push({
-            key: addon.pricingKey,
-            label: catSizeHint ? `${addon.label} — ${catSizeHint}` : addon.label,
-            quantity: 1,
-            unitPriceAed: amount,
-          });
-        }
-
-        createBookingInvoice({
-          bookingId: booking.id,
-          ownerId: form.owner_id,
-          serviceType: "boarding",
-          roomId: form.room_id,
-          roomType: selectedRoom?.room_type ?? "boarding",
-          roomName: selectedRoom?.room_number,
-          petCount: form.pet_ids.length,
-          checkInDate: form.check_in_date,
-          checkOutDate: form.check_out_date,
-          addons: addonItems,
-        })
-          .then(async () => {
-            const discountApplied = await applyDoubleOccupancyDiscountRpc(booking.id);
-            if (discountApplied > 0) {
-              toast.success(`Draft invoice created with AED ${discountApplied.toFixed(2)} double-occupancy discount`);
-            } else {
-              toast.success("Draft invoice created");
-            }
-          })
-          .catch((err) => {
-            console.error("Auto-invoice failed:", err);
-            toast.error("Invoice not created: " + (err?.message ?? "unknown error"));
-          });
-      },
-      onError: (err) =>
-        showCreateBookingErrorToast({
-          err,
-          navigate,
-          ownerId: form.owner_id,
-          petId: form.pet_ids[0],
-          petName: ownerPets.find((p) => p.id === form.pet_ids[0])?.name,
-        }),
-    });
-  };
-
-  const renderRoomRow = (roomId: string, isPlaceholder = false) => {
-    const roomBookings = bookingsByRoom.get(roomId) ?? [];
-    const dayBookingMap = new Map<string, { booking: BookingWithDetails; span: number; isFirst: boolean }>();
-
-    roomBookings.forEach((b) => {
-      days.forEach((day, idx) => {
-        const dayStr = toDateStr(day);
-        if (dayStr >= b.check_in_date && dayStr < b.check_out_date) {
-          const isFirst = dayStr === b.check_in_date || idx === 0;
-          if (isFirst) {
-            const endOfWindow = toDateStr(addDays(windowStart, DAYS));
-            const chipEnd = b.check_out_date < endOfWindow ? b.check_out_date : endOfWindow;
-            const span = differenceInCalendarDays(parseISO(chipEnd), parseISO(dayStr === b.check_in_date ? b.check_in_date : toDateStr(day)));
-            dayBookingMap.set(dayStr, { booking: b, span: Math.max(span, 1), isFirst: true });
-          } else if (!dayBookingMap.has(dayStr)) {
-            dayBookingMap.set(dayStr, { booking: b, span: 1, isFirst: false });
-          }
-        }
-      });
-    });
-
-    return (
-      <div className="flex">
-        {days.map((day) => {
-          const dayStr = toDateStr(day);
-          const entry = dayBookingMap.get(dayStr);
-          const todayHighlight = isToday(day);
-
-          if (!entry) {
-            return (
-              <div
-                key={dayStr}
-                style={{ minWidth: DAY_COL_W, width: DAY_COL_W }}
-                className={`h-12 border-r border-b border-border cursor-pointer transition-colors ${todayHighlight ? "bg-amber-50 hover:bg-amber-100" : "hover:bg-muted/50"}`}
-                onClick={() => openNewBooking(roomId, dayStr)}
-              />
-            );
-          }
-
-          if (!entry.isFirst) {
-            return (
-              <div
-                key={dayStr}
-                style={{ minWidth: DAY_COL_W, width: DAY_COL_W }}
-                className={`h-12 border-r border-b border-border ${todayHighlight ? "bg-amber-50" : ""}`}
-              />
-            );
-          }
-
-          const { booking, span } = entry;
-          const names = booking.booking_pets.map((bp) => bp.pets?.name ?? "").filter(Boolean);
-          const label = formatBookingCell(names, booking.owners?.last_name ?? "") || booking.booking_ref || "—";
-          const chipPlaceholder =
-            isPlaceholder || isImportPlaceholderBooking(booking);
-
-          return (
-            <div
-              key={dayStr}
-              style={{ minWidth: DAY_COL_W * span - 4, width: DAY_COL_W * span - 4, marginLeft: 2, marginRight: 2 }}
-              className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1 cursor-pointer truncate z-10 select-none border border-dashed ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
-              onClick={() => setDetailBooking(booking)}
-            >
-              <span className="truncate min-w-0 flex-1">{label}</span>
-              {bookingAnyPetHasAlerts(booking) ? (
-                <TriangleAlert
-                  className="h-3.5 w-3.5 shrink-0 text-orange-100 drop-shadow-sm"
-                  aria-label="Pet alert"
-                />
-              ) : null}
-              {booking.booking_pets.length > 1 && <span className="shrink-0 opacity-80">+{booking.booking_pets.length - 1}</span>}
-              {bookingBelongingsCount(booking) > 0 ? <Luggage className="h-3 w-3 shrink-0 opacity-90" aria-hidden /> : null}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const isLoading = bookingsLoading || roomsLoading;
-
-  return (
-    <>
-      <main className={`flex flex-col ${suppressToolbar ? "" : "flex-1 overflow-hidden"}`}>
-        {!suppressToolbar ? (
-          <div className="flex items-center justify-between gap-4 px-6 py-3 border-b border-border bg-card shrink-0">
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" onClick={() => onWindowStartChange((d) => addDays(d, -7))}><ChevronLeft className="h-4 w-4" /></Button>
-              <Button variant="outline" size="sm" onClick={() => onWindowStartChange(startOfWeek(today, { weekStartsOn: 1 }))}>Today</Button>
-              <Button variant="outline" size="icon" onClick={() => onWindowStartChange((d) => addDays(d, 7))}><ChevronRight className="h-4 w-4" /></Button>
-              <span className="ml-2 text-sm font-medium text-foreground">{format(windowStart, "d MMM")} – {format(windowEnd, "d MMM yyyy")}</span>
-            </div>
-            <Button onClick={() => openNewBooking()}><Plus className="mr-2 h-4 w-4" />New booking</Button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-end px-6 py-2 border-b border-border bg-violet-50/90 shrink-0">
-            <Button size="sm" onClick={() => openNewBooking()}><Plus className="mr-2 h-4 w-4" />New cat booking</Button>
-          </div>
-        )}
-
-        <div className={suppressToolbar ? "" : "flex-1 overflow-auto"}>
-          {isLoading ? (
-            <div className="p-8 space-y-3">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-          ) : catRooms.length === 0 ? (
-            <p className="p-8 text-sm text-muted-foreground">No active cat boarding rooms found. Add rooms with cat wing in Settings &rarr; Rooms.</p>
-          ) : (
-            <div style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}>
-              <div className="flex sticky top-0 z-20 bg-card border-b border-border">
-                <div style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }} className="shrink-0 border-r border-border" />
-                {days.map((day) => {
-                  const todayHighlight = isToday(day);
-                  return (
-                    <div key={toDateStr(day)} style={{ minWidth: DAY_COL_W, width: DAY_COL_W }} className={`border-r border-border text-center py-2 text-xs font-medium ${todayHighlight ? "bg-amber-100 text-amber-900" : "text-muted-foreground"}`}>
-                      <div>{format(day, "EEE")}</div>
-                      <div className={`text-sm ${todayHighlight ? "font-bold" : "font-normal"}`}>{format(day, "d")}</div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {catWingOrder.map((wing) => {
-                const wingRooms = roomsByWing.get(wing) ?? [];
-                if (wingRooms.length === 0) return null;
-                return (
-                  <div key={wing}>
-                    <div className="flex sticky left-0 bg-violet-50 border-b border-t border-border" style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}>
-                      <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-violet-900">
-                        {WING_LABELS[wing] ?? wing.replace(/_/g, " ")}
-                      </div>
-                    </div>
-                    {wingRooms.map((room) => (
-                      <div key={room.id} className="flex">
-                        <div style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }} className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card">
-                          <span className="truncate" title={`${room.room_number} — ${room.room_type?.replace(/_/g, " ")} (${room.capacity_type})`}>
-                            <span className="font-medium">{room.room_number}</span>
-                            <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{room.room_type?.replace(/_/g, " ")} · {room.capacity_type}</span>
-                          </span>
-                        </div>
-                        {renderRoomRow(room.id)}
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-
-              <UnknownKennelCalendarSection
-                species="cat"
-                placeholderRooms={catPlaceholderRooms}
-                roomColW={ROOM_COL_W}
-                dayColW={DAY_COL_W}
-                daysWidth={DAY_COL_W * DAYS}
-                renderRoomRow={(roomId, isPlaceholder) => renderRoomRow(roomId, isPlaceholder)}
-              />
-            </div>
-          )}
-        </div>
-      </main>
-
-      {/* Cat new booking sheet */}
-      <Sheet open={newBookingOpen} onOpenChange={setNewBookingOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>New Cat Booking</SheetTitle>
-            <SheetDescription>Cat boarding — only cats are listed below.</SheetDescription>
-          </SheetHeader>
-
-          <form onSubmit={handleCreateBooking} className="mt-6 space-y-5">
-            <div className="space-y-2">
-              <Label>Owner <span className="text-destructive">*</span></Label>
-              <div className="flex flex-wrap items-center gap-2">
-                <Popover open={ownerPopOpen} onOpenChange={setOwnerPopOpen}>
-                  <PopoverTrigger asChild>
-                    <div className="relative">
-                      <Input
-                        placeholder="Search by name or phone…"
-                        value={ownerSearch}
-                        onChange={(e) => {
-                          setOwnerSearch(e.target.value);
-                          setOwnerPopOpen(true);
-                        }}
-                        onFocus={() => ownerSearch.length >= 2 && setOwnerPopOpen(true)}
-                      />
-                    </div>
-                  </PopoverTrigger>
-                  {ownerResults.length > 0 && (
-                    <PopoverContent align="start" className="p-1 w-80 z-[120] pointer-events-auto">
-                      {ownerResults.map((o) => (
-                        <button
-                          key={o.id}
-                          type="button"
-                          className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent"
-                          onClick={() => {
-                            setForm((f) => ({ ...f, owner_id: o.id }));
-                            setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`);
-                            setOwnerPopOpen(false);
-                          }}
-                        >
-                          <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
-                          <span className="ml-2 text-muted-foreground">{o.phone}</span>
-                        </button>
-                      ))}
-                    </PopoverContent>
-                  )}
-                </Popover>
-                {catBoardingOwnerProfile && catBoardingOwnerProfile.id === form.owner_id ? null : null}
-              </div>
-            </div>
-
-            {form.owner_id && (
-              <div className="space-y-2">
-                <Label>Pets (cats only)</Label>
-                {ownerPets.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No pets registered for this owner.</p>
-                ) : catPets.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">This owner has no cats — switch to <strong>Dogs</strong> above.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {catPets.map((pet) => (
-                      <div key={pet.id} className="flex items-center gap-2">
-                        <Checkbox id={`cat-${pet.id}`} checked={form.pet_ids.includes(pet.id)} onCheckedChange={() => togglePet(pet.id)} />
-                        <Label
-                          htmlFor={`cat-${pet.id}`}
-                          className="cursor-pointer font-normal flex-1 flex flex-wrap items-center gap-2"
-                        >
-                          <span>
-                            {pet.name}{" "}
-                            <span className="ml-1 text-muted-foreground text-xs">(cat)</span>
-                          </span>
-                          {petHasSpecialAlerts(parsePetSpecialAlerts(pet.special_alerts)) ? (
-                            <Badge
-                              variant="outline"
-                              className="border-orange-400 bg-orange-50 text-orange-900 text-[10px] h-5"
-                            >
-                              Alert
-                            </Badge>
-                          ) : null}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {form.pet_ids.length > 0 && (
-              <div className="space-y-3 rounded-md border p-3">
-                <Label className="text-sm font-medium">Per-cat care (prefilled from profile)</Label>
-                {form.pet_ids.map((petId) => {
-                  const pet = ownerPets.find((p) => p.id === petId);
-                  const care = form.pet_care_by_pet_id[petId] ?? getInitialPetCare(petId);
-                  return (
-                    <div key={petId} className="space-y-2 rounded border p-3">
-                      <p className="text-sm font-semibold">{pet?.name ?? "Cat"}</p>
-                      <PetSpecialAlertsBanner specialAlerts={pet?.special_alerts} />
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Feeding notes</Label>
-                        <Textarea
-                          rows={2}
-                          value={care.feeding_notes}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              pet_care_by_pet_id: {
-                                ...f.pet_care_by_pet_id,
-                                [petId]: { ...care, feeding_notes: e.target.value },
-                              },
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Medication notes</Label>
-                        <Textarea
-                          rows={2}
-                          value={care.medication_notes}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              pet_care_by_pet_id: {
-                                ...f.pet_care_by_pet_id,
-                                [petId]: { ...care, medication_notes: e.target.value },
-                              },
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Special instructions</Label>
-                        <Textarea
-                          rows={2}
-                          value={care.special_instructions}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              pet_care_by_pet_id: {
-                                ...f.pet_care_by_pet_id,
-                                [petId]: { ...care, special_instructions: e.target.value },
-                              },
-                            }))
-                          }
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Room <span className="text-destructive">*</span></Label>
-              <Select value={form.room_id} onValueChange={(v) => setForm((f) => ({ ...f, room_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Select room" /></SelectTrigger>
-                <SelectContent>
-                  {catRooms
-                    .slice()
-                    .sort((a, b) =>
-                      a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
-                    )
-                    .map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.room_number} — <span className="capitalize text-muted-foreground">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              {form.room_id && (
-                <div className="rounded-md border bg-muted/30 px-3 py-2">
-                  {catRatePreview.isLoading ? (
-                    <p className="text-xs text-muted-foreground">Resolving mapped price...</p>
-                  ) : catRatePreview.data ? (
-                    <>
-                      <p className="text-xs text-muted-foreground">
-                        {catRatePreview.data.seasonSummary} · {catRatePetCount} pet{catRatePetCount !== 1 ? "s" : ""}
-                        {catNights > 0
-                          ? ` · ${catNights} night${catNights !== 1 ? "s" : ""}`
-                          : ""}
-                      </p>
-                      <p className="text-sm font-medium">
-                        {formatAed(catRatePreview.data.totalAed)}{" "}
-                        <span className="text-xs text-muted-foreground">(boarding_night)</span>
-                      </p>
-                      {catRatePreview.data.peakNights > 0 && catRatePreview.data.offPeakNights > 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                          Peak and off-peak nights are priced separately on the invoice.
-                        </p>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">Could not resolve mapped price yet.</p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Check-in <span className="text-destructive">*</span></Label>
-                <Input type="date" value={form.check_in_date} onChange={(e) => setForm((f) => ({ ...f, check_in_date: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Check-out <span className="text-destructive">*</span></Label>
-                <Input type="date" value={form.check_out_date} onChange={(e) => setForm((f) => ({ ...f, check_out_date: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Transport</Label>
-              {(form.pickup_required || form.dropoff_required) && (
-                <div className="space-y-1 pt-0.5">
-                  <Label className="text-xs text-muted-foreground font-normal">Transport zone</Label>
-                  <Select
-                    value={form.transport_region}
-                    onValueChange={(v) =>
-                      setForm((f) => ({
-                        ...f,
-                        transport_region: v as BoardingTransportRegion,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BOARDING_TRANSPORT_REGION_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <Checkbox id="pickup_cat" checked={form.pickup_required} onCheckedChange={(v) => setForm((f) => ({ ...f, pickup_required: !!v }))} />
-                  <Label htmlFor="pickup_cat" className="cursor-pointer font-normal">Pickup (to facility)</Label>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {catTransportPromo.applies && form.pickup_required ? (
-                    <span className="text-xs font-medium text-emerald-700">Complimentary</span>
-                  ) : null}
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0"
-                    className="h-8 w-[7rem] text-right"
-                    disabled={catTransportPromo.applies || !form.pickup_required}
-                    value={form.transport_pickup_price_aed}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, transport_pickup_price_aed: e.target.value }))
-                    }
-                  />
-                  <span className="text-xs text-muted-foreground">AED</span>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <Checkbox id="dropoff_cat" checked={form.dropoff_required} onCheckedChange={(v) => setForm((f) => ({ ...f, dropoff_required: !!v }))} />
-                  <Label htmlFor="dropoff_cat" className="cursor-pointer font-normal">Drop-off (after stay)</Label>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {catTransportPromo.applies && form.dropoff_required ? (
-                    <span className="text-xs font-medium text-emerald-700">Complimentary</span>
-                  ) : null}
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0"
-                    className="h-8 w-[7rem] text-right"
-                    disabled={catTransportPromo.applies || !form.dropoff_required}
-                    value={form.transport_dropoff_price_aed}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, transport_dropoff_price_aed: e.target.value }))
-                    }
-                  />
-                  <span className="text-xs text-muted-foreground">AED</span>
-                </div>
-              </div>
-              {(form.pickup_required || form.dropoff_required) && (
-                <BoardingTransportRateHint
-                  activeRate={catActiveTransportRate}
-                  zone={resolvedCatTransportZone}
-                  petCount={form.pet_ids.length}
-                  pickup={form.pickup_required}
-                  dropoff={form.dropoff_required}
-                  promo={catTransportPromo}
-                  petNoun="cat"
-                />
-              )}
-              {catTransportPromo.applies && (form.pickup_required || form.dropoff_required) ? (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
-                  {catTransportPromo.notice}
-                </div>
-              ) : null}
-            </div>
-
-            <Separator />
-
-            <div className="space-y-3">
-              <Label className="text-sm font-medium">Cat preferences</Label>
-              <div className="space-y-2">
-                <Label htmlFor="cat_litter" className="text-xs text-muted-foreground font-normal">Litter type</Label>
-                <Input id="cat_litter" placeholder="e.g. clumping, wood pellet…" value={form.cat_litter_type} onChange={(e) => setForm((f) => ({ ...f, cat_litter_type: e.target.value }))} />
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="cat_indoor" className="cursor-pointer">Indoor only</Label>
-                <Switch id="cat_indoor" checked={form.cat_indoor_only} onCheckedChange={(v) => setForm((f) => ({ ...f, cat_indoor_only: v }))} />
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="cat_share" className="cursor-pointer">OK to share with family cats</Label>
-                <Switch id="cat_share" checked={form.cat_ok_share_family} onCheckedChange={(v) => setForm((f) => ({ ...f, cat_ok_share_family: v }))} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cat_diet" className="text-xs text-muted-foreground font-normal">Special diet notes</Label>
-                <Textarea id="cat_diet" rows={3} placeholder="Feeding restrictions, wet/dry, portions…" value={form.cat_special_diet} onChange={(e) => setForm((f) => ({ ...f, cat_special_diet: e.target.value }))} />
-              </div>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-3">
-              <Label className="text-sm font-medium">Add-ons</Label>
-              {form.pet_ids.length > 0 && (
-                <p className="text-xs text-muted-foreground leading-snug">
-                  <span className="font-medium text-foreground">Pets:</span>{" "}
-                  {selectedPetsSizeSummary(ownerPets, form.pet_ids)}
-                </p>
-              )}
-              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Grooming add-ons ({selectedCatSpecies === "cat" ? "cat-safe services" : "all dog services"})
-                </p>
-                <div className="space-y-2">
-                  {visibleCatAddonOptions.map((addon) => {
-                    const checked = !!form.addon_enabled[addon.id];
-                    const value = form.addon_price_aed[addon.id] ?? "0";
-                    return (
-                      <div key={addon.id} className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id={`cat_addon_${addon.id}`}
-                            checked={checked}
-                            onCheckedChange={(v) =>
-                              setForm((f) => ({
-                                ...f,
-                                addon_enabled: { ...f.addon_enabled, [addon.id]: !!v },
-                              }))
-                            }
-                          />
-                          <Label htmlFor={`cat_addon_${addon.id}`} className="cursor-pointer font-normal">
-                            {addon.label}
-                          </Label>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">AED</span>
-                          <Input
-                            id={`cat_addon_${addon.id}_price`}
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            className="h-8 w-[7rem]"
-                            value={value}
-                            onChange={(e) =>
-                              setForm((f) => ({
-                                ...f,
-                                addon_price_aed: { ...f.addon_price_aed, [addon.id]: e.target.value },
-                              }))
-                            }
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-snug">
-                  Only checked add-ons with price above AED 0 are added to the invoice.
-                </p>
-              </div>
-
-              {form.pet_ids.length > 0 && (
-                <div className="rounded-lg border-2 border-primary/25 bg-primary/5 p-4 space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Estimated total (this booking)
-                  </p>
-                  <div className="space-y-1.5 text-sm">
-                    {catRatePreview.data && catNights > 0 && (
-                      <div className="flex justify-between gap-4">
-                        <span className="text-muted-foreground">
-                          Room ({catNights} night{catNights !== 1 ? "s" : ""})
-                        </span>
-                        <span className="tabular-nums font-medium">
-                          {formatAed(catRatePreview.data.totalAed)}
-                        </span>
-                      </div>
-                    )}
-                    {(form.pickup_required || form.dropoff_required) && (
-                      <div className="flex justify-between gap-4">
-                        <span className="text-muted-foreground">Transport (est.)</span>
-                        <span className="tabular-nums font-medium flex items-center justify-end gap-2">
-                          {catTransportPromo.applies ? (
-                            <>
-                              <span className="text-emerald-700">Free</span>
-                              <Badge
-                                variant="outline"
-                                className="border-emerald-300 bg-emerald-100 text-emerald-800 text-[10px] shrink-0"
-                              >
-                                Free
-                              </Badge>
-                            </>
-                          ) : (
-                            formatAed(catTransportEstimate)
-                          )}
-                        </span>
-                      </div>
-                    )}
-                    {catManualAddonTotal > 0 && (
-                      <div className="flex justify-between gap-4">
-                        <span className="text-muted-foreground">Grooming add-ons</span>
-                        <span className="tabular-nums font-medium">
-                          {formatAed(catManualAddonTotal)}
-                        </span>
-                      </div>
-                    )}
-                    {catBookingEstimateTotal > 0 && (
-                      <div className="flex justify-between gap-4 font-medium">
-                        <span>Subtotal</span>
-                        <span className="tabular-nums">{formatAed(catBookingEstimateTotal)}</span>
-                      </div>
-                    )}
-                    {catDoubleOccupancyDiscount > 0 && (
-                      <div className="flex justify-between gap-4 text-emerald-700">
-                        <span>Double occupancy 15% discount</span>
-                        <span className="tabular-nums font-medium">
-                          −{formatAed(catDoubleOccupancyDiscount)}
-                        </span>
-                      </div>
-                    )}
-                    {(catMemberDiscountPreview?.discount_aed ?? 0) > 0 && (
-                      <div className="flex justify-between gap-4 text-emerald-700">
-                        <span>
-                          Member discount
-                          {catMemberDiscountPreview?.discount_pct != null
-                            ? ` (${Number(catMemberDiscountPreview.discount_pct).toFixed(2)}%)`
-                            : ""}
-                        </span>
-                        <span className="tabular-nums font-medium">
-                          −{formatAed(catMemberDiscountPreview!.discount_aed)}
-                        </span>
-                      </div>
-                    )}
-                    {catBookingEstimateTotal > 0 && (
-                      <div className="flex justify-between gap-4 font-medium">
-                        <span>Total</span>
-                        <span className="tabular-nums">{formatAed(netFromGrossInclusive(catGrossAfterMember))}</span>
-                      </div>
-                    )}
-                    {catBookingEstimateTotal > 0 && (
-                      <div className="flex justify-between gap-4">
-                        <span className="text-muted-foreground">{vatLineLabel()}</span>
-                        <span className="tabular-nums font-medium">
-                          {formatAed(catBookingVatEstimate)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xl font-semibold tabular-nums border-t pt-2">
-                    Total incl. VAT: {formatAed(catBookingGrossEstimate)}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground leading-snug">
-                    Includes room (when resolved), transport (if selected), grooming add-ons, and VAT.
-                  </p>
-                  {form.pet_ids.length >= 2 ? (
-                    <p className="text-[11px] text-emerald-700 leading-snug">
-                      15% double-occupancy discount will apply.
-                    </p>
-                  ) : null}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <Label htmlFor="do_not_move_cat" className="cursor-pointer">DO NOT MOVE</Label>
-              <Switch id="do_not_move_cat" checked={form.do_not_move} onCheckedChange={(v) => setForm((f) => ({ ...f, do_not_move: v }))} />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea rows={3} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Staff name</Label>
-              <Input placeholder="Who is creating this booking?" value={form.staff_name} onChange={(e) => setForm((f) => ({ ...f, staff_name: e.target.value }))} />
-            </div>
-
-            <Button type="submit" className="w-full" disabled={createBookingMut.isPending}>
-              {createBookingMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Booking
-            </Button>
-          </form>
-        </SheetContent>
-      </Sheet>
-
-      {/* Cat detail sheet */}
-      <Sheet open={!!detailBooking} onOpenChange={(open) => { if (!open) { setDetailBooking(null); setCheckInSheetOpen(false); setCheckOutSheetOpen(false); setBelongingsReadOnly(false); } }}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
-          {detailBooking && (
-            <>
-              <SheetHeader>
-                <SheetTitle>{detailBooking.booking_ref ?? "Booking Details"}</SheetTitle>
-                <SheetDescription>Reservation overview and actions.</SheetDescription>
-              </SheetHeader>
-              <div className="mt-6 space-y-5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant="outline" className={STATUS_BADGE[detailBooking.status]}>{detailBooking.status.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}</Badge>
-                  {detailBooking.do_not_move && <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-200">DO NOT MOVE</Badge>}
-                </div>
-                <Separator />
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Owner</p>
-                  <button type="button" className="flex items-center gap-1 text-sm font-medium text-primary hover:underline" onClick={() => navigate(`/customers/${detailBooking.owner_id}`)}>
-                    {detailBooking.owners?.first_name} {detailBooking.owners?.last_name} <ExternalLink className="h-3 w-3" />
-                  </button>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Pet{detailBooking.booking_pets.length !== 1 ? "s" : ""}</p>
-                  {detailBooking.booking_pets.length === 0 ? <p className="text-sm">—</p> : (
-                    <p className="text-sm flex flex-wrap gap-x-1 gap-y-0.5">
-                      {detailBooking.booking_pets.map((bp, i) => (
-                        <span key={bp.pet_id}>
-                          {i > 0 ? <span className="text-muted-foreground">, </span> : null}
-                          <button type="button" className="font-medium text-primary hover:underline" onClick={() => navigate(`/customers/${detailBooking.owner_id}/pets/${bp.pet_id}`)}>{bp.pets?.name ?? "Unknown"}</button>
-                        </span>
-                      ))}
-                    </p>
-                  )}
-                </div>
-                <BookingProfileNotes ownerOtherNotes={detailBooking.owners?.other_notes} pets={detailBooking.booking_pets.map((bp) => ({ name: bp.pets?.name ?? "Pet", otherNotes: bp.pets?.other_notes }))} />
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
-                  <p className="text-sm font-medium">{detailBooking.rooms?.room_number ?? detailBooking.rooms?.display_name ?? "—"}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{detailBooking.rooms?.room_type?.replace(/_/g, " ") ?? ""} · {detailBooking.rooms?.capacity_type ?? ""} · {detailBooking.rooms?.wing?.replace(/_/g, " ") ?? ""}</p>
-                </div>
-
-                {isImportPlaceholderBooking(detailBooking) && (
-                  <AssignRealRoomPanel
-                    booking={detailBooking}
-                    facilityRooms={catRooms}
-                    updateBooking={updateBooking}
-                    onRoomAssigned={(room) =>
-                      setDetailBooking((prev) =>
-                        prev && prev.id === detailBooking.id
-                          ? { ...prev, room_id: room.id, rooms: room }
-                          : prev,
-                      )
-                    }
-                  />
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Check-in</p>
-                    <p className="text-sm">{format(parseISO(detailBooking.check_in_date), "d MMM yyyy")}</p>
-                    {detailBooking.actual_check_in_at && <p className="text-xs text-muted-foreground">Actual: {format(parseISO(detailBooking.actual_check_in_at), "d MMM HH:mm")}</p>}
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Check-out</p>
-                    <p className="text-sm">{format(parseISO(detailBooking.check_out_date), "d MMM yyyy")}</p>
-                    {detailBooking.actual_check_out_at && <p className="text-xs text-muted-foreground">Actual: {format(parseISO(detailBooking.actual_check_out_at), "d MMM HH:mm")}</p>}
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground">{nightsBetween(detailBooking.check_in_date, detailBooking.check_out_date)} night{nightsBetween(detailBooking.check_in_date, detailBooking.check_out_date) !== 1 ? "s" : ""}</p>
-                {detailBooking.notes && <div className="space-y-1"><p className="text-xs uppercase text-muted-foreground font-medium">Notes</p><p className="text-sm whitespace-pre-line">{detailBooking.notes}</p></div>}
-                <Separator />
-                <div className="space-y-3">
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() =>
-                      window.open(
-                        `/print/kennel-card/${detailBooking.id}`,
-                        "_blank",
-                        "noopener,noreferrer",
-                      )
-                    }
-                  >
-                    <Printer className="mr-2 h-4 w-4" />
-                    Print Kennel Card
-                  </Button>
-                  {detailBooking.status === "confirmed" && <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => { setBelongingsReadOnly(false); setCheckInSheetOpen(true); }}>Check In</Button>}
-                  {detailBooking.status === "checked_in" && (
-                    <div className="flex flex-col gap-2">
-                      <Button className="w-full" variant="outline" onClick={() => setCheckOutSheetOpen(true)}>Check Out</Button>
-                      <Button type="button" variant="outline" className="w-full" onClick={() => { setBelongingsReadOnly(true); setCheckInSheetOpen(true); }}><Eye className="mr-2 h-4 w-4" />View Belongings</Button>
-                    </div>
-                  )}
-                  {(detailBooking.status === "confirmed" || detailBooking.status === "enquiry") && (
-                    <Button variant="outline" className="w-full text-destructive border-destructive/40 hover:bg-destructive/10" disabled={updateBooking.isPending} onClick={() => updateBooking.mutate({ id: detailBooking.id, status: "cancelled" }, { onSuccess: () => { toast.success("Booking cancelled"); setDetailBooking(null); }, onError: (err) => toast.error(err.message) })}>
-                      {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Cancel Booking
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      {detailBooking && (
-        <>
-          <CheckInSheet open={checkInSheetOpen} onOpenChange={(o) => { if (!o) { setCheckInSheetOpen(false); setBelongingsReadOnly(false); } }} bookingId={detailBooking.id} ownerName={`${detailBooking.owners?.first_name ?? ""} ${detailBooking.owners?.last_name ?? ""}`.trim()} petNames={detailBooking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")} roomName={detailBooking.rooms?.display_name ?? "—"} bookedCheckInDate={detailBooking.check_in_date} bookedCheckOutDate={detailBooking.check_out_date} readOnly={belongingsReadOnly} onFinished={handleBelongingsFlowFinished} />
-          <CheckOutSheet open={checkOutSheetOpen} onOpenChange={(o) => { if (!o) setCheckOutSheetOpen(false); }} bookingId={detailBooking.id} ownerName={`${detailBooking.owners?.first_name ?? ""} ${detailBooking.owners?.last_name ?? ""}`.trim()} petNames={detailBooking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")} roomName={detailBooking.rooms?.display_name ?? "—"} checkInDate={detailBooking.check_in_date} checkOutDate={detailBooking.check_out_date} onFinished={handleBelongingsFlowFinished} />
-        </>
-      )}
-    </>
-  );
-}
-
 // ─── hub page ────────────────────────────────────────────────────────────────
 
-type Species = "dog" | "cat";
 type BoardingListPreset = "today" | "tomorrow" | "next7";
 type BoardingListFocus = "all" | "check-ins" | "check-outs";
 
@@ -4038,34 +2715,23 @@ function boardingBookingOverlapsDate(
   return b.check_in_date <= asOf && b.check_out_date > asOf;
 }
 
-function occupancyFacilityRooms(rooms: Room[], species: Species): Room[] {
+function occupancyFacilityRooms(rooms: Room[]): Room[] {
   return rooms.filter((r) => {
     if (!r.is_active || isImportPlaceholderRoom(r)) return false;
-    return species === "cat" ? r.wing === "cattery" : r.wing !== "cattery";
+    return r.wing !== "cattery";
   });
 }
 
-function occupancyPlaceholderRooms(rooms: Room[], species: Species): Room[] {
-  const { placeholders } = splitFacilityAndPlaceholderRooms(rooms, species);
+function occupancyPlaceholderRooms(rooms: Room[]): Room[] {
+  const { placeholders } = splitFacilityAndPlaceholderRooms(rooms);
   return placeholders.filter((r) => r.is_active);
 }
 
-function occupancyWingGroupLabel(wing: string): string {
-  return WING_LABELS[wing] ?? wing.replace(/_/g, " ");
-}
-
-function occupancyWingGroupOrder(species: Species): string[] {
-  if (species === "cat") return ["cattery"];
-  return [...WING_ORDER, "other"];
-}
-
 function BoardingOperationsList({
-  species,
   initialDatePreset = "today",
   initialAnchorDate,
   focus = "all",
 }: {
-  species: Species;
   initialDatePreset?: BoardingListPreset;
   initialAnchorDate?: string;
   focus?: BoardingListFocus;
@@ -4093,11 +2759,7 @@ function BoardingOperationsList({
   const { data: bookings = [], isLoading } = useBookings(rangeStart, rangeEnd);
 
   const filtered = useMemo(() => {
-    const rows = bookings.filter((b) => {
-      const isCatRoom = b.rooms?.wing === "cattery";
-      if (species === "cat") return isCatRoom;
-      return !isCatRoom;
-    });
+    const rows = bookings.filter((b) => b.rooms?.wing !== "cattery");
 
     const focusRows = rows.filter((b) => {
       if (focus === "check-ins") return b.check_in_date === rangeStart;
@@ -4106,7 +2768,7 @@ function BoardingOperationsList({
     });
 
     return focusRows.sort((a, b) => a.check_in_date.localeCompare(b.check_in_date));
-  }, [bookings, species, focus, rangeStart]);
+  }, [bookings, focus, rangeStart]);
 
   return (
     <div className="p-6 space-y-4">
@@ -4192,13 +2854,9 @@ function BoardingOperationsList({
 function BoardingHubPage() {
   const navigate = useNavigate();
   const today = useMemo(() => new Date(), []);
-  const location = useLocation();
   const [searchParams] = useSearchParams();
   const todayStr = toDateStr(today);
 
-  const initialSpecies: Species =
-    location.hash === `#${CAT_BOARDING_SECTION_ID}` ? "cat" : "dog";
-  const [species, setSpecies] = useState<Species>(initialSpecies);
   const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
 
   const [windowStart, setWindowStart] = useState(() =>
@@ -4238,7 +2896,7 @@ function BoardingHubPage() {
   const { data: facilityRooms = [] } = useRooms();
 
   const { data: occRaw = [], isFetching: occLoading } = useQuery({
-    queryKey: ["boarding", "occupancy-bookings", occupancyDate, species],
+    queryKey: ["boarding", "occupancy-bookings", occupancyDate],
     enabled: occupancyOpen && !!occupancyDate,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -4255,8 +2913,10 @@ function BoardingHubPage() {
 
   const occupancyStats = useMemo(() => {
     const occBookingsList = occRaw as BookingWithDetails[];
-    const roomsPool = occupancyFacilityRooms(facilityRooms, species);
-    const placeholderPool = occupancyPlaceholderRooms(facilityRooms, species);
+    const roomsPool = occupancyFacilityRooms(facilityRooms).filter(
+      (r) => !isExcludedBoardingRoom(r),
+    );
+    const placeholderPool = occupancyPlaceholderRooms(facilityRooms);
     const poolIds = new Set(roomsPool.map((r) => r.id));
     const placeholderIds = new Set(placeholderPool.map((r) => r.id));
     const total = roomsPool.length;
@@ -4278,13 +2938,12 @@ function BoardingHubPage() {
 
     const byGroup = new Map<string, { occupied: { room: Room; booking: BookingWithDetails }[]; available: Room[] }>();
 
-    const sortRooms = (a: Room, b: Room) =>
-      a.room_number.localeCompare(b.room_number, undefined, { numeric: true });
+    const sortRooms = (a: Room, b: Room) => sortRoomsBySectionNumber(a, b);
 
     for (const room of roomsPool) {
-      const wingKey = room.wing;
-      if (!byGroup.has(wingKey)) byGroup.set(wingKey, { occupied: [], available: [] });
-      const bucket = byGroup.get(wingKey)!;
+      const groupKey = getRoomSectionParts(room).section;
+      if (!byGroup.has(groupKey)) byGroup.set(groupKey, { occupied: [], available: [] });
+      const bucket = byGroup.get(groupKey)!;
       const bk = occupiedByRoomId.get(room.id);
       if (bk) bucket.occupied.push({ room, booking: bk });
       else bucket.available.push(room);
@@ -4294,14 +2953,10 @@ function BoardingHubPage() {
       b.available.sort(sortRooms);
     }
 
-    const preferredWings = occupancyWingGroupOrder(species);
-    const groupOrder = [
-      ...preferredWings.filter((w) => byGroup.has(w)),
-      ...Array.from(byGroup.keys()).filter((w) => !preferredWings.includes(w)),
-    ];
+    const groupOrder = buildRoomsBySection(roomsPool).order.filter((k) => byGroup.has(k));
 
     return { total, occupiedCount, availableCount, pct, byGroup, groupOrder, importedUnassignedCount };
-  }, [occRaw, facilityRooms, species, occupancyDate]);
+  }, [occRaw, facilityRooms, occupancyDate]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
@@ -4312,7 +2967,7 @@ function BoardingHubPage() {
           <DialogHeader className="border-b px-6 py-4 text-left">
             <DialogTitle className="pr-8">Occupancy Report</DialogTitle>
             <p className="text-sm text-muted-foreground">
-              {species === "cat" ? "Cat boarding" : "Dog boarding"} · as of{" "}
+              Boarding · as of{" "}
               {occupancyDate ? format(parseISO(occupancyDate), "EEEE, d MMMM yyyy") : "—"}
             </p>
             <div className="pt-2">
@@ -4357,13 +3012,13 @@ function BoardingHubPage() {
               </p>
             )}
 
-            {occupancyStats.groupOrder.map((wingKey) => {
-              const bucket = occupancyStats.byGroup.get(wingKey);
+            {occupancyStats.groupOrder.map((groupKey) => {
+              const bucket = occupancyStats.byGroup.get(groupKey);
               if (!bucket) return null;
               if (bucket.occupied.length === 0 && bucket.available.length === 0) return null;
-              const groupName = occupancyWingGroupLabel(wingKey);
+              const groupName = groupKey;
               return (
-                <section key={wingKey} className="space-y-2 rounded-lg border p-3">
+                <section key={groupKey} className="space-y-2 rounded-lg border p-3">
                   <h3 className="text-sm font-semibold">{groupName}</h3>
                   {bucket.occupied.length > 0 ? (
                     <div className="space-y-1">
@@ -4389,7 +3044,7 @@ function BoardingHubPage() {
                               return (
                                 <TableRow key={booking.id}>
                                   <TableCell className="font-medium whitespace-nowrap">
-                                    {room.display_name || room.room_number}
+                                    {formatRoomSectionLabel(room)}
                                   </TableCell>
                                   <TableCell>{petNames}</TableCell>
                                   <TableCell>
@@ -4416,7 +3071,7 @@ function BoardingHubPage() {
                     <div className="space-y-1">
                       <p className="text-xs font-medium uppercase text-muted-foreground">Available</p>
                       <p className="text-sm text-muted-foreground">
-                        {bucket.available.map((r) => r.display_name || r.room_number).join(", ")}
+                        {bucket.available.map((r) => formatRoomSectionLabel(r)).join(", ")}
                       </p>
                     </div>
                   ) : null}
@@ -4432,7 +3087,7 @@ function BoardingHubPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Toolbar: week nav + species toggle + manage rooms ── */}
+      {/* ── Toolbar: week nav + manage rooms ── */}
       <div className="flex items-center justify-between gap-4 px-6 py-3 border-b border-border bg-card shrink-0">
         <div className="flex items-center gap-2">
           {viewMode === "calendar" && (
@@ -4471,24 +3126,6 @@ function BoardingHubPage() {
             </button>
           </div>
 
-          {/* Species toggle */}
-          <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
-            <button
-              type="button"
-              className={`px-3 py-1.5 transition-colors ${species === "dog" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-              onClick={() => setSpecies("dog")}
-            >
-              Dogs
-            </button>
-            <button
-              type="button"
-              className={`px-3 py-1.5 transition-colors ${species === "cat" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-              onClick={() => setSpecies("cat")}
-            >
-              Cats
-            </button>
-          </div>
-
           <Button
             variant="outline"
             size="sm"
@@ -4504,7 +3141,7 @@ function BoardingHubPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate(`/settings/rooms?species=${species}`)}
+            onClick={() => navigate("/settings/rooms")}
           >
             Manage Rooms
           </Button>
@@ -4514,22 +3151,13 @@ function BoardingHubPage() {
       {/* ── Calendar (only one rendered at a time) ── */}
       <div className="flex-1 overflow-auto min-h-0">
         {viewMode === "calendar" ? (
-          species === "dog" ? (
-            <DogBoardingCalendar
-              windowStart={windowStart}
-              onWindowStartChange={setWindowStart}
-              suppressToolbar
-            />
-          ) : (
-            <CatBoardingCalendar
-              windowStart={windowStart}
-              onWindowStartChange={setWindowStart}
-              suppressToolbar
-            />
-          )
+          <DogBoardingCalendar
+            windowStart={windowStart}
+            onWindowStartChange={setWindowStart}
+            suppressToolbar
+          />
         ) : (
           <BoardingOperationsList
-            species={species}
             focus={listFocus}
             initialAnchorDate={normalizedDate ?? undefined}
             initialDatePreset="today"

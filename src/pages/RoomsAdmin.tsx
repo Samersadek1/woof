@@ -15,7 +15,6 @@ import {
   useEffect,
   KeyboardEvent,
 } from "react";
-import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import TopBar from "@/components/dashboard/TopBar";
 import { useUpdateRoom, useCreateRoom, useDeleteRoom, useAllRooms } from "@/hooks/useBookings";
@@ -81,7 +80,6 @@ const WING_LABELS: Record<string, string> = {
   park_lane: "Park Lane",
   fleet: "Fleet Street",
   back_kennels: "Back Kennels",
-  cattery: "Cat boarding (wing)",
   grooming_upstairs: "Grooming Upstairs",
   bond_rooms: "Bond Rooms",
   dluxe: "Dluxe",
@@ -114,9 +112,6 @@ const ROOM_TYPE_LABELS: Record<string, string> = {
   single_royal: "Single Royal",
   family_room: "Family Room",
   royal_annex: "Royal Annex",
-  cattery_super_presidential: "Cattery Super Presidential",
-  cattery_presidential: "Cattery Presidential",
-  cattery_deluxe: "Cattery Deluxe",
   park_lane: "Park Lane",
   pall_mall: "Pall Mall",
   kennels: "Back Kennels",
@@ -150,7 +145,6 @@ const WING_VALUES: RoomWing[] = [
   "park_lane",
   "fleet",
   "back_kennels",
-  "cattery",
   "grooming_upstairs",
 ];
 
@@ -166,9 +160,6 @@ const ROOM_TYPE_VALUES: RoomType[] = [
   "park_lane",
   "pall_mall",
   "kennels",
-  "cattery_super_presidential",
-  "cattery_presidential",
-  "cattery_deluxe",
 ];
 
 const CAPACITY_VALUES: CapacityType[] = ["single", "twin", "twin_plus", "multiple"];
@@ -310,8 +301,6 @@ function MaxPetsCell({
 // ── Editable cell helpers ─────────────────────────────────────────────────────
 
 type EditingCell = { id: string; field: string } | null;
-
-type Species = "dog" | "cat";
 
 /** Supabase / react-query often pass plain objects, not Error instances. */
 function formatRoomMutationError(err: unknown): string {
@@ -459,8 +448,6 @@ const DOG_WINGS: string[] = [
   "dluxe",
   "standard_room",
 ];
-const CAT_WINGS: string[] = ["cattery"];
-
 const WING_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "__all__", label: "All Wings" },
   { value: "oxford", label: "Oxford Street" },
@@ -488,7 +475,7 @@ const ROOM_TYPE_FILTER_OPTIONS: { value: string; label: string; types: string[] 
   { value: "__all__", label: "All Types", types: [] },
   { value: "presidential", label: "Presidential", types: ["presidential_super", "presidential_standard", "presidential_single", "presidential_double"] },
   { value: "royal_suite", label: "Royal Suite", types: ["royal_suite_single", "royal_suite_double", "single_royal", "double_royal", "royal_annex"] },
-  { value: "deluxe", label: "Deluxe", types: ["deluxe", "cattery_deluxe"] },
+  { value: "deluxe", label: "Deluxe", types: ["deluxe"] },
   { value: "standard", label: "Standard", types: ["standard", "standard_glass"] },
   { value: "lg_royal", label: "LG Royal", types: ["lg_royal", "lg_royal_double"] },
   { value: "lg_deluxe", label: "LG Deluxe", types: ["lg_deluxe"] },
@@ -542,10 +529,6 @@ function roomToEditForm(room: Room): RoomEditForm {
 }
 
 const RoomsAdminPage = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const initialSpecies: Species = searchParams.get("species") === "cat" ? "cat" : "dog";
-  const [species, setSpecies] = useState<Species>(initialSpecies);
-
   const { data: allRooms, isLoading, isError, error } = useAllRooms();
   const updateRoom = useUpdateRoom();
   const createRoom = useCreateRoom();
@@ -579,10 +562,8 @@ const RoomsAdminPage = () => {
 
   const rooms = useMemo(() => {
     if (!allRooms) return undefined;
-    return allRooms.filter((r) =>
-      species === "cat" ? r.wing === "cattery" : r.wing !== "cattery",
-    );
-  }, [allRooms, species]);
+    return allRooms.filter((r) => r.wing !== "cattery");
+  }, [allRooms]);
   const [searchQuery, setSearchQuery] = useState("");
   const [wingFilter, setWingFilter] = useState("__all__");
   const [typeFilter, setTypeFilter] = useState("__all__");
@@ -639,19 +620,11 @@ const RoomsAdminPage = () => {
 
   useEffect(() => {
     setVisibleCount(ROOMS_PAGE_SIZE);
-  }, [searchQuery, wingFilter, typeFilter, species]);
+  }, [searchQuery, wingFilter, typeFilter]);
 
   const loadMore = useCallback(() => {
     setVisibleCount((c) => c + ROOMS_PAGE_SIZE);
   }, []);
-
-  const handleSpeciesChange = useCallback(
-    (s: Species) => {
-      setSpecies(s);
-      setSearchParams({ species: s }, { replace: true });
-    },
-    [setSearchParams],
-  );
 
   const [editingCell, setEditingCell] = useState<EditingCell>(null);
   const [editValue, setEditValue] = useState("");
@@ -992,22 +965,6 @@ const RoomsAdminPage = () => {
               <Plus className="mr-2 h-4 w-4" />
               Add room
             </Button>
-            <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
-              <button
-                type="button"
-                className={`px-3 py-1.5 transition-colors ${species === "dog" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-                onClick={() => handleSpeciesChange("dog")}
-              >
-                Dogs
-              </button>
-              <button
-                type="button"
-                className={`px-3 py-1.5 transition-colors ${species === "cat" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-                onClick={() => handleSpeciesChange("cat")}
-              >
-                Cats
-              </button>
-            </div>
           </div>
         </div>
 

@@ -427,11 +427,6 @@ const DashboardPage = () => {
     metrics?.occupancy.boarding_occupied ?? 0,
     metrics?.occupancy.boarding_total_rooms ?? 0,
   );
-  const catPct = percent(
-    metrics?.occupancy.cattery_occupied ?? 0,
-    metrics?.occupancy.cattery_total_rooms ?? 0,
-  );
-
   const alerts = [
     {
       key: "overdue",
@@ -781,19 +776,6 @@ const DashboardPage = () => {
                     value={boardPct}
                     className="h-2"
                     indicatorClassName={occupancyTone(boardPct)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Cattery</span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {metrics?.occupancy.cattery_occupied}/{metrics?.occupancy.cattery_total_rooms} ({catPct}%)
-                    </span>
-                  </div>
-                  <Progress
-                    value={catPct}
-                    className="h-2"
-                    indicatorClassName={occupancyTone(catPct)}
                   />
                 </div>
                 <div>
