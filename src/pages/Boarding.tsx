@@ -13,12 +13,21 @@ import {
 import TopBar from "@/components/dashboard/TopBar";
 import {
   useBookings,
+  useBookingRoomAssignments,
   useRooms,
   useCreateBooking,
   useUpdateBooking,
   isAssessmentRequiredError,
 } from "@/hooks/useBookings";
-import type { BookingWithDetails, CreateBookingPayload } from "@/hooks/useBookings";
+import type {
+  BookingWithDetails,
+  CalendarRoomAssignment,
+  CreateBookingPayload,
+} from "@/hooks/useBookings";
+import {
+  roomLabelForBooking,
+  type BookingRoomAssignmentSlice,
+} from "@/lib/bookingRoomDisplay";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { Button } from "@/components/ui/button";
@@ -507,9 +516,13 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): string {
+function renderKennelCardHtml(
+  booking: BookingWithDetails,
+  todayDate: string,
+  assignments?: BookingRoomAssignmentSlice[] | null,
+): string {
   const ownerName = ownerDisplayName(booking.owners?.first_name, booking.owners?.last_name);
-  const roomName = booking.rooms?.room_number ?? booking.rooms?.display_name ?? "—";
+  const roomName = roomLabelForBooking(booking, assignments);
   const notes = booking.notes || "No booking notes";
   const bookingRef = booking.booking_ref ?? booking.id.slice(0, 8);
   const status = booking.status.replace(/_/g, " ");
@@ -639,11 +652,42 @@ async function hydrateBookingsForPrint(bookings: BookingWithDetails[]): Promise<
   return bookings.map((b) => byId.get(b.id) ?? b);
 }
 
+async function fetchBookingRoomAssignmentsByBookingId(
+  bookingIds: string[],
+): Promise<Map<string, BookingRoomAssignmentSlice[]>> {
+  const map = new Map<string, BookingRoomAssignmentSlice[]>();
+  if (bookingIds.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("booking_room_assignments")
+    .select("booking_id, start_date, end_date, rooms(room_number, display_name)")
+    .in("booking_id", bookingIds)
+    .order("start_date", { ascending: true });
+
+  if (error || !data) return map;
+
+  for (const row of data) {
+    const list = map.get(row.booking_id) ?? [];
+    list.push({
+      start_date: row.start_date,
+      end_date: row.end_date,
+      rooms: row.rooms as BookingRoomAssignmentSlice["rooms"],
+    });
+    map.set(row.booking_id, list);
+  }
+  return map;
+}
+
 async function printKennelCards(bookings: BookingWithDetails[], printTitle: string) {
   if (bookings.length === 0) return;
   const todayDate = toDateStr(new Date());
   const freshBookings = await hydrateBookingsForPrint(bookings);
-  const cardsHtml = freshBookings.map((b) => renderKennelCardHtml(b, todayDate)).join("");
+  const assignmentsByBooking = await fetchBookingRoomAssignmentsByBookingId(
+    freshBookings.map((b) => b.id),
+  );
+  const cardsHtml = freshBookings
+    .map((b) => renderKennelCardHtml(b, todayDate, assignmentsByBooking.get(b.id)))
+    .join("");
   const w = window.open("", "_blank");
   if (!w) return;
   w.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(printTitle)}</title><style>
@@ -1028,6 +1072,8 @@ export function DogBoardingCalendar({
   // data
   const queryClient = useQueryClient();
   const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
+  const { data: roomAssignments = [], isLoading: assignmentsLoading } =
+    useBookingRoomAssignments(startStr, endStr);
   const { data: rooms = [], isLoading: roomsLoading } = useRooms();
 
   // drawer / panel state
@@ -1285,23 +1331,59 @@ export function DogBoardingCalendar({
     [assignableDogRooms],
   );
 
-  // booking lookup: roomId → bookings (for this window); unassigned = no room or unknown room
-  const { bookingsByRoom, unassignedBookings } = useMemo(() => {
-    const map = new Map<string, BookingWithDetails[]>();
-    const unassigned: BookingWithDetails[] = [];
-    bookings.forEach((b) => {
-      if (b.booking_type && b.booking_type !== "boarding") return;
-      if (b.rooms?.wing === "cattery") return;
-      if (!b.room_id || !facilityRoomIds.has(b.room_id)) {
-        unassigned.push(b);
-        return;
+  // Calendar: imported segments from booking_room_assignments; room_id for manually assigned stays.
+  const { assignmentsByRoom, bookingsByRoom, unassignedBookings } =
+    useMemo(() => {
+      const assignmentMap = new Map<string, CalendarRoomAssignment[]>();
+      const bookingIdsWithSegments = new Set<string>();
+
+      for (const row of roomAssignments) {
+        if (row.rooms.wing === "cattery") continue;
+        if (!facilityRoomIds.has(row.room_id)) continue;
+        bookingIdsWithSegments.add(row.booking_id);
+        const list = assignmentMap.get(row.room_id) ?? [];
+        list.push(row);
+        assignmentMap.set(row.room_id, list);
       }
-      const list = map.get(b.room_id) ?? [];
-      list.push(b);
-      map.set(b.room_id, list);
-    });
-    return { bookingsByRoom: map, unassignedBookings: unassigned };
-  }, [bookings, facilityRoomIds]);
+
+      const roomIdMap = new Map<string, BookingWithDetails[]>();
+      const unassigned: BookingWithDetails[] = [];
+
+      bookings.forEach((b) => {
+        if (b.booking_type && b.booking_type !== "boarding") return;
+        if (b.rooms?.wing === "cattery") return;
+
+        if (bookingIdsWithSegments.has(b.id)) {
+          return;
+        }
+
+        if (!b.room_id || !facilityRoomIds.has(b.room_id)) {
+          unassigned.push(b);
+          return;
+        }
+
+        const list = roomIdMap.get(b.room_id) ?? [];
+        list.push(b);
+        roomIdMap.set(b.room_id, list);
+      });
+
+      return {
+        assignmentsByRoom: assignmentMap,
+        bookingsByRoom: roomIdMap,
+        bookingIdsWithAssignments: bookingIdsWithSegments,
+        unassignedBookings: unassigned,
+      };
+    }, [bookings, roomAssignments, facilityRoomIds]);
+
+  const assignmentsByBookingId = useMemo(() => {
+    const map = new Map<string, CalendarRoomAssignment[]>();
+    for (const row of roomAssignments) {
+      const list = map.get(row.booking_id) ?? [];
+      list.push(row);
+      map.set(row.booking_id, list);
+    }
+    return map;
+  }, [roomAssignments]);
 
   // open new booking drawer, optionally pre-fill room + date
   const openNewBooking = (roomId?: string, date?: string) => {
@@ -1510,38 +1592,54 @@ export function DogBoardingCalendar({
 
   // ─── calendar rendering helpers ───────────────────────────────────────────
 
+  type CalendarSegment =
+    | { kind: "assignment"; assignment: CalendarRoomAssignment }
+    | { kind: "booking"; booking: BookingWithDetails };
+
   // for a given room row, render booking chips + empty cells
   const renderRoomRow = (roomId: string, isPlaceholder = false) => {
-    const roomBookings =
+    const segments: CalendarSegment[] =
       roomId === UNASSIGNED_CALENDAR_ROW
-        ? unassignedBookings
-        : bookingsByRoom.get(roomId) ?? [];
+        ? unassignedBookings.map((booking) => ({ kind: "booking" as const, booking }))
+        : [
+            ...(assignmentsByRoom.get(roomId) ?? []).map((assignment) => ({
+              kind: "assignment" as const,
+              assignment,
+            })),
+            ...(bookingsByRoom.get(roomId) ?? []).map((booking) => ({
+              kind: "booking" as const,
+              booking,
+            })),
+          ];
     const prefillRoomOnEmptyCell =
       roomId !== UNASSIGNED_CALENDAR_ROW ? roomId : undefined;
 
-    // build a day → booking map (only show chip on first visible day)
+    const endOfWindow = toDateStr(addDays(windowStart, DAYS));
+
+    // build a day → booking map (only show chip on first visible day of each segment)
     const dayBookingMap = new Map<string, { booking: BookingWithDetails; span: number; isFirst: boolean }>();
 
-    roomBookings.forEach((b) => {
-      const ciDate = parseISO(b.check_in_date);
-      const coDate = parseISO(b.check_out_date);
+    segments.forEach((segment) => {
+      const booking =
+        segment.kind === "assignment" ? segment.assignment.bookings : segment.booking;
+      const segStart =
+        segment.kind === "assignment" ? segment.assignment.start_date : segment.booking.check_in_date;
+      const segEnd =
+        segment.kind === "assignment" ? segment.assignment.end_date : segment.booking.check_out_date;
 
       days.forEach((day, idx) => {
         const dayStr = toDateStr(day);
-        if (dayStr >= b.check_in_date && dayStr < b.check_out_date) {
-          // is this the first visible day of the booking?
-          const isFirst = dayStr === b.check_in_date || idx === 0;
+        if (dayStr >= segStart && dayStr < segEnd) {
+          const isFirst = dayStr === segStart || idx === 0;
           if (isFirst) {
-            // calculate how many cells this chip spans (capped at remaining days)
-            const endOfWindow = toDateStr(addDays(windowStart, DAYS));
-            const chipEnd = b.check_out_date < endOfWindow ? b.check_out_date : endOfWindow;
+            const chipEnd = segEnd < endOfWindow ? segEnd : endOfWindow;
             const span = differenceInCalendarDays(
               parseISO(chipEnd),
-              parseISO(dayStr === b.check_in_date ? b.check_in_date : toDateStr(day))
+              parseISO(dayStr === segStart ? segStart : dayStr),
             );
-            dayBookingMap.set(dayStr, { booking: b, span: Math.max(span, 1), isFirst: true });
+            dayBookingMap.set(dayStr, { booking, span: Math.max(span, 1), isFirst: true });
           } else if (!dayBookingMap.has(dayStr)) {
-            dayBookingMap.set(dayStr, { booking: b, span: 1, isFirst: false });
+            dayBookingMap.set(dayStr, { booking, span: 1, isFirst: false });
           }
         }
       });
@@ -1621,7 +1719,7 @@ export function DogBoardingCalendar({
     );
   };
 
-  const isLoading = bookingsLoading || roomsLoading;
+  const isLoading = bookingsLoading || assignmentsLoading || roomsLoading;
 
   // ─── JSX ──────────────────────────────────────────────────────────────────
   return (
@@ -2494,18 +2592,33 @@ export function DogBoardingCalendar({
                 {/* Room */}
                 <div className="space-y-1">
                   <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
-                  {detailBooking.rooms ? (
-                    <>
-                      <p className="text-sm font-medium">
-                        {formatRoomSectionLabel(detailBooking.rooms)}
-                      </p>
-                      <p className="text-xs text-muted-foreground capitalize">
-                        {detailBooking.rooms.room_type?.replace(/_/g, " ") ?? ""}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">Unassigned</p>
-                  )}
+                  {(() => {
+                    const slices = (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
+                      start_date: a.start_date,
+                      end_date: a.end_date,
+                      rooms: a.rooms,
+                    }));
+                    const label = roomLabelForBooking(detailBooking, slices);
+                    const displayRoom =
+                      detailBooking.rooms ??
+                      assignmentsByBookingId.get(detailBooking.id)?.[0]?.rooms ??
+                      null;
+                    if (label === "Unassigned") {
+                      return <p className="text-sm text-muted-foreground italic">Unassigned</p>;
+                    }
+                    return (
+                      <>
+                        <p className="text-sm font-medium">
+                          {displayRoom ? formatRoomSectionLabel(displayRoom) : label}
+                        </p>
+                        {displayRoom?.room_type ? (
+                          <p className="text-xs text-muted-foreground capitalize">
+                            {displayRoom.room_type.replace(/_/g, " ")}
+                          </p>
+                        ) : null}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {(!detailBooking.room_id || isImportPlaceholderBooking(detailBooking)) && (

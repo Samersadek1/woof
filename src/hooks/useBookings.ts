@@ -61,6 +61,19 @@ export const queryKeys = {
   ownerBookings: (ownerId: string) => ["bookings", "owner", ownerId] as const,
   petBookings: (petId: string) => ["bookings", "pet", petId] as const,
   rooms: () => ["rooms"] as const,
+  bookingRoomAssignments: (startDate: string, endDate: string) =>
+    ["booking_room_assignments", startDate, endDate] as const,
+};
+
+/** Segment from `booking_room_assignments` — used by the boarding calendar for imported stays. */
+export type CalendarRoomAssignment = {
+  id: string;
+  booking_id: string;
+  room_id: string;
+  start_date: string;
+  end_date: string;
+  rooms: Room;
+  bookings: BookingWithDetails;
 };
 
 export function useBookings(startDate: string, endDate: string) {
@@ -167,6 +180,39 @@ export function usePetBookings(petId: string) {
         throw error;
       }
       return data as BookingWithDetails[];
+    },
+  });
+}
+
+const CALENDAR_ASSIGNMENT_SELECT = `
+  id,
+  booking_id,
+  room_id,
+  start_date,
+  end_date,
+  rooms (*),
+  bookings (${BOOKING_BASE_SELECT})
+`;
+
+export function useBookingRoomAssignments(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: queryKeys.bookingRoomAssignments(startDate, endDate),
+    enabled: !!startDate && !!endDate,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("booking_room_assignments")
+        .select(CALENDAR_ASSIGNMENT_SELECT)
+        .lte("start_date", endDate)
+        .gte("end_date", startDate);
+
+      if (error) throw error;
+
+      return (data ?? []).filter((row) => {
+        const booking = row.bookings as BookingWithDetails | null;
+        if (!booking || booking.status === "cancelled") return false;
+        if (booking.booking_type && booking.booking_type !== "boarding") return false;
+        return true;
+      }) as CalendarRoomAssignment[];
     },
   });
 }

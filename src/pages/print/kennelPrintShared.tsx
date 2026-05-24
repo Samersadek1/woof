@@ -2,6 +2,7 @@
 import { format, formatDistanceToNowStrict, parseISO } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { ownerDisplayName } from "@/lib/bookingUtils";
+import { roomLabelForBooking } from "@/lib/bookingRoomDisplay";
 import { supabase } from "@/integrations/supabase/client";
 
 export type KennelCardBooking = {
@@ -56,6 +57,15 @@ export type KennelCardBooking = {
     quantity: number;
     category: string | null;
     condition_notes: string | null;
+  }>;
+  booking_room_assignments?: Array<{
+    start_date: string;
+    end_date: string;
+    rooms: {
+      display_name: string;
+      room_number: string;
+      cam_id: string | null;
+    } | null;
   }>;
 };
 
@@ -205,7 +215,7 @@ export function KennelCardBlock({
   const primaryPet = booking.booking_pets[0]?.pets ?? null;
   const primaryCare = booking.booking_pets[0] ?? null;
   const owner = booking.owners;
-  const roomLabel = booking.rooms?.display_name || booking.rooms?.room_number || "Unassigned";
+  const roomLabel = roomLabelForBooking(booking, booking.booking_room_assignments);
   const behaviourFlags = parseFlags(primaryPet?.behavioural_notes);
   if (owner?.is_vip) behaviourFlags.push("VIP");
   if (booking.do_not_move) behaviourFlags.push("Warning: Do not move");
@@ -445,6 +455,7 @@ export async function fetchKennelCardData(bookingId: string) {
       rooms(display_name, room_number, cam_id),
       owners(first_name, last_name, phone, phone2, emergency_contact_phone, is_vip, vet_name, vet_phone),
       booking_items(description, quantity, category, condition_notes),
+      booking_room_assignments(start_date, end_date, rooms(display_name, room_number, cam_id)),
       booking_pets(
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
@@ -470,6 +481,7 @@ export async function fetchKennelCardsAsOf(asOfDate: string) {
       rooms(display_name, room_number, cam_id),
       owners(first_name, last_name, phone, phone2, emergency_contact_phone, is_vip, vet_name, vet_phone),
       booking_items(description, quantity, category, condition_notes),
+      booking_room_assignments(start_date, end_date, rooms(display_name, room_number, cam_id)),
       booking_pets(
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
