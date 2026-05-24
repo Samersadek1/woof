@@ -1,1 +1,12 @@
+# Linked project: wineliuwejkxwsdbrthb (woof)
+# Run `npx supabase config push` after editing [auth] — do not push CLI defaults blindly.
+
 project_id = "wineliuwejkxwsdbrthb"
+
+[auth]
+site_url = "https://woof-neon.vercel.app"
+additional_redirect_urls = [
+  "https://woof-neon.vercel.app/auth/setup-password",
+  "https://woof-drool1.vercel.app/auth/setup-password",
+  "http://localhost:8080/auth/setup-password",
+]
