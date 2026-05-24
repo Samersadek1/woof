@@ -1238,36 +1238,17 @@ export function useInvoicesForOwner(
     queryKey: billingKeys.invoices(ownerId, filters as Record<string, string>),
     enabled: !!ownerId,
     queryFn: async () => {
-      const withBranchSelect =
-        "*, line_items:invoice_line_items(*), bookings(booking_ref, check_in_date, check_out_date), branches(code)";
-      const legacySelect =
+      const invoiceSelect =
         "*, line_items:invoice_line_items(*), bookings(booking_ref, check_in_date, check_out_date)";
       let q = supabase
         .from("invoices")
-        .select(withBranchSelect)
+        .select(invoiceSelect)
         .eq("owner_id", ownerId)
         .order("created_at", { ascending: false });
 
       if (filters?.status) q = q.eq("status", filters.status);
 
-      let { data, error } = await q;
-      if (error) {
-        const msg = error.message.toLowerCase();
-        const missingBranchRelation =
-          msg.includes("branches") ||
-          msg.includes("branch_id") ||
-          msg.includes("relationship");
-        if (!missingBranchRelation) throw error;
-        q = supabase
-          .from("invoices")
-          .select(legacySelect)
-          .eq("owner_id", ownerId)
-          .order("created_at", { ascending: false });
-        if (filters?.status) q = q.eq("status", filters.status);
-        const fallback = await q;
-        data = fallback.data;
-        error = fallback.error;
-      }
+      const { data, error } = await q;
       if (error) throw error;
 
       type RawLineItem = { id: string; description: string; quantity: number; unit_price: number; total_price: number; service_type: string | null };
@@ -1293,9 +1274,7 @@ export function useInvoicesForOwner(
         return {
           id: inv.id,
           invoice_number: inv.invoice_number,
-          branch_code:
-            ((raw.branches as { code: string | null } | null | undefined)?.code ?? null) ??
-            deriveBranchCodeFromInvoiceNumber(inv.invoice_number),
+          branch_code: deriveBranchCodeFromInvoiceNumber(inv.invoice_number),
           owner_id: inv.owner_id,
           service_type: inv.service_type ?? null,
           service_id: inv.booking_id,

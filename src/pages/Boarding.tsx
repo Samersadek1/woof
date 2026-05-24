@@ -1213,7 +1213,7 @@ export function DogBoardingCalendar({
   const dogBookingEstimateTotal = useMemo(() => {
     let total = 0;
     if (dogRatePreview.data && dogNights > 0) {
-      total += dogRatePreview.data.unitPrice * dogNights;
+      total += dogRatePreview.data.totalAed;
     }
     total += dogTransportEstimate;
     total += dogManualAddonTotal;
@@ -1227,7 +1227,7 @@ export function DogBoardingCalendar({
 
   const dogBoardingSubtotal = useMemo(() => {
     if (!dogRatePreview.data || dogNights <= 0) return 0;
-    return dogRatePreview.data.unitPrice * dogNights;
+    return dogRatePreview.data.totalAed;
   }, [dogRatePreview.data, dogNights]);
 
   const dogDoubleOccupancyDiscount = useMemo(() => {
@@ -1452,7 +1452,6 @@ export function DogBoardingCalendar({
       staff_id: null,
       status: "confirmed",
       booking_type: "boarding",
-      dog_size: form.dog_size,
     };
 
     createBooking.mutate(payload, {
@@ -2278,7 +2277,7 @@ export function DogBoardingCalendar({
                           Room ({dogNights} night{dogNights !== 1 ? "s" : ""})
                         </span>
                         <span className="tabular-nums font-medium">
-                          {formatAed(dogRatePreview.data.unitPrice * dogNights)}
+                          {formatAed(dogRatePreview.data.totalAed)}
                         </span>
                       </div>
                     )}
@@ -2978,7 +2977,7 @@ function CatBoardingCalendar({
   const catBookingEstimateTotal = useMemo(() => {
     let total = 0;
     if (catRatePreview.data && catNights > 0) {
-      total += catRatePreview.data.unitPrice * catNights;
+      total += catRatePreview.data.totalAed;
     }
     total += catTransportEstimate;
     total += catManualAddonTotal;
@@ -2992,7 +2991,7 @@ function CatBoardingCalendar({
 
   const catBoardingSubtotal = useMemo(() => {
     if (!catRatePreview.data || catNights <= 0) return 0;
-    return catRatePreview.data.unitPrice * catNights;
+    return catRatePreview.data.totalAed;
   }, [catRatePreview.data, catNights]);
 
   const catDoubleOccupancyDiscount = useMemo(() => {
@@ -3795,7 +3794,7 @@ function CatBoardingCalendar({
                           Room ({catNights} night{catNights !== 1 ? "s" : ""})
                         </span>
                         <span className="tabular-nums font-medium">
-                          {formatAed(catRatePreview.data.unitPrice * catNights)}
+                          {formatAed(catRatePreview.data.totalAed)}
                         </span>
                       </div>
                     )}

@@ -52,29 +52,20 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
     queryFn: async () => {
       const invoiceSelect =
         "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name, phone)";
-      const applyFilters = <T,>(query: T): T => {
-        let next = query as T & {
-          eq: (column: string, value: string) => T;
-          in: (column: string, values: InvoiceStatus[]) => T;
-          gte: (column: string, value: string) => T;
-          lte: (column: string, value: string) => T;
-        };
-        if (filters.ownerId) next = next.eq("owner_id", filters.ownerId);
-        if (filters.status?.length) next = next.in("status", filters.status);
-        if (filters.from) next = next.gte("created_at", `${filters.from}T00:00:00`);
-        if (filters.to) next = next.lte("created_at", `${filters.to}T23:59:59`);
-        if (filters.serviceType && filters.serviceType !== "all") {
-          next = next.eq("service_type", filters.serviceType);
-        }
-        return next;
-      };
 
-      const { data, error } = await applyFilters(
-        supabase
-          .from("invoices")
-          .select(invoiceSelect)
-          .order("created_at", { ascending: false }),
-      );
+      let q = supabase
+        .from("invoices")
+        .select(invoiceSelect)
+        .order("created_at", { ascending: false });
+      if (filters.ownerId) q = q.eq("owner_id", filters.ownerId);
+      if (filters.status?.length) q = q.in("status", filters.status);
+      if (filters.from) q = q.gte("created_at", `${filters.from}T00:00:00`);
+      if (filters.to) q = q.lte("created_at", `${filters.to}T23:59:59`);
+      if (filters.serviceType && filters.serviceType !== "all") {
+        q = q.eq("service_type", filters.serviceType);
+      }
+
+      const { data, error } = await q;
 
       if (error) throw error;
 
