@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTestOwner, createTestRoom } from "../helpers/factories";
+import { createTestOwner, createTestPet, createTestRoom } from "../helpers/factories";
 import { getServiceRoleClient } from "../helpers/supabaseTestClient";
 import { withScope } from "./_utils";
 import type { Database } from "@/integrations/supabase/types";
@@ -302,49 +302,83 @@ describe("booking_room_assignments", () => {
     }
   });
 
-  it("spot-checks known imported booking with pet and room segments", async () => {
-    const supabase = getServiceRoleClient();
-    const { data: booking, error: bookingError } = await supabase
-      .from("bookings")
-      .select("id, source_external_id")
-      .eq("source_external_id", "BOOK-CL000007-2027-05-23")
-      .single();
-    if (bookingError) throw bookingError;
+  it("loads pet names and ordered room segments for a multi-night stay", async () => {
+    await withScope(async (scope) => {
+      const supabase = getServiceRoleClient();
+      const owner = await createTestOwner(scope);
+      const pet = await createTestPet(scope, owner.id, { name: "Paddy" });
+      const roomB2 = await createTestRoom(scope, {
+        display_name: "B2",
+        name: "B2",
+        room_number: `${scope.scopeId}_B2`,
+      });
+      const roomA16 = await createTestRoom(scope, {
+        display_name: "A16",
+        name: "A16",
+        room_number: `${scope.scopeId}_A16`,
+      });
+      const booking = await createTestBooking({
+        ownerId: owner.id,
+        roomId: null,
+        notes: `${scope.scopeId}_multi_segment_calendar_query`,
+      });
 
-    const { data: pets, error: petsError } = await supabase
-      .from("booking_pets")
-      .select("pets(name)")
-      .eq("booking_id", booking.id);
-    if (petsError) throw petsError;
+      const { error: linkPetError } = await supabase
+        .from("booking_pets")
+        .insert({ booking_id: booking.id, pet_id: pet.id });
+      if (linkPetError) throw linkPetError;
 
-    const { data: segments, error: segmentsError } = await supabase
-      .from("booking_room_assignments")
-      .select("start_date,end_date,rooms(name)")
-      .eq("booking_id", booking.id)
-      .order("start_date", { ascending: true });
-    if (segmentsError) throw segmentsError;
+      const { error: segmentsError } = await supabase.from("booking_room_assignments").insert([
+        {
+          booking_id: booking.id,
+          room_id: roomB2.id,
+          start_date: "2027-05-23",
+          end_date: "2027-05-23",
+        },
+        {
+          booking_id: booking.id,
+          room_id: roomA16.id,
+          start_date: "2027-05-24",
+          end_date: "2027-05-25",
+        },
+      ]);
+      if (segmentsError) throw segmentsError;
 
-    type BookingPetNameRow = Pick<
-      Database["public"]["Tables"]["booking_pets"]["Row"],
-      "booking_id"
-    > & { pets: Pick<Database["public"]["Tables"]["pets"]["Row"], "name"> | null };
-    type RoomSegmentRow = Pick<
-      Database["public"]["Tables"]["booking_room_assignments"]["Row"],
-      "start_date" | "end_date"
-    > & { rooms: Pick<Database["public"]["Tables"]["rooms"]["Row"], "name"> | null };
+      const { data: pets, error: petsError } = await supabase
+        .from("booking_pets")
+        .select("pets(name)")
+        .eq("booking_id", booking.id);
+      if (petsError) throw petsError;
 
-    const petNames = ((pets ?? []) as BookingPetNameRow[])
-      .map((row) => row.pets?.name)
-      .filter(Boolean)
-      .sort();
-    const roomSegments = ((segments ?? []) as RoomSegmentRow[]).map(
-      (row) => `${row.rooms?.name} (${row.start_date} to ${row.end_date})`,
-    );
+      const { data: segments, error: fetchSegmentsError } = await supabase
+        .from("booking_room_assignments")
+        .select("start_date,end_date,rooms(name)")
+        .eq("booking_id", booking.id)
+        .order("start_date", { ascending: true });
+      if (fetchSegmentsError) throw fetchSegmentsError;
 
-    expect(petNames).toEqual(["Paddy"]);
-    expect(roomSegments).toEqual([
-      "B2 (2027-05-23 to 2027-05-23)",
-      "A16 (2027-05-24 to 2027-05-25)",
-    ]);
+      type BookingPetNameRow = Pick<
+        Database["public"]["Tables"]["booking_pets"]["Row"],
+        "booking_id"
+      > & { pets: Pick<Database["public"]["Tables"]["pets"]["Row"], "name"> | null };
+      type RoomSegmentRow = Pick<
+        Database["public"]["Tables"]["booking_room_assignments"]["Row"],
+        "start_date" | "end_date"
+      > & { rooms: Pick<Database["public"]["Tables"]["rooms"]["Row"], "name"> | null };
+
+      const petNames = ((pets ?? []) as BookingPetNameRow[])
+        .map((row) => row.pets?.name)
+        .filter(Boolean)
+        .sort();
+      const roomSegments = ((segments ?? []) as RoomSegmentRow[]).map(
+        (row) => `${row.rooms?.name} (${row.start_date} to ${row.end_date})`,
+      );
+
+      expect(petNames).toEqual(["Paddy"]);
+      expect(roomSegments).toEqual([
+        "B2 (2027-05-23 to 2027-05-23)",
+        "A16 (2027-05-24 to 2027-05-25)",
+      ]);
+    });
   });
 });
