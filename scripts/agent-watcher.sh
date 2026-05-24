@@ -81,6 +81,7 @@ process_one() {
   # Use plain command + $? capture (not `if ! cmd`, which clobbers $?).
   set +e
   "$AGENT_BIN" -p \
+      --trust \
       --output-format stream-json \
       < "$prompt_file" \
       > "$task_dir/stream.ndjson" \
