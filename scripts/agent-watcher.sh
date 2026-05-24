@@ -13,7 +13,8 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+REPO_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 QUEUE="$REPO_ROOT/.cursor-queue"
 PENDING="$QUEUE/pending"
 DONE="$QUEUE/done"
@@ -22,6 +23,12 @@ STOP="$QUEUE/STOP"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-3}"
 ONCE=0
 [[ "${1:-}" == "--once" ]] && ONCE=1
+
+# Cross-platform stat -m (mtime). BSD (macOS) uses -f %m, GNU uses -c %Y.
+script_mtime() {
+  stat -f %m "$SCRIPT_PATH" 2>/dev/null || stat -c %Y "$SCRIPT_PATH"
+}
+SCRIPT_MTIME_AT_START="$(script_mtime)"
 
 mkdir -p "$PENDING" "$DONE" "$(dirname "$LOG")"
 
@@ -146,6 +153,14 @@ while true; do
   if [[ -f "$STOP" ]]; then
     log "STOP sentinel found — exiting cleanly."
     exit 0
+  fi
+
+  # Self-update: if the script file on disk has changed since we started,
+  # re-exec ourselves with the new code. This means future patches require
+  # no manual restart.
+  if [[ "$(script_mtime)" != "$SCRIPT_MTIME_AT_START" ]]; then
+    log "↻ script file changed (mtime $(script_mtime) ≠ $SCRIPT_MTIME_AT_START) — restarting with new code"
+    exec bash "$SCRIPT_PATH" "$@"
   fi
 
   # Process oldest pending prompt, if any.
