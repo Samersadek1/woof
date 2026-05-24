@@ -26,6 +26,11 @@ import {
 import { useCheckIn, useUpdateBooking } from "@/hooks/useBookings";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  PET_CARE_NOTES_SELECT,
+  petFeedingNotes,
+  petMedicationNotes,
+} from "@/lib/petCareNotes";
 
 export const OVERVIEW_ITEM_DESCRIPTION = "Overview — belongings (group photo)";
 
@@ -181,7 +186,7 @@ export function CheckInSheet({
     setCareLoading(true);
     void supabase
       .from("booking_pets")
-      .select("id, feeding_notes, medication_notes, special_instructions, pets(name, feeding_instructions, medications, other_notes)")
+      .select(`id, feeding_notes, medication_notes, special_instructions, pets(name, ${PET_CARE_NOTES_SELECT}, other_notes)`)
       .eq("booking_id", bookingId)
       .then(({ data, error }) => {
         if (!active) return;
@@ -197,6 +202,8 @@ export function CheckInSheet({
           special_instructions: string | null;
           pets: {
             name: string | null;
+            feeding_notes: string | null;
+            medication_notes: string | null;
             feeding_instructions: string | null;
             medications: string | null;
             other_notes: string | null;
@@ -206,16 +213,16 @@ export function CheckInSheet({
           id: row.id,
           petName: row.pets?.name ?? "Pet",
           feeding_am: splitAmPmNotes(
-            row.feeding_notes ?? row.pets?.feeding_instructions ?? "",
+            row.feeding_notes?.trim() || petFeedingNotes(row.pets ?? undefined),
           ).am,
           feeding_pm: splitAmPmNotes(
-            row.feeding_notes ?? row.pets?.feeding_instructions ?? "",
+            row.feeding_notes?.trim() || petFeedingNotes(row.pets ?? undefined),
           ).pm,
           medication_am: splitAmPmNotes(
-            row.medication_notes ?? row.pets?.medications ?? "",
+            row.medication_notes?.trim() || petMedicationNotes(row.pets ?? undefined),
           ).am,
           medication_pm: splitAmPmNotes(
-            row.medication_notes ?? row.pets?.medications ?? "",
+            row.medication_notes?.trim() || petMedicationNotes(row.pets ?? undefined),
           ).pm,
           special_instructions: row.special_instructions ?? row.pets?.other_notes ?? "",
         }));

@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
+import { PET_CARE_NOTES_SELECT } from "@/lib/petCareNotes";
 
 type Booking = Database["public"]["Tables"]["bookings"]["Row"];
 type BookingInsert = Database["public"]["Tables"]["bookings"]["Insert"];
@@ -17,8 +18,12 @@ export type BookingPetDetail = {
   pets: {
     name: string;
     other_notes: string | null;
+    feeding_notes: string | null;
+    medication_notes: string | null;
+    behaviour_notes: string | null;
     feeding_instructions: string | null;
     medications: string | null;
+    behavioural_notes: string | null;
     special_alerts: Database["public"]["Tables"]["pets"]["Row"]["special_alerts"];
   } | null;
 };
@@ -32,7 +37,7 @@ export type BookingWithDetails = Booking & {
 };
 
 const BOOKING_BASE_SELECT =
-  "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts))";
+  `*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, ${PET_CARE_NOTES_SELECT}, special_alerts))`;
 
 const BOOKING_DETAIL_SELECT =
   `${BOOKING_BASE_SELECT}, booking_items(count)`;

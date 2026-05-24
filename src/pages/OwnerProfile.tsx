@@ -253,10 +253,10 @@ function makePetForm(ownerId: string): PetInsert {
     weight_kg: undefined,
     gender: undefined,
     spayed_neutered: false,
-    feeding_instructions: "",
+    feeding_notes: "",
     medical_conditions: "",
-    medications: "",
-    behavioural_notes: "",
+    medication_notes: "",
+    behaviour_notes: "",
     assessment_status: "not_assessed",
     microchip_number: "",
     grooming_notes: "",
@@ -1918,7 +1918,7 @@ const OwnerProfilePage = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="pet_feeding">Feeding instructions</Label>
-                <Textarea id="pet_feeding" rows={2} value={(petForm.feeding_instructions as string) ?? ""} onChange={(e) => handlePetField("feeding_instructions", e.target.value)} />
+                <Textarea id="pet_feeding" rows={2} value={(petForm.feeding_notes as string) ?? ""} onChange={(e) => handlePetField("feeding_notes", e.target.value)} />
               </div>
 
               <div className="space-y-2">
@@ -1928,12 +1928,12 @@ const OwnerProfilePage = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="pet_meds">Medications</Label>
-                <Textarea id="pet_meds" rows={2} value={(petForm.medications as string) ?? ""} onChange={(e) => handlePetField("medications", e.target.value)} />
+                <Textarea id="pet_meds" rows={2} value={(petForm.medication_notes as string) ?? ""} onChange={(e) => handlePetField("medication_notes", e.target.value)} />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="pet_behaviour">Behavioural notes</Label>
-                <Textarea id="pet_behaviour" rows={2} value={(petForm.behavioural_notes as string) ?? ""} onChange={(e) => handlePetField("behavioural_notes", e.target.value)} />
+                <Textarea id="pet_behaviour" rows={2} value={(petForm.behaviour_notes as string) ?? ""} onChange={(e) => handlePetField("behaviour_notes", e.target.value)} />
               </div>
 
               <div className="space-y-2">

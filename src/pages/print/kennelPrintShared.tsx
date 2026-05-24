@@ -4,6 +4,12 @@ import { Badge } from "@/components/ui/badge";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { roomLabelForBooking } from "@/lib/bookingRoomDisplay";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  PET_CARE_NOTES_SELECT,
+  petBehaviourNotes,
+  petFeedingNotes,
+  petMedicationNotes,
+} from "@/lib/petCareNotes";
 
 export type KennelCardBooking = {
   id: string;
@@ -43,6 +49,9 @@ export type KennelCardBooking = {
       size: "small" | "medium" | "large" | null;
       date_of_birth: string | null;
       microchip_number: string | null;
+      feeding_notes: string | null;
+      medication_notes: string | null;
+      behaviour_notes: string | null;
       feeding_instructions: string | null;
       medications: string | null;
       medical_conditions: string | null;
@@ -101,8 +110,7 @@ function kennelBottomFeedingInstructions(
 ): string {
   return (
     primaryCare?.feeding_notes?.trim() ||
-    primaryPet?.feeding_instructions?.trim() ||
-    ""
+    petFeedingNotes(primaryPet ?? undefined)
   );
 }
 
@@ -112,7 +120,7 @@ function kennelBottomMedicationSpecialCare(
 ): string {
   const parts = [
     primaryCare?.medication_notes?.trim(),
-    primaryPet?.medications?.trim(),
+    petMedicationNotes(primaryPet ?? undefined),
     primaryPet?.medical_conditions?.trim(),
   ].filter(Boolean) as string[];
   return parts.join("\n\n");
@@ -123,7 +131,7 @@ function kennelBottomBehavioralNotes(primaryPet: KennelCardBooking["booking_pets
   flagged: boolean;
 } {
   const parts = [
-    primaryPet?.behavioural_notes?.trim(),
+    petBehaviourNotes(primaryPet ?? undefined),
     primaryPet?.other_notes?.trim(),
   ].filter(Boolean) as string[];
   const text = parts.join("\n\n");
@@ -216,17 +224,17 @@ export function KennelCardBlock({
   const primaryCare = booking.booking_pets[0] ?? null;
   const owner = booking.owners;
   const roomLabel = roomLabelForBooking(booking, booking.booking_room_assignments);
-  const behaviourFlags = parseFlags(primaryPet?.behavioural_notes);
+  const behaviourFlags = parseFlags(petBehaviourNotes(primaryPet ?? undefined) || null);
   if (owner?.is_vip) behaviourFlags.push("VIP");
   if (booking.do_not_move) behaviourFlags.push("Warning: Do not move");
 
   const feedingText =
     primaryCare?.feeding_notes?.trim() ||
-    primaryPet?.feeding_instructions?.trim() ||
+    petFeedingNotes(primaryPet ?? undefined) ||
     "No feeding notes";
   const medicationText =
     primaryCare?.medication_notes?.trim() ||
-    displayMedications(primaryPet?.medications ?? null);
+    displayMedications(petMedicationNotes(primaryPet ?? undefined) || null);
   const notesText = booking.notes?.trim() || primaryCare?.special_instructions?.trim() || "—";
   const createdAt = format(new Date(booking.created_at), "d MMM yyyy, h:mm a");
   const checklistDates = stayDates(booking.check_in_date, booking.check_out_date).map((day) =>
@@ -460,7 +468,7 @@ export async function fetchKennelCardData(bookingId: string) {
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
           id, name, photo_url, breed, size, date_of_birth, microchip_number,
-          feeding_instructions, medications, medical_conditions, behavioural_notes, other_notes, vet_name, vet_phone
+          ${PET_CARE_NOTES_SELECT}, medical_conditions, other_notes, vet_name, vet_phone
         )
       )
     `,
@@ -486,7 +494,7 @@ export async function fetchKennelCardsAsOf(asOfDate: string) {
         pet_id, feeding_notes, medication_notes, special_instructions,
         pets(
           id, name, photo_url, breed, size, date_of_birth, microchip_number,
-          feeding_instructions, medications, medical_conditions, behavioural_notes, other_notes, vet_name, vet_phone
+          ${PET_CARE_NOTES_SELECT}, medical_conditions, other_notes, vet_name, vet_phone
         )
       )
     `,

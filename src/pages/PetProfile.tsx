@@ -19,6 +19,7 @@ import { VaccinationInformationTable } from "@/components/VaccinationInformation
 import { PetDocuments } from "@/components/PetDocuments";
 import { VaccicheckPanel } from "@/components/VaccicheckPanel";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
+import { petBehaviourNotes, petFeedingNotes, petMedicationNotes } from "@/lib/petCareNotes";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -372,10 +373,10 @@ const PetProfilePage = () => {
       gender: pet.gender,
       spayed_neutered: pet.spayed_neutered,
       microchip_number: pet.microchip_number,
-      feeding_instructions: pet.feeding_instructions,
+      feeding_notes: petFeedingNotes(pet) || null,
       medical_conditions: pet.medical_conditions,
-      medications: pet.medications,
-      behavioural_notes: pet.behavioural_notes,
+      medication_notes: petMedicationNotes(pet) || null,
+      behaviour_notes: petBehaviourNotes(pet) || null,
       grooming_notes: pet.grooming_notes,
       other_notes: pet.other_notes,
       vet_name: pet.vet_name,
@@ -680,10 +681,10 @@ const PetProfilePage = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             {[
-              { label: "Feeding instructions", value: pet.feeding_instructions },
+              { label: "Feeding instructions", value: petFeedingNotes(pet) || null },
               { label: "Medical conditions",   value: pet.medical_conditions },
-              { label: "Medications",          value: pet.medications },
-              { label: "Behavioural notes",    value: pet.behavioural_notes },
+              { label: "Medications",          value: petMedicationNotes(pet) || null },
+              { label: "Behavioural notes",    value: petBehaviourNotes(pet) || null },
               { label: "Grooming notes",       value: pet.grooming_notes },
             ].map(({ label, value }) => (
               <div key={label} className="space-y-0.5">
@@ -1498,7 +1499,7 @@ const PetProfilePage = () => {
 
             <div className="space-y-2">
               <Label htmlFor="edit_feeding">Feeding instructions</Label>
-              <Textarea id="edit_feeding" rows={2} value={editForm.feeding_instructions ?? ""} onChange={(e) => handleField("feeding_instructions", e.target.value)} />
+              <Textarea id="edit_feeding" rows={2} value={editForm.feeding_notes ?? ""} onChange={(e) => handleField("feeding_notes", e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit_medical">Medical conditions</Label>
@@ -1506,11 +1507,11 @@ const PetProfilePage = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit_meds">Medications</Label>
-              <Textarea id="edit_meds" rows={2} value={editForm.medications ?? ""} onChange={(e) => handleField("medications", e.target.value)} />
+              <Textarea id="edit_meds" rows={2} value={editForm.medication_notes ?? ""} onChange={(e) => handleField("medication_notes", e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit_behaviour">Behavioural notes</Label>
-              <Textarea id="edit_behaviour" rows={2} value={editForm.behavioural_notes ?? ""} onChange={(e) => handleField("behavioural_notes", e.target.value)} />
+              <Textarea id="edit_behaviour" rows={2} value={editForm.behaviour_notes ?? ""} onChange={(e) => handleField("behaviour_notes", e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit_grooming">Grooming notes</Label>

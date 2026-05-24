@@ -1495,6 +1495,7 @@ export type Database = {
           assessment_date: string | null
           assessment_notes: string | null
           assessment_status: Database["public"]["Enums"]["assessment_status"]
+          behaviour_notes: string | null
           behavioural_notes: string | null
           breed: string | null
           camera_preferred: boolean
@@ -1509,6 +1510,7 @@ export type Database = {
           id: string
           medical_conditions: string | null
           medical_notes: string | null
+          medication_notes: string | null
           medications: string | null
           microchip_number: string | null
           name: string
@@ -1543,6 +1545,7 @@ export type Database = {
           assessment_date?: string | null
           assessment_notes?: string | null
           assessment_status?: Database["public"]["Enums"]["assessment_status"]
+          behaviour_notes?: string | null
           behavioural_notes?: string | null
           breed?: string | null
           camera_preferred?: boolean
@@ -1557,6 +1560,7 @@ export type Database = {
           id?: string
           medical_conditions?: string | null
           medical_notes?: string | null
+          medication_notes?: string | null
           medications?: string | null
           microchip_number?: string | null
           name: string
@@ -1591,6 +1595,7 @@ export type Database = {
           assessment_date?: string | null
           assessment_notes?: string | null
           assessment_status?: Database["public"]["Enums"]["assessment_status"]
+          behaviour_notes?: string | null
           behavioural_notes?: string | null
           breed?: string | null
           camera_preferred?: boolean
@@ -1605,6 +1610,7 @@ export type Database = {
           id?: string
           medical_conditions?: string | null
           medical_notes?: string | null
+          medication_notes?: string | null
           medications?: string | null
           microchip_number?: string | null
           name?: string

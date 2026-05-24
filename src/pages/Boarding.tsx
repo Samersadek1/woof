@@ -37,6 +37,11 @@ import {
 } from "@/lib/boardingCalendarPrint";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
+import {
+  PET_CARE_NOTES_SELECT,
+  petFeedingNotes,
+  petMedicationNotes,
+} from "@/lib/petCareNotes";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -538,8 +543,8 @@ function renderKennelCardHtml(
     .map((bp) => {
       const petName = bp.pets?.name ?? "Unknown pet";
       const petNote = bp.pets?.other_notes?.trim();
-      const feeding = (bp.feeding_notes ?? bp.pets?.feeding_instructions ?? "").trim();
-      const medication = (bp.medication_notes ?? bp.pets?.medications ?? "").trim();
+      const feeding = (bp.feeding_notes?.trim() || petFeedingNotes(bp.pets ?? undefined));
+      const medication = (bp.medication_notes?.trim() || petMedicationNotes(bp.pets ?? undefined));
       const special = (bp.special_instructions ?? "").trim();
       return `<li>
         <strong>${escapeHtml(petName)}</strong>
@@ -553,8 +558,8 @@ function renderKennelCardHtml(
   const petChecklistCards = booking.booking_pets
     .map((bp) => {
       const petName = bp.pets?.name ?? "Unknown pet";
-      const feeding = (bp.feeding_notes ?? bp.pets?.feeding_instructions ?? "").trim() || "—";
-      const medication = (bp.medication_notes ?? bp.pets?.medications ?? "").trim() || "—";
+      const feeding = (bp.feeding_notes?.trim() || petFeedingNotes(bp.pets ?? undefined)) || "—";
+      const medication = (bp.medication_notes?.trim() || petMedicationNotes(bp.pets ?? undefined)) || "—";
       const special = (bp.special_instructions ?? "").trim() || "—";
       return `<div class="pet-check">
         <div class="pet-check-title">${escapeHtml(petName)}</div>
@@ -649,7 +654,7 @@ async function hydrateBookingsForPrint(bookings: BookingWithDetails[]): Promise<
   const { data, error } = await supabase
     .from("bookings")
     .select(
-      "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications)), booking_items(count)",
+      `*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, ${PET_CARE_NOTES_SELECT})), booking_items(count)`,
     )
     .in("id", ids);
 
@@ -744,7 +749,7 @@ async function hydrateBookingsForComingGoingPrint(
   const { data, error } = await supabase
     .from("bookings")
     .select(
-      "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, breed, other_notes, feeding_instructions, medications))",
+      `*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, breed, other_notes, ${PET_CARE_NOTES_SELECT}))`,
     )
     .in("id", ids);
 
@@ -1434,8 +1439,8 @@ export function DogBoardingCalendar({
   const getInitialPetCare = (petId: string) => {
     const pet = ownerPets.find((p) => p.id === petId);
     return {
-      feeding_notes: pet?.feeding_instructions ?? "",
-      medication_notes: pet?.medications ?? "",
+      feeding_notes: petFeedingNotes(pet),
+      medication_notes: petMedicationNotes(pet),
       special_instructions: pet?.other_notes ?? "",
     };
   };
@@ -2941,7 +2946,7 @@ type BoardingListPreset = "today" | "tomorrow" | "next7";
 type BoardingListFocus = "all" | "check-ins" | "check-outs";
 
 const OCCUPANCY_BOOKING_SELECT =
-  "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts))";
+  `*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, ${PET_CARE_NOTES_SELECT}, special_alerts))`;
 
 function BoardingOperationsList({
   initialDatePreset = "today",
