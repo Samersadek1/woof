@@ -493,8 +493,8 @@ const emptyInsertDefaults = (): Omit<RoomInsert, "id" | "created_at"> => ({
   room_number: "",
   wing: "oxford",
   room_type: "single_royal",
-  capacity_type: "single",
-  max_pets: 1,
+  capacity_type: "multiple",
+  max_pets: 99,
   is_active: true,
   camera_recording: false,
 });
@@ -513,8 +513,8 @@ const EMPTY_EDIT_FORM: RoomEditForm = {
   room_number: "",
   wing: "oxford",
   room_type: "single_royal",
-  capacity_type: "single",
-  max_pets: MIN_MAX_PETS,
+  capacity_type: "multiple",
+  max_pets: 99,
 };
 
 function roomToEditForm(room: Room): RoomEditForm {
@@ -934,8 +934,6 @@ const RoomsAdminPage = () => {
       "Room No": room.room_number,
       "Wing": WING_LABELS[room.wing as RoomWing] ?? room.wing,
       "Room Type": roomTypeLabels[room.room_type] ?? room.room_type,
-      "Capacity": CAPACITY_LABELS[room.capacity_type as CapacityType] ?? room.capacity_type,
-      "Max Pets": room.max_pets,
       "Status": occupiedRoomIds?.has(room.id) ? "Occupied" : "Available",
     }));
     const ws = XLSX.utils.json_to_sheet(data);
@@ -1037,8 +1035,6 @@ const RoomsAdminPage = () => {
                   <TableHead className="min-w-[88px] w-[88px] text-center">Room no.</TableHead>
                   <TableHead className="min-w-[150px]">Wing</TableHead>
                   <TableHead className="min-w-[190px]">Room Type</TableHead>
-                  <TableHead className="min-w-[120px]">Capacity</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Max Pets</TableHead>
                   <TableHead className="min-w-[100px]">Camera No.</TableHead>
                   <TableHead className="text-center min-w-[120px]">Camera recording</TableHead>
                   <TableHead className="text-center min-w-[100px]">Status</TableHead>
@@ -1106,27 +1102,6 @@ const RoomsAdminPage = () => {
                         labels={roomTypeLabels}
                       />
                     </TableCell>
-
-                    <TableCell>
-                      <EnumCell<CapacityType>
-                        room={room}
-                        field="capacity_type"
-                        value={room.capacity_type}
-                        options={CAPACITY_VALUES}
-                        labels={CAPACITY_LABELS}
-                      />
-                    </TableCell>
-
-                    <TableCell className="text-right">
-                      <MaxPetsCell
-                        room={room}
-                        isEditing={isEditing(room.id, "max_pets")}
-                        onOpen={() => setEditingCell({ id: room.id, field: "max_pets" })}
-                        onClose={() => setEditingCell(null)}
-                        onSave={saveMaxPets}
-                      />
-                    </TableCell>
-
 
                     <TableCell>
                       <TextCell room={room} field="cam_number" value={room.cam_number} />
@@ -1287,44 +1262,6 @@ const RoomsAdminPage = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-2">
-                <Label>Capacity</Label>
-                <Select
-                  value={editForm.capacity_type}
-                  onValueChange={(v) =>
-                    setEditForm((f) => ({ ...f, capacity_type: v as CapacityType }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CAPACITY_VALUES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {CAPACITY_LABELS[c]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="er-max">Max pets</Label>
-                <Input
-                  id="er-max"
-                  type="number"
-                  inputMode="numeric"
-                  min={MIN_MAX_PETS}
-                  max={MAX_MAX_PETS}
-                  step={1}
-                  value={editForm.max_pets}
-                  onChange={(e) =>
-                    setEditForm((f) => ({
-                      ...f,
-                      max_pets: clampMaxPets(parseInt(e.target.value, 10) || MIN_MAX_PETS),
-                    }))
-                  }
-                />
-              </div>
             </div>
             <DialogFooter>
               <Button
@@ -1407,26 +1344,6 @@ const RoomsAdminPage = () => {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>Capacity</Label>
-                <Select
-                  value={newRoom.capacity_type}
-                  onValueChange={(v) =>
-                    setNewRoom((f) => ({ ...f, capacity_type: v as CapacityType }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CAPACITY_VALUES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {CAPACITY_LABELS[c]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
                 <Label>Pet Type</Label>
                 <Select
                   value={newRoom.pet_type ?? "dog"}
@@ -1440,24 +1357,6 @@ const RoomsAdminPage = () => {
                     <SelectItem value="cat">Cat</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="nr-max">Max pets</Label>
-                <Input
-                  id="nr-max"
-                  type="number"
-                  inputMode="numeric"
-                  min={MIN_MAX_PETS}
-                  max={MAX_MAX_PETS}
-                  step={1}
-                  value={newRoom.max_pets ?? MIN_MAX_PETS}
-                  onChange={(e) =>
-                    setNewRoom((f) => ({
-                      ...f,
-                      max_pets: clampMaxPets(parseInt(e.target.value, 10) || MIN_MAX_PETS),
-                    }))
-                  }
-                />
               </div>
               <div className="flex items-center justify-between rounded-md border p-3 gap-3">
                 <Label htmlFor="nr-cam" className="cursor-pointer shrink-0">

@@ -210,12 +210,6 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
 
 // ── Boarding-specific invoice helper ─────────────────────────────────────────
 
-function occupancyTag(petCount: number): string {
-  if (petCount <= 1) return "single";
-  if (petCount === 2) return "twin";
-  return "multiple";
-}
-
 interface AutoInvoiceParams {
   bookingId: string;
   ownerId: string;
@@ -255,10 +249,10 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
 
   void roomRateType;
 
-  const occ = occupancyTag(petCount);
-  const typeLabel = roomType.replace(/_/g, " ");
-  const occLabel = petCount > 1 ? ` (${occ})` : "";
+  void petCount;
+  void roomType;
   const roomPrefix = roomName ? `${roomName} — ` : "";
+  const boardingLabel = roomPrefix ? `${roomPrefix}Boarding` : "Boarding";
 
   const lineItems: ServiceInvoiceLineItem[] = [];
 
@@ -270,7 +264,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
     const unitPrice = groupNights[0].unitPrice;
     const seasonLabel = boardingRateSeasonLabel(season);
     lineItems.push({
-      description: `${roomPrefix}${typeLabel}${occLabel} — ${groupNights.length} ${seasonLabel.toLowerCase()} night${groupNights.length !== 1 ? "s" : ""}`,
+      description: `${boardingLabel} — ${groupNights.length} ${seasonLabel.toLowerCase()} night${groupNights.length !== 1 ? "s" : ""}`,
       quantity: groupNights.length,
       unitPrice,
       pricingKey: groupNights[0].pricingKey,
@@ -285,7 +279,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
 
   if (lineItems.length === 0) {
     lineItems.push({
-      description: `${roomPrefix}${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`,
+      description: `${boardingLabel} — ${nights} night${nights !== 1 ? "s" : ""}`,
       quantity: nights,
       unitPrice: 0,
       pricingKey: "boarding_night",

@@ -498,10 +498,15 @@ export function useBillingCalculator(
 
       switch (params.type) {
         case "boarding": {
-          const occ = params.petCount <= 1 ? "single" : params.petCount === 2 ? "twin" : "multiple";
           const resolved = await resolveBoardingRate(params.roomId, params.petCount);
           const rate = resolved.unitPrice;
-          lineItems.push({ pricingKey: resolved.pricingKey, label: `Room (${occ})`, quantity: params.nights, unitPrice: rate, total: rate * params.nights });
+          lineItems.push({
+            pricingKey: resolved.pricingKey,
+            label: "Boarding",
+            quantity: params.nights,
+            unitPrice: rate,
+            total: rate * params.nights,
+          });
 
           if (params.addons?.length) {
             const priceMap = await resolveAddonPricesForKeys(params.addons.map((a) => a.addonType));

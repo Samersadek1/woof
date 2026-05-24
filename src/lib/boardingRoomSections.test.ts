@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatBoardingRoomPickerLabel,
   formatRoomSectionLabel,
   getRoomSectionParts,
   isExcludedBoardingRoom,
@@ -38,5 +39,15 @@ describe("boardingRoomSections", () => {
     expect(
       formatRoomSectionLabel({ room_number: "Dcare2b2", display_name: "Dcare2b2" }),
     ).toBe("Dcare2b 2");
+  });
+
+  it("formats boarding picker labels without capacity", () => {
+    expect(
+      formatBoardingRoomPickerLabel({
+        room_number: "A1",
+        display_name: "A1",
+        room_type: "single_royal",
+      }),
+    ).toBe("A 1 — single royal");
   });
 });

@@ -92,3 +92,14 @@ export function formatRoomSectionLabel(room: RoomLike): string {
   if (section && roomNumber) return `${section} ${roomNumber}`;
   return label || (room.room_number ?? "—");
 }
+
+type RoomPickerLike = RoomLike & {
+  room_type?: string | null;
+};
+
+/** Boarding UI label — section + room type only (no single/twin capacity). */
+export function formatBoardingRoomPickerLabel(room: RoomPickerLike): string {
+  const section = formatRoomSectionLabel(room);
+  const type = room.room_type?.replace(/_/g, " ");
+  return type ? `${section} — ${type}` : section;
+}

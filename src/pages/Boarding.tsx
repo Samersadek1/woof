@@ -77,6 +77,7 @@ import { CheckInSheet } from "@/components/CheckInSheet";
 import { CheckOutSheet } from "@/components/CheckOutSheet";
 import {
   buildRoomsBySection,
+  formatBoardingRoomPickerLabel,
   formatRoomSectionLabel,
   getRoomSectionParts,
   isExcludedBoardingRoom,
@@ -143,7 +144,6 @@ import { supabase } from "@/integrations/supabase/client";
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
 type RoomWing = Database["public"]["Enums"]["room_wing"];
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
-type BillingAdjustmentRow = Database["public"]["Tables"]["billing_adjustments"]["Row"];
 function showCreateBookingErrorToast(options: {
   err: unknown;
   navigate: ReturnType<typeof useNavigate>;
@@ -175,23 +175,6 @@ function showCreateBookingErrorToast(options: {
         }
       : undefined,
   });
-}
-
-async function applyDoubleOccupancyDiscountRpc(bookingId: string): Promise<number> {
-  const { data: adjustmentId, error } = await supabase.rpc("apply_double_occupancy_discount", {
-    p_booking_id: bookingId,
-  });
-  if (error) throw error;
-  if (!adjustmentId) return 0;
-
-  const { data: row, error: fetchError } = await supabase
-    .from("billing_adjustments")
-    .select("adjusted_amount")
-    .eq("id", adjustmentId)
-    .single();
-  if (fetchError) throw fetchError;
-
-  return Math.abs((row as Pick<BillingAdjustmentRow, "adjusted_amount">).adjusted_amount ?? 0);
 }
 
 const DAYS = 14;
@@ -1231,38 +1214,23 @@ export function DogBoardingCalendar({
     dogManualAddonTotal,
   ]);
 
-  const dogBoardingSubtotal = useMemo(() => {
-    if (!dogRatePreview.data || dogNights <= 0) return 0;
-    return dogRatePreview.data.totalAed;
-  }, [dogRatePreview.data, dogNights]);
-
-  const dogDoubleOccupancyDiscount = useMemo(() => {
-    if (form.pet_ids.length < 2) return 0;
-    return Number((dogBoardingSubtotal * 0.15).toFixed(2));
-  }, [form.pet_ids.length, dogBoardingSubtotal]);
-
-  const dogSubtotalAfterDoubleOccupancy = useMemo(
-    () => Math.max(0, dogBookingEstimateTotal - dogDoubleOccupancyDiscount),
-    [dogBookingEstimateTotal, dogDoubleOccupancyDiscount],
-  );
-
   const { data: dogMemberDiscountPreview } = useQuery<{
     discount_pct: number;
     discount_aed: number;
     final_aed: number;
   }>({
-    queryKey: ["boarding", "dog", "member-discount-preview", form.owner_id, dogSubtotalAfterDoubleOccupancy],
-    enabled: Boolean(newBookingOpen && form.owner_id && dogSubtotalAfterDoubleOccupancy > 0),
+    queryKey: ["boarding", "dog", "member-discount-preview", form.owner_id, dogBookingEstimateTotal],
+    enabled: Boolean(newBookingOpen && form.owner_id && dogBookingEstimateTotal > 0),
     queryFn: async () => {
       return {
         discount_pct: 0,
         discount_aed: 0,
-        final_aed: dogSubtotalAfterDoubleOccupancy,
+        final_aed: dogBookingEstimateTotal,
       };
     },
   });
 
-  const dogGrossAfterMember = dogMemberDiscountPreview?.final_aed ?? dogSubtotalAfterDoubleOccupancy;
+  const dogGrossAfterMember = dogMemberDiscountPreview?.final_aed ?? dogBookingEstimateTotal;
   const dogBookingVatEstimate = useMemo(
     () => vatAmountFromGrossInclusive(dogGrossAfterMember),
     [dogGrossAfterMember],
@@ -1521,13 +1489,8 @@ export function DogBoardingCalendar({
           checkOutDate: form.check_out_date,
           addons: addonItems,
         })
-          .then(async () => {
-            const discountApplied = await applyDoubleOccupancyDiscountRpc(booking.id);
-            if (discountApplied > 0) {
-              toast.success(`Draft invoice created with AED ${discountApplied.toFixed(2)} double-occupancy discount`);
-            } else {
-              toast.success("Draft invoice created");
-            }
+          .then(() => {
+            toast.success("Draft invoice created");
           })
           .catch((err) => {
             console.error("Auto-invoice failed:", err);
@@ -1769,9 +1732,9 @@ export function DogBoardingCalendar({
                           style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
                           className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
                         >
-                          <span className="truncate" title={`${formatRoomSectionLabel(room)} — ${room.room_type?.replace(/_/g, " ")} (${room.capacity_type})`}>
+                          <span className="truncate" title={formatBoardingRoomPickerLabel(room)}>
                             <span className="font-medium">{formatRoomSectionLabel(room)}</span>
-                            <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{room.room_type?.replace(/_/g, " ")} · {room.capacity_type}</span>
+                            <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{room.room_type?.replace(/_/g, " ")}</span>
                           </span>
                         </div>
                         {/* Day cells */}
@@ -1981,7 +1944,7 @@ export function DogBoardingCalendar({
                     {form.room_id ? (() => {
                       const sel = assignableDogRooms.find((r) => r.id === form.room_id);
                       if (!sel) return "Select room";
-                      return `${formatRoomSectionLabel(sel)} — ${sel.room_type?.replace(/_/g, " ")} · ${sel.capacity_type}`;
+                      return formatBoardingRoomPickerLabel(sel);
                     })() : "No room — assign later"}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -2028,7 +1991,7 @@ export function DogBoardingCalendar({
                                 }}
                               >
                                 <Check className={`mr-2 h-4 w-4 ${form.room_id === r.id ? "opacity-100" : "opacity-0"}`} />
-                                {formatRoomSectionLabel(r)} — <span className="capitalize text-muted-foreground ml-1">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
+                                {formatBoardingRoomPickerLabel(r)}
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -2356,14 +2319,6 @@ export function DogBoardingCalendar({
                         <span className="tabular-nums">{formatAed(dogBookingEstimateTotal)}</span>
                       </div>
                     )}
-                    {dogDoubleOccupancyDiscount > 0 && (
-                      <div className="flex justify-between gap-4 text-emerald-700">
-                        <span>Double occupancy 15% discount</span>
-                        <span className="tabular-nums font-medium">
-                          −{formatAed(dogDoubleOccupancyDiscount)}
-                        </span>
-                      </div>
-                    )}
                     {(dogMemberDiscountPreview?.discount_aed ?? 0) > 0 && (
                       <div className="flex justify-between gap-4 text-emerald-700">
                         <span>
@@ -2398,11 +2353,6 @@ export function DogBoardingCalendar({
                   <p className="text-[11px] text-muted-foreground leading-snug">
                     Includes boarding nights, transport (if selected), grooming add-ons, and VAT.
                   </p>
-                  {form.pet_ids.length >= 2 ? (
-                    <p className="text-[11px] text-emerald-700 leading-snug">
-                      15% double-occupancy discount will apply.
-                    </p>
-                  ) : null}
                 </div>
               )}
             </div>
@@ -2551,9 +2501,6 @@ export function DogBoardingCalendar({
                       </p>
                       <p className="text-xs text-muted-foreground capitalize">
                         {detailBooking.rooms.room_type?.replace(/_/g, " ") ?? ""}
-                        {detailBooking.rooms.capacity_type
-                          ? ` · ${detailBooking.rooms.capacity_type}`
-                          : ""}
                       </p>
                     </>
                   ) : (
