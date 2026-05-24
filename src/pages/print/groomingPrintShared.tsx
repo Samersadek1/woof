@@ -446,7 +446,9 @@ export function GroomingCardBlock({
         </p>
         <p>
           <span className="print-label font-semibold uppercase text-[11px]">Sensitivities: </span>
-          {appointment.pets?.medical_conditions ?? "—"}
+          {(appointment.pets?.medical_conditions?.trim() ||
+            appointment.pets?.medication_notes?.trim()) ??
+            "—"}
         </p>
         <p>
           <span className="print-label font-semibold uppercase text-[11px]">Previous groom: </span>

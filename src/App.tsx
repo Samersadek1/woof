@@ -1,13 +1,17 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
+import { lazyWithRetry } from "@/lib/lazyWithRetry";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppVersionNotifier } from "@/components/AppVersionNotifier";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { Loader2 } from "lucide-react";
 
 const queryClient = new QueryClient();
+
+const lazy = lazyWithRetry;
 
 const DashboardLayout = lazy(() => import("@/layouts/DashboardLayout"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
@@ -30,6 +34,7 @@ const StaffPage = lazy(() => import("@/pages/Staff"));
 const ProfilePage = lazy(() => import("@/pages/Profile"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const VetsAdminPage = lazy(() => import("@/pages/VetsAdmin"));
+const DataIssuesAdminPage = lazy(() => import("@/pages/DataIssuesAdmin"));
 const KennelCardPrintPage = lazy(() => import("@/pages/print/KennelCardPrintPage"));
 const KennelCardsPrintPage = lazy(() => import("@/pages/print/KennelCardsPrintPage"));
 const GroomingCardPrintPage = lazy(() => import("@/pages/print/GroomingCardPrintPage"));
@@ -93,6 +98,7 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <AppVersionNotifier />
         <BrowserRouter>
           <Suspense fallback={<AuthLoadingScreen />}>
             <Routes>
@@ -124,6 +130,7 @@ const App = () => (
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="settings/vets" element={<VetsAdminPage />} />
                 <Route path="settings/rooms" element={<RoomsAdminPage />} />
+                <Route path="settings/data-issues" element={<DataIssuesAdminPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

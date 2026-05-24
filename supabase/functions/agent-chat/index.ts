@@ -511,7 +511,7 @@ const WOOF_TOOLS: Anthropic.Tool[] = [
         note: { type: "string" },
         note_field: {
           type: "string",
-          enum: ["behavioural_notes", "feeding_notes", "medical_notes", "agent_notes"],
+          enum: ["behaviour_notes", "feeding_notes", "medication_notes", "agent_notes"],
         },
       },
       required: ["target_type", "target_id", "note", "note_field"],
@@ -746,7 +746,7 @@ async function executeTool(
           note_field: string;
         };
 
-        const PET_FIELDS = ["behavioural_notes", "feeding_notes", "medical_notes"];
+        const PET_FIELDS = ["behaviour_notes", "feeding_notes", "medication_notes"];
         const BOOKING_FIELDS = ["agent_notes"];
 
         if (target_type === "pet" && !PET_FIELDS.includes(note_field)) {

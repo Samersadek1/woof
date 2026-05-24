@@ -12,6 +12,7 @@ import {
   DoorOpen,
   Sparkles,
   Stethoscope,
+  AlertTriangle,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +33,7 @@ const navItems = [
 const settingsItems = [
   { icon: Stethoscope, label: "Vets", path: "/settings/vets" },
   { icon: DoorOpen, label: "Rooms", path: "/settings/rooms" },
+  { icon: AlertTriangle, label: "Data issues", path: "/settings/data-issues" },
 ];
 
 const AppSidebar = () => {

@@ -19,7 +19,12 @@ import { VaccinationInformationTable } from "@/components/VaccinationInformation
 import { PetDocuments } from "@/components/PetDocuments";
 import { VaccicheckPanel } from "@/components/VaccicheckPanel";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
-import { petBehaviourNotes, petFeedingNotes, petMedicationNotes } from "@/lib/petCareNotes";
+import {
+  petBehaviourNotes,
+  petFeedingNotes,
+  petMedicalConditions,
+  petMedicationNotes,
+} from "@/lib/petCareNotes";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -374,7 +379,7 @@ const PetProfilePage = () => {
       spayed_neutered: pet.spayed_neutered,
       microchip_number: pet.microchip_number,
       feeding_notes: petFeedingNotes(pet) || null,
-      medical_conditions: pet.medical_conditions,
+      medical_conditions: petMedicalConditions(pet) || null,
       medication_notes: petMedicationNotes(pet) || null,
       behaviour_notes: petBehaviourNotes(pet) || null,
       grooming_notes: pet.grooming_notes,
@@ -682,7 +687,7 @@ const PetProfilePage = () => {
           <CardContent className="space-y-4">
             {[
               { label: "Feeding instructions", value: petFeedingNotes(pet) || null },
-              { label: "Medical conditions",   value: pet.medical_conditions },
+              { label: "Medical conditions",   value: petMedicalConditions(pet) || null },
               { label: "Medications",          value: petMedicationNotes(pet) || null },
               { label: "Behavioural notes",    value: petBehaviourNotes(pet) || null },
               { label: "Grooming notes",       value: pet.grooming_notes },

@@ -1,9 +1,10 @@
-/** Pet care notes: import/RPC use `*_notes`; legacy columns are older UI names. */
+/** Canonical pet care note columns (migration + UI). Legacy names kept in helpers until columns drop. */
 export type PetCareNotesFields = {
   feeding_notes?: string | null;
   feeding_instructions?: string | null;
   medication_notes?: string | null;
   medications?: string | null;
+  medical_conditions?: string | null;
   behaviour_notes?: string | null;
   behavioural_notes?: string | null;
 };
@@ -20,6 +21,10 @@ export function petBehaviourNotes(pet: PetCareNotesFields | null | undefined): s
   return (pet?.behaviour_notes ?? pet?.behavioural_notes ?? "").trim();
 }
 
+export function petMedicalConditions(pet: PetCareNotesFields | null | undefined): string {
+  return (pet?.medical_conditions ?? "").trim();
+}
+
 /** Supabase nested `pets(...)` fragment for booking/check-in care fallbacks. */
 export const PET_CARE_NOTES_SELECT =
-  "feeding_notes, medication_notes, behaviour_notes, feeding_instructions, medications, behavioural_notes";
+  "feeding_notes, medication_notes, behaviour_notes, feeding_instructions, medications, behavioural_notes, medical_conditions";
