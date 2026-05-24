@@ -220,7 +220,7 @@ interface AutoInvoiceParams {
   bookingId: string;
   ownerId: string;
   serviceType: ServiceType;
-  roomId: string;
+  roomId: string | null;
   roomType: string;
   roomName?: string;
   petCount: number;
@@ -250,7 +250,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
 
   const [addonPriceMap, stayRates] = await Promise.all([
     resolveAddonPricesForKeys(addons.map((a) => a.key)),
-    resolveBoardingStayRates(roomId, petCount, checkInDate, checkOutDate),
+    resolveBoardingStayRates(roomId ?? "", petCount, checkInDate, checkOutDate),
   ]);
 
   void roomRateType;

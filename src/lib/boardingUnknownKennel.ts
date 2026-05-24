@@ -31,14 +31,26 @@ export function isBoardingFacilityRoom(room: Pick<Room, "wing">): boolean {
   return room.wing !== "cattery";
 }
 
-export function isImportPlaceholderRoom(room: Pick<Room, "wing" | "room_number" | "notes">): boolean {
-  if (room.wing === IMPORT_PLACEHOLDER_WING) return true;
-  if ((room.room_number ?? "").startsWith(PLACEHOLDER_ROOM_NUMBER_PREFIX)) return true;
-  return (room.notes ?? "").includes("import_placeholder_tier=");
+/**
+ * Synthetic PetExec / import rows awaiting a real kennel — not every room on
+ * `import_placeholder` wing (many imported A1/B1/Dcare* rows are real kennels).
+ */
+export function isImportPlaceholderRoom(
+  room: Pick<Room, "wing" | "room_number" | "notes" | "display_name">,
+): boolean {
+  const num = (room.room_number ?? "").trim();
+  if (num.startsWith(PLACEHOLDER_ROOM_NUMBER_PREFIX)) return true;
+  if ((room.notes ?? "").includes("import_placeholder_tier=")) return true;
+  const name = (room.display_name ?? "").trim();
+  if (name.startsWith("Unknown ·") || name.startsWith("Unknown -")) return true;
+  return false;
 }
 
 export function isImportPlaceholderBooking(
-  booking: { notes?: string | null; rooms?: Pick<Room, "wing" | "room_number" | "notes"> | null },
+  booking: {
+    notes?: string | null;
+    rooms?: Pick<Room, "wing" | "room_number" | "notes" | "display_name"> | null;
+  },
 ): boolean {
   if (booking.rooms && isImportPlaceholderRoom(booking.rooms)) return true;
   const notes = booking.notes ?? "";

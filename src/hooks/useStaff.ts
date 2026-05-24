@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { staffMatchesSearch } from "@/lib/staffRoles";
 
 export type StaffRole = Database["public"]["Enums"]["staff_role"];
 export type StaffRow = Database["public"]["Tables"]["staff"]["Row"];
@@ -15,16 +16,15 @@ export function useStaff(search?: string) {
   return useQuery({
     queryKey: [...staffKeys.all, search ?? ""] as const,
     queryFn: async () => {
-      let query = supabase.from("staff").select("*").order("created_at", { ascending: false });
-      const q = search?.trim();
-      if (q) {
-        query = query.or(
-          `first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`,
-        );
-      }
-      const { data, error } = await query;
+      const { data, error } = await supabase
+        .from("staff")
+        .select("*")
+        .order("created_at", { ascending: false });
       if (error) throw error;
-      return (data ?? []) as StaffRow[];
+      const rows = (data ?? []) as StaffRow[];
+      const q = search?.trim();
+      if (!q) return rows;
+      return rows.filter((row) => staffMatchesSearch(row, q));
     },
   });
 }

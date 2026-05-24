@@ -197,6 +197,8 @@ async function applyDoubleOccupancyDiscountRpc(bookingId: string): Promise<numbe
 const DAYS = 14;
 const ROOM_COL_W = 160; // px
 const DAY_COL_W = 100;  // px
+/** Calendar row for bookings with no room assigned */
+const UNASSIGNED_CALENDAR_ROW = "__unassigned__";
 
 const WING_LABELS: Record<string, string> = {
   oxford: "Oxford Street",
@@ -1109,15 +1111,14 @@ export function DogBoardingCalendar({
     queryKey: [
       "boarding_rate_preview",
       "dog",
-      form.room_id,
       dogRatePetCount,
       form.check_in_date,
       form.check_out_date,
     ],
-    enabled: Boolean(form.room_id && form.check_in_date && form.check_out_date),
+    enabled: Boolean(form.check_in_date && form.check_out_date),
     queryFn: async () =>
       resolveBoardingStayRates(
-        form.room_id,
+        "",
         dogRatePetCount,
         form.check_in_date,
         form.check_out_date,
@@ -1311,16 +1312,28 @@ export function DogBoardingCalendar({
     [filteredAssignableDogRooms],
   );
 
-  // booking lookup: roomId → bookings (for this window)
-  const bookingsByRoom = useMemo(() => {
+  const facilityRoomIds = useMemo(
+    () => new Set(assignableDogRooms.map((r) => r.id)),
+    [assignableDogRooms],
+  );
+
+  // booking lookup: roomId → bookings (for this window); unassigned = no room or unknown room
+  const { bookingsByRoom, unassignedBookings } = useMemo(() => {
     const map = new Map<string, BookingWithDetails[]>();
+    const unassigned: BookingWithDetails[] = [];
     bookings.forEach((b) => {
+      if (b.booking_type && b.booking_type !== "boarding") return;
+      if (b.rooms?.wing === "cattery") return;
+      if (!b.room_id || !facilityRoomIds.has(b.room_id)) {
+        unassigned.push(b);
+        return;
+      }
       const list = map.get(b.room_id) ?? [];
       list.push(b);
       map.set(b.room_id, list);
     });
-    return map;
-  }, [bookings]);
+    return { bookingsByRoom: map, unassignedBookings: unassigned };
+  }, [bookings, facilityRoomIds]);
 
   // open new booking drawer, optionally pre-fill room + date
   const openNewBooking = (roomId?: string, date?: string) => {
@@ -1380,7 +1393,7 @@ export function DogBoardingCalendar({
 
   const handleCreateBooking = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.owner_id || !form.room_id || !form.check_in_date || !form.check_out_date) {
+    if (!form.owner_id || !form.check_in_date || !form.check_out_date) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -1424,7 +1437,7 @@ export function DogBoardingCalendar({
 
     const payload: CreateBookingPayload = {
       owner_id: form.owner_id,
-      room_id: form.room_id,
+      room_id: form.room_id || null,
       check_in_date: form.check_in_date,
       check_out_date: form.check_out_date,
       pet_ids: form.pet_ids,
@@ -1500,9 +1513,9 @@ export function DogBoardingCalendar({
           bookingId: booking.id,
           ownerId: form.owner_id,
           serviceType: "boarding",
-          roomId: form.room_id,
+          roomId: form.room_id || null,
           roomType: selectedRoom?.room_type ?? "boarding",
-          roomName: selectedRoom?.room_number,
+          roomName: selectedRoom?.room_number ?? undefined,
           petCount: form.pet_ids.length,
           checkInDate: form.check_in_date,
           checkOutDate: form.check_out_date,
@@ -1536,7 +1549,12 @@ export function DogBoardingCalendar({
 
   // for a given room row, render booking chips + empty cells
   const renderRoomRow = (roomId: string, isPlaceholder = false) => {
-    const roomBookings = bookingsByRoom.get(roomId) ?? [];
+    const roomBookings =
+      roomId === UNASSIGNED_CALENDAR_ROW
+        ? unassignedBookings
+        : bookingsByRoom.get(roomId) ?? [];
+    const prefillRoomOnEmptyCell =
+      roomId !== UNASSIGNED_CALENDAR_ROW ? roomId : undefined;
 
     // build a day → booking map (only show chip on first visible day)
     const dayBookingMap = new Map<string, { booking: BookingWithDetails; span: number; isFirst: boolean }>();
@@ -1580,7 +1598,7 @@ export function DogBoardingCalendar({
                 style={{ minWidth: DAY_COL_W, width: DAY_COL_W }}
                 className={`h-12 border-r border-b border-border cursor-pointer transition-colors
                   ${todayHighlight ? "bg-amber-50 hover:bg-amber-100" : "hover:bg-muted/50"}`}
-                onClick={() => openNewBooking(roomId, dayStr)}
+                onClick={() => openNewBooking(prefillRoomOnEmptyCell, dayStr)}
               />
             );
           }
@@ -1709,6 +1727,27 @@ export function DogBoardingCalendar({
                 })}
               </div>
 
+              {/* Unassigned (no room) — always visible for optional room workflow */}
+              <div>
+                <div
+                  className="flex sticky left-0 bg-slate-100 border-b border-t border-border"
+                  style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}
+                >
+                  <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Unassigned
+                  </div>
+                </div>
+                <div className="flex">
+                  <div
+                    style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
+                    className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
+                  >
+                    <span className="truncate text-muted-foreground italic">No room</span>
+                  </div>
+                  {renderRoomRow(UNASSIGNED_CALENDAR_ROW)}
+                </div>
+              </div>
+
               {/* Section groups + room rows (section from room name prefix, number = trailing digits) */}
               {roomSectionOrder.map((sectionKey) => {
                 const sectionRooms = roomsBySection.get(sectionKey) ?? [];
@@ -1763,7 +1802,7 @@ export function DogBoardingCalendar({
           <SheetHeader>
             <SheetTitle>New Booking</SheetTitle>
             <SheetDescription>
-              Boarding — dogs only. Pick a room in the kennel grid.
+              Boarding — dogs only. Room is optional; assign a kennel on the calendar when ready.
             </SheetDescription>
           </SheetHeader>
 
@@ -1921,9 +1960,9 @@ export function DogBoardingCalendar({
               </div>
             )}
 
-            {/* Room */}
+            {/* Room (optional) */}
             <div className="space-y-2">
-              <Label>Room <span className="text-destructive">*</span></Label>
+              <Label>Room <span className="text-muted-foreground font-normal">(optional)</span></Label>
               <Popover
                 open={roomPickerOpen}
                 onOpenChange={(open) => {
@@ -1943,7 +1982,7 @@ export function DogBoardingCalendar({
                       const sel = assignableDogRooms.find((r) => r.id === form.room_id);
                       if (!sel) return "Select room";
                       return `${formatRoomSectionLabel(sel)} — ${sel.room_type?.replace(/_/g, " ")} · ${sel.capacity_type}`;
-                    })() : "Select room"}
+                    })() : "No room — assign later"}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
@@ -1960,6 +1999,20 @@ export function DogBoardingCalendar({
                           ? "No dog boarding rooms configured."
                           : "No rooms match your search."}
                       </CommandEmpty>
+                      <CommandGroup heading="Assignment">
+                        <CommandItem
+                          value="__no_room__"
+                          onSelect={() => {
+                            setForm((f) => ({ ...f, room_id: "" }));
+                            setRoomPickerOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={`mr-2 h-4 w-4 ${!form.room_id ? "opacity-100" : "opacity-0"}`}
+                          />
+                          No room — assign later
+                        </CommandItem>
+                      </CommandGroup>
                       {roomSectionOrder.map((sectionKey) => {
                         const sectionRooms = roomsBySection.get(sectionKey) ?? [];
                         if (sectionRooms.length === 0) return null;
@@ -1985,21 +2038,21 @@ export function DogBoardingCalendar({
                   </Command>
                 </PopoverContent>
               </Popover>
-              {form.room_id && (
+              {form.check_in_date && form.check_out_date && (
                 <div className="rounded-md border bg-muted/30 px-3 py-2">
                   {dogRatePreview.isLoading ? (
-                    <p className="text-xs text-muted-foreground">Resolving mapped price...</p>
+                    <p className="text-xs text-muted-foreground">Resolving boarding rate...</p>
                   ) : dogRatePreview.data ? (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        {dogRatePreview.data.seasonSummary} · {dogRatePetCount} pet{dogRatePetCount !== 1 ? "s" : ""}
+                        {dogRatePreview.data.seasonSummary}
                         {dogNights > 0
                           ? ` · ${dogNights} night${dogNights !== 1 ? "s" : ""}`
                           : ""}
                       </p>
                       <p className="text-sm font-medium">
                         {formatAed(dogRatePreview.data.totalAed)}{" "}
-                        <span className="text-xs text-muted-foreground">(boarding_night)</span>
+                        <span className="text-xs text-muted-foreground">(standard boarding / night)</span>
                       </p>
                       {dogRatePreview.data.peakNights > 0 && dogRatePreview.data.offPeakNights > 0 ? (
                         <p className="text-xs text-muted-foreground">
@@ -2008,7 +2061,7 @@ export function DogBoardingCalendar({
                       ) : null}
                     </>
                   ) : (
-                    <p className="text-xs text-muted-foreground">Could not resolve mapped price yet.</p>
+                    <p className="text-xs text-muted-foreground">Could not resolve boarding rate yet.</p>
                   )}
                 </div>
               )}
@@ -2253,7 +2306,7 @@ export function DogBoardingCalendar({
             <Separator />
 
             <div className="space-y-3">
-              {form.pet_ids.length > 0 && (
+              {form.check_in_date && form.check_out_date && (
                 <div className="rounded-lg border-2 border-primary/25 bg-primary/5 p-4 space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Estimated total (this booking)
@@ -2262,7 +2315,7 @@ export function DogBoardingCalendar({
                     {dogRatePreview.data && dogNights > 0 && (
                       <div className="flex justify-between gap-4">
                         <span className="text-muted-foreground">
-                          Room ({dogNights} night{dogNights !== 1 ? "s" : ""})
+                          Boarding ({dogNights} night{dogNights !== 1 ? "s" : ""})
                         </span>
                         <span className="tabular-nums font-medium">
                           {formatAed(dogRatePreview.data.totalAed)}
@@ -2343,7 +2396,7 @@ export function DogBoardingCalendar({
                     Total incl. VAT: {formatAed(dogBookingGrossEstimate)}
                   </p>
                   <p className="text-[11px] text-muted-foreground leading-snug">
-                    Includes room (when resolved), transport (if selected), grooming add-ons, and VAT.
+                    Includes boarding nights, transport (if selected), grooming add-ons, and VAT.
                   </p>
                   {form.pet_ids.length >= 2 ? (
                     <p className="text-[11px] text-emerald-700 leading-snug">
@@ -2491,11 +2544,24 @@ export function DogBoardingCalendar({
                 {/* Room */}
                 <div className="space-y-1">
                   <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
-                  <p className="text-sm font-medium">{detailBooking.rooms?.room_number ?? detailBooking.rooms?.display_name ?? "—"}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{detailBooking.rooms?.room_type?.replace(/_/g, " ") ?? ""} · {detailBooking.rooms?.capacity_type ?? ""} · {detailBooking.rooms?.wing?.replace(/_/g, " ") ?? ""}</p>
+                  {detailBooking.rooms ? (
+                    <>
+                      <p className="text-sm font-medium">
+                        {formatRoomSectionLabel(detailBooking.rooms)}
+                      </p>
+                      <p className="text-xs text-muted-foreground capitalize">
+                        {detailBooking.rooms.room_type?.replace(/_/g, " ") ?? ""}
+                        {detailBooking.rooms.capacity_type
+                          ? ` · ${detailBooking.rooms.capacity_type}`
+                          : ""}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic">Unassigned</p>
+                  )}
                 </div>
 
-                {isImportPlaceholderBooking(detailBooking) && (
+                {(!detailBooking.room_id || isImportPlaceholderBooking(detailBooking)) && (
                   <AssignRealRoomPanel
                     booking={detailBooking}
                     facilityRooms={assignableDogRooms}

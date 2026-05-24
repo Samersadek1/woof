@@ -37,40 +37,20 @@ import {
   type StaffRole,
   type StaffRow,
 } from "@/hooks/useStaff";
-
-const ROLE_OPTIONS: StaffRole[] = [
-  "admin",
-  "management",
-  "booking_coordinator",
-  "groomer",
-  "kennel_staff",
-  "night_staff",
-];
-
-const ROLE_LABELS: Record<StaffRole, string> = {
-  admin: "Admin",
-  management: "Management",
-  booking_coordinator: "Booking coordinator",
-  groomer: "Groomer",
-  kennel_staff: "Kennel staff",
-  night_staff: "Night staff",
-};
-
-const ROLE_BADGE: Record<StaffRole, string> = {
-  admin: "bg-rose-50 text-rose-700 border-rose-200",
-  management: "bg-amber-50 text-amber-700 border-amber-200",
-  booking_coordinator: "bg-blue-50 text-blue-700 border-blue-200",
-  groomer: "bg-purple-50 text-purple-700 border-purple-200",
-  kennel_staff: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  night_staff: "bg-slate-100 text-slate-700 border-slate-200",
-};
+import {
+  normalizeStaffRole,
+  STAFF_ROLE_OPTIONS,
+  staffRoleBadgeClass,
+  staffRoleLabel,
+} from "@/lib/staffRoles";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const INITIAL_FORM: StaffInsert = {
   first_name: "",
   last_name: "",
   email: "",
   phone: "",
-  role: "booking_coordinator",
+  role: normalizeStaffRole("booking_coordinator"),
   active: true,
 };
 
@@ -97,7 +77,7 @@ const StaffPage = () => {
   const [editForm, setEditForm] = useState<StaffInsert>({ ...INITIAL_FORM });
   const [editingRow, setEditingRow] = useState<StaffRow | null>(null);
 
-  const { data: staff = [], isLoading } = useStaff(debouncedSearch || undefined);
+  const { data: staff = [], isLoading, isError, error } = useStaff(debouncedSearch || undefined);
   const [isInviting, setIsInviting] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
@@ -210,7 +190,7 @@ const StaffPage = () => {
       last_name: row.last_name ?? "",
       email: row.email ?? "",
       phone: row.phone ?? "",
-      role: row.role,
+      role: normalizeStaffRole(row.role),
       active: row.active,
     });
     setEditOpen(true);
@@ -285,6 +265,15 @@ const StaffPage = () => {
           </Button>
         </div>
 
+        {isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>Could not load staff users</AlertTitle>
+            <AlertDescription>
+              {error instanceof Error ? error.message : "Check your connection and try again."}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         <div className="rounded-lg border border-border bg-card">
           <Table>
             <TableHeader>
@@ -317,8 +306,8 @@ const StaffPage = () => {
                     <TableCell>{row.email || "—"}</TableCell>
                     <TableCell>{row.phone || "—"}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={ROLE_BADGE[row.role]}>
-                        {ROLE_LABELS[row.role]}
+                      <Badge variant="outline" className={staffRoleBadgeClass(row.role)}>
+                        {staffRoleLabel(row.role)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-center">
@@ -406,16 +395,16 @@ const StaffPage = () => {
             <div className="space-y-1.5">
               <Label>Role</Label>
               <Select
-                value={form.role}
+                value={normalizeStaffRole(form.role)}
                 onValueChange={(value) => setField("role", value as StaffRole)}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLE_OPTIONS.map((role) => (
+                  {STAFF_ROLE_OPTIONS.map((role) => (
                     <SelectItem key={role} value={role}>
-                      {ROLE_LABELS[role]}
+                      {staffRoleLabel(role)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -501,16 +490,16 @@ const StaffPage = () => {
             <div className="space-y-1.5">
               <Label>Role</Label>
               <Select
-                value={editForm.role}
+                value={normalizeStaffRole(editForm.role)}
                 onValueChange={(value) => setEditField("role", value as StaffRole)}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLE_OPTIONS.map((role) => (
+                  {STAFF_ROLE_OPTIONS.map((role) => (
                     <SelectItem key={role} value={role}>
-                      {ROLE_LABELS[role]}
+                      {staffRoleLabel(role)}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -10,16 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import type { StaffRow, StaffRole } from "@/hooks/useStaff";
-
-const ROLE_LABELS: Record<StaffRole, string> = {
-  admin: "Admin",
-  management: "Management",
-  booking_coordinator: "Booking coordinator",
-  groomer: "Groomer",
-  kennel_staff: "Kennel staff",
-  night_staff: "Night staff",
-};
+import type { StaffRow } from "@/hooks/useStaff";
+import { staffRoleLabel } from "@/lib/staffRoles";
 
 const ProfilePage = () => {
   const { user } = useAuth();
@@ -129,7 +121,7 @@ const ProfilePage = () => {
               </div>
               <div className="space-y-1.5">
                 <Label>Role</Label>
-                <Input value={ROLE_LABELS[staff.role]} disabled />
+                <Input value={staffRoleLabel(staff.role)} disabled />
               </div>
               <Button onClick={saveProfile} disabled={saving}>
                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

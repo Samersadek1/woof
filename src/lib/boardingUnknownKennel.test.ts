@@ -30,6 +30,17 @@ const facilityOxford = {
   is_active: true,
 } as Room;
 
+/** Real kennel imported on import_placeholder wing (common in woof DB). */
+const importedRealKennel = {
+  id: "r1",
+  wing: "import_placeholder",
+  room_number: "A1",
+  notes: null,
+  room_type: "kennels",
+  display_name: "A1",
+  is_active: true,
+} as Room;
+
 const catteryRoom = {
   id: "c1",
   wing: "cattery",
@@ -44,6 +55,7 @@ describe("boardingUnknownKennel", () => {
   it("detects placeholder rooms", () => {
     expect(isImportPlaceholderRoom(placeholderStd)).toBe(true);
     expect(isImportPlaceholderRoom(facilityOxford)).toBe(false);
+    expect(isImportPlaceholderRoom(importedRealKennel)).toBe(false);
   });
 
   it("infers tier from kennel text", () => {
@@ -55,9 +67,10 @@ describe("boardingUnknownKennel", () => {
     const { facility, placeholders } = splitFacilityAndPlaceholderRooms([
       placeholderStd,
       facilityOxford,
+      importedRealKennel,
       catteryRoom,
     ]);
-    expect(facility.map((r) => r.id)).toEqual(["f1"]);
+    expect(facility.map((r) => r.id).sort()).toEqual(["f1", "r1"].sort());
     expect(placeholders.map((r) => r.id)).toEqual(["p1"]);
   });
 
