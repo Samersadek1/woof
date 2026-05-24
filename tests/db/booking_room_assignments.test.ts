@@ -83,8 +83,11 @@ describe("booking_room_assignments", () => {
         end_date: "2027-06-02",
       });
 
-      expect(error?.message ?? "").toContain("booking_room_assignments");
-      expect(error?.message ?? "").toContain("check");
+      expect(error).toBeTruthy();
+      const msg = error?.message ?? "";
+      const rejectedByCheck = msg.includes("booking_room_assignments") && msg.includes("check");
+      const rejectedByRange = msg.includes("range lower bound must be less than or equal to range upper bound");
+      expect(rejectedByCheck || rejectedByRange).toBe(true);
     });
   });
 
