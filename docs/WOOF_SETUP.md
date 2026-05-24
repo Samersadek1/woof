@@ -62,6 +62,24 @@ are **not** auto-applied.
 Create staff users in the **woof** Supabase project under **Authentication →
 Users**. No accounts are inherited from any other project.
 
+### Staff invite links (production URL)
+
+Invites use `APP_BASE_URL` (Vercel) and Supabase **Site URL** / **Redirect URLs**.
+If emails point at `localhost`, fix both:
+
+1. **Vercel** — set `APP_BASE_URL` to your deployed origin (no trailing slash),
+   e.g. `https://woof-neon.vercel.app`, for Production and Preview.
+2. **Supabase** — Authentication → URL Configuration:
+   - **Site URL:** same as `APP_BASE_URL`
+   - **Redirect URLs:** include `${APP_BASE_URL}/**` and `http://localhost:8080/**`
+
+Or run (needs a [personal access token](https://supabase.com/dashboard/account/tokens)):
+
+```bash
+export SUPABASE_ACCESS_TOKEN="sbp_..."
+./scripts/configure-supabase-auth-urls.sh
+```
+
 ## 3. Install and run
 
 ```bash

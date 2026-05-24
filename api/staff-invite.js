@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { resolveAppBaseUrl } from "./resolveAppBaseUrl.js";
 
 function json(res, status, body) {
   res.status(status).setHeader("Content-Type", "application/json");
@@ -29,23 +30,6 @@ async function resolveActor(serviceClient, user) {
 function hasPrivilegedRoleFromMetadata(user) {
   const role = user?.app_metadata?.role;
   return role === "admin" || role === "management";
-}
-
-function resolveBaseUrl(req) {
-  const envBase =
-    process.env.APP_BASE_URL ||
-    process.env.SITE_URL ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-    process.env.VERCEL_URL;
-  if (envBase) {
-    const withProtocol = envBase.startsWith("http")
-      ? envBase
-      : `https://${envBase}`;
-    return withProtocol.replace(/\/+$/, "");
-  }
-  const host = req.headers.host;
-  if (!host) return "https://woof.vercel.app";
-  return `${host.includes("localhost") ? "http" : "https"}://${host}`;
 }
 
 export default async function handler(req, res) {
@@ -95,7 +79,7 @@ export default async function handler(req, res) {
   }
 
   // 1) Send Supabase Auth invite email so the user can set password.
-  const baseUrl = resolveBaseUrl(req);
+  const baseUrl = resolveAppBaseUrl(req);
   const invite = await service.auth.admin.inviteUserByEmail(String(email).trim(), {
     redirectTo: `${baseUrl}/auth/setup-password`,
     data: {
