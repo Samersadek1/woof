@@ -19,3 +19,4 @@ This repository hosts multiple independently deployed services that share the sa
 - Supabase deploys edge functions from `supabase/functions/`.
 
 Each deployment is isolated: a deploy or crash in one service does not restart or redeploy the others.
+<!-- autonomous-loop verified 2026-05-24T10:01:06Z -->
