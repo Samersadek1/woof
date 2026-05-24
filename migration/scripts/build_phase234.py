@@ -495,19 +495,98 @@ print("Wrote phase4b_packages.sql")
 # Skip rows where UsageDate can't be parsed.
 
 usage_rows = []
+# ---------- Smart date parser (v2) ----------
+# Handles patterns that the original strict parser dropped (~14% of usage rows):
+#  - "Bella 2025-11-28"       (ISO date with pet-name prefix)
+#  - "Jan 20 WPT 184"         (month-name + day + staff annotation)
+#  - "11 April Lotus"         (day-first, month name, pet-name suffix)
+#  - "Meimei Jan-27"          (pet name, month-name with dash)
+#  - "Free SSPL used free wash on May 14"  (date embedded in sentence)
+# For month-name+day without year, infers year from package DateOfPurchase.
+_MONTHS = {'jan':1,'january':1,'feb':2,'february':2,'mar':3,'march':3,'apr':4,'april':4,
+           'may':5,'jun':6,'june':6,'jul':7,'july':7,'aug':8,'august':8,
+           'sep':9,'sept':9,'september':9,'oct':10,'october':10,'nov':11,'november':11,
+           'dec':12,'december':12}
+_MONTH_FIRST  = re.compile(r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*[-\s]?\s*(\d{1,2})\b', re.I)
+_DAY_FIRST    = re.compile(r'\b(\d{1,2})\s*[-\s]?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b', re.I)
+_ISO_ANYWHERE = re.compile(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})')
+_DDMMYY       = re.compile(r'\b(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})\b')
+
+def _parse_purchase_to_ts(s):
+    if pd.isna(s): return None
+    try:
+        ts = pd.to_datetime(str(s).strip(), errors='coerce', dayfirst=False)
+        if pd.notna(ts): return ts
+    except: pass
+    m_year = re.search(r'\b(20\d{2})\b', str(s))
+    if not m_year: return None
+    m = _MONTH_FIRST.search(str(s)) or _DAY_FIRST.search(str(s))
+    if not m: return None
+    g = m.groups()
+    try:
+        if g[0].isdigit(): day, mon_name = int(g[0]), g[1]
+        else:              mon_name, day = g[0], int(g[1])
+        mon = _MONTHS.get(mon_name.lower()) or _MONTHS.get(mon_name.lower()[:3])
+        return pd.Timestamp(year=int(m_year.group(1)), month=mon, day=day)
+    except: return None
+
+# Build PackageTrackerID -> purchase_ts lookup for year inference
+_PKG_PURCHASE = {p['PackageTrackerID']: _parse_purchase_to_ts(p['DateOfPurchase'])
+                 for _, p in pkgs.iterrows() if pd.notna(p.get('PackageTrackerID'))}
+
+def parse_usage_date_smart(raw, tracker_id):
+    """Return ISO date string or None. Multi-strategy parser."""
+    if pd.isna(raw): return None
+    s = str(raw).strip()
+    if not s: return None
+    # 1) Strict ISO at start
+    if re.match(r'^\d{4}-\d{2}-\d{2}', s):
+        try: return pd.Timestamp(s).strftime('%Y-%m-%d')
+        except: pass
+    # 2) ISO anywhere in string
+    m = _ISO_ANYWHERE.search(s)
+    if m:
+        try: return pd.Timestamp(year=int(m.group(1)), month=int(m.group(2)),
+                                 day=int(m.group(3))).strftime('%Y-%m-%d')
+        except: pass
+    # 3) DD/MM/YYYY (UAE day-first convention when ambiguous)
+    m = _DDMMYY.search(s)
+    if m:
+        try:
+            day, mon, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if yr < 100: yr += 2000
+            return pd.Timestamp(year=yr, month=mon, day=day).strftime('%Y-%m-%d')
+        except: pass
+    # 4) Month-name + day, year inferred from package
+    md = None
+    m = _MONTH_FIRST.search(s)
+    if m:
+        mon = _MONTHS.get(m.group(1).lower()) or _MONTHS.get(m.group(1).lower()[:3])
+        day = int(m.group(2))
+        if mon and 1 <= day <= 31: md = (mon, day)
+    if md is None:
+        m = _DAY_FIRST.search(s)
+        if m:
+            day = int(m.group(1))
+            mon = _MONTHS.get(m.group(2).lower()) or _MONTHS.get(m.group(2).lower()[:3])
+            if mon and 1 <= day <= 31: md = (mon, day)
+    if md is None: return None
+    purchase_ts = _PKG_PURCHASE.get(tracker_id)
+    if purchase_ts is None: return None
+    candidates = []
+    for y in [purchase_ts.year, purchase_ts.year + 1, purchase_ts.year - 1]:
+        try: d = pd.Timestamp(year=y, month=md[0], day=md[1])
+        except: continue
+        delta = (d - purchase_ts).days
+        if -7 <= delta <= 400: candidates.append((d, abs(delta)))
+    return min(candidates, key=lambda x: x[1])[0].strftime('%Y-%m-%d') if candidates else None
+
+
 unparseable_usage = 0
 for _, u in usage.iterrows():
     raw = u['UsageDateRaw']
-    if pd.isna(raw):
-        unparseable_usage += 1
-        continue
-    s = str(raw).strip()
-    try:
-        d = pd.Timestamp(s).strftime('%Y-%m-%d')
-    except Exception:
-        unparseable_usage += 1
-        continue
-    if not re.match(r'^\d{4}-\d{2}-\d{2}', d):
+    d = parse_usage_date_smart(raw, u.get('PackageTrackerID'))
+    if d is None:
         unparseable_usage += 1
         continue
 
