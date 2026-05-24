@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { OwnerSearchPopover } from "@/components/billing/OwnerSearchPopover";
 import { addDays, format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import { useOwners, useOwner } from "@/hooks/useOwners";
+import { useOwner } from "@/hooks/useOwners";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,10 +58,8 @@ function aed(v: number) {
 
 export default function CreateInvoicePage() {
   const navigate = useNavigate();
-  const [ownerSearch, setOwnerSearch] = useState("");
   const [ownerId, setOwnerId] = useState<string>("");
   const [ownerLabel, setOwnerLabel] = useState("");
-  const [ownerSearchOpen, setOwnerSearchOpen] = useState(false);
   const [serviceType, setServiceType] = useState("other");
   const [dueDate, setDueDate] = useState(format(addDays(new Date(), 14), "yyyy-MM-dd"));
   const [notes, setNotes] = useState("");
@@ -80,22 +79,10 @@ export default function CreateInvoicePage() {
   ]);
   const [adjustments, setAdjustments] = useState<AdjustmentDraft[]>([]);
 
-  const { data: ownerHits = [] } = useOwners(ownerSearch.trim().length >= 2 ? ownerSearch : undefined);
   const { data: owner } = useOwner(ownerId || "");
   const linesRef = useRef(lines);
-  const ownerSearchRef = useRef<HTMLDivElement>(null);
   linesRef.current = lines;
   const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
-
-  useEffect(() => {
-    const handler = (event: PointerEvent) => {
-      if (ownerSearchRef.current && !ownerSearchRef.current.contains(event.target as Node)) {
-        setOwnerSearchOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", handler);
-    return () => document.removeEventListener("pointerdown", handler);
-  }, []);
 
   useMemo(() => {
     (async () => {
@@ -284,39 +271,20 @@ export default function CreateInvoicePage() {
       <main className="flex-1 overflow-auto p-8 space-y-6">
         <Card>
           <CardContent className="p-5 space-y-4">
-            <div ref={ownerSearchRef} className="space-y-1">
-              <Label>Owner</Label>
-              <Input
-                placeholder="Search owner by name or phone"
-                value={ownerLabel || ownerSearch}
-                onChange={(e) => {
-                  setOwnerSearch(e.target.value);
-                  setOwnerId("");
-                  setOwnerLabel("");
-                  setOwnerSearchOpen(true);
-                }}
-                onFocus={() => setOwnerSearchOpen(true)}
-              />
-              {ownerSearchOpen && ownerSearch.trim().length >= 2 && !ownerId && ownerHits.length > 0 && (
-                <div className="rounded border bg-popover shadow-md max-h-48 overflow-auto">
-                  {ownerHits.slice(0, 8).map((o) => (
-                    <button
-                      key={o.id}
-                      type="button"
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted"
-                      onClick={() => {
-                        setOwnerId(o.id);
-                        setOwnerLabel(ownerDisplayName(o.first_name, o.last_name));
-                        setOwnerSearch("");
-                        setOwnerSearchOpen(false);
-                      }}
-                    >
-                      {ownerDisplayName(o.first_name, o.last_name)} <span className="text-muted-foreground">{o.phone}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <OwnerSearchPopover
+              ownerId={ownerId || undefined}
+              ownerLabel={ownerLabel}
+              placeholder="Search owner by name or phone"
+              inputTestId="billing-create-invoice-owner-search"
+              onSelect={(id, label) => {
+                setOwnerId(id);
+                setOwnerLabel(label);
+              }}
+              onClear={() => {
+                setOwnerId("");
+                setOwnerLabel("");
+              }}
+            />
 
             {ownerId && owner?.id === ownerId && (
               <div className="flex flex-wrap items-center gap-2">

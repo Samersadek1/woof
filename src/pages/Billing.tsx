@@ -96,6 +96,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Separator } from "@/components/ui/separator";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
 import { useInvoiceDeletionLog } from "@/hooks/useInvoices";
@@ -632,40 +633,74 @@ function OwnerSearchBar({ onSelect, selectedLabel, selectedOwnerId, onClear }: O
 
   return (
     <div ref={wrapperRef} className="max-w-lg space-y-1">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-        <Input className="pl-9" placeholder="Search client or pet name / phone…" value={query} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} autoComplete="off" />
-      </div>
-      {open && query.length >= 1 && (
-        <div className="w-full rounded-lg border bg-popover shadow-md overflow-hidden">
-          {isLoading ? (
-            <div className="p-3 space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
-          ) : !owners || owners.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">No clients or pets found</p>
-          ) : (
-            <ul className="max-h-64 overflow-y-auto divide-y">
-              {owners.map((o) => {
-                const label = ownerDisplayName(o.first_name, o.last_name);
-                const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
-                const details = [petNames, o.phone].filter(Boolean).join(" · ");
-                return (
-                  <li key={o.id} className="flex items-stretch">
-                    <button type="button" className="flex-1 min-w-0 flex items-center justify-between gap-2 px-4 py-2.5 text-sm hover:bg-muted/60 text-left transition-colors"
-                      onClick={() => { onSelect(o.id, label); setQuery(""); setOpen(false); }}>
-                      <span className="font-medium truncate">{label}</span>
-                      <span className="text-muted-foreground text-xs shrink-0">{details}</span>
-                    </button>
-                    <button type="button" className="shrink-0 px-3 flex items-center justify-center border-l hover:bg-muted/80 transition-colors" title="Open profile"
-                      onClick={() => { navigate(`/customers/${o.id}`); setOpen(false); }}>
-                      <ExternalLink className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              className="pl-9"
+              placeholder="Search client or pet name / phone…"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setOpen(true);
+              }}
+              onFocus={() => setOpen(true)}
+              autoComplete="off"
+              data-testid="billing-owner-search"
+            />
+          </div>
+        </PopoverTrigger>
+        {open && query.length >= 1 && (
+          <PopoverContent
+            align="start"
+            className="w-[var(--radix-popover-trigger-width)] p-0 z-[120]"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+          >
+            {isLoading ? (
+              <div className="p-3 space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : !owners || owners.length === 0 ? (
+              <p className="p-3 text-sm text-muted-foreground">No clients or pets found</p>
+            ) : (
+              <ul className="max-h-64 overflow-y-auto divide-y">
+                {owners.map((o) => {
+                  const label = ownerDisplayName(o.first_name, o.last_name);
+                  const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
+                  const details = [petNames, o.phone].filter(Boolean).join(" · ");
+                  return (
+                    <li key={o.id} className="flex items-stretch">
+                      <button
+                        type="button"
+                        className="flex-1 min-w-0 flex items-center justify-between gap-2 px-4 py-2.5 text-sm hover:bg-muted/60 text-left transition-colors"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          onSelect(o.id, label);
+                          setQuery("");
+                          setOpen(false);
+                        }}
+                      >
+                        <span className="font-medium truncate">{label}</span>
+                        <span className="text-muted-foreground text-xs shrink-0">{details}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="shrink-0 px-3 flex items-center justify-center border-l hover:bg-muted/80 transition-colors"
+                        title="Open profile"
+                        onClick={() => {
+                          navigate(`/customers/${o.id}`);
+                          setOpen(false);
+                        }}
+                      >
+                        <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </PopoverContent>
+        )}
+      </Popover>
     </div>
   );
 }

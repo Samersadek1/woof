@@ -111,6 +111,9 @@ import {
   IMPORT_PLACEHOLDER_STATUS_CLASS,
 } from "@/lib/boardingUnknownKennel";
 import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
+import { ChangeRoomDialog } from "@/components/boarding/ChangeRoomDialog";
+import { DayShufflePanel } from "@/components/boarding/DayShufflePanel";
+import { useMoveBoardingRoom } from "@/hooks/useMoveBoardingRoom";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
 import {
   netFromGrossInclusive,
@@ -144,6 +147,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
+  ArrowRightLeft,
   Plus,
   Loader2,
   ExternalLink,
@@ -1006,15 +1010,14 @@ export type DogBoardingCalendarProps = {
 function AssignRealRoomPanel({
   booking,
   facilityRooms,
-  updateBooking,
   onRoomAssigned,
 }: {
   booking: BookingWithDetails;
   facilityRooms: Room[];
-  updateBooking: ReturnType<typeof useUpdateBooking>;
   onRoomAssigned: (room: Room) => void;
 }) {
   const [pickedRoomId, setPickedRoomId] = useState("");
+  const moveRoom = useMoveBoardingRoom();
 
   if (!isImportPlaceholderBooking(booking)) return null;
 
@@ -1043,24 +1046,32 @@ function AssignRealRoomPanel({
       <Button
         type="button"
         className="w-full bg-amber-700 hover:bg-amber-800 text-white"
-        disabled={!pickedRoomId || updateBooking.isPending}
+        disabled={!pickedRoomId || moveRoom.isPending}
         onClick={() => {
           const room = sorted.find((r) => r.id === pickedRoomId);
           if (!room) return;
-          updateBooking.mutate(
-            { id: booking.id, room_id: pickedRoomId },
+          moveRoom.mutate(
+            {
+              bookingId: booking.id,
+              effectiveDate: booking.check_in_date,
+              targetRoomId: pickedRoomId,
+              reason: "Assign real room from import placeholder",
+            },
             {
               onSuccess: () => {
                 toast.success(`Assigned to ${room.room_number}`);
                 onRoomAssigned(room);
                 setPickedRoomId("");
               },
-              onError: (err) => toast.error(err.message),
+              onError: (err) => {
+                const overlap = getBookingRoomOverlapErrorMessage(err);
+                toast.error(overlap ?? (err instanceof Error ? err.message : "Assign failed"));
+              },
             },
           );
         }}
       >
-        {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+        {moveRoom.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
         Assign real room
       </Button>
     </div>
@@ -1106,6 +1117,7 @@ export function DogBoardingCalendar({
   const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
   const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
   const [belongingsReadOnly, setBelongingsReadOnly] = useState(false);
+  const [changeRoomOpen, setChangeRoomOpen] = useState(false);
 
   // owner search
   const [ownerSearch, setOwnerSearch] = useState("");
@@ -1533,9 +1545,27 @@ export function DogBoardingCalendar({
     };
 
     createBooking.mutate(payload, {
-      onSuccess: (booking) => {
+      onSuccess: async (booking) => {
+        if (booking.room_id) {
+          const { error: moveErr } = await supabase.rpc("move_boarding_room", {
+            p_booking_id: booking.id,
+            p_effective_date: booking.check_in_date,
+            p_target_room_id: booking.room_id,
+            p_reason: "Initial room on booking create",
+            p_moved_by: form.staff_name.trim() || null,
+            p_override_do_not_move: false,
+          });
+          if (moveErr) {
+            toast.error(
+              getBookingRoomOverlapErrorMessage(moveErr) ??
+                moveErr.message ??
+                "Booking saved but room segment failed",
+            );
+          }
+        }
         toast.success("Booking created");
         setNewBookingOpen(false);
+        queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
 
         const addonItems: {
           key: string;
@@ -2712,7 +2742,6 @@ export function DogBoardingCalendar({
                   <AssignRealRoomPanel
                     booking={detailBooking}
                     facilityRooms={assignableDogRooms}
-                    updateBooking={updateBooking}
                     onRoomAssigned={(room) =>
                       setDetailBooking((prev) =>
                         prev && prev.id === detailBooking.id
@@ -2812,6 +2841,19 @@ export function DogBoardingCalendar({
                 {/* Actions */}
                 <div className="space-y-3">
 
+                  {(detailBooking.status === "confirmed" || detailBooking.status === "checked_in") && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      data-testid="boarding-change-room-btn"
+                      onClick={() => setChangeRoomOpen(true)}
+                    >
+                      <ArrowRightLeft className="mr-2 h-4 w-4" />
+                      Change room
+                    </Button>
+                  )}
+
                   {detailBooking.status === "confirmed" && (
                     <Button
                       className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -2876,6 +2918,24 @@ export function DogBoardingCalendar({
 
       {detailBooking && (
         <>
+          <ChangeRoomDialog
+            open={changeRoomOpen}
+            onOpenChange={setChangeRoomOpen}
+            booking={detailBooking}
+            assignmentSlices={sortedAssignmentSlices(
+              (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
+                start_date: a.start_date,
+                end_date: a.end_date,
+                rooms: a.rooms,
+              })),
+            )}
+            facilityRooms={assignableDogRooms}
+            defaultEffectiveDate={detailContext?.asOfDate}
+            onMoved={() => {
+              queryClient.invalidateQueries({ queryKey: ["bookings"] });
+              queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
+            }}
+          />
           <CheckInSheet
             open={checkInSheetOpen}
             onOpenChange={(o) => {
@@ -3078,7 +3138,7 @@ function BoardingHubPage() {
   const [searchParams] = useSearchParams();
   const todayStr = toDateStr(today);
 
-  const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
+  const [viewMode, setViewMode] = useState<"calendar" | "list" | "shuffle">("calendar");
 
   const [windowStart, setWindowStart] = useState(() =>
     startOfWeek(today, { weekStartsOn: 1 }),
@@ -3364,6 +3424,14 @@ function BoardingHubPage() {
             >
               Operations list
             </button>
+            <button
+              type="button"
+              data-testid="boarding-day-shuffle-tab"
+              className={`px-3 py-1.5 transition-colors ${viewMode === "shuffle" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+              onClick={() => setViewMode("shuffle")}
+            >
+              Day shuffle
+            </button>
           </div>
 
           <Button
@@ -3396,6 +3464,8 @@ function BoardingHubPage() {
             onWindowStartChange={setWindowStart}
             suppressToolbar
           />
+        ) : viewMode === "shuffle" ? (
+          <DayShufflePanel initialDate={normalizedDate ?? todayStr} />
         ) : (
           <BoardingOperationsList
             focus={listFocus}

@@ -2568,6 +2568,17 @@ export type Database = {
         Args: { p_booking_id: string }
         Returns: number
       }
+      move_boarding_room: {
+        Args: {
+          p_booking_id: string
+          p_effective_date: string
+          p_target_room_id: string
+          p_moved_by?: string | null
+          p_override_do_not_move?: boolean | null
+          p_reason?: string | null
+        }
+        Returns: Json
+      }
       consume_service_credit: {
         Args: {
           p_consumed_for_ref_id?: string
