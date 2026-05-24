@@ -13,31 +13,38 @@ function isChunkLoadError(error: unknown): boolean {
 }
 
 /**
+ * Runs a dynamic import; on stale-chunk errors reloads once, then rethrows.
+ */
+export async function importWithChunkReload<T>(
+  importFn: () => Promise<T>,
+): Promise<T> {
+  try {
+    const mod = await importFn();
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    return mod;
+  } catch (error) {
+    if (!isChunkLoadError(error)) throw error;
+
+    const alreadyReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1";
+    if (!alreadyReloaded) {
+      sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
+      window.location.reload();
+      return new Promise(() => {
+        /* hang until reload */
+      });
+    }
+
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    throw error;
+  }
+}
+
+/**
  * Wraps React.lazy so a stale chunk after deploy triggers one full reload
  * (new index.html + asset hashes) instead of a broken route until manual refresh.
  */
 export function lazyWithRetry<T extends ComponentType<unknown>>(
   importFn: () => Promise<{ default: T }>,
 ): LazyExoticComponent<T> {
-  return lazy(async () => {
-    try {
-      const mod = await importFn();
-      sessionStorage.removeItem(CHUNK_RELOAD_KEY);
-      return mod;
-    } catch (error) {
-      if (!isChunkLoadError(error)) throw error;
-
-      const alreadyReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1";
-      if (!alreadyReloaded) {
-        sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
-        window.location.reload();
-        return new Promise(() => {
-          /* hang until reload */
-        });
-      }
-
-      sessionStorage.removeItem(CHUNK_RELOAD_KEY);
-      throw error;
-    }
-  });
+  return lazy(() => importWithChunkReload(importFn));
 }
