@@ -194,10 +194,14 @@ const CALENDAR_ASSIGNMENT_SELECT = `
   bookings (${BOOKING_BASE_SELECT})
 `;
 
-export function useBookingRoomAssignments(startDate: string, endDate: string) {
+export function useBookingRoomAssignments(
+  startDate: string,
+  endDate: string,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: queryKeys.bookingRoomAssignments(startDate, endDate),
-    enabled: !!startDate && !!endDate,
+    enabled: options?.enabled ?? (!!startDate && !!endDate),
     queryFn: async () => {
       const { data, error } = await supabase
         .from("booking_room_assignments")

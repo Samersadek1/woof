@@ -25,9 +25,16 @@ import type {
   CreateBookingPayload,
 } from "@/hooks/useBookings";
 import {
+  formatRoomAssignmentsSummary,
   roomLabelForBooking,
+  sortedAssignmentSlices,
   type BookingRoomAssignmentSlice,
 } from "@/lib/bookingRoomDisplay";
+import { computeBoardingOccupancyStats } from "@/lib/boardingOccupancy";
+import {
+  buildBoardingRoomCalendarDayHtml,
+  printBoardingRoomCalendarDay,
+} from "@/lib/boardingCalendarPrint";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { Button } from "@/components/ui/button";
@@ -1069,6 +1076,13 @@ export function DogBoardingCalendar({
   const startStr = toDateStr(windowStart);
   const endStr = toDateStr(windowEnd);
 
+  useEffect(() => {
+    const todayStr = toDateStr(new Date());
+    if (todayStr >= startStr && todayStr <= endStr) {
+      setCalendarPrintDate(todayStr);
+    }
+  }, [startStr, endStr]);
+
   // data
   const queryClient = useQueryClient();
   const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
@@ -1079,6 +1093,8 @@ export function DogBoardingCalendar({
   // drawer / panel state
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
+  const [detailContext, setDetailContext] = useState<{ asOfDate: string } | null>(null);
+  const [calendarPrintDate, setCalendarPrintDate] = useState(() => toDateStr(new Date()));
   const [form, setForm] = useState<NewBookingForm>({ ...BLANK_FORM });
   const [roomPickerOpen, setRoomPickerOpen] = useState(false);
   const [roomSearch, setRoomSearch] = useState("");
@@ -1629,7 +1645,7 @@ export function DogBoardingCalendar({
 
       days.forEach((day, idx) => {
         const dayStr = toDateStr(day);
-        if (dayStr >= segStart && dayStr < segEnd) {
+        if (dayStr >= segStart && dayStr <= segEnd) {
           const isFirst = dayStr === segStart || idx === 0;
           if (isFirst) {
             const chipEnd = segEnd < endOfWindow ? segEnd : endOfWindow;
@@ -1697,7 +1713,10 @@ export function DogBoardingCalendar({
               className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1
                 cursor-pointer truncate z-10 select-none border border-dashed
                 ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
-              onClick={() => setDetailBooking(booking)}
+              onClick={() => {
+                setDetailBooking(booking);
+                setDetailContext({ asOfDate: dayStr });
+              }}
             >
               <span className="truncate min-w-0 flex-1">{label || booking.booking_ref || "—"}</span>
               {bookingAnyPetHasAlerts(booking) ? (
@@ -1741,13 +1760,68 @@ export function DogBoardingCalendar({
                 {format(windowStart, "d MMM")} – {format(windowEnd, "d MMM yyyy")}
               </span>
             </div>
+            <Input
+              type="date"
+              className="h-9 w-36"
+              value={calendarPrintDate}
+              onChange={(e) => setCalendarPrintDate(e.target.value)}
+              aria-label="Print day"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="boarding-calendar-print-day-btn"
+              onClick={() => {
+                const html = buildBoardingRoomCalendarDayHtml({
+                  asOfDate: calendarPrintDate,
+                  rooms: assignableDogRooms,
+                  assignmentsByRoom,
+                  bookingsByRoom,
+                  unassignedBookings,
+                });
+                printBoardingRoomCalendarDay(html);
+              }}
+            >
+              <Printer className="mr-1.5 h-4 w-4" />
+              Print day
+            </Button>
             <Button data-testid="boarding-new-booking-btn" onClick={() => openNewBooking()}>
               <Plus className="mr-2 h-4 w-4" />
               New booking
             </Button>
           </div>
         ) : (
-          <div className="flex items-center justify-end px-6 py-2 border-b border-border bg-slate-50/90 shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-2 px-6 py-2 border-b border-border bg-slate-50/90 shrink-0">
+            <Label htmlFor="boarding-calendar-print-date" className="sr-only">
+              Print day
+            </Label>
+            <Input
+              id="boarding-calendar-print-date"
+              type="date"
+              className="h-8 w-36"
+              value={calendarPrintDate}
+              onChange={(e) => setCalendarPrintDate(e.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="boarding-calendar-print-day-btn"
+              onClick={() => {
+                const html = buildBoardingRoomCalendarDayHtml({
+                  asOfDate: calendarPrintDate,
+                  rooms: assignableDogRooms,
+                  assignmentsByRoom,
+                  bookingsByRoom,
+                  unassignedBookings,
+                });
+                printBoardingRoomCalendarDay(html);
+              }}
+            >
+              <Printer className="mr-1.5 h-4 w-4" />
+              Print day
+            </Button>
             <Button data-testid="boarding-new-booking-btn" size="sm" onClick={() => openNewBooking()}>
               <Plus className="mr-2 h-4 w-4" />
               New dog booking
@@ -2506,6 +2580,7 @@ export function DogBoardingCalendar({
         onOpenChange={(open) => {
           if (!open) {
             setDetailBooking(null);
+            setDetailContext(null);
             setCheckInSheetOpen(false);
             setCheckOutSheetOpen(false);
             setBelongingsReadOnly(false);
@@ -2593,28 +2668,35 @@ export function DogBoardingCalendar({
                 <div className="space-y-1">
                   <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
                   {(() => {
-                    const slices = (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
-                      start_date: a.start_date,
-                      end_date: a.end_date,
-                      rooms: a.rooms,
-                    }));
-                    const label = roomLabelForBooking(detailBooking, slices);
-                    const displayRoom =
-                      detailBooking.rooms ??
-                      assignmentsByBookingId.get(detailBooking.id)?.[0]?.rooms ??
-                      null;
-                    if (label === "Unassigned") {
+                    const slices = sortedAssignmentSlices(
+                      (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
+                        start_date: a.start_date,
+                        end_date: a.end_date,
+                        rooms: a.rooms,
+                      })),
+                    );
+                    const asOfDate =
+                      detailContext?.asOfDate ?? toDateStr(new Date());
+                    const label = roomLabelForBooking(detailBooking, slices, { asOfDate });
+                    const summaryLines = formatRoomAssignmentsSummary(slices, {
+                      highlightDate: asOfDate,
+                    });
+                    if (label === "Unassigned" && summaryLines.length === 0) {
                       return <p className="text-sm text-muted-foreground italic">Unassigned</p>;
                     }
                     return (
                       <>
                         <p className="text-sm font-medium">
-                          {displayRoom ? formatRoomSectionLabel(displayRoom) : label}
+                          {detailContext?.asOfDate
+                            ? `${label} (on ${format(parseISO(asOfDate), "d MMM yyyy")})`
+                            : label}
                         </p>
-                        {displayRoom?.room_type ? (
-                          <p className="text-xs text-muted-foreground capitalize">
-                            {displayRoom.room_type.replace(/_/g, " ")}
-                          </p>
+                        {summaryLines.length > 1 ? (
+                          <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground list-disc pl-4">
+                            {summaryLines.map((line) => (
+                              <li key={line}>{line}</li>
+                            ))}
+                          </ul>
                         ) : null}
                       </>
                     );
@@ -2800,7 +2882,21 @@ export function DogBoardingCalendar({
             bookingId={detailBooking.id}
             ownerName={`${detailBooking.owners?.first_name ?? ""} ${detailBooking.owners?.last_name ?? ""}`.trim()}
             petNames={detailBooking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
-            roomName={detailBooking.rooms?.display_name ?? "—"}
+            roomName={roomLabelForBooking(
+              detailBooking,
+              sortedAssignmentSlices(
+                (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
+                  start_date: a.start_date,
+                  end_date: a.end_date,
+                  rooms: a.rooms,
+                })),
+              ),
+              {
+                asOfDate:
+                  detailContext?.asOfDate ??
+                  detailBooking.check_in_date,
+              },
+            )}
             bookedCheckInDate={detailBooking.check_in_date}
             bookedCheckOutDate={detailBooking.check_out_date}
             readOnly={belongingsReadOnly}
@@ -2814,7 +2910,21 @@ export function DogBoardingCalendar({
             bookingId={detailBooking.id}
             ownerName={`${detailBooking.owners?.first_name ?? ""} ${detailBooking.owners?.last_name ?? ""}`.trim()}
             petNames={detailBooking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
-            roomName={detailBooking.rooms?.display_name ?? "—"}
+            roomName={roomLabelForBooking(
+              detailBooking,
+              sortedAssignmentSlices(
+                (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
+                  start_date: a.start_date,
+                  end_date: a.end_date,
+                  rooms: a.rooms,
+                })),
+              ),
+              {
+                asOfDate:
+                  detailContext?.asOfDate ??
+                  detailBooking.check_out_date,
+              },
+            )}
             checkInDate={detailBooking.check_in_date}
             checkOutDate={detailBooking.check_out_date}
             onFinished={handleBelongingsFlowFinished}
@@ -2832,26 +2942,6 @@ type BoardingListFocus = "all" | "check-ins" | "check-outs";
 
 const OCCUPANCY_BOOKING_SELECT =
   "*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts))";
-
-function boardingBookingOverlapsDate(
-  b: Pick<BookingWithDetails, "check_in_date" | "check_out_date" | "status">,
-  asOf: string,
-): boolean {
-  if (b.status === "cancelled") return false;
-  return b.check_in_date <= asOf && b.check_out_date > asOf;
-}
-
-function occupancyFacilityRooms(rooms: Room[]): Room[] {
-  return rooms.filter((r) => {
-    if (!r.is_active || isImportPlaceholderRoom(r)) return false;
-    return r.wing !== "cattery";
-  });
-}
-
-function occupancyPlaceholderRooms(rooms: Room[]): Room[] {
-  const { placeholders } = splitFacilityAndPlaceholderRooms(rooms);
-  return placeholders.filter((r) => r.is_active);
-}
 
 function BoardingOperationsList({
   initialDatePreset = "today",
@@ -3037,52 +3127,29 @@ function BoardingHubPage() {
     },
   });
 
-  const occupancyStats = useMemo(() => {
-    const occBookingsList = occRaw as BookingWithDetails[];
-    const roomsPool = occupancyFacilityRooms(facilityRooms).filter(
-      (r) => !isExcludedBoardingRoom(r),
-    );
-    const placeholderPool = occupancyPlaceholderRooms(facilityRooms);
-    const poolIds = new Set(roomsPool.map((r) => r.id));
-    const placeholderIds = new Set(placeholderPool.map((r) => r.id));
-    const total = roomsPool.length;
+  const { data: occAssignments = [], isFetching: occAssignmentsLoading } = useBookingRoomAssignments(
+    occupancyDate,
+    occupancyDate,
+    { enabled: occupancyOpen && !!occupancyDate },
+  );
 
-    const occupiedByRoomId = new Map<string, BookingWithDetails>();
-    let importedUnassignedCount = 0;
-    for (const b of occBookingsList) {
-      if (!b.room_id || !boardingBookingOverlapsDate(b, occupancyDate)) continue;
-      if (placeholderIds.has(b.room_id)) {
-        importedUnassignedCount += 1;
-        continue;
-      }
-      if (!poolIds.has(b.room_id)) continue;
-      if (!occupiedByRoomId.has(b.room_id)) occupiedByRoomId.set(b.room_id, b);
-    }
-    const occupiedCount = occupiedByRoomId.size;
-    const availableCount = Math.max(0, total - occupiedCount);
-    const pct = total > 0 ? Math.round((occupiedCount / total) * 1000) / 10 : 0;
-
-    const byGroup = new Map<string, { occupied: { room: Room; booking: BookingWithDetails }[]; available: Room[] }>();
-
-    const sortRooms = (a: Room, b: Room) => sortRoomsBySectionNumber(a, b);
-
-    for (const room of roomsPool) {
-      const groupKey = getRoomSectionParts(room).section;
-      if (!byGroup.has(groupKey)) byGroup.set(groupKey, { occupied: [], available: [] });
-      const bucket = byGroup.get(groupKey)!;
-      const bk = occupiedByRoomId.get(room.id);
-      if (bk) bucket.occupied.push({ room, booking: bk });
-      else bucket.available.push(room);
-    }
-    for (const b of byGroup.values()) {
-      b.occupied.sort((x, y) => sortRooms(x.room, y.room));
-      b.available.sort(sortRooms);
-    }
-
-    const groupOrder = buildRoomsBySection(roomsPool).order.filter((k) => byGroup.has(k));
-
-    return { total, occupiedCount, availableCount, pct, byGroup, groupOrder, importedUnassignedCount };
-  }, [occRaw, facilityRooms, occupancyDate]);
+  const occupancyStats = useMemo(
+    () =>
+      computeBoardingOccupancyStats({
+        asOfDate: occupancyDate,
+        facilityRooms,
+        bookings: occRaw,
+        assignments: occAssignments.map((row) => ({
+          booking_id: row.booking_id,
+          room_id: row.room_id,
+          start_date: row.start_date,
+          end_date: row.end_date,
+          bookings: row.bookings,
+        })),
+        isExcludedBoardingRoom,
+      }),
+    [occRaw, occAssignments, facilityRooms, occupancyDate],
+  );
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
@@ -3126,7 +3193,7 @@ function BoardingHubPage() {
               <div className="rounded-lg border bg-muted/40 px-3 py-2">
                 <p className="text-xs text-muted-foreground">Occupancy</p>
                 <p className="text-2xl font-semibold tabular-nums">
-                  {occLoading ? "…" : `${occupancyStats.pct}%`}
+                  {occLoading || occAssignmentsLoading ? "…" : `${occupancyStats.pct}%`}
                 </p>
               </div>
             </div>
@@ -3205,7 +3272,49 @@ function BoardingHubPage() {
               );
             })}
           </div>
-          <DialogFooter className="border-t px-6 py-3">
+          <DialogFooter className="border-t px-6 py-3 sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={occLoading || occAssignmentsLoading}
+              onClick={() => {
+                const { map: roomsBySection, order } = buildRoomsBySection(
+                  facilityRooms.filter(
+                    (r) => r.is_active && !isImportPlaceholderRoom(r) && r.wing !== "cattery" && !isExcludedBoardingRoom(r),
+                  ),
+                );
+                const assignmentsByRoom = new Map<string, CalendarRoomAssignment[]>();
+                for (const row of occAssignments) {
+                  const list = assignmentsByRoom.get(row.room_id) ?? [];
+                  list.push(row);
+                  assignmentsByRoom.set(row.room_id, list);
+                }
+                const bookingsByRoom = new Map<string, BookingWithDetails[]>();
+                const bookingIdsWithSegments = new Set(occAssignments.map((r) => r.booking_id));
+                for (const b of occRaw) {
+                  if (bookingIdsWithSegments.has(b.id) || !b.room_id) continue;
+                  const list = bookingsByRoom.get(b.room_id) ?? [];
+                  list.push(b);
+                  bookingsByRoom.set(b.room_id, list);
+                }
+                const flatRooms = order.flatMap((k) => roomsBySection.get(k) ?? []);
+                const html = buildBoardingRoomCalendarDayHtml({
+                  asOfDate: occupancyDate,
+                  rooms: flatRooms,
+                  assignmentsByRoom,
+                  bookingsByRoom,
+                  unassignedBookings: occRaw.filter(
+                    (b) =>
+                      !bookingIdsWithSegments.has(b.id) &&
+                      (!b.room_id || isImportPlaceholderBooking(b)),
+                  ),
+                });
+                printBoardingRoomCalendarDay(html);
+              }}
+            >
+              <Printer className="mr-1.5 h-4 w-4" />
+              Print day
+            </Button>
             <Button type="button" variant="outline" onClick={() => setOccupancyOpen(false)}>
               Close
             </Button>
