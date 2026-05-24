@@ -122,6 +122,7 @@ function serviceCodeLabel(serviceCode: Database["public"]["Enums"]["service_code
   const labels: Record<Database["public"]["Enums"]["service_code"], string> = {
     boarding_night: "boarding nights",
     daycare_full_day: "daycare days",
+    daycare_half_day: "daycare half days",
     daycare_hourly: "daycare hourly credits",
     grooming_full_service: "grooming full service sessions",
     cat_grooming_full_no_bath: "cat full service (no bath)",

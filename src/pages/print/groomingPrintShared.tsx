@@ -9,6 +9,7 @@ import {
   vatAmountFromGrossInclusive,
   vatLineLabel,
 } from "@/lib/vatConfig";
+import { petMedicalConditions, petMedicationNotes } from "@/lib/petCareNotes";
 
 export type GroomingInvoiceMoney = {
   netExVat: number;
@@ -52,6 +53,8 @@ export type GroomingPrintRow = {
     size: "small" | "medium" | "large" | null;
     grooming_notes: string | null;
     medical_conditions: string | null;
+    medication_notes: string | null;
+    medications: string | null;
   } | null;
   bookings: {
     booking_ref: string | null;
@@ -61,7 +64,7 @@ export type GroomingPrintRow = {
 const GROOMING_APPOINTMENT_PRINT_SELECT = `
   id, appointment_date, appointment_time, duration_minutes, service, grooming_notes, notes, visit_notes, pet_id, owner_id, price, booking_id,
   owners(first_name, last_name, phone, phone2, email, address),
-  pets(name, breed, size, grooming_notes, medical_conditions),
+  pets(name, breed, size, grooming_notes, medical_conditions, medication_notes, medications),
   bookings(booking_ref)
 `;
 
@@ -446,9 +449,9 @@ export function GroomingCardBlock({
         </p>
         <p>
           <span className="print-label font-semibold uppercase text-[11px]">Sensitivities: </span>
-          {(appointment.pets?.medical_conditions?.trim() ||
-            appointment.pets?.medication_notes?.trim()) ??
-            "—"}
+          {[petMedicalConditions(appointment.pets), petMedicationNotes(appointment.pets)]
+            .filter(Boolean)
+            .join(" · ") || "—"}
         </p>
         <p>
           <span className="print-label font-semibold uppercase text-[11px]">Previous groom: </span>

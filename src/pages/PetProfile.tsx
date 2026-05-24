@@ -105,6 +105,7 @@ function creditServiceLabel(serviceCode: Database["public"]["Enums"]["service_co
   const labels: Record<Database["public"]["Enums"]["service_code"], string> = {
     boarding_night: "boarding night",
     daycare_full_day: "daycare day",
+    daycare_half_day: "daycare half day",
     daycare_hourly: "daycare hourly",
     grooming_full_service: "full service grooming",
     cat_grooming_full_no_bath: "cat full service (no bath)",

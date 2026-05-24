@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       agent_capability_requests: {
@@ -485,6 +510,7 @@ export type Database = {
           owner_id: string
           pickup_required: boolean
           room_id: string | null
+          source_external_id: string | null
           staff_id: string | null
           status: Database["public"]["Enums"]["booking_status"]
           updated_at: string
@@ -515,6 +541,7 @@ export type Database = {
           owner_id: string
           pickup_required?: boolean
           room_id?: string | null
+          source_external_id?: string | null
           staff_id?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
           updated_at?: string
@@ -547,6 +574,7 @@ export type Database = {
           owner_id?: string
           pickup_required?: boolean
           room_id?: string | null
+          source_external_id?: string | null
           staff_id?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
           updated_at?: string
@@ -1228,6 +1256,7 @@ export type Database = {
           first_name: string
           how_heard: string | null
           id: string
+          is_elite: boolean | null
           is_vip: boolean
           is_woof_owned: boolean
           last_name: string | null
@@ -1243,6 +1272,7 @@ export type Database = {
           phone: string | null
           phone2: string | null
           preferred_groomer: string | null
+          source_external_id: string | null
           updated_at: string
           vet_name: string | null
           vet_phone: string | null
@@ -1265,6 +1295,7 @@ export type Database = {
           first_name: string
           how_heard?: string | null
           id?: string
+          is_elite?: boolean | null
           is_vip?: boolean
           is_woof_owned?: boolean
           last_name?: string | null
@@ -1280,6 +1311,7 @@ export type Database = {
           phone?: string | null
           phone2?: string | null
           preferred_groomer?: string | null
+          source_external_id?: string | null
           updated_at?: string
           vet_name?: string | null
           vet_phone?: string | null
@@ -1302,6 +1334,7 @@ export type Database = {
           first_name?: string
           how_heard?: string | null
           id?: string
+          is_elite?: boolean | null
           is_vip?: boolean
           is_woof_owned?: boolean
           last_name?: string | null
@@ -1317,6 +1350,7 @@ export type Database = {
           phone?: string | null
           phone2?: string | null
           preferred_groomer?: string | null
+          source_external_id?: string | null
           updated_at?: string
           vet_name?: string | null
           vet_phone?: string | null
@@ -1518,9 +1552,11 @@ export type Database = {
           owner_id: string
           photo_url: string | null
           size: Database["public"]["Enums"]["pet_size"] | null
+          source_external_id: string | null
           spayed_neutered: boolean | null
           special_alerts: Json | null
           species: Database["public"]["Enums"]["species"]
+          status: string | null
           updated_at: string
           vaccicheck_cav_value: number | null
           vaccicheck_cdv_value: number | null
@@ -1568,9 +1604,11 @@ export type Database = {
           owner_id: string
           photo_url?: string | null
           size?: Database["public"]["Enums"]["pet_size"] | null
+          source_external_id?: string | null
           spayed_neutered?: boolean | null
           special_alerts?: Json | null
           species?: Database["public"]["Enums"]["species"]
+          status?: string | null
           updated_at?: string
           vaccicheck_cav_value?: number | null
           vaccicheck_cdv_value?: number | null
@@ -1618,9 +1656,11 @@ export type Database = {
           owner_id?: string
           photo_url?: string | null
           size?: Database["public"]["Enums"]["pet_size"] | null
+          source_external_id?: string | null
           spayed_neutered?: boolean | null
           special_alerts?: Json | null
           species?: Database["public"]["Enums"]["species"]
+          status?: string | null
           updated_at?: string
           vaccicheck_cav_value?: number | null
           vaccicheck_cdv_value?: number | null
@@ -1736,11 +1776,13 @@ export type Database = {
           is_active: boolean
           label_color: string | null
           max_pets: number
+          name: string
           nightly_rate: number | null
           notes: string | null
           pet_type: string | null
           room_number: string
           room_type: Database["public"]["Enums"]["room_type"]
+          source_external_id: string | null
           street_name: string | null
           wing: Database["public"]["Enums"]["room_wing"]
         }
@@ -1758,11 +1800,13 @@ export type Database = {
           is_active?: boolean
           label_color?: string | null
           max_pets?: number
+          name?: string
           nightly_rate?: number | null
           notes?: string | null
           pet_type?: string | null
           room_number: string
           room_type: Database["public"]["Enums"]["room_type"]
+          source_external_id?: string | null
           street_name?: string | null
           wing: Database["public"]["Enums"]["room_wing"]
         }
@@ -1780,11 +1824,13 @@ export type Database = {
           is_active?: boolean
           label_color?: string | null
           max_pets?: number
+          name?: string
           nightly_rate?: number | null
           notes?: string | null
           pet_type?: string | null
           room_number?: string
           room_type?: Database["public"]["Enums"]["room_type"]
+          source_external_id?: string | null
           street_name?: string | null
           wing?: Database["public"]["Enums"]["room_wing"]
         }
@@ -2568,17 +2614,6 @@ export type Database = {
         Args: { p_booking_id: string }
         Returns: number
       }
-      move_boarding_room: {
-        Args: {
-          p_booking_id: string
-          p_effective_date: string
-          p_target_room_id: string
-          p_moved_by?: string | null
-          p_override_do_not_move?: boolean | null
-          p_reason?: string | null
-        }
-        Returns: Json
-      }
       consume_service_credit: {
         Args: {
           p_consumed_for_ref_id?: string
@@ -2607,6 +2642,7 @@ export type Database = {
         }[]
       }
       create_room_type: { Args: { p_label: string }; Returns: string }
+      do_legacy_import_atomic: { Args: { p_payload: Json }; Returns: Json }
       flag_overdue_invoices: { Args: never; Returns: number }
       generate_booking_ref: { Args: never; Returns: string }
       get_dashboard_metrics: { Args: { p_as_of?: string }; Returns: Json }
@@ -2642,6 +2678,17 @@ export type Database = {
           source_type: string
           units_remaining: number
         }[]
+      }
+      move_boarding_room: {
+        Args: {
+          p_booking_id: string
+          p_effective_date: string
+          p_moved_by?: string
+          p_override_do_not_move?: boolean
+          p_reason?: string
+          p_target_room_id: string
+        }
+        Returns: Json
       }
       process_wallet_payment: {
         Args: { p_invoice_id: string; p_performed_by: string }
@@ -2819,6 +2866,7 @@ export type Database = {
         | "treadmill_daycare_addon"
         | "treadmill_hourly_addon"
         | "assessment_with_first_hour"
+        | "daycare_half_day"
       service_unit:
         | "per_night"
         | "per_day"
@@ -2968,6 +3016,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       addon_type: [
@@ -3114,6 +3165,7 @@ export const Constants = {
         "treadmill_daycare_addon",
         "treadmill_hourly_addon",
         "assessment_with_first_hour",
+        "daycare_half_day",
       ],
       service_unit: [
         "per_night",
