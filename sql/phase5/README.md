@@ -9,6 +9,15 @@ Run each script in the Supabase SQL editor as **one transaction** (`BEGIN` … `
 | `5a_drop_legacy_pet_note_columns.sql` | **Hold** | Run only after UI deploy uses canonical columns only |
 | `phase5c_contact_cleanup.sql` | Applied 2026-05-24 | 429 owners staged; POST-CHECK: vet_clinics=41, phone2=258, slash_in_phone=0, text_in_phone=2 (review) |
 | `phase5c_contact_cleanup_exec.sql` | Same run | Comment-stripped copy used with `npx supabase db query --linked --file` |
+| `phase5f_recover_daycare_sessions.sql` | Applied 2026-05-24 | POST-CHECK: recovered=1130, MULTI_DATE_REVIEW=24, total_legacy_sessions=4952 |
+
+## Phase 5f — dropped daycare usage recovery
+
+Phase 4c originally skipped ~463 usage rows with unparseable `UsageDateRaw`. Phase 5f re-parses them (ISO-in-string, DD/MM/YYYY, month-name + inferred year) and inserts `daycare_sessions` via the existing invoice `tracker=` join.
+
+**Before running:** use the generator output (not a hand-edited paste) so idempotency includes `usage_slot`. Run the pre-flight `SELECT` in the script — expect **0** unresolved rows. Review `MULTI_DATE_REVIEW` count afterward (~24 rows need manual split).
+
+**Note:** `service_credits.units_consumed` was set in Phase 4b from source `UtilizedDays`; this script does not adjust credits.
 
 ## Phase 5c schema (verified)
 

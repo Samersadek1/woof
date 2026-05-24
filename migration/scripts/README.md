@@ -16,6 +16,7 @@ their own — because the source XLSX may have changed.**
 |---|---|---|
 | `build_phase01.py` | `woof_phase0_wipe.sql`, `woof_phase1_payload.json`, `woof_phase1_call.sql`, `woof_phase1_room_check.sql` | 0, 1 |
 | `build_phase234.py` | `woof_phase2_pets_update.sql`, `woof_phase3_vaccinations.sql`, `woof_phase4a_halfday_catalog.sql`, `woof_phase4b_packages.sql`, `woof_phase4c_daycare_sessions.sql` | 2, 3, 4a, 4b, 4c |
+| `build_phase5f.py` | `sql/phase5/phase5f_recover_daycare_sessions.sql` | 5f (one-time recovery after 4c) |
 
 Both scripts read from the patched XLSX (default
 `/mnt/user-data/outputs/WOOF_System_Migration_Simple_PATCHED.xlsx`).
