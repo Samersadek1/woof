@@ -2,6 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
+import { appVersionPlugin, resolveBuildId } from "./vite/buildVersion";
+
+const appBuildId = resolveBuildId();
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -12,7 +15,11 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  plugins: [
+    react(),
+    appVersionPlugin(appBuildId),
+    mode === "development" && componentTagger(),
+  ].filter(Boolean),
   optimizeDeps: {
     holdUntilCrawlEnd: false,
   },
