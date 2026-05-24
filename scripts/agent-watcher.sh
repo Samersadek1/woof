@@ -86,9 +86,13 @@ process_one() {
 
   # Capture both human-readable transcript (stream-json) and a final-result JSON.
   # Use plain command + $? capture (not `if ! cmd`, which clobbers $?).
+  # --trust: skip the workspace-trust prompt (this dir is trusted).
+  # --yolo:  auto-approve all command/tool invocations. Required for headless
+  #          runs — there's no TTY to answer interactive approvals.
   set +e
   "$AGENT_BIN" -p \
       --trust \
+      --yolo \
       --output-format stream-json \
       < "$prompt_file" \
       > "$task_dir/stream.ndjson" \
