@@ -7,41 +7,32 @@ import type { OccupancyAssignmentRow } from "./boardingOccupancy";
 
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
 
-const a1: Room = {
+const a1 = {
   id: "room-a1",
   room_number: "A1",
   display_name: "A1",
   wing: "back_kennels",
   room_type: "standard",
   is_active: true,
-  cam_id: null,
-  created_at: "",
-  updated_at: "",
-};
+} as Room;
 
-const grooming: Room = {
+const grooming = {
   id: "room-groom",
   room_number: "Grooming 1",
   display_name: "Grooming 1",
   wing: "grooming_upstairs",
-  room_type: "grooming",
+  room_type: "kennels",
   is_active: true,
-  cam_id: null,
-  created_at: "",
-  updated_at: "",
-};
+} as Room;
 
-const placeholder: Room = {
+const placeholder = {
   id: "room-unk",
   room_number: "UNK-1",
   display_name: "Unknown · Standard",
   wing: "back_kennels",
   room_type: "standard",
   is_active: true,
-  cam_id: null,
-  created_at: "",
-  updated_at: "",
-};
+} as Room;
 
 type TestBooking = OccupancyAssignmentRow["bookings"];
 
