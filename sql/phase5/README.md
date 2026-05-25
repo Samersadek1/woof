@@ -12,6 +12,7 @@ Run each script in the Supabase SQL editor as **one transaction** (`BEGIN` … `
 | `phase5f_recover_daycare_sessions.sql` | Applied 2026-05-24 | POST-CHECK: recovered=1130, MULTI_DATE_REVIEW=24, total_legacy_sessions=4952 |
 | `phase5g_add_d_wing_rooms.sql` | Applied 2026-05-24 | Step 2a: D4/D5/D10/D11 added; POST-CHECK: 13 D-wing rooms (D1–D13) |
 | `phase5g_rebuild_bra.sql` | Applied 2026-05-24 | Step 2b: bra 1366→1404; 2059 spans staged; 398 orphans; `_bra_backup` retained |
+| `phase5g_delta_bra_patch.sql` | Applied 2026-05-24 | 29 pets: 288 deleted → 284 reinserted; 380 spans staged; 96 orphans (`_delta_backup`, `_delta_orphan_assignments` retained) |
 | `dashboard_boarding_occupancy_align.sql` | Applied 2026-05-24 | `boarding_kennel_occupancy_counts`; dashboard occupancy uses BRA + unassigned (140 kennel rooms) |
 
 ## Phase 5f — dropped daycare usage recovery
@@ -42,6 +43,10 @@ Generator fixes baked into the applied script (do not paste the Cowork draft ver
 - `DISABLE TRIGGER trg_enforce_boarding_assignment_room_overlap` during bulk insert (legacy data already has cross-owner overlaps)
 
 **Rollback:** `INSERT INTO booking_room_assignments SELECT * FROM _bra_backup;` (after truncating current bra) if needed.
+
+**Delta patch** (`phase5g_delta_bra_patch.sql`): surgical replace for 29 pet UIDs after Room_assignment_3 vs FINAL.xlsx diff. Uses the same insert resolution as 2b (narrowest booking, segment trim, overlap trigger disabled during bulk insert). Orphans: 41 spans end on `check_out_date` (FINAL uses inclusive checkout day; DB last occupied night is `check_out - 1`); 55 spans have no boarding booking on those dates.
+
+**Delta rollback:** delete bra for the 29 pets, then `INSERT INTO booking_room_assignments SELECT * FROM _delta_backup;`
 
 ## Phase 5e generator scripts
 
