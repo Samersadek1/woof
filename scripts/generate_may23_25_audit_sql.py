@@ -10,8 +10,10 @@ from pathlib import Path
 import openpyxl
 
 ROOT = Path(__file__).resolve().parents[1]
-XLSX = ROOT / "exports" / "bookings-on-site-may23-25-2026.xlsx"
+AUDIT_XLSX = ROOT / "exports" / "woof_may23-25_invoice_audit.xlsx"
+ONSITE_XLSX = ROOT / "exports" / "bookings-on-site-may23-25-2026.xlsx"
 SQL_OUT = ROOT / "sql" / "may23-25_audit_ingestion.sql"
+AUDIT_SHEET = "Review Required"
 EXPORTS = ROOT / "exports"
 
 LOCKED = {
@@ -137,19 +139,27 @@ WHERE b.booking_ref = {esc(ref)};
 """
 
 
-def main() -> None:
-    wb = openpyxl.load_workbook(XLSX, read_only=True, data_only=True)
-    rows = list(wb["May 23-25 2026"].iter_rows(min_row=2, values_only=True))
+def load_audit_bulk_rows() -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
+    """Returns (bulk date rows, unparseable refs)."""
+    wb = openpyxl.load_workbook(AUDIT_XLSX, read_only=True, data_only=True)
     bulk: list[tuple[str, str, str]] = []
-    for r in rows:
-        if not r or not r[4]:
+    bad: list[tuple[str, str, str]] = []
+    for r in wb[AUDIT_SHEET].iter_rows(min_row=2, values_only=True):
+        if not r or not r[1]:
             continue
-        ref = str(r[4]).strip()
+        ref = str(r[1]).strip()
         if ref in LOCKED:
             continue
-        ci, co = parse_date(r[2]), parse_date(r[3])
+        ci, co = parse_date(r[5]), parse_date(r[6])
         if ci and co:
             bulk.append((ref, ci, co))
+        else:
+            bad.append((ref, str(r[5]), str(r[6])))
+    return bulk, bad
+
+
+def main() -> None:
+    bulk, unparseable = load_audit_bulk_rows()
 
     parts: list[str] = [
         "-- May 23–25 2026 audit ingestion (generated; idempotent)",
@@ -383,8 +393,8 @@ WHERE b.booking_ref = {esc(ref)};
 
     # STEP 2 bulk
     parts.append(
-        """
--- === STEP 2: Bulk date updates from export xlsx (119 rows) ===
+        f"""
+-- === STEP 2: Bulk date updates from {AUDIT_XLSX.name} / {AUDIT_SHEET} ({len(bulk)} rows) ===
 UPDATE bookings b SET
   check_in_date = v.check_in::date,
   check_out_date = v.check_out::date,
@@ -421,10 +431,18 @@ WHERE b.booking_ref IN ('WOOF-2026-00925','WOOF-2026-00725','WOOF-2026-00831');
     SQL_OUT.write_text("\n".join(parts), encoding="utf-8")
     print(f"Wrote {SQL_OUT} ({len(parts)} sections, {len(bulk)} bulk rows)")
 
-    # missing refs report helper
-    refs = [str(r[4]).strip() for r in rows if r and r[4]]
+    wb = openpyxl.load_workbook(AUDIT_XLSX, read_only=True, data_only=True)
+    refs = [
+        str(r[1]).strip()
+        for r in wb[AUDIT_SHEET].iter_rows(min_row=2, values_only=True)
+        if r and r[1]
+    ]
     with (EXPORTS / "may23-25_xlsx_refs.txt").open("w") as f:
         f.write("\n".join(sorted(set(refs))))
+    with (EXPORTS / "unparseable_dates.csv").open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["booking_ref", "check_in_raw", "check_out_raw"])
+        w.writerows(unparseable)
 
 
 if __name__ == "__main__":
