@@ -1,5 +1,6 @@
 import type { BookingWithDetails } from "@/hooks/useBookings";
 import type { Database } from "@/integrations/supabase/types";
+import { kennelOccupancyRoomPool } from "./boardingKennelRooms";
 import {
   buildRoomsBySection,
   getRoomSectionParts,
@@ -37,15 +38,8 @@ export type OccupancyStats = {
   unassignedGuests: BookingWithDetails[];
 };
 
-/** Wings that are not overnight dog kennel inventory for occupancy %. */
-const NON_KENNEL_OCCUPANCY_WINGS = new Set(["cattery", "grooming_upstairs"]);
-
 function occupancyFacilityRooms(rooms: Room[]): Room[] {
-  return rooms.filter((r) => {
-    if (!r.is_active || isImportPlaceholderRoom(r)) return false;
-    if (NON_KENNEL_OCCUPANCY_WINGS.has(r.wing)) return false;
-    return true;
-  });
+  return kennelOccupancyRoomPool(rooms);
 }
 
 function occupancyPlaceholderRooms(rooms: Room[]): Room[] {
@@ -58,10 +52,9 @@ export function computeBoardingOccupancyStats(args: {
   facilityRooms: Room[];
   bookings: BookingWithDetails[];
   assignments: OccupancyAssignmentRow[];
-  isExcludedBoardingRoom: (room: Room) => boolean;
 }): OccupancyStats {
-  const { asOfDate, facilityRooms, bookings, assignments, isExcludedBoardingRoom } = args;
-  const roomsPool = occupancyFacilityRooms(facilityRooms).filter((r) => !isExcludedBoardingRoom(r));
+  const { asOfDate, facilityRooms, bookings, assignments } = args;
+  const roomsPool = occupancyFacilityRooms(facilityRooms);
   const placeholderPool = occupancyPlaceholderRooms(facilityRooms);
   const poolIds = new Set(roomsPool.map((r) => r.id));
   const placeholderIds = new Set(placeholderPool.map((r) => r.id));

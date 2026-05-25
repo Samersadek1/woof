@@ -30,10 +30,13 @@ import {
   sortedAssignmentSlices,
   type BookingRoomAssignmentSlice,
 } from "@/lib/bookingRoomDisplay";
+import { BoardingRoomCalendarRow } from "@/components/boarding/BoardingRoomCalendarRow";
 import {
-  BoardingRoomCalendarRow,
+  calendarSegmentsForRoom,
+  unassignedCalendarRowLabel,
   type BoardingCalendarSegment,
-} from "@/components/boarding/BoardingRoomCalendarRow";
+} from "@/lib/boardingCalendarModel";
+import { useBoardingCalendarModel } from "@/hooks/useBoardingCalendarModel";
 import { computeBoardingOccupancyStats } from "@/lib/boardingOccupancy";
 import {
   buildBoardingRoomCalendarDayHtml,
@@ -1102,9 +1105,16 @@ export function DogBoardingCalendar({
 
   // data
   const queryClient = useQueryClient();
-  const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
-  const { data: roomAssignments = [], isLoading: assignmentsLoading } =
-    useBookingRoomAssignments(startStr, endStr);
+  const { model: calendarModel, isLoading: calendarDataLoading } = useBoardingCalendarModel(
+    startStr,
+    endStr,
+  );
+  const {
+    assignmentsByRoom,
+    bookingsByRoom,
+    sortedUnassignedBookings,
+    assignmentsByBookingId,
+  } = calendarModel;
   const { data: rooms = [], isLoading: roomsLoading } = useRooms();
 
   // drawer / panel state
@@ -1360,77 +1370,6 @@ export function DogBoardingCalendar({
     [filteredAssignableDogRooms],
   );
 
-  const facilityRoomIds = useMemo(
-    () => new Set(assignableDogRooms.map((r) => r.id)),
-    [assignableDogRooms],
-  );
-
-  // Calendar: imported segments from booking_room_assignments; room_id for manually assigned stays.
-  const { assignmentsByRoom, bookingsByRoom, unassignedBookings } =
-    useMemo(() => {
-      const assignmentMap = new Map<string, CalendarRoomAssignment[]>();
-      const bookingIdsWithSegments = new Set<string>();
-
-      for (const row of roomAssignments) {
-        if (row.rooms.wing === "cattery") continue;
-        if (!facilityRoomIds.has(row.room_id)) continue;
-        bookingIdsWithSegments.add(row.booking_id);
-        const list = assignmentMap.get(row.room_id) ?? [];
-        list.push(row);
-        assignmentMap.set(row.room_id, list);
-      }
-
-      const roomIdMap = new Map<string, BookingWithDetails[]>();
-      const unassigned: BookingWithDetails[] = [];
-
-      bookings.forEach((b) => {
-        if (b.booking_type && b.booking_type !== "boarding") return;
-        if (b.rooms?.wing === "cattery") return;
-
-        if (bookingIdsWithSegments.has(b.id)) {
-          return;
-        }
-
-        if (!b.room_id || !facilityRoomIds.has(b.room_id)) {
-          unassigned.push(b);
-          return;
-        }
-
-        const list = roomIdMap.get(b.room_id) ?? [];
-        list.push(b);
-        roomIdMap.set(b.room_id, list);
-      });
-
-      return {
-        assignmentsByRoom: assignmentMap,
-        bookingsByRoom: roomIdMap,
-        bookingIdsWithAssignments: bookingIdsWithSegments,
-        unassignedBookings: unassigned,
-      };
-    }, [bookings, roomAssignments, facilityRoomIds]);
-
-  const sortedUnassignedBookings = useMemo(
-    () =>
-      [...unassignedBookings].sort((a, b) => {
-        const byCheckIn = a.check_in_date.localeCompare(b.check_in_date);
-        if (byCheckIn !== 0) return byCheckIn;
-        const petA = a.booking_pets?.[0]?.pets?.name ?? "";
-        const petB = b.booking_pets?.[0]?.pets?.name ?? "";
-        return petA.localeCompare(petB);
-      }),
-    [unassignedBookings],
-  );
-
-  const assignmentsByBookingId = useMemo(() => {
-    const map = new Map<string, CalendarRoomAssignment[]>();
-    for (const row of roomAssignments) {
-      const list = map.get(row.booking_id) ?? [];
-      list.push(row);
-      map.set(row.booking_id, list);
-    }
-    return map;
-  }, [roomAssignments]);
-
   // open new booking drawer, optionally pre-fill room + date
   const openNewBooking = (roomId?: string, date?: string) => {
     setForm({
@@ -1677,27 +1616,13 @@ export function DogBoardingCalendar({
     />
   );
 
-  const renderRoomRow = (roomId: string, isPlaceholder = false) => {
-    const segments: BoardingCalendarSegment[] = [
-      ...(assignmentsByRoom.get(roomId) ?? []).map((assignment) => ({
-        kind: "assignment" as const,
-        assignment,
-      })),
-      ...(bookingsByRoom.get(roomId) ?? []).map((booking) => ({
-        kind: "booking" as const,
-        booking,
-      })),
-    ];
-    return renderCalendarCells(segments, { prefillRoomOnEmptyCell: roomId, isPlaceholder });
-  };
+  const renderRoomRow = (roomId: string, isPlaceholder = false) =>
+    renderCalendarCells(calendarSegmentsForRoom(calendarModel, roomId), {
+      prefillRoomOnEmptyCell: roomId,
+      isPlaceholder,
+    });
 
-  const unassignedRowLabel = (booking: BookingWithDetails): string => {
-    const pet = booking.booking_pets?.[0]?.pets?.name ?? "";
-    const owner = booking.owners?.last_name ?? "";
-    return [pet, owner].filter(Boolean).join(" – ") || booking.booking_ref || "Unassigned";
-  };
-
-  const isLoading = bookingsLoading || assignmentsLoading || roomsLoading;
+  const isLoading = calendarDataLoading || roomsLoading;
 
   // ─── JSX ──────────────────────────────────────────────────────────────────
   return (
@@ -1737,7 +1662,7 @@ export function DogBoardingCalendar({
                   rooms: assignableDogRooms,
                   assignmentsByRoom,
                   bookingsByRoom,
-                  unassignedBookings,
+                  unassignedBookings: calendarModel.unassignedBookings,
                 });
                 printBoardingRoomCalendarDay(html);
               }}
@@ -1773,7 +1698,7 @@ export function DogBoardingCalendar({
                   rooms: assignableDogRooms,
                   assignmentsByRoom,
                   bookingsByRoom,
-                  unassignedBookings,
+                  unassignedBookings: calendarModel.unassignedBookings,
                 });
                 printBoardingRoomCalendarDay(html);
               }}
@@ -1847,10 +1772,10 @@ export function DogBoardingCalendar({
                       <div
                         style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
                         className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
-                        title={unassignedRowLabel(booking)}
+                        title={unassignedCalendarRowLabel(booking)}
                       >
                         <span className="truncate text-muted-foreground italic">
-                          {unassignedRowLabel(booking)}
+                          {unassignedCalendarRowLabel(booking)}
                         </span>
                       </div>
                       {renderCalendarCells([{ kind: "booking", booking }])}
@@ -3152,7 +3077,6 @@ function BoardingHubPage() {
           end_date: row.end_date,
           bookings: row.bookings,
         })),
-        isExcludedBoardingRoom,
       }),
     [occRaw, occAssignments, facilityRooms, occupancyDate],
   );

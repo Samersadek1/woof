@@ -772,6 +772,12 @@ const DashboardPage = () => {
                       {metrics?.occupancy.boarding_occupied}/{metrics?.occupancy.boarding_total_rooms} ({boardPct}%)
                     </span>
                   </div>
+                  {(metrics?.occupancy.boarding_unassigned_guests ?? 0) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {metrics?.occupancy.boarding_rooms_occupied ?? 0} rooms ·{" "}
+                      {metrics?.occupancy.boarding_unassigned_guests} unassigned
+                    </p>
+                  )}
                   <Progress
                     value={boardPct}
                     className="h-2"

@@ -59,8 +59,6 @@ function booking(overrides: Partial<TestBooking> & { id: string }): TestBooking 
   } as TestBooking;
 }
 
-const noExclude = () => false;
-
 describe("computeBoardingOccupancyStats", () => {
   it("counts guests without a kennel room as unassigned", () => {
     const stats = computeBoardingOccupancyStats({
@@ -68,7 +66,6 @@ describe("computeBoardingOccupancyStats", () => {
       facilityRooms: [a1, grooming],
       bookings: [booking({ id: "b1" })],
       assignments: [],
-      isExcludedBoardingRoom: noExclude,
     });
 
     expect(stats.roomOccupiedCount).toBe(0);
@@ -93,7 +90,6 @@ describe("computeBoardingOccupancyStats", () => {
           bookings: booking({ id: "b1" }),
         },
       ],
-      isExcludedBoardingRoom: noExclude,
     });
 
     expect(stats.roomOccupiedCount).toBe(1);
@@ -115,7 +111,6 @@ describe("computeBoardingOccupancyStats", () => {
           bookings: booking({ id: "b1" }),
         },
       ],
-      isExcludedBoardingRoom: noExclude,
     });
 
     expect(stats.roomOccupiedCount).toBe(0);
@@ -140,7 +135,6 @@ describe("computeBoardingOccupancyStats", () => {
           bookings: booking({ id: "b1" }),
         },
       ],
-      isExcludedBoardingRoom: noExclude,
     });
 
     expect(stats.importedUnassignedCount).toBe(1);

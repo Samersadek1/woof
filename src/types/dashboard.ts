@@ -8,7 +8,10 @@ export type DashboardMetrics = {
     assessments_scheduled: number;
   };
   occupancy: {
+    /** Kennel rooms with a guest + unassigned guests on site (capacity used). */
     boarding_occupied: number;
+    boarding_rooms_occupied: number;
+    boarding_unassigned_guests: number;
     boarding_total_rooms: number;
     cattery_occupied: number;
     cattery_total_rooms: number;

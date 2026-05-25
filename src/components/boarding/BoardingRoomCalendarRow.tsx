@@ -1,6 +1,7 @@
 import { isToday, parseISO } from "date-fns";
 
 import type { BookingWithDetails } from "@/hooks/useBookings";
+import type { BoardingCalendarSegment } from "@/lib/boardingCalendarModel";
 import {
   bookingLastOccupiedNight,
   layoutRoomCalendarEvents,
@@ -13,10 +14,6 @@ import {
 import { bookingBelongingsCount } from "@/lib/bookingUtils";
 import { bookingAnyPetHasAlerts } from "@/lib/petAlerts";
 import { Luggage, TriangleAlert } from "lucide-react";
-
-export type BoardingCalendarSegment =
-  | { kind: "assignment"; assignment: { start_date: string; end_date: string; bookings: BookingWithDetails } }
-  | { kind: "booking"; booking: BookingWithDetails };
 
 type Props = {
   days: Date[];

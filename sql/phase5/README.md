@@ -12,6 +12,7 @@ Run each script in the Supabase SQL editor as **one transaction** (`BEGIN` … `
 | `phase5f_recover_daycare_sessions.sql` | Applied 2026-05-24 | POST-CHECK: recovered=1130, MULTI_DATE_REVIEW=24, total_legacy_sessions=4952 |
 | `phase5g_add_d_wing_rooms.sql` | Applied 2026-05-24 | Step 2a: D4/D5/D10/D11 added; POST-CHECK: 13 D-wing rooms (D1–D13) |
 | `phase5g_rebuild_bra.sql` | Applied 2026-05-24 | Step 2b: bra 1366→1404; 2059 spans staged; 398 orphans; `_bra_backup` retained |
+| `dashboard_boarding_occupancy_align.sql` | Applied 2026-05-24 | `boarding_kennel_occupancy_counts`; dashboard occupancy uses BRA + unassigned (140 kennel rooms) |
 
 ## Phase 5f — dropped daycare usage recovery
 
