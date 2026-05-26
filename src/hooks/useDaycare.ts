@@ -25,6 +25,7 @@ export type DaycarePackage = {
   service_code: ServiceCode;
   is_bonus: boolean;
   units_remaining: number;
+  status: string;
   source_ref_id: string | null;
   redemption_group_id: string | null;
 };
@@ -97,6 +98,7 @@ export function useDaycarePackages(ownerId: string) {
           package_name: packageName,
           service_code: row.service_code,
           is_bonus: row.is_bonus,
+          status: row.status,
           units_remaining: row.units_total - row.units_consumed,
           source_ref_id: row.source_ref_id,
           redemption_group_id: row.redemption_group_id,
@@ -480,6 +482,7 @@ export function useAllDaycarePackages() {
           package_name: pkgName ?? null,
           service_code: row.service_code,
           is_bonus: row.is_bonus,
+          status: row.status,
           units_remaining: row.units_total - row.units_consumed,
           source_ref_id: row.source_ref_id,
           redemption_group_id: row.redemption_group_id,

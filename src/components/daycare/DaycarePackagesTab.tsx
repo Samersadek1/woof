@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { format, parseISO } from "date-fns";
-import { AlertTriangle, Loader2, Package, Plus } from "lucide-react";
+import { AlertTriangle, Download, Loader2, Package, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { exportDaycarePackagesToExcel } from "@/lib/daycarePackagesExport";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import {
   useAllDaycarePackages,
@@ -216,15 +218,35 @@ export function DaycarePackagesTab() {
             data-testid="daycare-packages-search"
           />
         </div>
-        <Button
-          type="button"
-          size="sm"
-          data-testid="daycare-new-package-btn"
-          onClick={() => setSellOpen(true)}
-        >
-          <Plus className="mr-1.5 h-4 w-4" />
-          Sell package
-        </Button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="daycare-packages-export-btn"
+            disabled={isLoading || !packages?.length}
+            onClick={() => {
+              if (!packages?.length) {
+                toast.error("No packages to export.");
+                return;
+              }
+              exportDaycarePackagesToExcel(packages);
+              toast.success(`Exported ${packages.length} package${packages.length === 1 ? "" : "s"}.`);
+            }}
+          >
+            <Download className="mr-1.5 h-4 w-4" />
+            Export Excel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            data-testid="daycare-new-package-btn"
+            onClick={() => setSellOpen(true)}
+          >
+            <Plus className="mr-1.5 h-4 w-4" />
+            Sell package
+          </Button>
+        </div>
       </div>
 
       {isError ? (
