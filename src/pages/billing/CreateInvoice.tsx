@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { OwnerSearchPopover } from "@/components/billing/OwnerSearchPopover";
 import { addDays, format } from "date-fns";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -58,7 +58,9 @@ function aed(v: number) {
 
 export default function CreateInvoicePage() {
   const navigate = useNavigate();
-  const [ownerId, setOwnerId] = useState<string>("");
+  const [searchParams] = useSearchParams();
+  const presetOwnerId = searchParams.get("ownerId") ?? "";
+  const [ownerId, setOwnerId] = useState<string>(presetOwnerId);
   const [ownerLabel, setOwnerLabel] = useState("");
   const [serviceType, setServiceType] = useState("other");
   const [dueDate, setDueDate] = useState(format(addDays(new Date(), 14), "yyyy-MM-dd"));
@@ -80,6 +82,10 @@ export default function CreateInvoicePage() {
   const [adjustments, setAdjustments] = useState<AdjustmentDraft[]>([]);
 
   const { data: owner } = useOwner(ownerId || "");
+  useEffect(() => {
+    if (!owner?.id || owner.id !== ownerId) return;
+    setOwnerLabel(ownerDisplayName(owner.first_name, owner.last_name));
+  }, [owner, ownerId]);
   const linesRef = useRef(lines);
   linesRef.current = lines;
   const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
@@ -297,7 +303,7 @@ export default function CreateInvoicePage() {
               <div className="space-y-1">
                 <Label>Service type</Label>
                 <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={serviceType} onChange={(e) => setServiceType(e.target.value)}>
-                  {["boarding", "daycare", "grooming", "park", "transport", "training", "retail", "membership", "other"].map((s) => (
+                  {["boarding", "daycare", "grooming", "transport", "training", "retail", "membership", "other"].map((s) => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>

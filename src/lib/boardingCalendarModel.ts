@@ -1,33 +1,73 @@
 import type { BookingWithDetails, CalendarRoomAssignment } from "@/hooks/useBookings";
+import { isRetiredCatteryWing } from "./retiredFacilities";
+import type { Database } from "@/integrations/supabase/types";
+import {
+  buildKennelAssignmentContext,
+  hasKennelRoomOnDate,
+  unassignedNightRangesInWindow,
+  type KennelAssignmentSlice,
+} from "./kennelAssignmentOnDate";
+
+type Room = Database["public"]["Tables"]["rooms"]["Row"];
 
 export type BoardingCalendarSegment =
   | { kind: "assignment"; assignment: CalendarRoomAssignment }
-  | { kind: "booking"; booking: BookingWithDetails };
+  | {
+      kind: "booking";
+      booking: BookingWithDetails;
+      /** Inclusive night range for calendar chips (defaults to full stay). */
+      segStart?: string;
+      segEnd?: string;
+    };
 
 export type BoardingCalendarModel = {
   assignmentsByRoom: Map<string, CalendarRoomAssignment[]>;
   bookingsByRoom: Map<string, BookingWithDetails[]>;
   unassignedBookings: BookingWithDetails[];
+  /** Per-booking unassigned night ranges in the calendar window (for clipped chips). */
+  unassignedClipsByBookingId: Map<string, Array<{ start: string; end: string }>>;
   sortedUnassignedBookings: BookingWithDetails[];
   assignmentsByBookingId: Map<string, CalendarRoomAssignment[]>;
 };
 
 /**
  * Group bookings and assignment segments for the room × day calendar.
- * Assignments win over `bookings.room_id`; bookings with any BRA are not legacy room rows.
+ * Unassigned uses the same kennel-on-date rules as the occupancy report for `unassignedAsOfDate`.
  */
 export function buildBoardingCalendarModel(args: {
   bookings: BookingWithDetails[];
   roomAssignments: CalendarRoomAssignment[];
   facilityRoomIds: Set<string>;
+  /** Facility rooms list (for kennel pool / placeholder context). */
+  facilityRooms: Room[];
+  windowStart: string;
+  windowEnd: string;
+  /** Date to match occupancy “unassigned guests” (e.g. today when in the week window). */
+  unassignedAsOfDate: string;
 }): BoardingCalendarModel {
-  const { bookings, roomAssignments, facilityRoomIds } = args;
+  const {
+    bookings,
+    roomAssignments,
+    facilityRoomIds,
+    facilityRooms,
+    windowStart,
+    windowEnd,
+    unassignedAsOfDate,
+  } = args;
+
+  const kennelCtx = buildKennelAssignmentContext(facilityRooms);
+  const assignmentSlices: KennelAssignmentSlice[] = roomAssignments.map((row) => ({
+    booking_id: row.booking_id,
+    room_id: row.room_id,
+    start_date: row.start_date,
+    end_date: row.end_date,
+  }));
 
   const assignmentMap = new Map<string, CalendarRoomAssignment[]>();
   const bookingIdsWithSegments = new Set<string>();
 
   for (const row of roomAssignments) {
-    if (row.rooms.wing === "cattery") continue;
+    if (isRetiredCatteryWing(row.rooms.wing)) continue;
     if (!facilityRoomIds.has(row.room_id)) continue;
     bookingIdsWithSegments.add(row.booking_id);
     const list = assignmentMap.get(row.room_id) ?? [];
@@ -37,15 +77,35 @@ export function buildBoardingCalendarModel(args: {
 
   const roomIdMap = new Map<string, BookingWithDetails[]>();
   const unassigned: BookingWithDetails[] = [];
+  const unassignedClipsByBookingId = new Map<string, Array<{ start: string; end: string }>>();
 
   for (const b of bookings) {
     if (b.booking_type && b.booking_type !== "boarding") continue;
-    if (b.rooms?.wing === "cattery") continue;
+    if (isRetiredCatteryWing(b.rooms?.wing)) continue;
+
+    const clips = unassignedNightRangesInWindow(
+      b,
+      assignmentSlices,
+      kennelCtx,
+      windowStart,
+      windowEnd,
+    );
+    if (clips.length > 0) {
+      unassignedClipsByBookingId.set(b.id, clips);
+    }
+
+    const unassignedOnReportDate =
+      hasKennelRoomOnDate(b, assignmentSlices, kennelCtx, unassignedAsOfDate) === false &&
+      b.check_in_date <= unassignedAsOfDate &&
+      b.check_out_date > unassignedAsOfDate;
+
+    if (unassignedOnReportDate) {
+      unassigned.push(b);
+    }
 
     if (bookingIdsWithSegments.has(b.id)) continue;
 
     if (!b.room_id || !facilityRoomIds.has(b.room_id)) {
-      unassigned.push(b);
       continue;
     }
 
@@ -73,6 +133,7 @@ export function buildBoardingCalendarModel(args: {
     assignmentsByRoom: assignmentMap,
     bookingsByRoom: roomIdMap,
     unassignedBookings: unassigned,
+    unassignedClipsByBookingId,
     sortedUnassignedBookings,
     assignmentsByBookingId,
   };
@@ -92,6 +153,22 @@ export function calendarSegmentsForRoom(
       booking,
     })),
   ];
+}
+
+export function unassignedCalendarSegments(
+  model: Pick<BoardingCalendarModel, "unassignedClipsByBookingId">,
+  booking: BookingWithDetails,
+): BoardingCalendarSegment[] {
+  const clips = model.unassignedClipsByBookingId.get(booking.id);
+  if (!clips || clips.length === 0) {
+    return [{ kind: "booking", booking }];
+  }
+  return clips.map((clip) => ({
+    kind: "booking" as const,
+    booking,
+    segStart: clip.start,
+    segEnd: clip.end,
+  }));
 }
 
 export function unassignedCalendarRowLabel(booking: BookingWithDetails): string {

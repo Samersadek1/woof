@@ -21,10 +21,6 @@ const SCHEMA_EXPECTATIONS = {
   bookings: ["id", "owner_id", "room_id", "check_in_date", "check_out_date", "status", "booking_ref"],
   booking_pets: ["booking_id", "pet_id"],
   rooms: ["id", "display_name"],
-  park_bookings: [
-    "id", "booking_ref", "visit_date", "slot_start", "slot_end", "size_lane",
-    "owner_id", "pet_id", "is_assessment", "price", "status",
-  ],
 };
 
 export async function bootstrapAgentSchema(supabase, { sessionBucket }) {

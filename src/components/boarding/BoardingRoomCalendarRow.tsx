@@ -14,7 +14,12 @@ import {
   isImportPlaceholderBooking,
 } from "@/lib/boardingUnknownKennel";
 import { bookingBelongingsCount } from "@/lib/bookingUtils";
+import {
+  boardingBookingMatchesSearch,
+  boardingBookingSearchActive,
+} from "@/lib/boardingBookingSearch";
 import { bookingAnyPetHasAlerts } from "@/lib/petAlerts";
+import { cn } from "@/lib/utils";
 import { Luggage, TriangleAlert } from "lucide-react";
 
 type Props = {
@@ -28,6 +33,8 @@ type Props = {
   onEmptyCellClick: (roomId: string | undefined, dayStr: string) => void;
   onGuestClick: (booking: BookingWithDetails, asOfDate: string) => void;
   statusClassFor: (status: BookingWithDetails["status"]) => string;
+  /** When set (≥2 chars), non-matching booking chips are dimmed; matches get a ring. */
+  bookingSearchQuery?: string;
 };
 
 function layoutSegments(
@@ -66,11 +73,13 @@ function layoutSegments(
     }
 
     return {
-      segStart: segment.booking.check_in_date,
-      segEnd: bookingLastOccupiedNight(
-        segment.booking.check_in_date,
-        segment.booking.check_out_date,
-      ),
+      segStart: segment.segStart ?? segment.booking.check_in_date,
+      segEnd:
+        segment.segEnd ??
+        bookingLastOccupiedNight(
+          segment.booking.check_in_date,
+          segment.booking.check_out_date,
+        ),
       payload: booking,
     };
   });
@@ -87,7 +96,9 @@ export function BoardingRoomCalendarRow({
   onEmptyCellClick,
   onGuestClick,
   statusClassFor,
+  bookingSearchQuery = "",
 }: Props) {
+  const searchActive = boardingBookingSearchActive(bookingSearchQuery);
   const dayStrs = days.map((d) => toDateStr(d));
   const events = layoutRoomCalendarEvents(
     layoutSegments(segments),
@@ -124,14 +135,20 @@ export function BoardingRoomCalendarRow({
           .filter(Boolean)
           .join(" – ");
         const chipPlaceholder = isPlaceholder || isImportPlaceholderBooking(booking);
+        const searchMatch =
+          !searchActive || boardingBookingMatchesSearch(booking, bookingSearchQuery);
 
         return (
           <div
             key={ev.key}
             style={{ gridColumn: `${ev.colStart} / span ${ev.colSpan}`, gridRow: 1 }}
-            className={`z-10 mx-0.5 my-1 min-w-0 h-[calc(100%-0.5rem)] rounded text-xs font-medium px-2 flex items-center gap-1
-              cursor-pointer truncate select-none border border-dashed
-              ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : statusClassFor(booking.status)}`}
+            className={cn(
+              "z-10 mx-0.5 my-1 min-w-0 h-[calc(100%-0.5rem)] rounded text-xs font-medium px-2 flex items-center gap-1",
+              "cursor-pointer truncate select-none border border-dashed",
+              chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : statusClassFor(booking.status),
+              searchActive && !searchMatch && "opacity-25 pointer-events-none",
+              searchActive && searchMatch && "ring-2 ring-primary ring-offset-1",
+            )}
             onClick={(e) => {
               e.stopPropagation();
               onGuestClick(booking, ev.segStart);

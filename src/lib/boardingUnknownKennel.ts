@@ -1,4 +1,5 @@
 import type { Database } from "@/integrations/supabase/types";
+import { isRetiredCatteryWing } from "./retiredFacilities";
 
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
 
@@ -28,7 +29,7 @@ export const DOG_UNKNOWN_TIER_LABELS: Record<DogUnknownTier, string> = {
 const PLACEHOLDER_ROOM_NUMBER_PREFIX = "UNK-";
 
 export function isBoardingFacilityRoom(room: Pick<Room, "wing">): boolean {
-  return room.wing !== "cattery";
+  return !isRetiredCatteryWing(room.wing);
 }
 
 /**

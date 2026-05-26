@@ -56,6 +56,7 @@ const DROP_KEYS = new Set([
   "park_1_dog",
   "park_2_dogs",
   "park_3_dogs",
+  "park_extra_dog",
   "park_slot",
   "park:slot",
   "daycare_hourly_family_per_dog",

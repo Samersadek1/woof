@@ -120,10 +120,7 @@ export function translateTraceEntry(entry) {
   m = /^create_draft_booking:\s*draft=(\S+)/i.exec(trimmed);
   if (m) return `Drafted boarding booking ${m[1]}.`;
 
-  m = /^create_park_booking:\s*draft=(\S+)/i.exec(trimmed);
-  if (m) return `Drafted park booking ${m[1]}.`;
-
-  m = /^create_(?:draft|park)_booking:\s*error=(.+)$/i.exec(trimmed);
+  m = /^create_draft_booking:\s*error=(.+)$/i.exec(trimmed);
   if (m) return `Booking draft failed: ${m[1].slice(0, 140)}.`;
 
   // profile updates

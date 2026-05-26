@@ -31,8 +31,6 @@ const HIGHLIGHT_TABLES = new Set([
   "bookings",
   "booking_pets",
   "booking_addons",
-  "park_bookings",
-  "park_rates",
   "daycare_sessions",
   "daycare_packages",
   "daycare_package_types",

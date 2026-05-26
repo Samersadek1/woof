@@ -64,6 +64,8 @@ import { toast } from "sonner";
 import { Plus, Trash2, Download, Pencil, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { Database } from "@/integrations/supabase/types";
+import { isQaTestRoom } from "@/lib/boardingRoomSections";
+import { isRetiredCatteryWing } from "@/lib/retiredFacilities";
 
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
 type RoomInsert = Database["public"]["Tables"]["rooms"]["Insert"];
@@ -562,7 +564,7 @@ const RoomsAdminPage = () => {
 
   const rooms = useMemo(() => {
     if (!allRooms) return undefined;
-    return allRooms.filter((r) => r.wing !== "cattery");
+    return allRooms.filter((r) => !isRetiredCatteryWing(r.wing) && !isQaTestRoom(r));
   }, [allRooms]);
   const [searchQuery, setSearchQuery] = useState("");
   const [wingFilter, setWingFilter] = useState("__all__");

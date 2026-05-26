@@ -112,9 +112,7 @@ export function useTodaySchedule(asOf: string) {
         check_ins: checkIns,
         check_outs: checkOuts,
         daycare,
-        park: [],
         grooming: groomingRows,
-        assessments: [],
       } satisfies TodaySchedule;
     },
   });

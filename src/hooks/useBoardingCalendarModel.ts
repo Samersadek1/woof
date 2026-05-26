@@ -1,3 +1,4 @@
+import { format } from "date-fns";
 import { useMemo } from "react";
 
 import {
@@ -30,11 +31,21 @@ export function useBoardingCalendarModel(
     });
   const { data: rooms = [], isLoading: roomsLoading } = useRooms();
 
-  const facilityRoomIds = useMemo(() => {
+  const assignableFacilityRooms = useMemo(() => {
     const { facility } = splitFacilityAndPlaceholderRooms(rooms);
-    const assignable = facility.filter((r) => !isExcludedBoardingRoom(r));
-    return boardingCalendarFacilityRoomIds(assignable);
+    return facility.filter((r) => !isExcludedBoardingRoom(r));
   }, [rooms]);
+
+  const facilityRoomIds = useMemo(
+    () => boardingCalendarFacilityRoomIds(assignableFacilityRooms),
+    [assignableFacilityRooms],
+  );
+
+  const unassignedAsOfDate = useMemo(() => {
+    const today = format(new Date(), "yyyy-MM-dd");
+    if (today >= startDate && today <= endDate) return today;
+    return startDate;
+  }, [startDate, endDate]);
 
   const model = useMemo(
     () =>
@@ -42,8 +53,20 @@ export function useBoardingCalendarModel(
         bookings,
         roomAssignments: roomAssignments as CalendarRoomAssignment[],
         facilityRoomIds,
+        facilityRooms: assignableFacilityRooms,
+        windowStart: startDate,
+        windowEnd: endDate,
+        unassignedAsOfDate,
       }),
-    [bookings, roomAssignments, facilityRoomIds],
+    [
+      bookings,
+      roomAssignments,
+      facilityRoomIds,
+      assignableFacilityRooms,
+      startDate,
+      endDate,
+      unassignedAsOfDate,
+    ],
   );
 
   return {

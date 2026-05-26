@@ -41,7 +41,6 @@ export type ServiceType =
   | "boarding"
   | "grooming"
   | "daycare"
-  | "park"
   | "transport"
   | "membership"
   | "package"
@@ -453,11 +452,9 @@ export function useServiceRates() {
 
   return {
     groomingRates: groomingQuery.data ?? [],
-    parkRates: [],
     daycarePackageTypes: daycareQuery.data ?? [],
     addonRates: addonQuery.data ?? [],
     updateGroomingRate,
-    updateParkRate: async (_id: string, _price_per_slot_aed: number) => {},
     updateDaycarePackageType,
     createDaycarePackageType,
     updateAddonRate,
@@ -478,7 +475,6 @@ type ServiceParams =
       addons?: { addonType: string; label: string; qty?: number }[];
     }
   | { type: "grooming"; service: string }
-  | { type: "park"; slots?: number }
   | { type: "package_purchase"; packageTypeId: string; pickup?: boolean; dropoff?: boolean; transportZone?: TransportZone | string | null }
   | { type: "membership"; pricingKey: string };
 
@@ -527,11 +523,6 @@ export function useBillingCalculator(
             p = (data as { amount_aed: number }[] | null)?.[0]?.amount_aed ?? 0;
           }
           lineItems.push({ pricingKey: serviceCode ?? params.service, label: params.service, quantity: 1, unitPrice: p, total: p });
-          break;
-        }
-        case "park": {
-          const slots = params.slots ?? 1;
-          lineItems.push({ pricingKey: "park:slot", label: "Park slot", quantity: slots, unitPrice: 0, total: 0 });
           break;
         }
         case "package_purchase": {

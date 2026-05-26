@@ -8,6 +8,11 @@ import {
 } from "./boardingRoomSections";
 import { assignmentCoversDate, bookingOccupiesDate } from "./bookingRoomDisplay";
 import {
+  buildKennelAssignmentContext,
+  hasKennelRoomOnDate,
+  type KennelAssignmentSlice,
+} from "./kennelAssignmentOnDate";
+import {
   isImportPlaceholderRoom,
   splitFacilityAndPlaceholderRooms,
 } from "./boardingUnknownKennel";
@@ -59,9 +64,10 @@ export function computeBoardingOccupancyStats(args: {
   const poolIds = new Set(roomsPool.map((r) => r.id));
   const placeholderIds = new Set(placeholderPool.map((r) => r.id));
   const total = roomsPool.length;
+  const kennelCtx = buildKennelAssignmentContext(facilityRooms);
+  const assignmentSlices: KennelAssignmentSlice[] = assignments;
 
   const occupiedByRoomId = new Map<string, BookingWithDetails>();
-  const bookingIdsWithKennelAssignmentOnDate = new Set<string>();
   let importedUnassignedCount = 0;
 
   for (const row of assignments) {
@@ -69,13 +75,11 @@ export function computeBoardingOccupancyStats(args: {
 
     if (placeholderIds.has(row.room_id)) {
       importedUnassignedCount += 1;
-      bookingIdsWithKennelAssignmentOnDate.add(row.booking_id);
       continue;
     }
 
     if (!poolIds.has(row.room_id)) continue;
 
-    bookingIdsWithKennelAssignmentOnDate.add(row.booking_id);
     if (!occupiedByRoomId.has(row.room_id)) {
       occupiedByRoomId.set(row.room_id, row.bookings);
     }
@@ -85,10 +89,24 @@ export function computeBoardingOccupancyStats(args: {
 
   for (const b of bookings) {
     if (!bookingOccupiesDate(b.check_in_date, b.check_out_date, asOfDate)) continue;
-    if (bookingIdsWithKennelAssignmentOnDate.has(b.id)) continue;
 
-    if (b.room_id && poolIds.has(b.room_id) && !placeholderIds.has(b.room_id)) {
-      if (!occupiedByRoomId.has(b.room_id)) occupiedByRoomId.set(b.room_id, b);
+    const onImportPlaceholder = assignments.some(
+      (row) =>
+        row.booking_id === b.id &&
+        assignmentCoversDate(row, asOfDate) &&
+        placeholderIds.has(row.room_id),
+    );
+    if (onImportPlaceholder) continue;
+
+    if (hasKennelRoomOnDate(b, assignmentSlices, kennelCtx, asOfDate)) {
+      if (
+        b.room_id &&
+        poolIds.has(b.room_id) &&
+        !placeholderIds.has(b.room_id) &&
+        !occupiedByRoomId.has(b.room_id)
+      ) {
+        occupiedByRoomId.set(b.room_id, b);
+      }
       continue;
     }
 

@@ -388,20 +388,7 @@ async function notifyOwnerByOwnerId(ownerId, message) {
 // Maps a booking_ref prefix to (table, columns, owner-message-builder).
 function bookingTargetFor(ref) {
   if (ref.startsWith("P-")) {
-    return {
-      table: "park_bookings",
-      cancelColumn: "notes",
-      selectCols: "id, booking_ref, visit_date, slot_start, slot_end, is_assessment, owner_id",
-      buildOwnerMessage: (row) => {
-        const slot = `${String(row.slot_start).slice(0, 5)}-${String(row.slot_end).slice(0, 5)}`;
-        const label = row.is_assessment ? "park assessment" : "park visit";
-        return (
-          `Great news! Your ${label} ${row.booking_ref} is confirmed ✓\n` +
-          `Date: ${row.visit_date}\n` +
-          `Slot: ${slot}\n\nSee you then!`
-        );
-      },
-    };
+    return null;
   }
   return {
     table: "bookings",
@@ -426,6 +413,10 @@ async function reactivateOwnerAgent(ownerId, extraUpdate = {}) {
 async function handleStaffConfirmCommand(text) {
   const ref = text.slice(9).trim().toUpperCase();
   const target = bookingTargetFor(ref);
+  if (!target) {
+    await channel.notifyStaff(`✗ ${ref} is not a supported booking type (park visits are retired).`);
+    return;
+  }
 
   const { data: row } = await supabase
     .from(target.table)
@@ -449,6 +440,10 @@ async function handleStaffRejectCommand(text) {
   const ref = parts[0].toUpperCase();
   const reason = parts.slice(1).join(" ") || "No reason given";
   const target = bookingTargetFor(ref);
+  if (!target) {
+    await channel.notifyStaff(`✗ ${ref} is not a supported booking type (park visits are retired).`);
+    return;
+  }
 
   const { data: row } = await supabase
     .from(target.table)

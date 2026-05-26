@@ -3,7 +3,12 @@ import { format, parseISO } from "date-fns";
 import type { BookingWithDetails } from "@/hooks/useBookings";
 import type { CalendarRoomAssignment } from "@/hooks/useBookings";
 import type { Database } from "@/integrations/supabase/types";
-import { assignmentCoversDate } from "@/lib/bookingRoomDisplay";
+import { assignmentCoversDate, bookingOccupiesDate } from "@/lib/bookingRoomDisplay";
+import {
+  buildKennelAssignmentContext,
+  hasKennelRoomOnDate,
+  type KennelAssignmentSlice,
+} from "@/lib/kennelAssignmentOnDate";
 import { formatRoomSectionLabel } from "@/lib/boardingRoomSections";
 import { buildRoomsBySection } from "@/lib/boardingRoomSections";
 
@@ -57,8 +62,23 @@ export function buildBoardingRoomCalendarDayHtml(args: {
   assignmentsByRoom: Map<string, CalendarRoomAssignment[]>;
   bookingsByRoom: Map<string, BookingWithDetails[]>;
   unassignedBookings: BookingWithDetails[];
+  roomAssignments?: CalendarRoomAssignment[];
 }): string {
-  const { asOfDate, rooms, assignmentsByRoom, bookingsByRoom, unassignedBookings } = args;
+  const {
+    asOfDate,
+    rooms,
+    assignmentsByRoom,
+    bookingsByRoom,
+    unassignedBookings,
+    roomAssignments = [],
+  } = args;
+  const kennelCtx = buildKennelAssignmentContext(rooms);
+  const assignmentSlices: KennelAssignmentSlice[] = roomAssignments.map((row) => ({
+    booking_id: row.booking_id,
+    room_id: row.room_id,
+    start_date: row.start_date,
+    end_date: row.end_date,
+  }));
   const titleDate = format(parseISO(asOfDate), "EEEE, d MMMM yyyy");
   const { map: roomsBySection, order } = buildRoomsBySection(rooms);
 
@@ -85,7 +105,11 @@ export function buildBoardingRoomCalendarDayHtml(args: {
     .join("");
 
   const unassignedLabels = unassignedBookings
-    .filter((b) => b.check_in_date <= asOfDate && b.check_out_date > asOfDate)
+    .filter(
+      (b) =>
+        bookingOccupiesDate(b.check_in_date, b.check_out_date, asOfDate) &&
+        !hasKennelRoomOnDate(b, assignmentSlices, kennelCtx, asOfDate),
+    )
     .map((b) => guestLabel(b));
 
   const unassignedRow =

@@ -24,6 +24,7 @@ import {
   splitFacilityAndPlaceholderRooms,
 } from "@/lib/boardingUnknownKennel";
 import { assignmentCoversDate, roomLabelForBooking, sortedAssignmentSlices } from "@/lib/bookingRoomDisplay";
+import { isRetiredCatteryWing } from "@/lib/retiredFacilities";
 import { getSegmentForDate } from "@/lib/bookingRoomSegments";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { ChangeRoomDialog } from "@/components/boarding/ChangeRoomDialog";
@@ -92,7 +93,7 @@ export function DayShufflePanel({ initialDate }: { initialDate?: string }) {
 
     for (const row of assignments) {
       if (!assignmentCoversDate(row, shuffleDate)) continue;
-      if (row.bookings.rooms?.wing === "cattery") continue;
+      if (isRetiredCatteryWing(row.bookings.rooms?.wing)) continue;
       if (isImportPlaceholderRoom(row.rooms)) {
         pending.push(row.bookings);
         seenBookingIds.add(row.booking_id);
@@ -116,7 +117,7 @@ export function DayShufflePanel({ initialDate }: { initialDate?: string }) {
 
     for (const b of bookings) {
       if (b.booking_type && b.booking_type !== "boarding") continue;
-      if (b.rooms?.wing === "cattery") continue;
+      if (isRetiredCatteryWing(b.rooms?.wing)) continue;
       if (seenBookingIds.has(b.id)) continue;
 
       const slices = sortedAssignmentSlices(

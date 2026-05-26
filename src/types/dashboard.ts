@@ -13,8 +13,6 @@ export type DashboardMetrics = {
     boarding_rooms_occupied: number;
     boarding_unassigned_guests: number;
     boarding_total_rooms: number;
-    cattery_occupied: number;
-    cattery_total_rooms: number;
   };
   alerts: {
     overdue_invoices_count: number;
@@ -44,23 +42,9 @@ export type ScheduleItem = {
   sortKey: string;
 };
 
-export type ParkSlotItem = {
-  id: string;
-  slotStart: string;
-  slotEnd: string;
-  sizeLane: "small" | "big";
-  isAssessment: boolean;
-  petId: string | null;
-  ownerId: string | null;
-  petName: string;
-  ownerInitials: string;
-};
-
 export type TodaySchedule = {
   check_ins: ScheduleItem[];
   check_outs: ScheduleItem[];
   daycare: ScheduleItem[];
-  park: ParkSlotItem[];
   grooming: ScheduleItem[];
-  assessments: ParkSlotItem[];
 };

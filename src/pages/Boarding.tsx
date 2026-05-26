@@ -34,8 +34,10 @@ import { BoardingRoomCalendarRow } from "@/components/boarding/BoardingRoomCalen
 import {
   calendarSegmentsForRoom,
   unassignedCalendarRowLabel,
+  unassignedCalendarSegments,
   type BoardingCalendarSegment,
 } from "@/lib/boardingCalendarModel";
+import { isRetiredCatteryWing } from "@/lib/retiredFacilities";
 import { useBoardingCalendarModel } from "@/hooks/useBoardingCalendarModel";
 import { computeBoardingOccupancyStats } from "@/lib/boardingOccupancy";
 import {
@@ -1664,6 +1666,7 @@ export function DogBoardingCalendar({
                   assignmentsByRoom,
                   bookingsByRoom,
                   unassignedBookings: calendarModel.unassignedBookings,
+                  roomAssignments: [...assignmentsByBookingId.values()].flat(),
                 });
                 printBoardingRoomCalendarDay(html);
               }}
@@ -1700,6 +1703,7 @@ export function DogBoardingCalendar({
                   assignmentsByRoom,
                   bookingsByRoom,
                   unassignedBookings: calendarModel.unassignedBookings,
+                  roomAssignments: [...assignmentsByBookingId.values()].flat(),
                 });
                 printBoardingRoomCalendarDay(html);
               }}
@@ -1779,7 +1783,7 @@ export function DogBoardingCalendar({
                           {unassignedCalendarRowLabel(booking)}
                         </span>
                       </div>
-                      {renderCalendarCells([{ kind: "booking", booking }])}
+                      {renderCalendarCells(unassignedCalendarSegments(calendarModel, booking))}
                     </div>
                   ))
                 )}
@@ -2894,7 +2898,7 @@ function BoardingOperationsList({
   const { data: bookings = [], isLoading } = useBookings(rangeStart, rangeEnd);
 
   const filtered = useMemo(() => {
-    const rows = bookings.filter((b) => b.rooms?.wing !== "cattery");
+    const rows = bookings.filter((b) => !isRetiredCatteryWing(b.rooms?.wing));
 
     const focusRows = rows.filter((b) => {
       if (focus === "check-ins") return b.check_in_date === rangeStart;
@@ -3248,7 +3252,11 @@ function BoardingHubPage() {
               onClick={() => {
                 const { map: roomsBySection, order } = buildRoomsBySection(
                   facilityRooms.filter(
-                    (r) => r.is_active && !isImportPlaceholderRoom(r) && r.wing !== "cattery" && !isExcludedBoardingRoom(r),
+                    (r) =>
+                      r.is_active &&
+                      !isImportPlaceholderRoom(r) &&
+                      !isRetiredCatteryWing(r.wing) &&
+                      !isExcludedBoardingRoom(r),
                   ),
                 );
                 const assignmentsByRoom = new Map<string, CalendarRoomAssignment[]>();
@@ -3271,11 +3279,8 @@ function BoardingHubPage() {
                   rooms: flatRooms,
                   assignmentsByRoom,
                   bookingsByRoom,
-                  unassignedBookings: occRaw.filter(
-                    (b) =>
-                      !bookingIdsWithSegments.has(b.id) &&
-                      (!b.room_id || isImportPlaceholderBooking(b)),
-                  ),
+                  unassignedBookings: occupancyStats.unassignedGuests,
+                  roomAssignments: occAssignments,
                 });
                 printBoardingRoomCalendarDay(html);
               }}

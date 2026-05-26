@@ -327,10 +327,6 @@ async function getTodaySnapshot(svc: SupabaseClient, today: string): Promise<str
       .select("*", { count: "exact", head: true })
       .eq("session_date", today),
     svc
-      .from("park_bookings")
-      .select("*", { count: "exact", head: true })
-      .eq("visit_date", today),
-    svc
       .from("grooming_appointments")
       .select("*", { count: "exact", head: true })
       .eq("appointment_date", today),
@@ -346,8 +342,7 @@ Currently in house: ${counts[0]}
 Arriving today:     ${counts[1]}
 Departing today:    ${counts[2]}
 Daycare sessions:   ${counts[3]}
-Park bookings:      ${counts[4]}
-Grooming:           ${counts[5]}`;
+Grooming:           ${counts[4]}`;
   setCachedWithTtl(cacheKey, snapshot, SNAPSHOT_TTL_MS);
   return snapshot;
 }
@@ -535,7 +530,6 @@ async function executeTool(
           "rooms",
           "daycare_sessions",
           "daycare_packages",
-          "park_bookings",
           "vaccinations",
           "invoices",
           "invoice_line_items",

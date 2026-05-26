@@ -153,10 +153,6 @@ const CANONICAL_PRICING_KEYS: Array<{ key: string; label: string; category: stri
   { key: "daycare_hourly_4_dogs", label: "Daycare hourly — 4 dogs", category: "daycare" },
   { key: "daycare_hourly_5_dogs", label: "Daycare hourly — 5 dogs", category: "daycare" },
   { key: "daycare_hourly_6_dogs", label: "Daycare hourly — 6 dogs", category: "daycare" },
-  { key: "park_1_dog", label: "Park 1 dog", category: "park" },
-  { key: "park_2_dogs", label: "Park 2 dogs", category: "park" },
-  { key: "park_3_dogs", label: "Park 3 dogs", category: "park" },
-  { key: "park_extra_dog", label: "Park extra dog", category: "park" },
   { key: "transport_dubai_shared", label: "Transport Dubai shared", category: "transport" },
   { key: "transport_dubai", label: "Transport Dubai private", category: "transport" },
   { key: "transport_abudhabi", label: "Transport Other Emirates", category: "transport" },
@@ -1072,6 +1068,7 @@ function PricingTab() {
     const byKey = new Map((allRows ?? []).map((r) => [r.key, r]));
     const rows: RateCardRow[] = [];
     for (const c of CANONICAL_PRICING_KEYS) {
+      if (c.category === "park") continue;
       const live = byKey.get(c.key);
       rows.push({
         key: c.key,
@@ -1082,6 +1079,7 @@ function PricingTab() {
       });
     }
     for (const r of allRows ?? []) {
+      if (r.category === "park" || r.key.startsWith("park_")) continue;
       if (!CANONICAL_PRICING_KEYS.some((c) => c.key === r.key)) {
         rows.push({
           key: r.key,
@@ -1297,7 +1295,7 @@ function PricingTab() {
             <div>
               <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Live Rate Card (pricing table)</CardTitle>
               <p className="text-xs text-muted-foreground font-normal pt-1">
-                These keys drive live billing for transport, daycare day-pass, daycare hourly, park visits, and registration. Press Enter or blur to save price changes.
+                These keys drive live billing for transport, daycare day-pass, daycare hourly, and registration. Press Enter or blur to save price changes.
               </p>
             </div>
             <Button
@@ -1414,7 +1412,7 @@ function PricingTab() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="pricing-add-category">Category</Label>
-              <select id="pricing-add-category" value={addForm.category} onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"><option value="" disabled>Select category…</option><option value="boarding">boarding</option><option value="grooming">grooming</option><option value="transport">transport</option><option value="daycare">daycare</option><option value="park">park</option><option value="membership">membership</option><option value="rule">rule</option></select>
+              <select id="pricing-add-category" value={addForm.category} onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"><option value="" disabled>Select category…</option><option value="boarding">boarding</option><option value="grooming">grooming</option><option value="transport">transport</option><option value="daycare">daycare</option><option value="membership">membership</option><option value="rule">rule</option></select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="pricing-add-price">Price (AED)</Label>
@@ -1671,10 +1669,6 @@ function PricingTab() {
           </Table>
         </CardContent>
       </Card>
-
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-        Park legacy table is intentionally hidden to avoid stale values. Live park billing is controlled only by Rate Card keys above (`park_1_dog`, `park_2_dogs`, `park_3_dogs`, `park_extra_dog`).
-      </div>
 
       {/* Daycare Package Types */}
       <Card>
