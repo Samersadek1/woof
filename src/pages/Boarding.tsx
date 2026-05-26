@@ -150,8 +150,7 @@ import {
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
 import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErrors";
 import {
-  largestDogSizeFormValue,
-  petSizeToDogSizeFormValue,
+  resolveDogSizeForSelectedPets,
   type DogSizeFormValue,
 } from "@/lib/dogSizeForm";
 import { resolveBoardingStayRates } from "@/lib/boardingPricing";
@@ -1401,16 +1400,15 @@ export function DogBoardingCalendar({
 
   useEffect(() => {
     if (!newBookingOpen || form.pet_ids.length === 0) return;
-    const profileSizes = form.pet_ids
-      .map((id) => dogBoardingPets.find((p) => p.id === id))
-      .filter((p): p is NonNullable<typeof p> => !!p)
-      .map((p) => petSizeToDogSizeFormValue(p.size))
-      .filter((s): s is DogSizeFormValue => s != null);
-    if (profileSizes.length === form.pet_ids.length) {
-      const derived = largestDogSizeFormValue(profileSizes);
-      if (derived) setForm((f) => ({ ...f, dog_size: derived }));
+    const { size } = resolveDogSizeForSelectedPets(
+      form.pet_ids,
+      dogBoardingPets,
+      form.dog_size,
+    );
+    if (size && size !== form.dog_size) {
+      setForm((f) => ({ ...f, dog_size: size }));
     }
-  }, [newBookingOpen, form.pet_ids, dogBoardingPets]);
+  }, [newBookingOpen, form.pet_ids, form.dog_size, dogBoardingPets]);
 
   const getInitialPetCare = (petId: string) => {
     const pet = ownerPets.find((p) => p.id === petId);
@@ -1440,16 +1438,31 @@ export function DogBoardingCalendar({
 
   const handleCreateBooking = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.owner_id || !form.check_in_date || !form.check_out_date) {
-      toast.error("Please fill in all required fields");
+    if (!form.owner_id) {
+      toast.error("Select an owner for this booking");
+      return;
+    }
+    if (!form.check_in_date || !form.check_out_date) {
+      toast.error("Check-in and check-out dates are required");
       return;
     }
     if (form.pet_ids.length === 0) {
       toast.error("Select at least one pet for this stay");
       return;
     }
-    if (!form.dog_size) {
-      toast.error("Select dog size for this stay (required when size is missing on the profile)");
+
+    const { size: resolvedDogSize, missingProfilePetNames } = resolveDogSizeForSelectedPets(
+      form.pet_ids,
+      dogBoardingPets,
+      form.dog_size,
+    );
+    if (!resolvedDogSize) {
+      const names = missingProfilePetNames.join(", ");
+      toast.error(
+        names
+          ? `${names} ${missingProfilePetNames.length === 1 ? "has" : "have"} no size on the profile — choose a size for this stay.`
+          : "Select dog size for this stay",
+      );
       return;
     }
     const catInSelection = form.pet_ids.some(
@@ -1495,7 +1508,7 @@ export function DogBoardingCalendar({
         dogRatePreview.data
           ? `Rate: ${dogRatePreview.data.seasonSummary}`
           : "",
-        `Dog size: ${form.dog_size}`,
+        `Dog size: ${resolvedDogSize}`,
         addons ? `Add-ons: ${addons}` : "",
       ]
         .filter(Boolean)

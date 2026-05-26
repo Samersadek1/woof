@@ -48,3 +48,44 @@ export function largestDogSizeFormValue(sizes: DogSizeFormValue[]): DogSizeFormV
     FORM_SIZE_RANK[cur] > FORM_SIZE_RANK[max] ? cur : max,
   );
 }
+
+type PetSizeSource = {
+  id: string;
+  name?: string | null;
+  size?: string | null;
+};
+
+/** Resolve stay dog size from staff selection and/or linked pet profile sizes. */
+export function resolveDogSizeForSelectedPets(
+  petIds: string[],
+  pets: PetSizeSource[],
+  manualSize: DogSizeFormValue | null,
+): {
+  size: DogSizeFormValue | null;
+  missingProfilePetNames: string[];
+} {
+  const selected = petIds
+    .map((id) => pets.find((pet) => pet.id === id))
+    .filter((pet): pet is PetSizeSource => !!pet);
+
+  const missingProfilePetNames = selected
+    .filter((pet) => !petSizeToDogSizeFormValue(pet.size))
+    .map((pet) => pet.name?.trim() || "Dog");
+
+  const profileSizes = selected
+    .map((pet) => petSizeToDogSizeFormValue(pet.size))
+    .filter((size): size is DogSizeFormValue => size != null);
+
+  const derivedFromProfile =
+    profileSizes.length === selected.length ? largestDogSizeFormValue(profileSizes) : null;
+
+  if (manualSize) {
+    return { size: manualSize, missingProfilePetNames };
+  }
+
+  if (derivedFromProfile) {
+    return { size: derivedFromProfile, missingProfilePetNames: [] };
+  }
+
+  return { size: null, missingProfilePetNames };
+}

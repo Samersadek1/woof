@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { normalizePetDateOfBirth } from "@/lib/petProfileFields";
 
 type Pet = Database["public"]["Tables"]["pets"]["Row"];
 type PetInsert = Database["public"]["Tables"]["pets"]["Insert"];
@@ -8,14 +9,6 @@ type PetUpdate = Database["public"]["Tables"]["pets"]["Update"];
 type Vaccination = Database["public"]["Tables"]["vaccinations"]["Row"];
 
 export type PetWithVaccinations = Pet & { vaccinations: Vaccination[] };
-
-function normalizePetDateOfBirth<T extends { date_of_birth?: string | null }>(pet: T): T {
-  const dob = pet.date_of_birth;
-  return {
-    ...pet,
-    date_of_birth: dob == null || String(dob).trim() === "" ? null : dob,
-  };
-}
 
 export const petQueryKeys = {
   pets: (ownerId: string) => ["pets", ownerId] as const,

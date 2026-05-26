@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { useOwners, useCreateOwner } from "@/hooks/useOwners";
 import { useCreatePet } from "@/hooks/usePets";
+import { normalizePetDateOfBirth } from "@/lib/petProfileFields";
 import type { OwnerWithPetCount } from "@/hooks/useOwners";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -284,7 +285,7 @@ const CustomersPage = () => {
     if (validPets.length === 0) throw new Error("Add at least one pet.");
     for (const draft of validPets) {
       const weight = draft.weight_kg ? Number(draft.weight_kg) : null;
-      const payload: PetInsert = {
+      const payload: PetInsert = normalizePetDateOfBirth({
         owner_id: createdOwnerId,
         name: draft.name.trim(),
         species: draft.species,
@@ -293,7 +294,7 @@ const CustomersPage = () => {
         weight_kg: weight,
         assessment_status: "not_assessed",
         size: inferPetSize(weight),
-      };
+      });
       await createPet.mutateAsync(payload);
     }
     toast.success("New client onboarding completed.");

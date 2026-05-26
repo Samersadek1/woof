@@ -253,6 +253,7 @@ function makePetForm(ownerId: string): PetInsert {
     breed: "",
     colour: "",
     date_of_birth: null,
+    size: "medium",
     weight_kg: undefined,
     gender: undefined,
     spayed_neutered: false,
