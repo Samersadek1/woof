@@ -226,6 +226,42 @@ export function useBookingRoomAssignments(
   });
 }
 
+function filterCalendarRoomAssignments(rows: unknown[]): CalendarRoomAssignment[] {
+  return rows.filter((row) => {
+    const assignment = row as CalendarRoomAssignment;
+    const booking = assignment.bookings as BookingWithDetails | null;
+    if (!booking || booking.status === "cancelled") return false;
+    if (booking.booking_type && booking.booking_type !== "boarding") return false;
+    return true;
+  }) as CalendarRoomAssignment[];
+}
+
+/** All BRA rows for bookings in the calendar window (not only segments overlapping the window). */
+export function useBookingRoomAssignmentsForBookings(
+  bookingIds: string[],
+  options?: { enabled?: boolean },
+) {
+  const sortedIds = [...bookingIds].sort();
+  return useQuery({
+    queryKey: ["booking_room_assignments", "by-bookings", sortedIds] as const,
+    enabled: (options?.enabled ?? true) && sortedIds.length > 0,
+    queryFn: async () => {
+      const chunkSize = 80;
+      const all: CalendarRoomAssignment[] = [];
+      for (let i = 0; i < sortedIds.length; i += chunkSize) {
+        const chunk = sortedIds.slice(i, i + chunkSize);
+        const { data, error } = await supabase
+          .from("booking_room_assignments")
+          .select(CALENDAR_ASSIGNMENT_SELECT)
+          .in("booking_id", chunk);
+        if (error) throw error;
+        all.push(...filterCalendarRoomAssignments(data ?? []));
+      }
+      return all;
+    },
+  });
+}
+
 export function useRooms() {
   return useQuery({
     queryKey: queryKeys.rooms(),

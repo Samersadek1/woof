@@ -14,6 +14,16 @@ export function calculateNights(checkIn: string, checkOut: string): number {
   return differenceInCalendarDays(parseISO(checkOut), parseISO(checkIn));
 }
 
+/** Planned stay range: `check_out_date` is exclusive (departure day, not a charged night). */
+export function validateBoardingDateRange(
+  checkIn: string,
+  checkOutExclusive: string,
+): string | null {
+  if (!checkIn || !checkOutExclusive) return "Check-in and check-out are required";
+  if (checkOutExclusive <= checkIn) return "Check-out must be after check-in";
+  return null;
+}
+
 /** From `booking_items(count)` on list/detail booking queries */
 export function bookingBelongingsCount(b: {
   booking_items?: { count: number }[];

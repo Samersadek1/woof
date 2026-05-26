@@ -113,6 +113,46 @@ export type RoomCalendarLayoutSegment<T> = {
   payload: T;
 };
 
+/** Min/max assignment segment dates per booking on one room row. */
+export function assignmentExtentsByBookingId(
+  segments: Array<{ bookingId: string; start_date: string; end_date: string }>,
+): Map<string, { minStart: string; maxEnd: string }> {
+  const map = new Map<string, { minStart: string; maxEnd: string }>();
+  for (const { bookingId, start_date, end_date } of segments) {
+    const cur = map.get(bookingId);
+    if (!cur) {
+      map.set(bookingId, { minStart: start_date, maxEnd: end_date });
+      continue;
+    }
+    if (start_date < cur.minStart) cur.minStart = start_date;
+    if (end_date > cur.maxEnd) cur.maxEnd = end_date;
+  }
+  return map;
+}
+
+/**
+ * Calendar bar span: use booking stay dates when imported BRA rows start late or end early.
+ */
+export function calendarSegmentLayoutBounds(args: {
+  check_in_date: string;
+  check_out_date: string;
+  assignmentStart: string;
+  assignmentEnd: string;
+  isEarliestAssignment: boolean;
+  isLatestAssignment: boolean;
+}): { segStart: string; segEnd: string } {
+  const lastNight = bookingLastOccupiedNight(args.check_in_date, args.check_out_date);
+  let segStart = args.assignmentStart;
+  let segEnd = args.assignmentEnd;
+  if (args.isEarliestAssignment && segStart > args.check_in_date) {
+    segStart = args.check_in_date;
+  }
+  if (args.isLatestAssignment && segEnd < lastNight) {
+    segEnd = lastNight;
+  }
+  return { segStart, segEnd };
+}
+
 /** One guest bar in a room row — positioned with CSS grid column span (no flex overflow). */
 export type RoomCalendarGridEvent<T> = {
   key: string;

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import {
   useBookings,
-  useBookingRoomAssignments,
+  useBookingRoomAssignmentsForBookings,
   useRooms,
   type CalendarRoomAssignment,
 } from "@/hooks/useBookings";
@@ -23,8 +23,11 @@ export function useBoardingCalendarModel(
   isLoading: boolean;
 } {
   const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startDate, endDate);
+  const bookingIds = useMemo(() => bookings.map((b) => b.id), [bookings]);
   const { data: roomAssignments = [], isLoading: assignmentsLoading } =
-    useBookingRoomAssignments(startDate, endDate);
+    useBookingRoomAssignmentsForBookings(bookingIds, {
+      enabled: !bookingsLoading && bookingIds.length > 0,
+    });
   const { data: rooms = [], isLoading: roomsLoading } = useRooms();
 
   const facilityRoomIds = useMemo(() => {

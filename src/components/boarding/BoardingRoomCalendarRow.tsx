@@ -3,7 +3,9 @@ import { isToday, parseISO } from "date-fns";
 import type { BookingWithDetails } from "@/hooks/useBookings";
 import type { BoardingCalendarSegment } from "@/lib/boardingCalendarModel";
 import {
+  assignmentExtentsByBookingId,
   bookingLastOccupiedNight,
+  calendarSegmentLayoutBounds,
   layoutRoomCalendarEvents,
   type RoomCalendarLayoutSegment,
 } from "@/lib/bookingRoomDisplay";
@@ -31,21 +33,46 @@ type Props = {
 function layoutSegments(
   segments: BoardingCalendarSegment[],
 ): RoomCalendarLayoutSegment<BookingWithDetails>[] {
+  const assignmentExtents = assignmentExtentsByBookingId(
+    segments.flatMap((segment) =>
+      segment.kind === "assignment"
+        ? [
+            {
+              bookingId: segment.assignment.booking_id,
+              start_date: segment.assignment.start_date,
+              end_date: segment.assignment.end_date,
+            },
+          ]
+        : [],
+    ),
+  );
+
   return segments.map((segment) => {
     const booking =
       segment.kind === "assignment" ? segment.assignment.bookings : segment.booking;
-    const segStart =
-      segment.kind === "assignment"
-        ? segment.assignment.start_date
-        : segment.booking.check_in_date;
-    const segEnd =
-      segment.kind === "assignment"
-        ? segment.assignment.end_date
-        : bookingLastOccupiedNight(
-            segment.booking.check_in_date,
-            segment.booking.check_out_date,
-          );
-    return { segStart, segEnd, payload: booking };
+
+    if (segment.kind === "assignment") {
+      const extents = assignmentExtents.get(segment.assignment.booking_id);
+      const { segStart, segEnd } = calendarSegmentLayoutBounds({
+        check_in_date: booking.check_in_date,
+        check_out_date: booking.check_out_date,
+        assignmentStart: segment.assignment.start_date,
+        assignmentEnd: segment.assignment.end_date,
+        isEarliestAssignment:
+          segment.assignment.start_date === extents?.minStart,
+        isLatestAssignment: segment.assignment.end_date === extents?.maxEnd,
+      });
+      return { segStart, segEnd, payload: booking };
+    }
+
+    return {
+      segStart: segment.booking.check_in_date,
+      segEnd: bookingLastOccupiedNight(
+        segment.booking.check_in_date,
+        segment.booking.check_out_date,
+      ),
+      payload: booking,
+    };
   });
 }
 

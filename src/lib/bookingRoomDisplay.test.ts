@@ -4,6 +4,7 @@ import {
   assignmentCalendarColumnSpan,
   assignmentCoversDate,
   bookingLastOccupiedNight,
+  calendarSegmentLayoutBounds,
   formatRoomAssignmentsSummary,
   layoutRoomCalendarEvents,
   roomAssignmentForDate,
@@ -75,6 +76,19 @@ describe("bookingRoomDisplay", () => {
       expect.objectContaining({ payload: "beirut", colStart: 2, colSpan: 1 }),
       expect.objectContaining({ payload: "tweed", colStart: 3, colSpan: 1 }),
     ]);
+  });
+
+  it("calendarSegmentLayoutBounds extends bar to booking stay when BRA starts late", () => {
+    expect(
+      calendarSegmentLayoutBounds({
+        check_in_date: "2026-04-30",
+        check_out_date: "2026-05-24",
+        assignmentStart: "2026-05-23",
+        assignmentEnd: "2026-05-23",
+        isEarliestAssignment: true,
+        isLatestAssignment: true,
+      }),
+    ).toEqual({ segStart: "2026-04-30", segEnd: "2026-05-23" });
   });
 
   it("layoutRoomCalendarEvents spans multiple visible columns for a multi-night stay", () => {

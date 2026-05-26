@@ -119,6 +119,7 @@ import {
 } from "@/lib/boardingUnknownKennel";
 import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
 import { ChangeRoomDialog } from "@/components/boarding/ChangeRoomDialog";
+import { EditBoardingStayDates } from "@/components/boarding/EditBoardingStayDates";
 import { DayShufflePanel } from "@/components/boarding/DayShufflePanel";
 import { useMoveBoardingRoom } from "@/hooks/useMoveBoardingRoom";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
@@ -2618,27 +2619,14 @@ export function DogBoardingCalendar({
                   />
                 )}
 
-                {/* Dates */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Check-in</p>
-                    <p className="text-sm">{format(parseISO(detailBooking.check_in_date), "d MMM yyyy")}</p>
-                    {detailBooking.actual_check_in_at && (
-                      <p className="text-xs text-muted-foreground">
-                        Actual: {format(parseISO(detailBooking.actual_check_in_at), "d MMM HH:mm")}
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Check-out</p>
-                    <p className="text-sm">{format(parseISO(detailBooking.check_out_date), "d MMM yyyy")}</p>
-                    {detailBooking.actual_check_out_at && (
-                      <p className="text-xs text-muted-foreground">
-                        Actual: {format(parseISO(detailBooking.actual_check_out_at), "d MMM HH:mm")}
-                      </p>
-                    )}
-                  </div>
-                </div>
+                <EditBoardingStayDates
+                  booking={detailBooking}
+                  onUpdated={(patch) =>
+                    setDetailBooking((prev) =>
+                      prev && prev.id === detailBooking.id ? { ...prev, ...patch } : prev,
+                    )
+                  }
+                />
                 <p className="text-sm text-muted-foreground">
                   {nightsBetween(detailBooking.check_in_date, detailBooking.check_out_date)} night
                   {nightsBetween(detailBooking.check_in_date, detailBooking.check_out_date) !== 1 ? "s" : ""}
@@ -2707,7 +2695,7 @@ export function DogBoardingCalendar({
                 {/* Actions */}
                 <div className="space-y-3">
 
-                  {(detailBooking.status === "confirmed" || detailBooking.status === "checked_in") && (
+                  {detailBooking.status !== "cancelled" && (
                     <Button
                       type="button"
                       variant="outline"
