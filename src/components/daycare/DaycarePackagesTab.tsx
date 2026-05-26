@@ -1,0 +1,290 @@
+import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { format, parseISO } from "date-fns";
+import { AlertTriangle, Loader2, Package, Plus } from "lucide-react";
+import { ownerDisplayName } from "@/lib/bookingUtils";
+import {
+  useAllDaycarePackages,
+  type PackageWithDetails,
+} from "@/hooks/useDaycare";
+import { OwnerSearchPopover } from "@/components/billing/OwnerSearchPopover";
+import { PurchasePackageDialog } from "@/components/packages/PurchasePackageDialog";
+import { useOwner } from "@/hooks/useOwners";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+type PkgFilter = "all" | "low" | "exhausted";
+type TierFilter = "all" | "standard" | "silver" | "gold";
+
+const TIER_OPTIONS: { value: TierFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "standard", label: "Standard" },
+  { value: "silver", label: "Silver" },
+  { value: "gold", label: "Gold" },
+];
+
+const MEMBER_BADGE: Record<string, string> = {
+  standard: "bg-slate-100 text-slate-700 border-slate-200",
+  silver: "bg-slate-200 text-slate-800 border-slate-300",
+  gold: "bg-amber-50 text-amber-800 border-amber-200",
+};
+
+function creditColour(remaining: number) {
+  if (remaining <= 1) return "text-red-600";
+  if (remaining <= 3) return "text-amber-600";
+  return "text-emerald-600";
+}
+
+function creditBarColour(remaining: number) {
+  if (remaining <= 1) return "bg-red-500";
+  if (remaining <= 3) return "bg-amber-500";
+  return "bg-emerald-500";
+}
+
+function packageMatchesTier(pkg: PackageWithDetails, tier: TierFilter): boolean {
+  if (tier === "all") return true;
+  const memberType = (pkg.owners?.member_type ?? "standard").toLowerCase();
+  return memberType === tier;
+}
+
+function packageMatchesSearch(pkg: PackageWithDetails, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const ownerName = pkg.owners
+    ? ownerDisplayName(pkg.owners.first_name, pkg.owners.last_name).toLowerCase()
+    : "";
+  const petName = (pkg.pets?.name ?? "").toLowerCase();
+  const pkgName = (pkg.package_name ?? "").toLowerCase();
+  return ownerName.includes(q) || petName.includes(q) || pkgName.includes(q);
+}
+
+function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
+  const [, setSearchParams] = useSearchParams();
+  const remaining = pkg.total_days - pkg.days_used;
+  const pct = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
+  const isExhausted = remaining <= 0;
+  const memberType = (pkg.owners?.member_type ?? "standard").toLowerCase();
+
+  const openInPlanner = () => {
+    setSearchParams(
+      (prev) => {
+        const n = new URLSearchParams(prev);
+        n.set("tab", "planner");
+        n.set("ownerId", pkg.owner_id);
+        n.set("packageId", pkg.id);
+        return n;
+      },
+      { replace: true },
+    );
+  };
+
+  return (
+    <Card className={`transition-shadow hover:shadow-md ${isExhausted ? "opacity-60" : ""}`}>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <button type="button" className="space-y-1 min-w-0 text-left" onClick={openInPlanner}>
+            <p className="font-semibold truncate">
+              {pkg.pets?.name ?? "Unknown pet"}
+              <span className="font-normal text-muted-foreground"> — </span>
+              {pkg.owners
+                ? ownerDisplayName(pkg.owners.first_name, pkg.owners.last_name)
+                : "Unknown owner"}
+            </p>
+            {pkg.package_name ? (
+              <p className="text-xs text-muted-foreground truncate">{pkg.package_name}</p>
+            ) : null}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+              <Badge variant="outline" className={MEMBER_BADGE[memberType] ?? MEMBER_BADGE.standard}>
+                {memberType.charAt(0).toUpperCase() + memberType.slice(1)}
+              </Badge>
+              {isExhausted ? (
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-[10px]">
+                  Exhausted
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">
+                  Active
+                </Badge>
+              )}
+            </div>
+          </button>
+          <div className={`text-right shrink-0 ${creditColour(remaining)}`}>
+            {remaining <= 3 && <AlertTriangle className="h-3.5 w-3.5 ml-auto mb-0.5" />}
+            <p className="text-2xl font-bold tabular-nums leading-none">
+              {pkg.days_used}
+              <span className="text-base font-normal text-muted-foreground">/{pkg.total_days}</span>
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">{remaining} remaining</p>
+          </div>
+        </div>
+        <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${creditBarColour(remaining)}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        {pkg.expiry_date && (
+          <p className="text-[10px] text-muted-foreground">
+            Expires {format(parseISO(pkg.expiry_date), "d MMM yyyy")}
+          </p>
+        )}
+        <Button type="button" variant="outline" size="sm" className="w-full" onClick={openInPlanner}>
+          Open in planner
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function DaycarePackagesTab() {
+  const [filter, setFilter] = useState<PkgFilter>("all");
+  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sellOpen, setSellOpen] = useState(false);
+  const [sellOwnerId, setSellOwnerId] = useState<string | undefined>();
+  const { data: sellOwner } = useOwner(sellOwnerId ?? "");
+
+  const { data: packages, isLoading } = useAllDaycarePackages();
+
+  const sellOwnerLabel =
+    sellOwner && sellOwnerId === sellOwner.id
+      ? ownerDisplayName(sellOwner.first_name, sellOwner.last_name)
+      : "";
+
+  const filtered = useMemo(() => {
+    return (packages ?? []).filter((pkg) => {
+      const remaining = pkg.total_days - pkg.days_used;
+      if (filter === "low" && !(remaining > 0 && remaining <= 2)) return false;
+      if (filter === "exhausted" && remaining > 0) return false;
+      if (!packageMatchesTier(pkg, tierFilter)) return false;
+      if (!packageMatchesSearch(pkg, searchQuery)) return false;
+      return true;
+    });
+  }, [packages, filter, tierFilter, searchQuery]);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-3 min-w-0 flex-1">
+          <h3 className="text-base font-semibold">Daycare packages</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={filter} onValueChange={(v) => setFilter(v as PkgFilter)}>
+              <SelectTrigger className="h-8 w-48 text-xs" data-testid="daycare-packages-filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All packages</SelectItem>
+                <SelectItem value="low">Low credits (≤2 left)</SelectItem>
+                <SelectItem value="exhausted">Exhausted</SelectItem>
+              </SelectContent>
+            </Select>
+            {TIER_OPTIONS.map(({ value, label }) => (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                variant={tierFilter === value ? "default" : "outline"}
+                className="h-8 text-xs"
+                onClick={() => setTierFilter(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+          <Input
+            placeholder="Search owner, pet, or package name…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="max-w-md h-9"
+            data-testid="daycare-packages-search"
+          />
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          data-testid="daycare-new-package-btn"
+          onClick={() => setSellOpen(true)}
+        >
+          <Plus className="mr-1.5 h-4 w-4" />
+          Sell package
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-40 w-full" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+          <Package className="h-10 w-10 mb-3 opacity-40" />
+          <p>No packages match these filters.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((pkg) => (
+            <PackageCard key={pkg.id} pkg={pkg} />
+          ))}
+        </div>
+      )}
+
+      <Dialog open={sellOpen} onOpenChange={setSellOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sell daycare package</DialogTitle>
+          </DialogHeader>
+          <OwnerSearchPopover
+            label="Client"
+            ownerId={sellOwnerId}
+            ownerLabel={sellOwnerLabel}
+            onSelect={(id) => setSellOwnerId(id)}
+            onClear={() => setSellOwnerId(undefined)}
+            inputTestId="daycare-sell-package-owner"
+          />
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setSellOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!sellOwnerId}
+              onClick={() => {
+                if (!sellOwnerId) return;
+                setSellOpen(false);
+              }}
+            >
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {sellOwnerId && !sellOpen ? (
+        <PurchasePackageDialog
+          ownerId={sellOwnerId}
+          isOpen
+          onClose={() => setSellOwnerId(undefined)}
+          onSuccess={() => setSellOwnerId(undefined)}
+        />
+      ) : null}
+    </div>
+  );
+}

@@ -36,9 +36,11 @@ import {
   useUpdateDaycareSession,
   useRescheduleDaycareSession,
   useDeleteDaycareSession,
+  useCancelDaycareCheckIn,
   type DaycarePackage,
   type SessionRow,
 } from "@/hooks/useDaycare";
+import { DaycarePackagesTab } from "@/components/daycare/DaycarePackagesTab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -306,7 +308,7 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
   const confirmDelete = () => {
     if (!deleteId) return;
     deleteSession.mutate({ sessionId: deleteId, package_id: packageId }, {
-      onSuccess: () => { toast.success("Session removed"); setDeleteId(null); },
+      onSuccess: () => { toast.success("Check-in cancelled"); setDeleteId(null); },
       onError:   (err) => toast.error(err.message),
     });
   };
@@ -657,9 +659,10 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
       <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove session?</AlertDialogTitle>
+            <AlertDialogTitle>Cancel check-in?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will delete the session and decrement the package's used day count by 1. This cannot be undone.
+              Removes this session, restores package credit if used, and voids or deletes any linked
+              invoice so you can check in again with different billing.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -671,7 +674,7 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
             >
               {deleteSession.isPending
                 ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Deleting…</>
-                : "Remove session"}
+                : "Cancel check-in"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1193,7 +1196,109 @@ function PlannerTab() {
 
   return (
     <div className="space-y-6">
-      {/* Search-first check-in */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Package planner</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Pick a client and package to view or edit session dates (including past days) — no check-in
+            required.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1 max-w-xl">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Client</Label>
+            <OwnerCombobox
+              selectedId={
+                ownerId && (resolvedOwnerLabel || ownerDetailLoading) ? ownerId : null
+              }
+              selectedLabel={ownerDetailLoading ? "Loading…" : resolvedOwnerLabel}
+              onSelect={handleOwnerSelect}
+              onClear={handleOwnerClear}
+              placeholder="Search by client name, pet name, or phone…"
+              inputTestId="daycare-planner-owner-search"
+            />
+          </div>
+          <div className="max-w-xl space-y-1">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Package</Label>
+            <Select
+              value={packageId ?? ""}
+              onValueChange={(pid) => {
+                setPackageId(pid);
+                syncPlannerSearchParams(setSearchParams, ownerId, pid);
+              }}
+              disabled={!ownerId || !packages?.length}
+            >
+              <SelectTrigger className="h-9" data-testid="daycare-planner-package-select">
+                <SelectValue
+                  placeholder={
+                    !ownerId
+                      ? "Select a client first"
+                      : packages?.length
+                        ? "Select package"
+                        : "No active packages"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {packages?.map((pkg) => (
+                  <SelectItem key={pkg.id} value={pkg.id}>
+                    {pkgLabel(pkg)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {!packageId && (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
+          <p className="text-muted-foreground">Select a client and package to open the planner</p>
+        </div>
+      )}
+
+      {packageId && selectedPkg && (
+        <>
+          <div className="flex items-start justify-between gap-4">
+            <Card className="flex-1">
+              <CardContent className="pt-5 pb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-4">
+                  {[
+                    { label: "Client", value: resolvedOwnerLabel },
+                    { label: "Dog", value: selectedPet?.name },
+                    {
+                      label: "Day Care Days",
+                      value: `${selectedPkg.days_used} / ${selectedPkg.total_days}`,
+                    },
+                    { label: "Pickups Used", value: String(pickupsUsed) },
+                    { label: "Drop-offs Used", value: String(dropoffsUsed) },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="space-y-0.5">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                        {label}
+                      </p>
+                      <p className="text-sm font-semibold">{value ?? "—"}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+            <Button variant="outline" size="sm" onClick={() => window.print()} className="shrink-0">
+              <Printer className="mr-1.5 h-4 w-4" />
+              Print
+            </Button>
+          </div>
+          <SessionsTable
+            sessions={sessions ?? []}
+            packageId={packageId}
+            petId={selectedPkg.pet_id}
+            ownerId={selectedPkg.owner_id}
+            isLoading={sessionsLoading}
+          />
+        </>
+      )}
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Daycare Check-in</CardTitle>
@@ -1602,79 +1707,6 @@ function PlannerTab() {
           )}
         </CardContent>
       </Card>
-
-      {/* Planner package selector */}
-      <div className="max-w-xl space-y-1">
-        <Label className="text-xs uppercase tracking-wide text-muted-foreground">Package planner view</Label>
-        <Select
-          value={packageId ?? ""}
-          onValueChange={(pid) => {
-            setPackageId(pid);
-            syncPlannerSearchParams(setSearchParams, ownerId, pid);
-          }}
-          disabled={!ownerId || !packages?.length}
-        >
-          <SelectTrigger className="h-9">
-            <SelectValue placeholder={!ownerId ? "Select client from check-in above" : packages?.length ? "Select package" : "No packages"} />
-          </SelectTrigger>
-          <SelectContent>
-            {packages?.map(pkg => (
-              <SelectItem key={pkg.id} value={pkg.id}>
-                {pkgLabel(pkg)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Empty state */}
-      {!packageId && (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
-          <p className="text-muted-foreground">Select a client and package to view the day care planner</p>
-        </div>
-      )}
-
-      {/* Content */}
-      {packageId && selectedPkg && (
-        <>
-          {/* Summary card + print */}
-          <div className="flex items-start justify-between gap-4">
-            <Card className="flex-1">
-              <CardContent className="pt-5 pb-4">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-4">
-                  {[
-                    { label: "Client",        value: resolvedOwnerLabel },
-                    { label: "Dog",           value: selectedPet?.name },
-                    { label: "Day Care Days", value: `${selectedPkg.days_used} / ${selectedPkg.total_days}` },
-                    { label: "Pickups Used",  value: String(pickupsUsed) },
-                    { label: "Drop-offs Used",value: String(dropoffsUsed) },
-                  ].map(({ label, value }) => (
-                    <div key={label} className="space-y-0.5">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">{label}</p>
-                      <p className="text-sm font-semibold">{value ?? "—"}</p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Button variant="outline" size="sm" onClick={() => window.print()} className="shrink-0">
-              <Printer className="mr-1.5 h-4 w-4" />
-              Print
-            </Button>
-          </div>
-
-          {/* Sessions table */}
-          <SessionsTable
-            sessions={sessions ?? []}
-            packageId={packageId}
-            petId={selectedPkg.pet_id}
-            ownerId={selectedPkg.owner_id}
-            isLoading={sessionsLoading}
-          />
-        </>
-      )}
     </div>
   );
 }
@@ -1732,7 +1764,9 @@ function DaycareOperationsTab() {
   const [datePreset, setDatePreset] = useState<DaycareListPreset>("today");
   const [anchorDate, setAnchorDate] = useState(TODAY);
   const [updatingSessionId, setUpdatingSessionId] = useState<string | null>(null);
+  const [cancelSessionId, setCancelSessionId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const cancelCheckIn = useCancelDaycareCheckIn();
 
   const rangeStart = useMemo(
     () => (datePreset === "tomorrow" ? format(addDays(parseISO(anchorDate), 1), "yyyy-MM-dd") : anchorDate),
@@ -1872,7 +1906,7 @@ function DaycareOperationsTab() {
                         )}
                       </div>
                     </div>
-                    <div className="min-w-[170px] space-y-1">
+                    <div className="min-w-[190px] space-y-2 shrink-0">
                       <p className="text-right text-xs text-muted-foreground">
                         In: {s.checked_in_at ? format(parseISO(s.checked_in_at), "HH:mm") : "—"}
                       </p>
@@ -1899,6 +1933,18 @@ function DaycareOperationsTab() {
                           <SelectItem value="pet_taxi">Collected by pet taxi</SelectItem>
                         </SelectContent>
                       </Select>
+                      {s.checked_in && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full h-8 text-xs text-destructive border-destructive/40"
+                          data-testid={`daycare-cancel-checkin-${s.id}`}
+                          onClick={() => setCancelSessionId(s.id)}
+                        >
+                          Cancel check-in
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1907,6 +1953,41 @@ function DaycareOperationsTab() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!cancelSessionId} onOpenChange={(o) => !o && setCancelSessionId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel daycare check-in?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Restores package credit if used and voids or removes linked invoices so you can check in
+              again with different billing.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelCheckIn.isPending}>Keep</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={cancelCheckIn.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!cancelSessionId) return;
+                cancelCheckIn.mutate(cancelSessionId, {
+                  onSuccess: () => {
+                    toast.success("Check-in cancelled");
+                    setCancelSessionId(null);
+                  },
+                  onError: (err) => toast.error(err.message),
+                });
+              }}
+            >
+              {cancelCheckIn.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Cancel check-in
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1916,7 +1997,12 @@ function DaycareOperationsTab() {
 const DaycarePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
-  const tab = requestedTab === "operations" ? requestedTab : "planner";
+  const tab =
+    requestedTab === "operations"
+      ? "operations"
+      : requestedTab === "packages"
+        ? "packages"
+        : "planner";
 
   const setTab = (value: string) => {
     setSearchParams(
@@ -1936,11 +2022,16 @@ const DaycarePage = () => {
         <Tabs value={tab} onValueChange={setTab} className="space-y-6">
           <TabsList>
             <TabsTrigger value="planner">Planner</TabsTrigger>
+            <TabsTrigger value="packages">Packages</TabsTrigger>
             <TabsTrigger value="operations">Operations</TabsTrigger>
           </TabsList>
 
           <TabsContent value="planner" className="mt-0">
             <PlannerTab />
+          </TabsContent>
+
+          <TabsContent value="packages" className="mt-0">
+            <DaycarePackagesTab />
           </TabsContent>
 
           <TabsContent value="operations" className="mt-0">

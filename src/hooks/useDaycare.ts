@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
@@ -436,15 +437,25 @@ export function useAllDaycarePackages() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("service_credits")
-        .select("*, pets!inner(name, owner_id), purchase_groups(package_definitions(display_name))")
+        .select(
+          "*, pets!inner(name, owner_id, owners(first_name, last_name, member_type)), purchase_groups(package_definitions(display_name))",
+        )
         .in("service_code", DAYCARE_CREDIT_CODES)
         .order("created_at", { ascending: false });
       if (error) throw error;
       const mapped = (data ?? []).map((row) => {
-        const ownerId = (row as unknown as { pets: { owner_id: string } | null }).pets?.owner_id ?? "";
-        const petName = (row as unknown as { pets: { name: string } | null }).pets?.name ?? "Pet";
-        const pkgName = (row as unknown as { purchase_groups?: { package_definitions?: { display_name?: string | null } | null } | null })
-          .purchase_groups?.package_definitions?.display_name;
+        type PetJoin = {
+          name: string;
+          owner_id: string;
+          owners: { first_name: string; last_name: string | null; member_type: string } | null;
+        };
+        const pet = (row as unknown as { pets: PetJoin | null }).pets;
+        const ownerId = pet?.owner_id ?? "";
+        const pkgName = (
+          row as unknown as {
+            purchase_groups?: { package_definitions?: { display_name?: string | null } | null } | null;
+          }
+        ).purchase_groups?.package_definitions?.display_name;
         return {
           id: row.id,
           owner_id: ownerId,
@@ -459,8 +470,8 @@ export function useAllDaycarePackages() {
           units_remaining: row.units_total - row.units_consumed,
           source_ref_id: row.source_ref_id,
           redemption_group_id: row.redemption_group_id,
-          pets: { name: petName },
-          owners: null,
+          pets: { name: pet?.name ?? "Pet" },
+          owners: pet?.owners ?? null,
         };
       });
       return mapped as unknown as PackageWithDetails[];
@@ -536,29 +547,28 @@ export function useDeleteDaycareSession() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ sessionId, package_id }: DeleteSessionPayload) => {
-      // Fetch the session first so we have package_id if not supplied
-      const { data: session, error: fetchErr } = await supabase
-        .from("daycare_sessions")
-        .select("id, package_id")
-        .eq("id", sessionId)
-        .single();
-
-      if (fetchErr) throw fetchErr;
-
-      const { error: deleteErr } = await supabase
-        .from("daycare_sessions")
-        .delete()
-        .eq("id", sessionId);
-
-      if (deleteErr) throw deleteErr;
-
-      void package_id;
-      void session.package_id;
+    mutationFn: async ({ sessionId }: DeleteSessionPayload) => {
+      await cancelDaycareCheckIn(sessionId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
       queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+    },
+  });
+}
+
+export function useCancelDaycareCheckIn() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      await cancelDaycareCheckIn(sessionId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
     },
   });
 }
