@@ -86,12 +86,12 @@ export async function resolveBoardingRate(
 
 export async function resolveBoardingStayRates(
   _roomId: string,
-  _petCount: number,
+  petCount: number,
   checkIn: string,
   checkOut: string,
 ): Promise<BoardingStayRates> {
   void _roomId;
-  void _petCount;
+  const billedPetCount = Math.max(1, petCount);
   const dates = eachBoardingNight(checkIn, checkOut);
   const nights = await Promise.all(
     dates.map(async (date) => ({
@@ -101,7 +101,8 @@ export async function resolveBoardingStayRates(
   );
   const peakNights = nights.filter((n) => n.isPeak).length;
   const offPeakNights = nights.length - peakNights;
-  const totalAed = nights.reduce((sum, n) => sum + n.unitPrice, 0);
+  const perPetTotalAed = nights.reduce((sum, n) => sum + n.unitPrice, 0);
+  const totalAed = perPetTotalAed * billedPetCount;
   return {
     nights,
     totalAed,

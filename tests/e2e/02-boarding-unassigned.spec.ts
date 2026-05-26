@@ -114,7 +114,7 @@ test.describe("boarding-unassigned", () => {
     await expect(page.getByText("Unassigned").first()).toBeVisible();
   });
 
-  test("multi-pet booking shows standard boarding total without occupancy discount", async ({
+  test("multi-pet booking shows boarding total with double occupancy discount", async ({
     page,
   }) => {
     const testStartIso = new Date().toISOString();
@@ -137,7 +137,7 @@ test.describe("boarding-unassigned", () => {
     await page.getByTestId("boarding-checkout-date").fill(checkOut);
 
     await expect(page.getByText("Estimated total (this booking)")).toBeVisible();
-    await expect(page.getByText(/double.?occupancy/i)).toHaveCount(0);
+    await expect(page.getByText("Double occupancy 15% discount")).toBeVisible();
 
     await page.getByTestId("boarding-save-booking-btn").click();
     await page.waitForLoadState("networkidle");

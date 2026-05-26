@@ -27,12 +27,13 @@ export async function buildBoardingNightLineItems(args: {
   const nights = differenceInCalendarDays(parseISO(checkOutDate), parseISO(checkInDate));
   if (nights <= 0) return [];
 
-  const stayRates = await resolveBoardingStayRates(roomId ?? "", petCount, checkInDate, checkOutDate);
-  void petCount;
+  const billedPetCount = Math.max(1, petCount);
+  const stayRates = await resolveBoardingStayRates(roomId ?? "", billedPetCount, checkInDate, checkOutDate);
 
   const roomPrefix = roomName ? `${roomName} — ` : "";
   const boardingLabel = roomPrefix ? `${roomPrefix}Boarding` : "Boarding";
   const lineItems: BoardingInvoiceLineItem[] = [];
+  const petSuffix = billedPetCount > 1 ? ` (${billedPetCount} pets)` : "";
 
   const pushNightGroup = (
     groupNights: typeof stayRates.nights,
@@ -42,8 +43,8 @@ export async function buildBoardingNightLineItems(args: {
     const unitPrice = groupNights[0].unitPrice;
     const seasonLabel = boardingRateSeasonLabel(season);
     lineItems.push({
-      description: `${boardingLabel} — ${groupNights.length} ${seasonLabel.toLowerCase()} night${groupNights.length !== 1 ? "s" : ""}`,
-      quantity: groupNights.length,
+      description: `${boardingLabel} — ${groupNights.length} ${seasonLabel.toLowerCase()} night${groupNights.length !== 1 ? "s" : ""}${petSuffix}`,
+      quantity: groupNights.length * billedPetCount,
       unitPrice,
       pricingKey: groupNights[0].pricingKey,
       serviceType: "boarding",
@@ -61,8 +62,8 @@ export async function buildBoardingNightLineItems(args: {
 
   if (lineItems.length === 0) {
     lineItems.push({
-      description: `${boardingLabel} — ${nights} night${nights !== 1 ? "s" : ""}`,
-      quantity: nights,
+      description: `${boardingLabel} — ${nights} night${nights !== 1 ? "s" : ""}${petSuffix}`,
+      quantity: nights * billedPetCount,
       unitPrice: 0,
       pricingKey: "boarding_night",
       serviceType: "boarding",

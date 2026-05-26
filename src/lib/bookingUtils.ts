@@ -302,4 +302,11 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
     referenceId: bookingId,
     lineItems,
   });
+
+  const { error: occupancyErr } = await supabase.rpc("apply_double_occupancy_discount", {
+    p_booking_id: bookingId,
+  });
+  if (occupancyErr) {
+    throw occupancyErr;
+  }
 }

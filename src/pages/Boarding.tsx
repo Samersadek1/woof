@@ -155,6 +155,7 @@ import {
   type DogSizeFormValue,
 } from "@/lib/dogSizeForm";
 import { resolveBoardingStayRates } from "@/lib/boardingPricing";
+import { calculateDoubleOccupancyDiscountAed } from "@/lib/doubleOccupancyDiscount";
 import {
   Check,
   ChevronLeft,
@@ -1297,20 +1298,23 @@ export function DogBoardingCalendar({
     [selectedDogAddons],
   );
 
+  const dogBoardingNightsTotal = useMemo(() => {
+    if (!dogRatePreview.data || dogNights <= 0) return 0;
+    return dogRatePreview.data.totalAed;
+  }, [dogRatePreview.data, dogNights]);
+
+  const dogDoubleOccupancyDiscount = useMemo(
+    () => calculateDoubleOccupancyDiscountAed(dogBoardingNightsTotal, dogRatePetCount),
+    [dogBoardingNightsTotal, dogRatePetCount],
+  );
+
+  const dogEstimateSubtotal = useMemo(() => {
+    return dogBoardingNightsTotal + dogTransportEstimate + dogManualAddonTotal;
+  }, [dogBoardingNightsTotal, dogTransportEstimate, dogManualAddonTotal]);
+
   const dogBookingEstimateTotal = useMemo(() => {
-    let total = 0;
-    if (dogRatePreview.data && dogNights > 0) {
-      total += dogRatePreview.data.totalAed;
-    }
-    total += dogTransportEstimate;
-    total += dogManualAddonTotal;
-    return total;
-  }, [
-    dogRatePreview.data,
-    dogNights,
-    dogTransportEstimate,
-    dogManualAddonTotal,
-  ]);
+    return Math.max(0, dogEstimateSubtotal - dogDoubleOccupancyDiscount);
+  }, [dogEstimateSubtotal, dogDoubleOccupancyDiscount]);
 
   const { data: dogMemberDiscountPreview } = useQuery<{
     discount_pct: number;
@@ -2370,10 +2374,11 @@ export function DogBoardingCalendar({
                     {dogRatePreview.data && dogNights > 0 && (
                       <div className="flex justify-between gap-4">
                         <span className="text-muted-foreground">
-                          Boarding ({dogNights} night{dogNights !== 1 ? "s" : ""})
+                          Boarding ({dogNights} night{dogNights !== 1 ? "s" : ""}
+                          {dogRatePetCount > 1 ? `, ${dogRatePetCount} pets` : ""})
                         </span>
                         <span className="tabular-nums font-medium">
-                          {formatAed(dogRatePreview.data.totalAed)}
+                          {formatAed(dogBoardingNightsTotal)}
                         </span>
                       </div>
                     )}
@@ -2405,10 +2410,18 @@ export function DogBoardingCalendar({
                         </span>
                       </div>
                     )}
-                    {dogBookingEstimateTotal > 0 && (
+                    {dogEstimateSubtotal > 0 && (
                       <div className="flex justify-between gap-4 font-medium">
                         <span>Subtotal</span>
-                        <span className="tabular-nums">{formatAed(dogBookingEstimateTotal)}</span>
+                        <span className="tabular-nums">{formatAed(dogEstimateSubtotal)}</span>
+                      </div>
+                    )}
+                    {dogDoubleOccupancyDiscount > 0 && (
+                      <div className="flex justify-between gap-4 text-emerald-700">
+                        <span>Double occupancy 15% discount</span>
+                        <span className="tabular-nums font-medium">
+                          −{formatAed(dogDoubleOccupancyDiscount)}
+                        </span>
                       </div>
                     )}
                     {(dogMemberDiscountPreview?.discount_aed ?? 0) > 0 && (

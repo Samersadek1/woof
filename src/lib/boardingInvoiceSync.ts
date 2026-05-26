@@ -211,13 +211,39 @@ export async function syncBoardingBookingInvoice(
     .eq("id", invoice.id);
   if (updErr) throw updErr;
 
+  const { error: occupancyErr } = await supabase.rpc("apply_double_occupancy_discount", {
+    p_booking_id: bookingId,
+  });
+  if (occupancyErr) throw occupancyErr;
+
+  const { data: refreshedInvoice, error: refreshErr } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("id", invoice.id)
+    .single();
+  if (refreshErr) throw refreshErr;
+
+  const refreshedGrossTotal = roundAed(refreshedInvoice.total ?? grossTotal);
+  const refreshedVatAed = roundAed(refreshedInvoice.vat_aed ?? vatAed);
+  const { grandTotal: refreshedGrandTotal } = invoiceDisplayTotals({
+    total: refreshedGrossTotal,
+    total_aed: refreshedGrossTotal,
+    vat_aed: refreshedVatAed,
+  });
+  const refreshedOutstanding = roundAed(Math.max(0, refreshedGrandTotal - amountPaid));
+  const refreshedStatus = deriveInvoiceStatusAfterRecalc(
+    refreshedInvoice.status,
+    amountPaid,
+    refreshedGrandTotal,
+  );
+
   return {
     kind: "updated",
     invoiceId: invoice.id,
-    grandTotal,
+    grandTotal: refreshedGrandTotal,
     amountPaid,
-    outstanding,
-    status,
+    outstanding: refreshedOutstanding,
+    status: refreshedStatus,
   };
 }
 
