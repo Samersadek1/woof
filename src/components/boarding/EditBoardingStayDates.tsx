@@ -4,6 +4,10 @@ import { format, parseISO } from "date-fns";
 import { Loader2, Pencil } from "lucide-react";
 import type { BookingWithDetails } from "@/hooks/useBookings";
 import { useUpdateBooking } from "@/hooks/useBookings";
+import {
+  formatSyncBoardingInvoiceToast,
+  syncBoardingBookingInvoice,
+} from "@/lib/boardingInvoiceSync";
 import { calculateNights, validateBoardingDateRange } from "@/lib/bookingUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,11 +55,26 @@ export function EditBoardingStayDates({ booking, onUpdated }: EditBoardingStayDa
     updateBooking.mutate(
       { id: booking.id, check_in_date: checkIn, check_out_date: checkOut },
       {
-        onSuccess: () => {
-          toast.success("Stay dates updated");
-          queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
+        onSuccess: async () => {
           onUpdated({ check_in_date: checkIn, check_out_date: checkOut });
           setEditing(false);
+          queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
+          queryClient.invalidateQueries({ queryKey: ["bookings"] });
+          queryClient.invalidateQueries({ queryKey: ["invoices"] });
+
+          try {
+            const invoiceResult = await syncBoardingBookingInvoice(booking.id);
+            queryClient.invalidateQueries({ queryKey: ["invoice"] });
+            const detail = formatSyncBoardingInvoiceToast(invoiceResult);
+            if (invoiceResult.kind === "skipped") {
+              toast.warning(`Stay dates updated. ${detail}`);
+            } else {
+              toast.success(`Stay dates updated. ${detail}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Invoice sync failed";
+            toast.warning(`Stay dates updated, but invoice could not be refreshed: ${msg}`);
+          }
         },
         onError: (e) => toast.error(e.message),
       },

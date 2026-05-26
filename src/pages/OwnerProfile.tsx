@@ -34,6 +34,8 @@ import {
   type InvoiceStatus,
 } from "@/hooks/useBilling";
 import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -273,7 +275,8 @@ function makePetForm(ownerId: string): PetInsert {
 function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const navigate = useNavigate();
   const statement = useOwnerStatement(ownerId);
-  const { data: invoices = [], isLoading: invoicesLoading } = useInvoicesForOwner(ownerId);
+  const { data: invoices = [], isLoading: invoicesLoading, refetch: refetchInvoices } =
+    useInvoicesForOwner(ownerId);
   const { adjustments, isLoading: adjLoading } = useBillingAdjustments(ownerId);
   const finalise = useFinaliseInvoice();
   const processPayment = useProcessPayment();
@@ -283,6 +286,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const [payMethod, setPayMethod] = useState<"wallet" | "card" | "cash">("wallet");
   const [payStaff, setPayStaff] = useState("");
   const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
+  const [addLineOpen, setAddLineOpen] = useState(false);
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState("");
   const topUp = useTopUpWallet();
@@ -689,7 +693,13 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
               )}
             </div>
 
-            <DialogFooter className="gap-2 pt-4">
+            <DialogFooter className="gap-2 pt-4 flex-wrap">
+              {viewInvoice && canEditInvoiceLineItems(viewInvoice.status) && (
+                <Button variant="secondary" onClick={() => setAddLineOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add line item
+                </Button>
+              )}
               <Button variant="outline" onClick={() => setViewInvoice(null)}>Close</Button>
               <Button onClick={() => {
                 const el = document.getElementById("invoice-print-area");
@@ -711,6 +721,23 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+
+      {viewInvoice && (
+        <AddInvoiceLineItemDialog
+          open={addLineOpen}
+          onOpenChange={setAddLineOpen}
+          invoiceId={viewInvoice.id}
+          ownerId={ownerId}
+          serviceType={viewInvoice.service_type}
+          invoiceLabel={viewInvoice.invoice_number ?? undefined}
+          onAdded={() => {
+            void refetchInvoices().then(({ data }) => {
+              const fresh = data?.find((i) => i.id === viewInvoice.id);
+              if (fresh) setViewInvoice(fresh);
+            });
+          }}
+        />
       )}
 
       <Dialog open={topUpOpen} onOpenChange={setTopUpOpen}>

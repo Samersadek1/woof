@@ -1,8 +1,7 @@
 import { differenceInCalendarDays, addDays, format, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
-import { resolveBoardingStayRates } from "@/lib/boardingPricing";
-import { boardingRateSeasonLabel } from "@/lib/boardingSeason";
+import { buildBoardingNightLineItems } from "@/lib/boardingInvoiceLines";
 import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import { serviceTypeForBoardingAddonKey } from "@/lib/groomingCatalog";
 import { netFromGrossInclusive, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
@@ -252,44 +251,27 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
   const nights = differenceInCalendarDays(parseISO(checkOutDate), parseISO(checkInDate));
   if (nights <= 0) return;
 
-  const [addonPriceMap, stayRates] = await Promise.all([
+  void roomRateType;
+  void roomType;
+
+  const [addonPriceMap, nightLineItems] = await Promise.all([
     resolveAddonPricesForKeys(addons.map((a) => a.key)),
-    resolveBoardingStayRates(roomId ?? "", petCount, checkInDate, checkOutDate),
+    buildBoardingNightLineItems({
+      roomId,
+      roomName,
+      petCount,
+      checkInDate,
+      checkOutDate,
+    }),
   ]);
 
-  void roomRateType;
-
-  void petCount;
-  void roomType;
-  const roomPrefix = roomName ? `${roomName} — ` : "";
-  const boardingLabel = roomPrefix ? `${roomPrefix}Boarding` : "Boarding";
-
-  const lineItems: ServiceInvoiceLineItem[] = [];
-
-  const pushNightGroup = (
-    groupNights: typeof stayRates.nights,
-    season: "peak" | "off_peak",
-  ) => {
-    if (groupNights.length === 0) return;
-    const unitPrice = groupNights[0].unitPrice;
-    const seasonLabel = boardingRateSeasonLabel(season);
-    lineItems.push({
-      description: `${boardingLabel} — ${groupNights.length} ${seasonLabel.toLowerCase()} night${groupNights.length !== 1 ? "s" : ""}`,
-      quantity: groupNights.length,
-      unitPrice,
-      pricingKey: groupNights[0].pricingKey,
-      serviceType: "boarding",
-    });
-  };
-
-  const peakGroup = stayRates.nights.filter((n) => n.isPeak);
-  const offPeakGroup = stayRates.nights.filter((n) => !n.isPeak);
-  pushNightGroup(peakGroup, "peak");
-  pushNightGroup(offPeakGroup, "off_peak");
+  const lineItems: ServiceInvoiceLineItem[] = [...nightLineItems];
 
   if (lineItems.length === 0) {
+    const fallbackPrefix = roomName ? `${roomName} — ` : "";
+    const fallbackLabel = fallbackPrefix ? `${fallbackPrefix}Boarding` : "Boarding";
     lineItems.push({
-      description: `${boardingLabel} — ${nights} night${nights !== 1 ? "s" : ""}`,
+      description: `${fallbackLabel} — ${nights} night${nights !== 1 ? "s" : ""}`,
       quantity: nights,
       unitPrice: 0,
       pricingKey: "boarding_night",

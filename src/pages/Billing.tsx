@@ -30,6 +30,8 @@ import {
   type ServiceType,
 } from "@/hooks/useBilling";
 import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -419,13 +421,18 @@ function InvoiceDetailDialog({
   open,
   invoice,
   ownerName,
+  ownerId,
   onClose,
+  onInvoiceUpdated,
 }: {
   open: boolean;
   invoice: InvoiceWithItems | null;
   ownerName: string;
+  ownerId?: string;
   onClose: () => void;
+  onInvoiceUpdated?: () => void;
 }) {
+  const [addLineOpen, setAddLineOpen] = useState(false);
   const handlePrint = useCallback(() => {
     if (!invoice) return;
     window.open(
@@ -447,6 +454,7 @@ function InvoiceDetailDialog({
   const lineItems = invoice.line_items ?? [];
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
@@ -558,7 +566,13 @@ function InvoiceDetailDialog({
           )}
         </div>
 
-        <DialogFooter className="gap-2 pt-4">
+        <DialogFooter className="gap-2 pt-4 flex-wrap">
+          {ownerId && invoice && canEditInvoiceLineItems(invoice.status) && (
+            <Button variant="secondary" onClick={() => setAddLineOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add line item
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button onClick={handlePrint}>
             <Printer className="mr-2 h-4 w-4" /> Print receipt
@@ -566,6 +580,18 @@ function InvoiceDetailDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {ownerId && invoice && (
+      <AddInvoiceLineItemDialog
+        open={addLineOpen}
+        onOpenChange={setAddLineOpen}
+        invoiceId={invoice.id}
+        ownerId={ownerId}
+        serviceType={invoice.service_type}
+        invoiceLabel={invoice.invoice_number ?? undefined}
+        onAdded={onInvoiceUpdated}
+      />
+    )}
+    </>
   );
 }
 
@@ -834,7 +860,7 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
   const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
 
   const filters = statusFilter !== "all" ? { status: statusFilter as InvoiceStatus } : undefined;
-  const { data: invoices = [], isLoading } = useInvoicesForOwner(ownerId, filters);
+  const { data: invoices = [], isLoading, refetch: refetchInvoices } = useInvoicesForOwner(ownerId, filters);
 
   const statement = useOwnerStatement(ownerId);
 
@@ -988,7 +1014,20 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
 
       <PaymentDialog open={!!payInvoice} invoice={payInvoice} onClose={() => setPayInvoice(null)} />
       <VoidDialog open={!!voidInvoice} invoice={voidInvoice} ownerId={ownerId} onClose={() => setVoidInvoice(null)} />
-      <InvoiceDetailDialog open={!!viewInvoice} invoice={viewInvoice} ownerName={ownerName} onClose={() => setViewInvoice(null)} />
+      <InvoiceDetailDialog
+        open={!!viewInvoice}
+        invoice={viewInvoice}
+        ownerName={ownerName}
+        ownerId={ownerId}
+        onClose={() => setViewInvoice(null)}
+        onInvoiceUpdated={() => {
+          void refetchInvoices().then(({ data }) => {
+            if (!viewInvoice) return;
+            const fresh = data?.find((i) => i.id === viewInvoice.id);
+            if (fresh) setViewInvoice(fresh);
+          });
+        }}
+      />
     </>
   );
 }

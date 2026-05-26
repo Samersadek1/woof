@@ -31,6 +31,9 @@ import {
   type BookingRoomAssignmentSlice,
 } from "@/lib/bookingRoomDisplay";
 import { BoardingRoomCalendarRow } from "@/components/boarding/BoardingRoomCalendarRow";
+import { BoardingBookingSearch } from "@/components/boarding/BoardingBookingSearch";
+import { boardingBookingMatchesSearch } from "@/lib/boardingBookingSearch";
+import type { BoardingBookingSearchHit } from "@/hooks/useBookings";
 import {
   calendarSegmentsForRoom,
   unassignedCalendarRowLabel,
@@ -1012,6 +1015,7 @@ export type DogBoardingCalendarProps = {
   onWindowStartChange: React.Dispatch<React.SetStateAction<Date>>;
   /** Hub renders the shared week toolbar */
   suppressToolbar?: boolean;
+  bookingSearchQuery?: string;
 };
 
 function AssignRealRoomPanel({
@@ -1090,6 +1094,7 @@ export function DogBoardingCalendar({
   windowStart,
   onWindowStartChange,
   suppressToolbar,
+  bookingSearchQuery = "",
 }: DogBoardingCalendarProps) {
   const navigate = useNavigate();
   const today = new Date();
@@ -1616,7 +1621,16 @@ export function DogBoardingCalendar({
         setDetailContext({ asOfDate });
       }}
       statusClassFor={(status) => STATUS_CLASSES[status]}
+      bookingSearchQuery={bookingSearchQuery}
     />
+  );
+
+  const visibleUnassignedBookings = useMemo(
+    () =>
+      sortedUnassignedBookings.filter((b) =>
+        boardingBookingMatchesSearch(b, bookingSearchQuery),
+      ),
+    [sortedUnassignedBookings, bookingSearchQuery],
   );
 
   const renderRoomRow = (roomId: string, isPlaceholder = false) =>
@@ -1761,7 +1775,7 @@ export function DogBoardingCalendar({
                     Unassigned
                   </div>
                 </div>
-                {sortedUnassignedBookings.length === 0 ? (
+                {visibleUnassignedBookings.length === 0 ? (
                   <div className="flex">
                     <div
                       style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
@@ -1772,7 +1786,7 @@ export function DogBoardingCalendar({
                     {renderCalendarCells([])}
                   </div>
                 ) : (
-                  sortedUnassignedBookings.map((booking) => (
+                  visibleUnassignedBookings.map((booking) => (
                     <div key={booking.id} className="flex">
                       <div
                         style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
@@ -3031,6 +3045,13 @@ function BoardingHubPage() {
 
   const [occupancyOpen, setOccupancyOpen] = useState(false);
   const [occupancyDate, setOccupancyDate] = useState(todayStr);
+  const [bookingSearch, setBookingSearch] = useState("");
+
+  const handleBookingSearchSelect = (hit: BoardingBookingSearchHit) => {
+    setBookingSearch(hit.booking_ref ?? hit.id);
+    setWindowStart(startOfWeek(parseISO(hit.check_in_date), { weekStartsOn: 1 }));
+    setViewMode("calendar");
+  };
 
   const { data: facilityRooms = [] } = useRooms();
 
@@ -3317,6 +3338,11 @@ function BoardingHubPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <BoardingBookingSearch
+            value={bookingSearch}
+            onChange={setBookingSearch}
+            onSelect={handleBookingSearchSelect}
+          />
           <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
             <button
               type="button"
@@ -3371,6 +3397,7 @@ function BoardingHubPage() {
             windowStart={windowStart}
             onWindowStartChange={setWindowStart}
             suppressToolbar
+            bookingSearchQuery={bookingSearch}
           />
         ) : viewMode === "shuffle" ? (
           <DayShufflePanel initialDate={normalizedDate ?? todayStr} />

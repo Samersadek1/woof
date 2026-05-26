@@ -113,6 +113,129 @@ export function useBookings(startDate: string, endDate: string) {
   });
 }
 
+const BOARDING_SEARCH_SELECT =
+  "id, booking_ref, owner_id, check_in_date, check_out_date, status, owners(first_name, last_name), booking_pets(pets(name))";
+
+export type BoardingBookingSearchHit = {
+  id: string;
+  booking_ref: string | null;
+  check_in_date: string;
+  check_out_date: string;
+  status: string;
+  owners: { first_name: string; last_name: string } | null;
+  booking_pets: { pets: { name: string } | null }[];
+};
+
+/** Search boarding stays by ref, owner name/phone, or pet name (for hub calendar/list). */
+export function useBoardingBookingSearch(searchTerm: string) {
+  const q = searchTerm.trim();
+  return useQuery({
+    queryKey: ["bookings", "boardingSearch", q] as const,
+    enabled: q.length >= 2,
+    queryFn: async () => {
+      const pat = `%${q}%`;
+      const orOwners = `first_name.ilike.${pat},last_name.ilike.${pat},phone.ilike.${pat}`;
+      const merged: BoardingBookingSearchHit[] = [];
+      const seen = new Set<string>();
+
+      const pushRows = (rows: BoardingBookingSearchHit[] | null | undefined) => {
+        for (const row of rows ?? []) {
+          if (seen.has(row.id)) continue;
+          seen.add(row.id);
+          merged.push(row);
+        }
+      };
+
+      const { data: byRef, error: e1 } = await supabase
+        .from("bookings")
+        .select(BOARDING_SEARCH_SELECT)
+        .eq("booking_type", "boarding")
+        .ilike("booking_ref", pat)
+        .neq("status", "cancelled")
+        .order("check_in_date", { ascending: false })
+        .limit(12);
+
+      if (e1) throw e1;
+      pushRows((byRef ?? []) as BoardingBookingSearchHit[]);
+
+      const { data: ownerRows, error: e2 } = await supabase
+        .from("owners")
+        .select("id")
+        .or(orOwners)
+        .limit(12);
+
+      if (e2) throw e2;
+
+      const ownerIds = ownerRows?.map((o) => o.id) ?? [];
+      if (ownerIds.length) {
+        const { data: byOwner, error: e3 } = await supabase
+          .from("bookings")
+          .select(BOARDING_SEARCH_SELECT)
+          .eq("booking_type", "boarding")
+          .in("owner_id", ownerIds)
+          .neq("status", "cancelled")
+          .order("check_in_date", { ascending: false })
+          .limit(12);
+
+        if (e3) throw e3;
+        pushRows((byOwner ?? []) as BoardingBookingSearchHit[]);
+      }
+
+      const { data: petRows, error: e4 } = await supabase
+        .from("pets")
+        .select("id")
+        .ilike("name", pat)
+        .limit(20);
+
+      if (e4) throw e4;
+
+      const petIds = petRows?.map((p) => p.id) ?? [];
+      if (petIds.length) {
+        const { data: bpRows, error: e5 } = await supabase
+          .from("booking_pets")
+          .select("booking_id")
+          .in("pet_id", petIds);
+
+        if (e5) throw e5;
+
+        const bookingIds = [...new Set((bpRows ?? []).map((r) => r.booking_id))];
+        if (bookingIds.length) {
+          const { data: byPet, error: e6 } = await supabase
+            .from("bookings")
+            .select(BOARDING_SEARCH_SELECT)
+            .eq("booking_type", "boarding")
+            .in("id", bookingIds)
+            .neq("status", "cancelled")
+            .order("check_in_date", { ascending: false })
+            .limit(12);
+
+          if (e6) throw e6;
+          pushRows((byPet ?? []) as BoardingBookingSearchHit[]);
+        }
+      }
+
+      merged.sort((a, b) => b.check_in_date.localeCompare(a.check_in_date));
+      return merged.slice(0, 12);
+    },
+  });
+}
+
+export function useBookingById(bookingId: string | null) {
+  return useQuery({
+    queryKey: ["bookings", "byId", bookingId] as const,
+    enabled: !!bookingId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select(BOOKING_DETAIL_SELECT)
+        .eq("id", bookingId!)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as BookingWithDetails | null;
+    },
+  });
+}
+
 /** Past and upcoming stays for a customer profile (includes cancelled). */
 export function useOwnerBookings(ownerId: string) {
   return useQuery({
