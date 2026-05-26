@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { extractErrorMessage } from "@/lib/bookingAvailabilityErrors";
@@ -128,7 +129,7 @@ export type BoardingBookingSearchHit = {
 
 /** Search boarding stays by ref, owner name/phone, or pet name (for hub calendar/list). */
 export function useBoardingBookingSearch(searchTerm: string) {
-  const q = searchTerm.trim();
+  const q = useDebounce(searchTerm.trim(), 300);
   return useQuery({
     queryKey: ["bookings", "boardingSearch", q] as const,
     enabled: q.length >= 2,

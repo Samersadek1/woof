@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { memo, useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -48,6 +48,7 @@ import {
   printBoardingRoomCalendarDay,
 } from "@/lib/boardingCalendarPrint";
 import { useOwners, useOwner } from "@/hooks/useOwners";
+import { useDebounce } from "@/hooks/useDebounce";
 import { usePets } from "@/hooks/usePets";
 import {
   PET_CARE_NOTES_SELECT,
@@ -1091,7 +1092,7 @@ function AssignRealRoomPanel({
 }
 
 // ─── dog boarding calendar (no TopBar — used inside Boarding hub) ─────────────
-export function DogBoardingCalendar({
+export const DogBoardingCalendar = memo(function DogBoardingCalendar({
   windowStart,
   onWindowStartChange,
   suppressToolbar,
@@ -1141,8 +1142,11 @@ export function DogBoardingCalendar({
 
   // owner search
   const [ownerSearch, setOwnerSearch] = useState("");
-  const [ownerPopOpen, setOwnerPopOpen] = useState(false);
-  const { data: ownerResults = [] } = useOwners(ownerSearch.trim().length >= 2 ? ownerSearch : undefined);
+  const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
+  const debouncedOwnerSearch = useDebounce(ownerSearch, 300);
+  const { data: ownerResults = [] } = useOwners(
+    debouncedOwnerSearch.trim().length >= 2 ? debouncedOwnerSearch : undefined,
+  );
 
   // pets for selected owner (dog boarding: exclude cats)
   const { data: ownerPets = [] } = usePets(form.owner_id);
@@ -1391,6 +1395,7 @@ export function DogBoardingCalendar({
       check_out_date: date ? toDateStr(addDays(parseISO(date), 1)) : "",
     });
     setOwnerSearch("");
+    setOwnerDropdownOpen(false);
     setNewBookingOpen(true);
   };
 
@@ -1884,44 +1889,55 @@ export function DogBoardingCalendar({
             {/* Owner search */}
             <div className="space-y-2">
               <Label>Owner <span className="text-destructive">*</span></Label>
-              <div className="flex flex-wrap items-center gap-2">
-                <Popover open={ownerPopOpen} onOpenChange={setOwnerPopOpen}>
-                  <PopoverTrigger asChild>
-                    <div className="relative">
-                      <Input
-                        data-testid="boarding-owner-search"
-                        placeholder="Search by name or phone…"
-                        value={ownerSearch}
-                        onChange={(e) => {
-                          setOwnerSearch(e.target.value);
-                          setOwnerPopOpen(true);
-                        }}
-                        onFocus={() => ownerSearch.length >= 2 && setOwnerPopOpen(true)}
-                      />
-                    </div>
-                  </PopoverTrigger>
-                  {ownerResults.length > 0 && (
-                    <PopoverContent align="start" className="p-1 w-80 z-[120] pointer-events-auto">
-                      {ownerResults.map((o) => (
-                        <button
-                          key={o.id}
-                          data-testid={`boarding-owner-option-${o.id}`}
-                          type="button"
-                          className="w-full text-left px-3 py-2 rounded text-sm hover:bg-accent"
-                          onClick={() => {
-                            setForm((f) => ({ ...f, owner_id: o.id }));
-                            setOwnerSearch(`${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`);
-                            setOwnerPopOpen(false);
-                          }}
-                        >
-                          <span className="font-medium">{ownerDisplayName(o.first_name, o.last_name)}</span>
-                          <span className="ml-2 text-muted-foreground">{o.phone}</span>
-                        </button>
-                      ))}
-                    </PopoverContent>
-                  )}
-                </Popover>
-                {dogBoardingOwnerProfile && dogBoardingOwnerProfile.id === form.owner_id ? null : null}
+              <div className="relative w-full max-w-md">
+                <Input
+                  data-testid="boarding-owner-search"
+                  placeholder="Search by name or phone…"
+                  value={ownerSearch}
+                  onChange={(e) => {
+                    setOwnerSearch(e.target.value);
+                    setOwnerDropdownOpen(true);
+                  }}
+                  onFocus={() => ownerSearch.trim().length >= 2 && setOwnerDropdownOpen(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setOwnerDropdownOpen(false), 150);
+                  }}
+                  aria-expanded={ownerDropdownOpen && ownerSearch.trim().length >= 2}
+                  aria-autocomplete="list"
+                />
+                {ownerDropdownOpen && ownerSearch.trim().length >= 2 ? (
+                  <ul
+                    className="absolute left-0 right-0 top-full z-[120] mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 text-sm shadow-md"
+                    role="listbox"
+                  >
+                    {ownerResults.length === 0 ? (
+                      <li className="px-3 py-2 text-muted-foreground">No owners found.</li>
+                    ) : (
+                      ownerResults.map((o) => (
+                        <li key={o.id} role="option">
+                          <button
+                            data-testid={`boarding-owner-option-${o.id}`}
+                            type="button"
+                            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setForm((f) => ({ ...f, owner_id: o.id }));
+                              setOwnerSearch(
+                                `${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`,
+                              );
+                              setOwnerDropdownOpen(false);
+                            }}
+                          >
+                            <span className="font-medium">
+                              {ownerDisplayName(o.first_name, o.last_name)}
+                            </span>
+                            <span className="ml-2 text-muted-foreground">{o.phone}</span>
+                          </button>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                ) : null}
               </div>
             </div>
 
@@ -2897,7 +2913,7 @@ export function DogBoardingCalendar({
       )}
     </>
   );
-}
+});
 
 // ─── hub page ────────────────────────────────────────────────────────────────
 
@@ -3073,6 +3089,7 @@ function BoardingHubPage() {
   const [occupancyOpen, setOccupancyOpen] = useState(false);
   const [occupancyDate, setOccupancyDate] = useState(todayStr);
   const [bookingSearch, setBookingSearch] = useState("");
+  const bookingSearchFilter = useDebounce(bookingSearch, 300);
 
   const handleBookingSearchSelect = (hit: BoardingBookingSearchHit) => {
     setBookingSearch(hit.booking_ref ?? hit.id);
@@ -3424,7 +3441,7 @@ function BoardingHubPage() {
             windowStart={windowStart}
             onWindowStartChange={setWindowStart}
             suppressToolbar
-            bookingSearchQuery={bookingSearch}
+            bookingSearchQuery={bookingSearchFilter}
           />
         ) : viewMode === "shuffle" ? (
           <DayShufflePanel initialDate={normalizedDate ?? todayStr} />
