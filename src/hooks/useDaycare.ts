@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
+import { ownerMemberTierFromFlags, type OwnerMemberTier } from "@/lib/memberTier";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
 type DaycareSessionInsert = Database["public"]["Tables"]["daycare_sessions"]["Insert"];
@@ -428,7 +429,13 @@ export function useSessionsByPackage(packageId: string) {
 
 export type PackageWithDetails = DaycarePackage & {
   pets:   { name: string } | null;
-  owners: { first_name: string; last_name: string; member_type: string } | null;
+  owners: {
+    first_name: string;
+    last_name: string | null;
+    is_elite: boolean | null;
+    is_vip: boolean;
+    member_tier: OwnerMemberTier;
+  } | null;
 };
 
 export function useAllDaycarePackages() {
@@ -438,7 +445,7 @@ export function useAllDaycarePackages() {
       const { data, error } = await supabase
         .from("service_credits")
         .select(
-          "*, pets!inner(name, owner_id, owners(first_name, last_name, member_type)), purchase_groups(package_definitions(display_name))",
+          "*, pets!inner(name, owner_id, owners(first_name, last_name, is_elite, is_vip)), purchase_groups(package_definitions(display_name))",
         )
         .in("service_code", DAYCARE_CREDIT_CODES)
         .order("created_at", { ascending: false });
@@ -447,10 +454,16 @@ export function useAllDaycarePackages() {
         type PetJoin = {
           name: string;
           owner_id: string;
-          owners: { first_name: string; last_name: string | null; member_type: string } | null;
+          owners: {
+            first_name: string;
+            last_name: string | null;
+            is_elite: boolean | null;
+            is_vip: boolean;
+          } | null;
         };
         const pet = (row as unknown as { pets: PetJoin | null }).pets;
         const ownerId = pet?.owner_id ?? "";
+        const ownerJoin = pet?.owners;
         const pkgName = (
           row as unknown as {
             purchase_groups?: { package_definitions?: { display_name?: string | null } | null } | null;
@@ -471,7 +484,15 @@ export function useAllDaycarePackages() {
           source_ref_id: row.source_ref_id,
           redemption_group_id: row.redemption_group_id,
           pets: { name: pet?.name ?? "Pet" },
-          owners: pet?.owners ?? null,
+          owners: ownerJoin
+            ? {
+                first_name: ownerJoin.first_name,
+                last_name: ownerJoin.last_name,
+                is_elite: ownerJoin.is_elite,
+                is_vip: ownerJoin.is_vip,
+                member_tier: ownerMemberTierFromFlags(ownerJoin),
+              }
+            : null,
         };
       });
       return mapped as unknown as PackageWithDetails[];

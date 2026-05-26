@@ -60,7 +60,7 @@ function creditBarColour(remaining: number) {
 
 function packageMatchesTier(pkg: PackageWithDetails, tier: TierFilter): boolean {
   if (tier === "all") return true;
-  const memberType = (pkg.owners?.member_type ?? "standard").toLowerCase();
+  const memberType = pkg.owners?.member_tier ?? "standard";
   return memberType === tier;
 }
 
@@ -80,7 +80,7 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
   const remaining = pkg.total_days - pkg.days_used;
   const pct = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
   const isExhausted = remaining <= 0;
-  const memberType = (pkg.owners?.member_type ?? "standard").toLowerCase();
+  const memberType = pkg.owners?.member_tier ?? "standard";
 
   const openInPlanner = () => {
     setSearchParams(
@@ -161,7 +161,7 @@ export function DaycarePackagesTab() {
   const [sellOwnerId, setSellOwnerId] = useState<string | undefined>();
   const { data: sellOwner } = useOwner(sellOwnerId ?? "");
 
-  const { data: packages, isLoading } = useAllDaycarePackages();
+  const { data: packages, isLoading, isError, error, refetch } = useAllDaycarePackages();
 
   const sellOwnerLabel =
     sellOwner && sellOwnerId === sellOwner.id
@@ -227,7 +227,17 @@ export function DaycarePackagesTab() {
         </Button>
       </div>
 
-      {isLoading ? (
+      {isError ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-6 text-sm text-destructive">
+          <p className="font-medium">Could not load packages</p>
+          <p className="mt-1 text-destructive/90">
+            {error instanceof Error ? error.message : "Unknown error"}
+          </p>
+          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-40 w-full" />

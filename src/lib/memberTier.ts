@@ -1,5 +1,17 @@
 /** Member tier helpers for Silver / Gold / Platinum pricing UX (matches apply_member_discount policy). */
 
+export type OwnerMemberTier = "standard" | "silver" | "gold" | "platinum";
+
+/** Map live owner flags to tier labels (member_type column was removed from owners). */
+export function ownerMemberTierFromFlags(owner: {
+  is_elite?: boolean | null;
+  is_vip?: boolean | null;
+}): OwnerMemberTier {
+  if (owner.is_elite) return "gold";
+  if (owner.is_vip) return "silver";
+  return "standard";
+}
+
 export function memberTierDiscountPct(memberType: string | null | undefined): number {
   switch (memberType) {
     case "silver":
