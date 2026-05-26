@@ -1344,7 +1344,7 @@ function PricingTab() {
                     <Input
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="0.001"
                       className="w-[140px] ml-auto text-right h-8 text-sm"
                       defaultValue={row.amount_aed}
                       onBlur={(e) => saveCanonicalKey(row.key, e.target.value, { label: row.label, category: row.category })}
@@ -1422,7 +1422,7 @@ function PricingTab() {
                 id="pricing-add-price"
                 type="number"
                 min="0"
-                step="0.01"
+                step="0.001"
                 value={addForm.amount_aed}
                 onChange={(e) => setAddForm((f) => ({ ...f, amount_aed: e.target.value }))}
               />
@@ -1496,7 +1496,7 @@ function PricingTab() {
                         <Input
                           type="number"
                           min="0"
-                          step="0.01"
+                          step="0.001"
                           className="w-[120px] ml-auto text-right h-8 text-sm"
                           defaultValue={live?.amount_aed ?? row.defaultPct}
                           onBlur={(e) => saveCanonicalKey(row.key, e.target.value, {
@@ -1550,7 +1550,7 @@ function PricingTab() {
                       <Input
                         type="number"
                         min="0"
-                        step="0.01"
+                        step="0.001"
                         className="w-[140px] ml-auto text-right h-8 text-sm"
                         defaultValue={row.amount_aed}
                         onBlur={(e) => saveCanonicalKey(row.key, e.target.value, {
@@ -1595,7 +1595,7 @@ function PricingTab() {
                       const live = key ? canonicalByKey.get(key) : null;
                       return (
                     <Input
-                      type="number" min="0" step="0.01"
+                      type="number" min="0" step="0.001"
                       className="w-[120px] ml-auto text-right h-8 text-sm"
                       defaultValue={live?.amount_aed ?? r.price_aed}
                       onBlur={(e) => {
@@ -1653,7 +1653,7 @@ function PricingTab() {
                       <Input
                         type="number"
                         min="0"
-                        step="0.01"
+                        step="0.001"
                         className="w-[140px] ml-auto text-right h-8 text-sm"
                         defaultValue={row.amount_aed}
                         onBlur={(e) => saveCanonicalKey(row.key, e.target.value, {

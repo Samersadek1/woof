@@ -362,7 +362,7 @@ export default function CreateInvoicePage() {
                     <Input
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="0.001"
                       value={line.unitPrice}
                       onChange={(e) => patchLine(line.id, { unitPrice: Number(e.target.value) || 0 })}
                       onBlur={() => resolveLine(line)}

@@ -135,7 +135,7 @@ export default function GroomingPricingGrid() {
                         <Input
                           type="number"
                           min="0"
-                          step="0.01"
+                          step="0.001"
                           className="w-[120px] h-8 text-right"
                           value={value}
                           onChange={(e) =>

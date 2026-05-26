@@ -24,6 +24,7 @@ import { MessageCircle, Trash2 } from "lucide-react";
 import { buildOverdueInvoiceWhatsAppUrl } from "@/lib/whatsappInvoiceReminder";
 import type { InvoiceSummary } from "@/hooks/useInvoices";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
+import { formatAed } from "@/lib/money";
 
 type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
 
@@ -60,13 +61,6 @@ const STATUS_BADGE: Record<string, string> = {
   paid: "border-emerald-300 text-emerald-700 bg-emerald-50",
   voided: "border-slate-300 text-slate-500 bg-slate-100 line-through",
 };
-
-function formatAed(v: number) {
-  return `AED ${v.toLocaleString("en-AE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
 
 function renderBranchCode(branchCode: string | null) {
   if (!branchCode) return <span className="text-muted-foreground">—</span>;

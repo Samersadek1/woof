@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,13 +7,15 @@ import { useOwners } from "@/hooks/useOwners";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 
 type OwnerSearchPopoverProps = {
-  label?: string;
+  label?: ReactNode;
   placeholder?: string;
   ownerId: string | undefined;
   ownerLabel: string;
   onSelect: (id: string, label: string) => void;
   onClear: () => void;
   inputTestId?: string;
+  /** e.g. `boarding-owner-option` → `boarding-owner-option-<uuid>` on each row */
+  optionTestIdPrefix?: string;
 };
 
 export function OwnerSearchPopover({
@@ -24,6 +26,7 @@ export function OwnerSearchPopover({
   onSelect,
   onClear,
   inputTestId,
+  optionTestIdPrefix,
 }: OwnerSearchPopoverProps) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -68,6 +71,7 @@ export function OwnerSearchPopover({
                 <li key={o.id}>
                   <button
                     type="button"
+                    data-testid={optionTestIdPrefix ? `${optionTestIdPrefix}-${o.id}` : undefined}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-muted"
                     onMouseDown={(e) => {
                       e.preventDefault();

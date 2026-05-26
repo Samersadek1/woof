@@ -198,5 +198,5 @@ export function computeNewGroomingAppointmentOriginalAed(
     if (typeof add === "number") addonSum += add;
   }
 
-  return Number((base + addonSum).toFixed(2));
+  return Number((base + addonSum).toFixed(3));
 }

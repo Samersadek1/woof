@@ -545,7 +545,7 @@ export function sumGroomingInvoicePaidAed(rows: readonly GroomingDayInvoiceRow[]
   for (const r of rows) {
     if (r.status === "paid") s += invoiceAmountAed(r);
   }
-  return Number(s.toFixed(2));
+  return Number(s.toFixed(3));
 }
 
 export function sumGroomingInvoicePendingAed(rows: readonly GroomingDayInvoiceRow[]): number {
@@ -555,7 +555,7 @@ export function sumGroomingInvoicePendingAed(rows: readonly GroomingDayInvoiceRo
       s += invoiceAmountAed(r);
     }
   }
-  return Number(s.toFixed(2));
+  return Number(s.toFixed(3));
 }
 
 function apptTimeSortKey(t: string | null): string {

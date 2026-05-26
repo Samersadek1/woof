@@ -145,9 +145,7 @@ export interface CancellationRefund {
 
 // ── Formatting helper ────────────────────────────────────────────────────────
 
-export function formatAed(amount: number): string {
-  return `AED ${amount.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+export { formatAed, roundAed, AED_DECIMAL_DIGITS } from "@/lib/money";
 
 function deriveBranchCodeFromInvoiceNumber(invoiceNumber: string | null): string | null {
   const normalized = invoiceNumber?.trim();
