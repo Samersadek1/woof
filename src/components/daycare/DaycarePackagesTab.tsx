@@ -4,6 +4,7 @@ import { format, parseISO } from "date-fns";
 import { AlertTriangle, Download, Loader2, Package, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { exportDaycarePackagesToExcel } from "@/lib/daycarePackagesExport";
+import { serviceGrantLabel } from "@/lib/packageCatalog";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import {
   useAllDaycarePackages,
@@ -111,7 +112,9 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
             </p>
             {pkg.package_name ? (
               <p className="text-xs text-muted-foreground truncate">{pkg.package_name}</p>
-            ) : null}
+            ) : (
+              <p className="text-xs text-muted-foreground truncate">{serviceGrantLabel(pkg.service_code)}</p>
+            )}
             <div className="flex items-center gap-1.5 flex-wrap pt-1">
               <Badge variant="outline" className={MEMBER_BADGE[memberType] ?? MEMBER_BADGE.standard}>
                 {memberType.charAt(0).toUpperCase() + memberType.slice(1)}
@@ -281,7 +284,7 @@ export function DaycarePackagesTab() {
       <Dialog open={sellOpen} onOpenChange={setSellOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Sell daycare package</DialogTitle>
+            <DialogTitle>Sell package</DialogTitle>
           </DialogHeader>
           <OwnerSearchPopover
             label="Client"

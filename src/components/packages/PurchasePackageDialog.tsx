@@ -11,6 +11,16 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import { PET_SIZE_COLUMNS, formatPackageIncludes } from "@/lib/packageCatalog";
+import { useGroomingPackageCatalog } from "@/hooks/useGroomingPackages";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type PaymentMethod = Database["public"]["Enums"]["payment_method"];
 type Pet = Pick<Database["public"]["Tables"]["pets"]["Row"], "id" | "name" | "size" | "coat_type" | "species" | "active">;
@@ -18,6 +28,7 @@ type PackageDef = Database["public"]["Tables"]["package_definitions"]["Row"];
 type PackagePricing = Database["public"]["Tables"]["package_pricing"]["Row"];
 
 type PurchaseResult = Database["public"]["Functions"]["purchase_package"]["Returns"][number];
+type PackageCreditGrant = Database["public"]["Tables"]["package_credit_grants"]["Row"];
 
 const CATEGORY_LABELS: Record<string, string> = {
   daycare: "Daycare",
@@ -79,6 +90,18 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
     enabled: isOpen,
   });
 
+  const { data: packageCreditGrants = [] } = useQuery({
+    queryKey: ["package_credit_grants"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("package_credit_grants").select("*");
+      if (error) throw error;
+      return (data ?? []) as PackageCreditGrant[];
+    },
+    enabled: isOpen,
+  });
+
+  const { data: groomingCatalog = [] } = useGroomingPackageCatalog(isOpen);
+
   const { data: pets = [], isLoading: petsLoading } = useQuery({
     queryKey: ["pets", ownerId, "active"],
     queryFn: async () => {
@@ -98,6 +121,17 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
     () => packageDefs.find((pkg) => pkg.code === selectedPackageCode) ?? null,
     [packageDefs, selectedPackageCode],
   );
+
+  const selectedGroomingCatalog = useMemo(
+    () => groomingCatalog.find((pkg) => pkg.code === selectedPackageCode) ?? null,
+    [groomingCatalog, selectedPackageCode],
+  );
+
+  const selectedPackageIncludes = useMemo(() => {
+    if (!selectedPackage) return "";
+    const grants = packageCreditGrants.filter((grant) => grant.package_def_id === selectedPackage.id);
+    return formatPackageIncludes(grants);
+  }, [packageCreditGrants, selectedPackage]);
 
   const packagePrices = useMemo(() => {
     if (!selectedPackage) return [];
@@ -211,7 +245,12 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
                           >
                             <p className="font-medium">{pkg.display_name}</p>
                             <p className="text-xs text-muted-foreground">{pkg.description ?? "No description"}</p>
-                            <div className="mt-2 flex items-center gap-2">
+                            {pkg.category === "grooming" ? (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {groomingCatalog.find((row) => row.id === pkg.id)?.includes ?? "Size-tier pricing applies"}
+                              </p>
+                            ) : null}
+                            <div className="mt-2 flex items-center gap-2 flex-wrap">
                               <Badge variant="outline">{pkg.validity_months} month{pkg.validity_months === 1 ? "" : "s"}</Badge>
                               {minPrice !== null ? <Badge variant="secondary">from AED {minPrice.toFixed(2)}</Badge> : null}
                             </div>
@@ -225,7 +264,47 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
             )}
           </section>
 
-          <Separator />
+          {selectedPackage?.category === "grooming" && selectedGroomingCatalog ? (
+            <>
+              <section className="space-y-2">
+                <h4 className="text-sm font-semibold">Grooming package rates</h4>
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead>Package</TableHead>
+                        {PET_SIZE_COLUMNS.map((col) => (
+                          <TableHead key={col.size} className="text-right">
+                            {col.label}
+                          </TableHead>
+                        ))}
+                        <TableHead className="text-center">Validity</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="text-sm font-medium">{selectedGroomingCatalog.display_name}</TableCell>
+                        {PET_SIZE_COLUMNS.map((col) => (
+                          <TableCell key={col.size} className="text-right text-sm tabular-nums">
+                            {selectedGroomingCatalog.prices[col.size]
+                              ? `AED ${selectedGroomingCatalog.prices[col.size]!.amount_aed.toFixed(2)}`
+                              : "—"}
+                          </TableCell>
+                        ))}
+                        <TableCell className="text-center">
+                          <Badge variant="outline">{selectedGroomingCatalog.validity_months}m</Badge>
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+                {selectedPackageIncludes ? (
+                  <p className="text-xs text-muted-foreground">Includes: {selectedPackageIncludes}</p>
+                ) : null}
+              </section>
+              <Separator />
+            </>
+          ) : null}
 
           <section className="space-y-2">
             <h4 className="text-sm font-semibold">2) Select pet(s)</h4>

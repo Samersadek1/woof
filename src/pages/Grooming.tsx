@@ -88,15 +88,19 @@ import { DogSizeField } from "@/components/DogSizeField";
 import { parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
 import type { DogSizeFormValue } from "@/lib/dogSizeForm";
 import {
-  computeNewGroomingAppointmentOriginalAed,
+  largestDogSizeFormValue,
+  petSizeToDogSizeFormValue,
+} from "@/lib/dogSizeForm";
+import {
   clampMattingFeeAed,
   clampHeavyDogFeeAed,
-  MATTING_FEE_AED_MIN,
-  HEAVY_DOG_FEE_AED_MIN,
   groomingPricingCheckboxToDbService,
   isGroomingPricingCheckbox,
   resolvePrimaryGroomingCheckbox,
 } from "@/lib/groomingNewAppointmentPricing";
+import { useGroomingManualFeeBounds } from "@/hooks/useGroomingManualFeeBounds";
+import { useNewGroomingAppointmentPrice } from "@/hooks/useNewGroomingAppointmentPrice";
+import { fetchCheckboxBasePriceAed } from "@/lib/groomingNewAppointmentRates";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -195,18 +199,8 @@ const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
   { value: "pawdicure", label: "Pawdicure", mapsTo: "pawdicure" },
   { value: "paw_wash", label: "Paw wash", mapsTo: "pawdicure" },
   { value: "malaseb_bath", label: "Malaseb bath", mapsTo: "full_bath" },
-  {
-    value: "matting_fee",
-    label: "Matting fee",
-    mapsTo: "brushing",
-    manualPriceRange: { min: 63, max: 126, default: 63 },
-  },
-  {
-    value: "heavy_dog_fee",
-    label: "Heavy dog fee",
-    mapsTo: "brushing",
-    manualPriceRange: { min: 47, max: 126, default: 47 },
-  },
+  { value: "matting_fee", label: "Matting fee", mapsTo: "brushing" },
+  { value: "heavy_dog_fee", label: "Heavy dog fee", mapsTo: "brushing" },
 ];
 
 function parseGroomingMeta(
@@ -775,9 +769,19 @@ const GroomingPage = () => {
   const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
   ]);
-  const [mattingFeeAed, setMattingFeeAed] = useState(String(MATTING_FEE_AED_MIN));
-  const [heavyDogFeeAed, setHeavyDogFeeAed] = useState(String(HEAVY_DOG_FEE_AED_MIN));
+  const { data: manualFeeBounds } = useGroomingManualFeeBounds(sheetOpen);
+  const mattingDefault =
+    manualFeeBounds && manualFeeBounds.mattingMin > 0
+      ? String(manualFeeBounds.mattingMin)
+      : "";
+  const heavyDefault =
+    manualFeeBounds && manualFeeBounds.heavyMin > 0
+      ? String(manualFeeBounds.heavyMin)
+      : "";
+  const [mattingFeeAed, setMattingFeeAed] = useState("");
+  const [heavyDogFeeAed, setHeavyDogFeeAed] = useState("");
   const [dogSize, setDogSize] = useState<DogSizeFormValue | null>(null);
+  const dogSizeManualRef = useRef(false);
   const [apptDate, setApptDate] = useState<Date>(new Date());
   const [groomingDate, setGroomingDate] = useState<Date>(new Date());
   const [apptTime, setApptTime] = useState("10:00");
@@ -903,6 +907,19 @@ const GroomingPage = () => {
     [pets, selectedPetIds],
   );
 
+  const effectivePetCoat = useMemo(() => {
+    return selectedPetsOrdered[0]?.coat_type ?? null;
+  }, [selectedPetsOrdered]);
+
+  useEffect(() => {
+    if (!sheetOpen || dogSizeManualRef.current || selectedPetsOrdered.length === 0) return;
+    const fromPets = selectedPetsOrdered
+      .map((pet) => petSizeToDogSizeFormValue(pet.size))
+      .filter((size): size is DogSizeFormValue => size != null);
+    const derived = largestDogSizeFormValue(fromPets);
+    if (derived) setDogSize(derived);
+  }, [sheetOpen, selectedPetsOrdered]);
+
   const petIdsForLastGroom = useMemo(() => {
     if (selectedPetIds.length > 0) return selectedPetIds;
     if (sheetOpen && pets.length === 1) return [pets[0].id];
@@ -947,24 +964,67 @@ const GroomingPage = () => {
   const newApptManualAddonAed = useMemo(() => {
     const out: { matting_fee?: number; heavy_dog_fee?: number } = {};
     if (selectedServices.includes("matting_fee")) {
-      out.matting_fee = clampMattingFeeAed(parseFloat(mattingFeeAed) || MATTING_FEE_AED_MIN);
+      const raw = parseFloat(mattingFeeAed);
+      const fallback = manualFeeBounds?.mattingMin ?? 0;
+      out.matting_fee = clampMattingFeeAed(
+        Number.isFinite(raw) ? raw : fallback,
+        manualFeeBounds,
+      );
     }
     if (selectedServices.includes("heavy_dog_fee")) {
-      out.heavy_dog_fee = clampHeavyDogFeeAed(parseFloat(heavyDogFeeAed) || HEAVY_DOG_FEE_AED_MIN);
+      const raw = parseFloat(heavyDogFeeAed);
+      const fallback = manualFeeBounds?.heavyMin ?? 0;
+      out.heavy_dog_fee = clampHeavyDogFeeAed(
+        Number.isFinite(raw) ? raw : fallback,
+        manualFeeBounds,
+      );
     }
     return Object.keys(out).length ? out : null;
-  }, [selectedServices, mattingFeeAed, heavyDogFeeAed]);
+  }, [selectedServices, mattingFeeAed, heavyDogFeeAed, manualFeeBounds]);
 
-  const newApptComputedOriginalAed = useMemo(
-    () => computeNewGroomingAppointmentOriginalAed(selectedServices, dogSize, newApptManualAddonAed),
-    [selectedServices, dogSize, newApptManualAddonAed],
-  );
+  const { data: newApptComputedOriginalAed, isFetching: newApptPriceFetching } = useNewGroomingAppointmentPrice({
+    selectedServices,
+    dogSize,
+    manualAddons: newApptManualAddonAed,
+    petCoat: effectivePetCoat,
+    bookingDate: format(apptDate, "yyyy-MM-dd"),
+    enabled: sheetOpen,
+  });
+
+  const { data: servicePriceHints = {} } = useQuery({
+    queryKey: [
+      "grooming-checkbox-prices",
+      dogSize,
+      effectivePetCoat,
+      format(apptDate, "yyyy-MM-dd"),
+    ],
+    enabled: sheetOpen && dogSize != null,
+    queryFn: async () => {
+      const baseOptions = GROOMING_SERVICE_CHECKBOX_OPTIONS.filter((o) =>
+        ["full_groom", "deshedding", "bath_only", "full_bath_full"].includes(o.value),
+      );
+      const entries = await Promise.all(
+        baseOptions.map(async (option) => {
+          const amount = await fetchCheckboxBasePriceAed(
+            option.value,
+            dogSize!,
+            effectivePetCoat,
+            format(apptDate, "yyyy-MM-dd"),
+          );
+          return [option.value, amount] as const;
+        }),
+      );
+      return Object.fromEntries(entries) as Partial<
+        Record<GroomingServiceCheckbox, number | null>
+      >;
+    },
+  });
 
   const newApptPriceManualRef = useRef(false);
 
   useEffect(() => {
     newApptPriceManualRef.current = false;
-  }, [selectedServices, dogSize]);
+  }, [selectedServices, dogSize, effectivePetCoat]);
 
   const isComplimentaryPayment = paymentMethod === "complimentary";
   const selectedPrimaryServiceCode = useMemo(() => {
@@ -1062,24 +1122,15 @@ const GroomingPage = () => {
     return Number((newApptOriginalAed - newApptFinalAed).toFixed(2));
   }, [newApptOriginalAed, newApptFinalAed, normalizedDiscountPct]);
 
-  const mappedEditServices = useMemo(
-    () =>
-      editSelectedServices.map(
-        (svc) =>
-          GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc)?.mapsTo ??
-          "full_groom",
-      ),
-    [editSelectedServices],
-  );
-
   const openNewSheet = () => {
     setApptDate(day);
     setGroomingDate(day);
     setApptTime("10:00");
     setDurationMin(60);
     setSelectedServices(["full_groom"]);
-    setMattingFeeAed(String(MATTING_FEE_AED_MIN));
-    setHeavyDogFeeAed(String(HEAVY_DOG_FEE_AED_MIN));
+    setMattingFeeAed(mattingDefault);
+    setHeavyDogFeeAed(heavyDefault);
+    dogSizeManualRef.current = false;
     setDogSize(null);
     setGroomerName("");
     setShowPreferredGroomerHint(false);
@@ -1134,7 +1185,10 @@ const GroomingPage = () => {
       toast.error("Enter a valid appointment time.");
       return;
     }
-    const primaryService = mappedEditServices[0];
+    const primaryCb = resolvePrimaryGroomingCheckbox(
+      editSelectedServices.filter(isGroomingPricingCheckbox),
+    );
+    const primaryService = primaryCb ? groomingPricingCheckboxToDbService(primaryCb) : null;
     if (!primaryService) {
       toast.error("Could not resolve a valid service.");
       return;
@@ -1210,6 +1264,10 @@ const GroomingPage = () => {
       toast.error("Select at least one service.");
       return;
     }
+    if (!dogSize) {
+      toast.error("Select dog size so pricing can load from the rate card.");
+      return;
+    }
 
     const primaryCb = resolvePrimaryGroomingCheckbox(
       selectedServices.filter(isGroomingPricingCheckbox),
@@ -1241,11 +1299,19 @@ const GroomingPage = () => {
         const opt = GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc);
         if (!opt) return svc;
         if (svc === "matting_fee") {
-          const v = clampMattingFeeAed(parseFloat(mattingFeeAed) || MATTING_FEE_AED_MIN);
+          const raw = parseFloat(mattingFeeAed);
+          const v = clampMattingFeeAed(
+            Number.isFinite(raw) ? raw : (manualFeeBounds?.mattingMin ?? 0),
+            manualFeeBounds,
+          );
           return `${opt.label} (AED ${v})`;
         }
         if (svc === "heavy_dog_fee") {
-          const v = clampHeavyDogFeeAed(parseFloat(heavyDogFeeAed) || HEAVY_DOG_FEE_AED_MIN);
+          const raw = parseFloat(heavyDogFeeAed);
+          const v = clampHeavyDogFeeAed(
+            Number.isFinite(raw) ? raw : (manualFeeBounds?.heavyMin ?? 0),
+            manualFeeBounds,
+          );
           return `${opt.label} (AED ${v})`;
         }
         return opt.label;
@@ -2550,7 +2616,24 @@ const GroomingPage = () => {
                 <div className="grid grid-cols-2 gap-2 rounded-lg border p-3">
                   {GROOMING_SERVICE_CHECKBOX_OPTIONS.map((o) => {
                     const checked = selectedServices.includes(o.value);
-                    const r = o.manualPriceRange;
+                    const r =
+                      o.value === "matting_fee" &&
+                      manualFeeBounds &&
+                      manualFeeBounds.mattingMax > manualFeeBounds.mattingMin
+                        ? {
+                            min: manualFeeBounds.mattingMin,
+                            max: manualFeeBounds.mattingMax,
+                            default: manualFeeBounds.mattingMin,
+                          }
+                        : o.value === "heavy_dog_fee" &&
+                            manualFeeBounds &&
+                            manualFeeBounds.heavyMax > manualFeeBounds.heavyMin
+                          ? {
+                              min: manualFeeBounds.heavyMin,
+                              max: manualFeeBounds.heavyMax,
+                              default: manualFeeBounds.heavyMin,
+                            }
+                          : undefined;
                     return (
                       <label
                         key={o.value}
@@ -2582,7 +2665,19 @@ const GroomingPage = () => {
                               });
                             }}
                           />
-                          <span>{o.label}</span>
+                          <span className="flex min-w-0 flex-col">
+                            <span>{o.label}</span>
+                            {dogSize &&
+                            ["full_groom", "deshedding", "bath_only", "full_bath_full"].includes(
+                              o.value,
+                            ) ? (
+                              <span className="text-[11px] text-muted-foreground tabular-nums">
+                                {servicePriceHints[o.value] == null
+                                  ? "Rate not configured"
+                                  : `from AED ${servicePriceHints[o.value]!.toFixed(2)}`}
+                              </span>
+                            ) : null}
+                          </span>
                         </span>
                         {r && checked ? (
                           <div className="flex shrink-0 items-center gap-1.5 pl-6 sm:pl-0">
@@ -2612,8 +2707,16 @@ const GroomingPage = () => {
               <DogSizeField
                 name="grooming-new-appt-dog-size"
                 value={dogSize}
-                onChange={setDogSize}
+                onChange={(value) => {
+                  dogSizeManualRef.current = true;
+                  setDogSize(value);
+                }}
               />
+              {!dogSize ? (
+                <p className="text-xs text-amber-700">
+                  Select dog size (or choose a pet with size on file) to load live rates from Billing.
+                </p>
+              ) : null}
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-2">
@@ -2701,6 +2804,12 @@ const GroomingPage = () => {
                   <p className="text-xs text-muted-foreground">
                     Fills from service and dog size (add-ons included). You can still edit the amount.
                   </p>
+                  {dogSize && !newApptPriceFetching && newApptComputedOriginalAed == null ? (
+                    <p className="text-xs text-amber-700">
+                      No matching rate in Billing for this service/size combination. Enter price manually or
+                      update the Grooming (v2) grid.
+                    </p>
+                  ) : null}
                   <Input
                     type="number"
                     min={0}

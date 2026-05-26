@@ -5,6 +5,7 @@ import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { addonRateUiGroup } from "@/lib/groomingCatalog";
 import GroomingPricingGrid from "@/components/billing/GroomingPricingGrid";
+import GroomingPackagesGrid from "@/components/billing/GroomingPackagesGrid";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import {
   useWalletTransactions,
@@ -1844,6 +1845,18 @@ function PricingTab() {
               )}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming Packages</CardTitle>
+          <p className="text-xs text-muted-foreground font-normal pt-1">
+            Multi-session grooming bundles (Summer Splash, Full Service, Yearly). Per-session grooming rates use the grids above.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <GroomingPackagesGrid />
         </CardContent>
       </Card>
 

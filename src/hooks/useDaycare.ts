@@ -4,6 +4,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
 import { ownerMemberTierFromFlags, type OwnerMemberTier } from "@/lib/memberTier";
+import { SOLD_PACKAGE_CREDIT_CODES } from "@/lib/packageCatalog";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
 type DaycareSessionInsert = Database["public"]["Tables"]["daycare_sessions"]["Insert"];
@@ -449,7 +450,7 @@ export function useAllDaycarePackages() {
         .select(
           "*, pets!inner(name, owner_id, owners(first_name, last_name, is_elite, is_vip)), purchase_groups(package_definitions(display_name))",
         )
-        .in("service_code", DAYCARE_CREDIT_CODES)
+        .in("service_code", SOLD_PACKAGE_CREDIT_CODES)
         .order("created_at", { ascending: false });
       if (error) throw error;
       const mapped = (data ?? []).map((row) => {

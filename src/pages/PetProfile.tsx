@@ -1400,7 +1400,7 @@ const PetProfilePage = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit_dob">Date of birth</Label>
-                <Input id="edit_dob" type="date" value={editForm.date_of_birth ?? ""} onChange={(e) => handleField("date_of_birth", e.target.value)} />
+                <Input id="edit_dob" type="date" value={editForm.date_of_birth ?? ""} onChange={(e) => handleField("date_of_birth", e.target.value || null)} />
               </div>
             </div>
 
