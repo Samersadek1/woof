@@ -1,5 +1,3 @@
-import { writeFileSync } from "fs";
-import path from "path";
 import type { Plugin } from "vite";
 
 export type AppVersionPayload = { buildId: string };
@@ -34,9 +32,12 @@ export function appVersionPlugin(buildId: string): Plugin {
         res.end(body);
       });
     },
-    closeBundle() {
-      const out = path.resolve(process.cwd(), "dist", "version.json");
-      writeFileSync(out, `${body}\n`, "utf8");
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "version.json",
+        source: `${body}\n`,
+      });
     },
   };
 }
