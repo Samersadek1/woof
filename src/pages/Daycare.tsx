@@ -24,6 +24,7 @@ import {
   vatAmountFromGrossInclusive,
   vatLineLabel,
 } from "@/lib/vatConfig";
+import { formatAed, parseBoundedDecimalInput } from "@/lib/money";
 import { useOwners, useOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -797,20 +798,12 @@ function PlannerTab() {
 
   const effectiveHourlyDogs = useMemo(() => {
     if (hourlyCount === 0) return 0;
-    const trimmed = hourlyDogsInput.trim();
-    if (trimmed === "") return 1;
-    const n = Number.parseInt(trimmed, 10);
-    if (Number.isNaN(n) || n < 1) return 1;
-    return Math.min(n, 99);
+    return Math.round(parseBoundedDecimalInput(hourlyDogsInput, 1, { min: 1, max: 99 }));
   }, [hourlyCount, hourlyDogsInput]);
 
   const effectiveHours = useMemo(() => {
     if (hourlyCount === 0) return 0;
-    const trimmed = hourlyHoursInput.trim();
-    if (trimmed === "") return 1;
-    const n = Number.parseInt(trimmed, 10);
-    if (Number.isNaN(n) || n < 1) return 1;
-    return Math.min(n, 48);
+    return parseBoundedDecimalInput(hourlyHoursInput, 1, { min: 0.5, max: 48 });
   }, [hourlyCount, hourlyHoursInput]);
 
   const singleDayRatePreview = useMemo(
@@ -821,7 +814,7 @@ function PlannerTab() {
     () =>
       hourlyCount > 0
         ? daycareHourlyLinearTotal(effectiveHourlyDogs, effectiveHours, daycarePriceMap)
-        : { pricingKey: "", unitRate: 0, total: 0, label: "" },
+        : { pricingKey: "", unitRate: 0, total: 0, label: "", dogHours: 0 },
     [hourlyCount, effectiveHourlyDogs, effectiveHours, daycarePriceMap],
   );
   const transportRate = useMemo(() => {
@@ -1061,7 +1054,7 @@ function PlannerTab() {
       const hourlyLinear =
         hourlyDogsForInvoice > 0 && hourlyHoursForInvoice > 0
           ? daycareHourlyLinearTotal(hourlyDogsForInvoice, hourlyHoursForInvoice, daycarePriceMap)
-          : { pricingKey: "", unitRate: 0, total: 0, label: "" };
+          : { pricingKey: "", unitRate: 0, total: 0, label: "", dogHours: 0 };
       const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
       const transportKey = transportPricingKey(checkInDraft.transport_zone);
       const lineItems: {
@@ -1091,7 +1084,7 @@ function PlannerTab() {
       ) {
         lineItems.push({
           description: hourlyLinear.label,
-          quantity: hourlyDogsForInvoice * hourlyHoursForInvoice,
+          quantity: hourlyLinear.dogHours,
           unitPrice: hourlyLinear.unitRate,
           pricingKey: hourlyLinear.pricingKey,
           serviceType: "daycare",
@@ -1431,11 +1424,11 @@ function PlannerTab() {
                       <Input
                         id="hourly_hours_count"
                         type="number"
-                        min={1}
+                        min={0.5}
                         max={48}
-                        step={1}
+                        step={0.5}
                         placeholder="1"
-                        inputMode="numeric"
+                        inputMode="decimal"
                         className="h-9 max-w-[8rem]"
                         value={hourlyHoursInput}
                         onChange={(e) => {
@@ -1450,11 +1443,18 @@ function PlannerTab() {
                       Hourly total (check before confirming)
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      AED {hourlyLinearPreview.unitRate.toFixed(2)} × {effectiveHourlyDogs} dog
-                      {effectiveHourlyDogs === 1 ? "" : "s"} × {effectiveHours} hr
+                      {formatAed(hourlyLinearPreview.unitRate)} × {effectiveHourlyDogs} dog
+                      {effectiveHourlyDogs === 1 ? "" : "s"} ×{" "}
+                      {Number.isInteger(effectiveHours)
+                        ? effectiveHours
+                        : effectiveHours.toLocaleString("en-AE", {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 3,
+                          })}{" "}
+                      hr
                     </p>
                     <p className="text-2xl font-semibold tabular-nums">
-                      AED {hourlyDurationTotal.toFixed(2)}
+                      {formatAed(hourlyDurationTotal)}
                     </p>
                   </div>
                 </div>
@@ -1555,12 +1555,12 @@ function PlannerTab() {
                       return (
                         <>
                           <p className="text-xs text-muted-foreground">
-                            AED {transportRate.toFixed(2)} × {qty}
+                            {formatAed(transportRate)} × {qty}
                             {zone === "dubai_private" ? " (flat per trip)" : " per dog"}
                             {opt ? ` — ${opt.helper}` : ""}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Estimated total: AED {total.toFixed(2)} ({trips || 1} trip{trips === 1 ? "" : "s"})
+                            Estimated total: {formatAed(total)} ({trips || 1} trip{trips === 1 ? "" : "s"})
                           </p>
                           {over && (
                             <p className="text-xs text-destructive">
@@ -1591,18 +1591,23 @@ function PlannerTab() {
                             {singleDayRatePreview.label} ({singleDayCount} dog
                             {singleDayCount === 1 ? "" : "s"})
                           </span>
-                          <span>AED {singleDayRatePreview.total.toFixed(2)}</span>
+                          <span>{formatAed(singleDayRatePreview.total)}</span>
                         </div>
                       )}
                       {hourlyCount > 0 && (
                         <div className="space-y-0.5">
                           <div className="flex items-center justify-between text-sm">
                             <span>Hourly daycare (rate × dogs × hours)</span>
-                            <span className="tabular-nums">AED {hourlyDurationTotal.toFixed(2)}</span>
+                            <span className="tabular-nums">{formatAed(hourlyDurationTotal)}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            AED {hourlyLinearPreview.unitRate.toFixed(2)} × {effectiveHourlyDogs} ×{" "}
-                            {effectiveHours}
+                            {formatAed(hourlyLinearPreview.unitRate)} × {effectiveHourlyDogs} ×{" "}
+                            {Number.isInteger(effectiveHours)
+                              ? effectiveHours
+                              : effectiveHours.toLocaleString("en-AE", {
+                                  minimumFractionDigits: 1,
+                                  maximumFractionDigits: 3,
+                                })}
                           </p>
                         </div>
                       )}
@@ -1615,13 +1620,13 @@ function PlannerTab() {
                           <span>
                             {checkInDraft.transport_zone === "complimentary"
                               ? "No charge"
-                              : `AED ${previewTransportTotal.toFixed(2)}`}
+                              : formatAed(previewTransportTotal)}
                           </span>
                         </div>
                       )}
                       <div className="flex items-center justify-between text-sm">
                         <span>Subtotal</span>
-                        <span>AED {immediateInvoiceSubtotalPreview.toFixed(2)}</span>
+                        <span>{formatAed(immediateInvoiceSubtotalPreview)}</span>
                       </div>
                       <div className="flex flex-col gap-2 rounded-md border bg-background/80 p-2 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-2">
@@ -1649,7 +1654,7 @@ function PlannerTab() {
                               : ""}
                           </span>
                           <span>
-                            - AED {(discountPreview?.discount_aed ?? 0).toFixed(2)}
+                            - {formatAed(discountPreview?.discount_aed ?? 0)}
                           </span>
                         </div>
                       )}
@@ -1657,7 +1662,7 @@ function PlannerTab() {
                         <span>Net (ex VAT)</span>
                         <span className="tabular-nums">
                           {daycareInvoiceNetExVatPreview != null
-                            ? `AED ${netFromGrossInclusive(daycareInvoiceNetExVatPreview).toFixed(2)}`
+                            ? formatAed(netFromGrossInclusive(daycareInvoiceNetExVatPreview))
                             : "—"}
                         </span>
                       </div>
@@ -1665,7 +1670,7 @@ function PlannerTab() {
                         <div className="flex items-center justify-between text-sm">
                           <span>{vatLineLabel()}</span>
                           <span className="tabular-nums">
-                            AED {vatAmountFromGrossInclusive(daycareInvoiceNetExVatPreview).toFixed(2)}
+                            {formatAed(vatAmountFromGrossInclusive(daycareInvoiceNetExVatPreview))}
                           </span>
                         </div>
                       ) : null}
@@ -1673,7 +1678,7 @@ function PlannerTab() {
                         <span>Total incl. VAT</span>
                         <span className="tabular-nums">
                           {daycareInvoiceNetExVatPreview != null
-                            ? `AED ${Math.max(0, daycareInvoiceNetExVatPreview).toFixed(2)}`
+                            ? formatAed(Math.max(0, daycareInvoiceNetExVatPreview))
                             : "—"}
                         </span>
                       </div>

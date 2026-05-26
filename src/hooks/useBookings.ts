@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { extractErrorMessage } from "@/lib/bookingAvailabilityErrors";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
 import { PET_CARE_NOTES_SELECT } from "@/lib/petCareNotes";
 
@@ -56,8 +57,7 @@ export type CreateBookingPayload = Omit<BookingInsert, "id" | "created_at" | "up
 };
 
 export function isAssessmentRequiredError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return message.includes("has not passed behavioural assessment");
+  return extractErrorMessage(error, "").includes("has not passed behavioural assessment");
 }
 
 export const queryKeys = {

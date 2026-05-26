@@ -148,7 +148,8 @@ import {
   transportQuantityForPets,
 } from "@/lib/transportPricing";
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
-import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErrors";
+import { getBookingRoomOverlapErrorMessage, extractErrorMessage } from "@/lib/bookingAvailabilityErrors";
+import { formatAed } from "@/lib/money";
 import {
   resolveDogSizeForSelectedPets,
   type DogSizeFormValue,
@@ -190,28 +191,30 @@ function showCreateBookingErrorToast(options: {
   petName?: string;
 }) {
   const { err, navigate, ownerId, petId, petName } = options;
+  const detail = extractErrorMessage(err, "");
+
   const overlapMessage = getBookingRoomOverlapErrorMessage(err);
   if (overlapMessage) {
-    toast.error(overlapMessage);
+    toast.error(overlapMessage, detail ? { description: detail } : undefined);
     return;
   }
 
-  if (!isAssessmentRequiredError(err)) {
-    const genericMessage = err instanceof Error ? err.message : "Failed to create booking";
-    toast.error(genericMessage);
+  if (isAssessmentRequiredError(err)) {
+    toast.error(`${petName ?? "This pet"} hasn't completed a behavioural assessment yet.`, {
+      description: detail || undefined,
+      action: petId
+        ? {
+            label: "Schedule Assessment",
+            onClick: () =>
+              navigate(`/customers/${ownerId}/pets/${petId}?schedule_assessment=1`),
+          }
+        : undefined,
+    });
     return;
   }
 
-  const detail = err instanceof Error ? err.message : "";
-  toast.error(`${petName ?? "This pet"} hasn't completed a behavioural assessment yet.`, {
-    description: detail,
-    action: petId
-      ? {
-          label: "Schedule Assessment",
-          onClick: () =>
-            navigate(`/customers/${ownerId}/pets/${petId}?schedule_assessment=1`),
-        }
-      : undefined,
+  toast.error("Could not save boarding booking", {
+    description: detail || "An unexpected error occurred.",
   });
 }
 
@@ -297,10 +300,6 @@ function toDateStr(d: Date): string {
 
 function nightsBetween(checkIn: string, checkOut: string): number {
   return differenceInCalendarDays(parseISO(checkOut), parseISO(checkIn));
-}
-
-function formatAed(value: number): string {
-  return `AED ${value.toLocaleString("en-AE", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 function BoardingTransportRateHint({
@@ -1076,7 +1075,9 @@ function AssignRealRoomPanel({
               },
               onError: (err) => {
                 const overlap = getBookingRoomOverlapErrorMessage(err);
-                toast.error(overlap ?? (err instanceof Error ? err.message : "Assign failed"));
+                toast.error(overlap ?? "Assign failed", {
+                  description: overlap ? extractErrorMessage(err, "") || undefined : extractErrorMessage(err),
+                });
               },
             },
           );
@@ -1533,11 +1534,9 @@ export function DogBoardingCalendar({
             p_override_do_not_move: false,
           });
           if (moveErr) {
-            toast.error(
-              getBookingRoomOverlapErrorMessage(moveErr) ??
-                moveErr.message ??
-                "Booking saved but room segment failed",
-            );
+            toast.error("Booking saved but room assignment failed", {
+              description: getBookingRoomOverlapErrorMessage(moveErr) ?? extractErrorMessage(moveErr),
+            });
           }
         }
         toast.success("Booking created");
@@ -1604,7 +1603,9 @@ export function DogBoardingCalendar({
           })
           .catch((err) => {
             console.error("Auto-invoice failed:", err);
-            toast.error("Invoice not created: " + (err?.message ?? "unknown error"));
+            toast.error("Invoice not created", {
+              description: extractErrorMessage(err),
+            });
           });
       },
       onError: (err) =>

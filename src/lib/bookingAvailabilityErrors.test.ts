@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BOOKING_ROOM_OVERLAP_TOKEN,
+  extractErrorMessage,
   getBookingRoomOverlapErrorMessage,
   isBookingRoomOverlapError,
 } from "./bookingAvailabilityErrors";
@@ -28,5 +29,17 @@ describe("booking availability error mapping", () => {
   it("returns null for non-object errors", () => {
     expect(isBookingRoomOverlapError("boom")).toBe(false);
     expect(getBookingRoomOverlapErrorMessage("boom")).toBeNull();
+  });
+
+  it("extractErrorMessage reads Supabase-style error objects", () => {
+    expect(
+      extractErrorMessage({
+        message: "Pet Alfie has not passed behavioural assessment (status=not_assessed).",
+        code: "23514",
+      }),
+    ).toBe("Pet Alfie has not passed behavioural assessment (status=not_assessed).");
+    expect(extractErrorMessage({ details: "Room conflict" })).toBe("Room conflict");
+    expect(extractErrorMessage("plain error")).toBe("plain error");
+    expect(extractErrorMessage(null)).toBe("Something went wrong");
   });
 });

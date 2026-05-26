@@ -144,7 +144,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
 
   const normalizedLines: ServiceInvoiceLineItem[] = [];
   for (const li of lineItems) {
-    const qty = Math.max(1, li.quantity);
+    const qty = Number.isFinite(li.quantity) && li.quantity > 0 ? li.quantity : 1;
     const unitPrice = li.unitPrice;
 
     normalizedLines.push({
@@ -196,16 +196,21 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
     throw invErr;
   }
 
-  const lineRows = normalizedLines.map((li, i) => ({
-    invoice_id: inv.id,
-    description: li.description,
-    quantity: li.quantity,
-    unit_price: li.unitPrice,
-    total_price: li.unitPrice * li.quantity,
-    pricing_key: li.pricingKey ?? null,
-    service_type: li.serviceType ?? serviceType,
-    sort_order: i,
-  }));
+  const lineRows = normalizedLines.map((li, i) => {
+    const quantity = li.quantity;
+    const lineTotal = li.unitPrice * quantity;
+    return {
+      invoice_id: inv.id,
+      description: li.description,
+      quantity,
+      unit_price: li.unitPrice,
+      total_price: lineTotal,
+      line_total: lineTotal,
+      pricing_key: li.pricingKey ?? null,
+      service_type: li.serviceType ?? serviceType,
+      sort_order: i,
+    };
+  });
 
   if (lineRows.length > 0) {
     const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);

@@ -22,25 +22,35 @@ export const DAYCARE_HOURLY_PRICING_KEYS = [
 /** Single hourly unit rate from the Live Rate Card (AED per dog per hour). */
 export const DAYCARE_HOURLY_UNIT_KEY = "daycare_hourly_single_day" as const;
 
+function formatHourCount(hours: number): string {
+  const label = Number.isInteger(hours)
+    ? String(hours)
+    : hours.toLocaleString("en-AE", { minimumFractionDigits: 1, maximumFractionDigits: 3 });
+  return `${label} hr`;
+}
+
 /**
  * Linear daycare hourly total: unit rate × dogs × hours.
  * Uses `daycare_hourly_single_day` as the per-dog hourly rate from `pricing`.
+ * Keeps full numeric precision — do not round before invoicing.
  */
 export function daycareHourlyLinearTotal(
   dogCount: number,
   hours: number,
   prices: PriceByKey,
-): { pricingKey: string; unitRate: number; total: number; label: string } {
+): { pricingKey: string; unitRate: number; total: number; label: string; dogHours: number } {
   if (dogCount <= 0 || hours <= 0) {
-    return { pricingKey: DAYCARE_HOURLY_UNIT_KEY, unitRate: 0, total: 0, label: "" };
+    return { pricingKey: DAYCARE_HOURLY_UNIT_KEY, unitRate: 0, total: 0, label: "", dogHours: 0 };
   }
   const unitRate = amountFor(prices, DAYCARE_HOURLY_UNIT_KEY);
-  const total = unitRate * dogCount * hours;
+  const dogHours = dogCount * hours;
+  const total = unitRate * dogHours;
   return {
     pricingKey: DAYCARE_HOURLY_UNIT_KEY,
     unitRate,
     total,
-    label: `Daycare hourly (${dogCount} dog${dogCount === 1 ? "" : "s"} × ${hours} hr)`,
+    dogHours,
+    label: `Daycare hourly (${dogCount} dog${dogCount === 1 ? "" : "s"} × ${formatHourCount(hours)})`,
   };
 }
 
