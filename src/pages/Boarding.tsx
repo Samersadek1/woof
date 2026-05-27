@@ -3121,7 +3121,7 @@ function BoardingHubPage() {
             </div>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <div className="rounded-lg border bg-muted/40 px-3 py-2">
                 <p className="text-xs text-muted-foreground">Total rooms</p>
                 <p className="text-2xl font-semibold tabular-nums">{occupancyStats.total}</p>
@@ -3129,6 +3129,20 @@ function BoardingHubPage() {
               <div className="rounded-lg border bg-muted/40 px-3 py-2">
                 <p className="text-xs text-muted-foreground">Rooms occupied</p>
                 <p className="text-2xl font-semibold tabular-nums">{occupancyStats.roomOccupiedCount}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                <p className="text-xs text-muted-foreground">Pets on site</p>
+                <p className="text-2xl font-semibold tabular-nums" data-testid="boarding-occupancy-pet-count">
+                  {occLoading || occAssignmentsLoading ? "…" : occupancyStats.totalPetCount}
+                </p>
+                {!occLoading && !occAssignmentsLoading && occupancyStats.totalPetCount > 0 ? (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {occupancyStats.roomOccupiedPetCount} in rooms
+                    {occupancyStats.unassignedPetCount > 0
+                      ? ` · ${occupancyStats.unassignedPetCount} unassigned`
+                      : ""}
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-lg border bg-muted/40 px-3 py-2">
                 <p className="text-xs text-muted-foreground">Unassigned guests</p>
@@ -3153,6 +3167,7 @@ function BoardingHubPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead>Pets</TableHead>
                         <TableHead>Pet</TableHead>
                         <TableHead>Owner</TableHead>
                         <TableHead>Check in</TableHead>
@@ -3162,6 +3177,7 @@ function BoardingHubPage() {
                     </TableHeader>
                     <TableBody>
                       {occupancyStats.unassignedGuests.map((booking) => {
+                        const petCount = booking.booking_pets?.length ?? 0;
                         const petNames =
                           booking.booking_pets
                             .map((bp) => bp.pets?.name)
@@ -3169,6 +3185,7 @@ function BoardingHubPage() {
                             .join(", ") || "—";
                         return (
                           <TableRow key={booking.id}>
+                            <TableCell className="tabular-nums font-medium">{petCount || "—"}</TableCell>
                             <TableCell>{petNames}</TableCell>
                             <TableCell>
                               {ownerDisplayName(
@@ -3204,9 +3221,22 @@ function BoardingHubPage() {
               if (!bucket) return null;
               if (bucket.occupied.length === 0 && bucket.available.length === 0) return null;
               const groupName = groupKey;
+              const groupPetCount = bucket.occupied.reduce(
+                (sum, { booking }) => sum + (booking.booking_pets?.length ?? 0),
+                0,
+              );
               return (
                 <section key={groupKey} className="space-y-2 rounded-lg border p-3">
-                  <h3 className="text-sm font-semibold">{groupName}</h3>
+                  <h3 className="text-sm font-semibold">
+                    {groupName}
+                    {bucket.occupied.length > 0 ? (
+                      <span className="font-normal text-muted-foreground">
+                        {" "}
+                        · {bucket.occupied.length} room{bucket.occupied.length === 1 ? "" : "s"}
+                        {groupPetCount > 0 ? `, ${groupPetCount} pet${groupPetCount === 1 ? "" : "s"}` : ""}
+                      </span>
+                    ) : null}
+                  </h3>
                   {bucket.occupied.length > 0 ? (
                     <div className="space-y-1">
                       <p className="text-xs font-medium uppercase text-muted-foreground">Occupied</p>
@@ -3215,6 +3245,7 @@ function BoardingHubPage() {
                           <TableHeader>
                             <TableRow>
                               <TableHead>Room</TableHead>
+                              <TableHead>Pets</TableHead>
                               <TableHead>Pet</TableHead>
                               <TableHead>Owner</TableHead>
                               <TableHead>Check in</TableHead>
@@ -3223,6 +3254,7 @@ function BoardingHubPage() {
                           </TableHeader>
                           <TableBody>
                             {bucket.occupied.map(({ room, booking }) => {
+                              const petCount = booking.booking_pets?.length ?? 0;
                               const petNames =
                                 booking.booking_pets
                                   .map((bp) => bp.pets?.name)
@@ -3233,6 +3265,7 @@ function BoardingHubPage() {
                                   <TableCell className="font-medium whitespace-nowrap">
                                     {formatRoomSectionLabel(room)}
                                   </TableCell>
+                                  <TableCell className="tabular-nums font-medium">{petCount || "—"}</TableCell>
                                   <TableCell>{petNames}</TableCell>
                                   <TableCell>
                                     {ownerDisplayName(
