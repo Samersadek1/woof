@@ -167,25 +167,55 @@ describe("consume_service_credit", () => {
       const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
       const pet = await createTestPet(scope, owner.id, { size: "medium" });
+      const expires = new Date();
+      expires.setMonth(expires.getMonth() + 6);
+      const expiresAt = expires.toISOString().slice(0, 10);
+      const redemptionGroupId = crypto.randomUUID();
 
-      const purchase = await supabase.rpc("purchase_package", {
-        p_owner_id: owner.id,
-        p_package_code: "thirty_day_ticket",
-        p_pet_ids: [pet.id],
-      });
-      if (purchase.error) throw purchase.error;
-      scope.registerResource("purchase_groups", purchase.data?.[0].purchase_group_id ?? null);
-      scope.registerResource("invoices", purchase.data?.[0].invoice_id ?? null);
-
-      const { data: credits } = await supabase
+      const { data: inserted, error: insertErr } = await supabase
         .from("service_credits")
-        .select("*")
-        .eq("purchase_group_id", purchase.data?.[0].purchase_group_id);
-      (credits ?? []).forEach((row) => scope.registerResource("service_credits", row.id));
+        .insert([
+          {
+            pet_id: pet.id,
+            service_code: "daycare_full_day",
+            units_total: 1,
+            units_consumed: 0,
+            expires_at: expiresAt,
+            source_type: "promotional",
+            is_bonus: true,
+            redemption_group_id: redemptionGroupId,
+            status: "active",
+          },
+          {
+            pet_id: pet.id,
+            service_code: "grooming_splash",
+            units_total: 1,
+            units_consumed: 0,
+            expires_at: expiresAt,
+            source_type: "promotional",
+            is_bonus: true,
+            redemption_group_id: redemptionGroupId,
+            status: "active",
+          },
+          {
+            pet_id: pet.id,
+            service_code: "daycare_full_day",
+            units_total: 30,
+            units_consumed: 0,
+            expires_at: expiresAt,
+            source_type: "promotional",
+            is_bonus: false,
+            redemption_group_id: null,
+            status: "active",
+          },
+        ])
+        .select("*");
+      if (insertErr) throw insertErr;
+      (inserted ?? []).forEach((row) => scope.registerResource("service_credits", row.id));
 
-      const bonusDaycare = (credits ?? []).find((row) => row.is_bonus && row.service_code === "daycare_full_day");
-      const bonusSplash = (credits ?? []).find((row) => row.is_bonus && row.service_code === "grooming_splash");
-      const base = (credits ?? []).find((row) => !row.is_bonus);
+      const bonusDaycare = (inserted ?? []).find((row) => row.is_bonus && row.service_code === "daycare_full_day");
+      const bonusSplash = (inserted ?? []).find((row) => row.is_bonus && row.service_code === "grooming_splash");
+      const base = (inserted ?? []).find((row) => !row.is_bonus);
 
       const result = await supabase.rpc("consume_service_credit", {
         p_credit_id: bonusDaycare!.id,

@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { format, parseISO } from "date-fns";
-import { AlertTriangle, Download, Loader2, Package, Plus } from "lucide-react";
+import { AlertTriangle, Download, Loader2, Package, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { exportDaycarePackagesToExcel } from "@/lib/daycarePackagesExport";
 import { serviceGrantLabel } from "@/lib/packageCatalog";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import {
   useAllDaycarePackages,
+  useDeleteDaycarePackage,
   type PackageWithDetails,
 } from "@/hooks/useDaycare";
 import { OwnerSearchPopover } from "@/components/billing/OwnerSearchPopover";
@@ -32,6 +33,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type PkgFilter = "all" | "low" | "exhausted";
 type TierFilter = "all" | "standard" | "silver" | "gold";
@@ -80,9 +91,12 @@ function packageMatchesSearch(pkg: PackageWithDetails, query: string): boolean {
 
 function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
   const [, setSearchParams] = useSearchParams();
+  const revokePackage = useDeleteDaycarePackage();
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const remaining = pkg.total_days - pkg.days_used;
   const pct = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
   const isExhausted = remaining <= 0;
+  const canDelete = pkg.days_used === 0 && remaining > 0;
   const memberType = pkg.owners?.member_tier ?? "standard";
 
   const openInPlanner = () => {
@@ -150,10 +164,59 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
             Expires {format(parseISO(pkg.expiry_date), "d MMM yyyy")}
           </p>
         )}
-        <Button type="button" variant="outline" size="sm" className="w-full" onClick={openInPlanner}>
-          Open in planner
-        </Button>
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" size="sm" className="flex-1" onClick={openInPlanner}>
+            Open in planner
+          </Button>
+          {canDelete ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10"
+              data-testid={`daycare-package-delete-${pkg.id}`}
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
       </CardContent>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this package?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Removes unused credit for {pkg.pets?.name ?? "this pet"}
+              {pkg.package_name ? ` (${pkg.package_name})` : ""}. Only allowed when no days have been used
+              and no planner sessions are linked. Any unpaid invoice for this purchase will be voided.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revokePackage.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={revokePackage.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                revokePackage.mutate(
+                  { creditId: pkg.id, reason: "Removed from daycare packages" },
+                  {
+                    onSuccess: () => {
+                      toast.success("Package removed");
+                      setDeleteOpen(false);
+                    },
+                    onError: (err) => toast.error(err.message),
+                  },
+                );
+              }}
+            >
+              {revokePackage.isPending ? "Removing…" : "Remove package"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
@@ -316,6 +379,7 @@ export function DaycarePackagesTab() {
         <PurchasePackageDialog
           ownerId={sellOwnerId}
           isOpen
+          allowCustomDaycare
           onClose={() => setSellOwnerId(undefined)}
           onSuccess={() => setSellOwnerId(undefined)}
         />

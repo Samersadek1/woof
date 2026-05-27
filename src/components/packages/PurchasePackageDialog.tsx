@@ -7,10 +7,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { useIssueCustomDaycarePackage } from "@/hooks/useDaycare";
 import { PET_SIZE_COLUMNS, formatPackageIncludes } from "@/lib/packageCatalog";
 import { useGroomingPackageCatalog } from "@/hooks/useGroomingPackages";
 import {
@@ -36,11 +39,15 @@ const CATEGORY_LABELS: Record<string, string> = {
   treadmill: "Treadmill",
 };
 
+type SaleMode = "catalog" | "custom";
+
 type Props = {
   ownerId: string;
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: (invoiceId: string) => void;
+  /** Daycare sell flow: staff can issue custom allowance/price (including AED 0). */
+  allowCustomDaycare?: boolean;
 };
 
 function resolvePetAmount(rows: PackagePricing[], pet: Pet): number | null {
@@ -56,12 +63,27 @@ function resolvePetAmount(rows: PackagePricing[], pet: Pet): number | null {
   return candidates[0]?.amount_aed ?? null;
 }
 
-export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: Props) {
+export function PurchasePackageDialog({
+  ownerId,
+  isOpen,
+  onClose,
+  onSuccess,
+  allowCustomDaycare = false,
+}: Props) {
   const queryClient = useQueryClient();
+  const issueCustom = useIssueCustomDaycarePackage();
+  const [saleMode, setSaleMode] = useState<SaleMode>("catalog");
   const [selectedPackageCode, setSelectedPackageCode] = useState<string>("");
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("card");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [customLabel, setCustomLabel] = useState("");
+  const [customUnits, setCustomUnits] = useState("1");
+  const [customAmount, setCustomAmount] = useState("0");
+  const [customValidityMonths, setCustomValidityMonths] = useState("6");
+  const [customServiceCode, setCustomServiceCode] = useState<"daycare_full_day" | "daycare_hourly">(
+    "daycare_full_day",
+  );
 
   const { data: packageDefs = [], isLoading: packageDefsLoading } = useQuery({
     queryKey: ["package_definitions", "active"],
@@ -171,6 +193,69 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
     setSelectedPetIds((prev) => (checked ? Array.from(new Set([...prev, petId])) : prev.filter((id) => id !== petId)));
   };
 
+  const customUnitsNum = Math.max(1, Math.min(365, parseInt(customUnits, 10) || 1));
+  const customAmountNum = Math.max(0, parseFloat(customAmount) || 0);
+  const customValidityNum = Math.max(1, Math.min(36, parseInt(customValidityMonths, 10) || 6));
+  const customLineTotal = customAmountNum * selectedPetIds.length;
+
+  const resetForm = () => {
+    setSelectedPetIds([]);
+    setSelectedPackageCode("");
+    setPaymentMethod("card");
+    setSaleMode("catalog");
+    setCustomLabel("");
+    setCustomUnits("1");
+    setCustomAmount("0");
+    setCustomValidityMonths("6");
+    setCustomServiceCode("daycare_full_day");
+  };
+
+  const handleCustomIssue = async () => {
+    const label = customLabel.trim();
+    if (!label) {
+      toast.error("Enter a package label (shown on the package card).");
+      return;
+    }
+    if (selectedPetIds.length === 0) {
+      toast.error("Select at least one pet.");
+      return;
+    }
+
+    issueCustom.mutate(
+      {
+        owner_id: ownerId,
+        pet_ids: selectedPetIds,
+        units: customUnitsNum,
+        amount_aed: customAmountNum,
+        label,
+        validity_months: customValidityNum,
+        payment_method: paymentMethod,
+        service_code: customServiceCode,
+      },
+      {
+        onSuccess: (result) => {
+          if (!result?.invoice_id) {
+            toast.error("Package issued but no result returned.");
+            return;
+          }
+          const total = Number(result.total_amount_aed);
+          toast.success(
+            total === 0
+              ? `Custom package issued (${customUnitsNum} day${customUnitsNum === 1 ? "" : "s"}, complimentary).`
+              : `Custom package issued. Invoice ${result.invoice_id.slice(0, 8)} · AED ${total.toFixed(2)}`,
+          );
+          queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+          queryClient.invalidateQueries({ queryKey: ["owners"] });
+          queryClient.invalidateQueries({ queryKey: ["pets", ownerId] });
+          onSuccess?.(result.invoice_id);
+          resetForm();
+          onClose();
+        },
+        onError: (err) => toast.error(err.message || "Could not issue custom package."),
+      },
+    );
+  };
+
   const handlePurchase = async () => {
     if (!selectedPackage) {
       toast.error("Select a package first.");
@@ -205,20 +290,117 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
     queryClient.invalidateQueries({ queryKey: ["owners"] });
     queryClient.invalidateQueries({ queryKey: ["pets", ownerId] });
     onSuccess?.(result.invoice_id);
-    setSelectedPetIds([]);
-    setSelectedPackageCode("");
-    setPaymentMethod("card");
+    resetForm();
     onClose();
   };
+
+  const isCustom = allowCustomDaycare && saleMode === "custom";
+  const busy = isSubmitting || issueCustom.isPending;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Purchase Package</DialogTitle>
+          <DialogTitle>{isCustom ? "Custom daycare package" : "Purchase Package"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-5">
+          {allowCustomDaycare ? (
+            <Tabs
+              value={saleMode}
+              onValueChange={(v) => {
+                setSaleMode(v as SaleMode);
+                setSelectedPackageCode("");
+                setSelectedPetIds([]);
+              }}
+            >
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="catalog" data-testid="purchase-pkg-tab-catalog">
+                  Catalog package
+                </TabsTrigger>
+                <TabsTrigger value="custom" data-testid="purchase-pkg-tab-custom">
+                  Custom daycare
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          ) : null}
+
+          {isCustom ? (
+            <section className="space-y-3 rounded-md border p-4">
+              <h4 className="text-sm font-semibold">Package details</h4>
+              <p className="text-xs text-muted-foreground">
+                Create a one-off daycare allowance for this client (e.g. bonus 1-day package at AED 0).
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="custom-pkg-label">Label</Label>
+                  <Input
+                    id="custom-pkg-label"
+                    data-testid="purchase-pkg-custom-label"
+                    placeholder="e.g. Complimentary 1 daycare day"
+                    value={customLabel}
+                    onChange={(e) => setCustomLabel(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="custom-pkg-units">Day allowance (per pet)</Label>
+                  <Input
+                    id="custom-pkg-units"
+                    type="number"
+                    min={1}
+                    max={365}
+                    data-testid="purchase-pkg-custom-units"
+                    value={customUnits}
+                    onChange={(e) => setCustomUnits(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="custom-pkg-amount">Price per pet (AED)</Label>
+                  <Input
+                    id="custom-pkg-amount"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    data-testid="purchase-pkg-custom-amount"
+                    value={customAmount}
+                    onChange={(e) => setCustomAmount(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Credit type</Label>
+                  <Select
+                    value={customServiceCode}
+                    onValueChange={(v) => setCustomServiceCode(v as "daycare_full_day" | "daycare_hourly")}
+                  >
+                    <SelectTrigger data-testid="purchase-pkg-custom-service">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daycare_full_day">Full day</SelectItem>
+                      <SelectItem value="daycare_hourly">Hourly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="custom-pkg-validity">Validity (months)</Label>
+                  <Input
+                    id="custom-pkg-validity"
+                    type="number"
+                    min={1}
+                    max={36}
+                    data-testid="purchase-pkg-custom-validity"
+                    value={customValidityMonths}
+                    onChange={(e) => setCustomValidityMonths(e.target.value)}
+                  />
+                </div>
+              </div>
+              {customAmountNum === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  AED 0 packages are marked paid automatically — no payment collection step.
+                </p>
+              ) : null}
+            </section>
+          ) : (
           <section className="space-y-2">
             <h4 className="text-sm font-semibold">1) Select package</h4>
             {packageDefsLoading ? (
@@ -263,6 +445,7 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
               </div>
             )}
           </section>
+          )}
 
           {selectedPackage?.category === "grooming" && selectedGroomingCatalog ? (
             <>
@@ -313,10 +496,11 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
             ) : (
               <div className="space-y-2">
                 {pets.map((pet) => {
-                  const speciesAllowed = selectedPackage
-                    ? selectedPackage.applicable_species.includes(pet.species)
-                    : true;
-                  const sizeRequired = packagePrices.some((p) => p.pet_size !== null);
+                  const speciesAllowed =
+                    isCustom || !selectedPackage
+                      ? true
+                      : selectedPackage.applicable_species.includes(pet.species);
+                  const sizeRequired = !isCustom && packagePrices.some((p) => p.pet_size !== null);
                   const sizeBlocked = sizeRequired && !pet.size;
                   const disabled = !speciesAllowed || sizeBlocked;
                   const checked = selectedPetIds.includes(pet.id);
@@ -348,21 +532,50 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
           <section className="space-y-2">
             <h4 className="text-sm font-semibold">3) Price preview</h4>
             <div className="rounded-md border p-3 space-y-1 text-sm">
-              {perPetPreview.map((row) => (
-                <div key={row.pet.id} className="flex items-center justify-between">
-                  <span>{row.pet.name}</span>
-                  <span>{row.amount == null ? "No pricing match" : `AED ${row.amount.toFixed(2)}`}</span>
-                </div>
-              ))}
-              <Separator />
-              <div data-testid="purchase-pkg-subtotal" className="flex items-center justify-between"><span>Subtotal</span><span>AED {subtotal.toFixed(2)}</span></div>
-              {selectedPetIds.length >= 2 ? (
-                <div data-testid="purchase-pkg-discount" className="flex items-center justify-between text-emerald-700">
-                  <span>Multi-pet {selectedPackage?.multi_pet_discount_pct ?? 10}% discount</span>
-                  <span>- AED {discount.toFixed(2)}</span>
-                </div>
-              ) : null}
-              <div data-testid="purchase-pkg-total" className="flex items-center justify-between font-semibold"><span>Total</span><span>AED {total.toFixed(2)}</span></div>
+              {isCustom ? (
+                <>
+                  {pets
+                    .filter((p) => selectedPetIds.includes(p.id))
+                    .map((pet) => (
+                      <div key={pet.id} className="flex items-center justify-between">
+                        <span>
+                          {pet.name} · {customUnitsNum}{" "}
+                          {customServiceCode === "daycare_hourly" ? "hour(s)" : "day(s)"}
+                        </span>
+                        <span>AED {customAmountNum.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  <Separator />
+                  <div data-testid="purchase-pkg-total" className="flex items-center justify-between font-semibold">
+                    <span>Total</span>
+                    <span>AED {customLineTotal.toFixed(2)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {perPetPreview.map((row) => (
+                    <div key={row.pet.id} className="flex items-center justify-between">
+                      <span>{row.pet.name}</span>
+                      <span>{row.amount == null ? "No pricing match" : `AED ${row.amount.toFixed(2)}`}</span>
+                    </div>
+                  ))}
+                  <Separator />
+                  <div data-testid="purchase-pkg-subtotal" className="flex items-center justify-between">
+                    <span>Subtotal</span>
+                    <span>AED {subtotal.toFixed(2)}</span>
+                  </div>
+                  {selectedPetIds.length >= 2 ? (
+                    <div data-testid="purchase-pkg-discount" className="flex items-center justify-between text-emerald-700">
+                      <span>Multi-pet {selectedPackage?.multi_pet_discount_pct ?? 10}% discount</span>
+                      <span>- AED {discount.toFixed(2)}</span>
+                    </div>
+                  ) : null}
+                  <div data-testid="purchase-pkg-total" className="flex items-center justify-between font-semibold">
+                    <span>Total</span>
+                    <span>AED {total.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
             </div>
           </section>
 
@@ -385,14 +598,26 @@ export function PurchasePackageDialog({ ownerId, isOpen, onClose, onSuccess }: P
               Validity starts from purchase date ({format(new Date(), "dd MMM yyyy")}).
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
-              <Button
-                data-testid="purchase-pkg-confirm-btn"
-                onClick={handlePurchase}
-                disabled={isSubmitting || !selectedPackageCode || selectedPetIds.length === 0}
-              >
-                {isSubmitting ? "Purchasing..." : "Purchase"}
+              <Button variant="outline" onClick={onClose} disabled={busy}>
+                Cancel
               </Button>
+              {isCustom ? (
+                <Button
+                  data-testid="purchase-pkg-custom-confirm-btn"
+                  onClick={handleCustomIssue}
+                  disabled={busy || !customLabel.trim() || selectedPetIds.length === 0}
+                >
+                  {issueCustom.isPending ? "Issuing…" : "Issue package"}
+                </Button>
+              ) : (
+                <Button
+                  data-testid="purchase-pkg-confirm-btn"
+                  onClick={handlePurchase}
+                  disabled={busy || !selectedPackageCode || selectedPetIds.length === 0}
+                >
+                  {isSubmitting ? "Purchasing..." : "Purchase"}
+                </Button>
+              )}
             </div>
           </section>
         </div>

@@ -123,7 +123,7 @@ describe("purchase_package", () => {
     });
   });
 
-  it("creates thirty_day_ticket base+bonus credits with shared bonus redemption group", async () => {
+  it("creates thirty_day_ticket as a single 30-day daycare credit (no bonus grants)", async () => {
     await withScope(async (scope) => {
       const supabase = getServiceRoleClient();
       const owner = await createTestOwner(scope);
@@ -143,19 +143,14 @@ describe("purchase_package", () => {
         .select("*")
         .eq("purchase_group_id", data?.[0]?.purchase_group_id)
         .order("units_total", { ascending: false });
-      expect(credits ?? []).toHaveLength(3);
+      expect(credits ?? []).toHaveLength(1);
       (credits ?? []).forEach((row) => scope.registerResource("service_credits", row.id));
 
-      const base = (credits ?? []).find((row) => row.units_total === 30);
-      const bonusDaycare = (credits ?? []).find((row) => row.units_total === 1 && row.service_code === "daycare_full_day");
-      const bonusSplash = (credits ?? []).find((row) => row.units_total === 1 && row.service_code === "grooming_splash");
-
-      expect(base?.redemption_group_id).toBeNull();
-      expect(base?.is_bonus).toBe(false);
-      expect(bonusDaycare?.is_bonus).toBe(true);
-      expect(bonusSplash?.is_bonus).toBe(true);
-      expect(bonusDaycare?.redemption_group_id).toBeTruthy();
-      expect(bonusDaycare?.redemption_group_id).toBe(bonusSplash?.redemption_group_id);
+      const base = (credits ?? [])[0];
+      expect(base.units_total).toBe(30);
+      expect(base.service_code).toBe("daycare_full_day");
+      expect(base.is_bonus).toBe(false);
+      expect(base.redemption_group_id).toBeNull();
     });
   });
 

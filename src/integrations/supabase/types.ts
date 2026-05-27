@@ -39,6 +39,108 @@ export type Database = {
   }
   public: {
     Tables: {
+      _bra_backup: {
+        Row: {
+          booking_id: string | null
+          created_at: string | null
+          end_date: string | null
+          id: string | null
+          room_id: string | null
+          start_date: string | null
+        }
+        Insert: {
+          booking_id?: string | null
+          created_at?: string | null
+          end_date?: string | null
+          id?: string | null
+          room_id?: string | null
+          start_date?: string | null
+        }
+        Update: {
+          booking_id?: string | null
+          created_at?: string | null
+          end_date?: string | null
+          id?: string | null
+          room_id?: string | null
+          start_date?: string | null
+        }
+        Relationships: []
+      }
+      _delta_backup: {
+        Row: {
+          booking_id: string | null
+          created_at: string | null
+          end_date: string | null
+          id: string | null
+          room_id: string | null
+          start_date: string | null
+        }
+        Insert: {
+          booking_id?: string | null
+          created_at?: string | null
+          end_date?: string | null
+          id?: string | null
+          room_id?: string | null
+          start_date?: string | null
+        }
+        Update: {
+          booking_id?: string | null
+          created_at?: string | null
+          end_date?: string | null
+          id?: string | null
+          room_id?: string | null
+          start_date?: string | null
+        }
+        Relationships: []
+      }
+      _delta_orphan_assignments: {
+        Row: {
+          end_date: string | null
+          pet_source_external_id: string | null
+          reason: string | null
+          room_name: string | null
+          start_date: string | null
+        }
+        Insert: {
+          end_date?: string | null
+          pet_source_external_id?: string | null
+          reason?: string | null
+          room_name?: string | null
+          start_date?: string | null
+        }
+        Update: {
+          end_date?: string | null
+          pet_source_external_id?: string | null
+          reason?: string | null
+          room_name?: string | null
+          start_date?: string | null
+        }
+        Relationships: []
+      }
+      _orphan_assignments: {
+        Row: {
+          end_date: string | null
+          pet_source_external_id: string | null
+          reason: string | null
+          room_name: string | null
+          start_date: string | null
+        }
+        Insert: {
+          end_date?: string | null
+          pet_source_external_id?: string | null
+          reason?: string | null
+          room_name?: string | null
+          start_date?: string | null
+        }
+        Update: {
+          end_date?: string | null
+          pet_source_external_id?: string | null
+          reason?: string | null
+          room_name?: string | null
+          start_date?: string | null
+        }
+        Relationships: []
+      }
       agent_capability_requests: {
         Row: {
           attempted_capability: string
@@ -1697,6 +1799,7 @@ export type Database = {
           owner_id: string
           package_def_id: string
           pet_count: number
+          staff_label: string | null
         }
         Insert: {
           created_at?: string
@@ -1706,6 +1809,7 @@ export type Database = {
           owner_id: string
           package_def_id: string
           pet_count: number
+          staff_label?: string | null
         }
         Update: {
           created_at?: string
@@ -1715,6 +1819,7 @@ export type Database = {
           owner_id?: string
           package_def_id?: string
           pet_count?: number
+          staff_label?: string | null
         }
         Relationships: [
           {
@@ -2596,6 +2701,10 @@ export type Database = {
         Args: { p_booking_id: string }
         Returns: string
       }
+      boarding_kennel_occupancy_counts: {
+        Args: { p_as_of: string }
+        Returns: Json
+      }
       calculate_cancellation_refund: {
         Args: {
           p_invoice_id: string
@@ -2659,11 +2768,38 @@ export type Database = {
           total_aed: number
         }[]
       }
+      is_boarding_import_placeholder_room: {
+        Args: { p_room: Database["public"]["Tables"]["rooms"]["Row"] }
+        Returns: boolean
+      }
       is_import_placeholder_room_id: {
         Args: { p_room_id: string }
         Returns: boolean
       }
+      is_kennel_occupancy_room: {
+        Args: { p_room: Database["public"]["Tables"]["rooms"]["Row"] }
+        Returns: boolean
+      }
       is_peak_date: { Args: { p_date: string }; Returns: boolean }
+      issue_custom_daycare_package: {
+        Args: {
+          p_amount_aed?: number
+          p_label?: string
+          p_owner_id: string
+          p_payment_method?: Database["public"]["Enums"]["payment_method"]
+          p_pet_ids: string[]
+          p_service_code?: Database["public"]["Enums"]["service_code"]
+          p_units: number
+          p_validity_months?: number
+        }
+        Returns: {
+          credits_granted: number
+          discount_applied_aed: number
+          invoice_id: string
+          purchase_group_id: string
+          total_amount_aed: number
+        }[]
+      }
       list_active_credits_for_pet: {
         Args: {
           p_pet_id: string
@@ -2724,6 +2860,21 @@ export type Database = {
           rate_id: string
           service_code: Database["public"]["Enums"]["service_code"]
           unit: Database["public"]["Enums"]["service_unit"]
+        }[]
+      }
+      restore_service_credit: {
+        Args: { p_credit_id: string; p_units?: number }
+        Returns: {
+          credit_id: string
+          new_status: string
+          units_remaining: number
+        }[]
+      }
+      revoke_daycare_package_credit: {
+        Args: { p_credit_id: string; p_reason?: string }
+        Returns: {
+          credit_id: string
+          invoice_voided: boolean
         }[]
       }
       show_limit: { Args: never; Returns: number }

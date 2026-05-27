@@ -784,6 +784,7 @@ function PlannerTab() {
   const getUsablePackagesForPet = useCallback((petId: string) => {
     return (packages ?? []).filter((pkg) => {
       if (pkg.pet_id !== petId) return false;
+      if (pkg.is_bonus) return false;
       if ((pkg.days_used ?? 0) >= (pkg.total_days ?? 0)) return false;
       if (pkg.expiry_date && pkg.expiry_date < TODAY) return false;
       return true;
@@ -1282,16 +1283,11 @@ function PlannerTab() {
                                   <SelectItem value="hourly">Hourly (invoice now)</SelectItem>
                                   {usablePackages.map((pkg) => (
                                     <SelectItem key={pkg.id} value={pkg.id}>
-                                      Use credit ({pkg.total_days - pkg.days_used} remaining{pkg.service_code === "daycare_hourly" ? " hourly" : ""}{pkg.is_bonus ? ", bonus choice" : ""})
+                                      Use credit ({pkg.total_days - pkg.days_used} remaining{pkg.service_code === "daycare_hourly" ? " hourly" : ""})
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
-                              {usablePackages.some((pkg) => pkg.is_bonus && pkg.service_code === "daycare_full_day") && (
-                                <p className="text-[11px] text-amber-700">
-                                  Using bonus daycare credit revokes the sibling bonus Splash credit from the same package.
-                                </p>
-                              )}
                             </div>
                           )}
                         </div>

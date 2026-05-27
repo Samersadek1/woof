@@ -4,7 +4,6 @@ import type { Database } from "@/integrations/supabase/types";
 import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
 import { ownerMemberTierFromFlags, type OwnerMemberTier } from "@/lib/memberTier";
-import { SOLD_PACKAGE_CREDIT_CODES } from "@/lib/packageCatalog";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
 type DaycareSessionInsert = Database["public"]["Tables"]["daycare_sessions"]["Insert"];
@@ -36,6 +35,17 @@ export type { DaycareSession };
 const DAYCARE_CREDIT_CODES: ServiceCode[] = ["daycare_full_day", "daycare_hourly"];
 
 type CreditRpcRow = Database["public"]["Functions"]["list_active_credits_for_pet"]["Returns"][number];
+
+type PurchaseGroupJoin = {
+  staff_label?: string | null;
+  package_definitions?: { display_name?: string | null } | null;
+} | null;
+
+function creditPackageDisplayName(purchaseGroups: PurchaseGroupJoin): string | null {
+  const label = purchaseGroups?.staff_label?.trim();
+  if (label) return label;
+  return purchaseGroups?.package_definitions?.display_name ?? null;
+}
 
 export const daycareQueryKeys = {
   packages: (ownerId?: string) => ["service_credits", "daycare", ownerId ?? "all"] as const,
@@ -74,20 +84,18 @@ export function useDaycarePackages(ownerId: string) {
 
       const { data, error } = await supabase
         .from("service_credits")
-        .select("*, purchase_groups(package_definitions(display_name))")
+        .select("*, purchase_groups(staff_label, package_definitions(display_name))")
         .in("pet_id", petIds)
         .in("service_code", DAYCARE_CREDIT_CODES)
+        .eq("is_bonus", false)
         .eq("status", "active")
         .gte("expires_at", new Date().toISOString().slice(0, 10))
         .order("expires_at", { ascending: true });
       if (error) throw error;
       return (data ?? []).map((row) => {
-        const packageName =
-          (
-            row as unknown as {
-              purchase_groups?: { package_definitions?: { display_name?: string | null } | null } | null;
-            }
-          ).purchase_groups?.package_definitions?.display_name ?? null;
+        const packageName = creditPackageDisplayName(
+          (row as unknown as { purchase_groups?: PurchaseGroupJoin }).purchase_groups ?? null,
+        );
         return {
           id: row.id,
           owner_id: ownerId,
@@ -470,9 +478,12 @@ export function useAllDaycarePackages() {
       const { data, error } = await supabase
         .from("service_credits")
         .select(
-          "*, pets!inner(name, owner_id, owners(first_name, last_name, is_elite, is_vip)), purchase_groups(package_definitions(display_name))",
+          "*, pets!inner(name, owner_id, owners(first_name, last_name, is_elite, is_vip)), purchase_groups(staff_label, package_definitions(display_name))",
         )
-        .in("service_code", SOLD_PACKAGE_CREDIT_CODES)
+        // Daycare UI only — base credits (no bonus-choice rows).
+        .in("service_code", DAYCARE_CREDIT_CODES)
+        .eq("is_bonus", false)
+        .neq("status", "revoked")
         .order("created_at", { ascending: false });
       if (error) throw error;
       const mapped = (data ?? []).map((row) => {
@@ -489,11 +500,9 @@ export function useAllDaycarePackages() {
         const pet = (row as unknown as { pets: PetJoin | null }).pets;
         const ownerId = pet?.owner_id ?? "";
         const ownerJoin = pet?.owners;
-        const pkgName = (
-          row as unknown as {
-            purchase_groups?: { package_definitions?: { display_name?: string | null } | null } | null;
-          }
-        ).purchase_groups?.package_definitions?.display_name;
+        const pkgName = creditPackageDisplayName(
+          (row as unknown as { purchase_groups?: PurchaseGroupJoin }).purchase_groups ?? null,
+        );
         return {
           id: row.id,
           owner_id: ownerId,
@@ -572,10 +581,70 @@ export function useUpdateDaycarePackage() {
 
 // ── useDeleteDaycarePackage ──────────────────────────────────────────────────
 
+export type RevokeDaycarePackageInput = {
+  creditId: string;
+  reason?: string;
+};
+
 export function useDeleteDaycarePackage() {
+  const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: async (_packageId: string) => {
-      throw new Error("Package deletion is not supported.");
+    mutationFn: async ({ creditId, reason }: RevokeDaycarePackageInput) => {
+      const { data, error } = await supabase.rpc("revoke_daycare_package_credit", {
+        p_credit_id: creditId,
+        p_reason: reason ?? null,
+      });
+      if (error) throw error;
+      const row = (data as { credit_id: string; invoice_voided: boolean }[] | null)?.[0];
+      return row ?? { credit_id: creditId, invoice_voided: false };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+    },
+  });
+}
+
+export type IssueCustomDaycarePackageInput = {
+  owner_id: string;
+  pet_ids: string[];
+  units: number;
+  amount_aed: number;
+  label: string;
+  validity_months?: number;
+  payment_method?: Database["public"]["Enums"]["payment_method"];
+  service_code?: Extract<ServiceCode, "daycare_full_day" | "daycare_hourly">;
+};
+
+export function useIssueCustomDaycarePackage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: IssueCustomDaycarePackageInput) => {
+      const { data, error } = await supabase.rpc("issue_custom_daycare_package", {
+        p_owner_id: input.owner_id,
+        p_pet_ids: input.pet_ids,
+        p_units: input.units,
+        p_amount_aed: input.amount_aed,
+        p_label: input.label.trim(),
+        p_validity_months: input.validity_months ?? 6,
+        p_payment_method: input.payment_method ?? "card",
+        p_service_code: input.service_code ?? "daycare_full_day",
+      });
+      if (error) throw error;
+      return (data as {
+        invoice_id: string;
+        purchase_group_id: string;
+        total_amount_aed: number;
+        discount_applied_aed: number;
+        credits_granted: number;
+      }[] | null)?.[0] ?? null;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
     },
   });
 }
