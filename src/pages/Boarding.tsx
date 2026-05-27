@@ -1988,6 +1988,10 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
           roomType: selectedRoom?.room_type ?? "boarding",
           roomName: selectedRoom?.room_number ?? undefined,
           petCount: form.pet_ids.length,
+          pets: form.pet_ids.map((petId) => ({
+            id: petId,
+            name: ownerPets.find((p) => p.id === petId)?.name ?? "Pet",
+          })),
           checkInDate: form.check_in_date,
           checkOutDate: form.check_out_date,
           addons: addonItems,
@@ -2884,20 +2888,42 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
 type BoardingListPreset = "today" | "tomorrow" | "next7";
 type BoardingListFocus = "all" | "check-ins" | "check-outs";
 
+function boardingListFocusFromViewParam(view: string | null): BoardingListFocus {
+  if (view === "check-ins") return "check-ins";
+  if (view === "check-outs") return "check-outs";
+  return "all";
+}
+
 const OCCUPANCY_BOOKING_SELECT =
   `*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, ${PET_CARE_NOTES_SELECT}, special_alerts))`;
 
 function BoardingOperationsList({
   initialDatePreset = "today",
   initialAnchorDate,
-  focus = "all",
   onBookingSelect,
 }: {
   initialDatePreset?: BoardingListPreset;
   initialAnchorDate?: string;
-  focus?: BoardingListFocus;
   onBookingSelect?: (booking: BookingWithDetails, asOfDate: string) => void;
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focus = useMemo(
+    () => boardingListFocusFromViewParam(searchParams.get("view")),
+    [searchParams],
+  );
+
+  const setListFocus = (next: BoardingListFocus) => {
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === "all") p.delete("view");
+        else p.set("view", next);
+        return p;
+      },
+      { replace: true },
+    );
+  };
+
   const [datePreset, setDatePreset] = useState<BoardingListPreset>(initialDatePreset);
   const [anchorDate, setAnchorDate] = useState(initialAnchorDate ?? toDateStr(new Date()));
 
@@ -2920,17 +2946,43 @@ function BoardingOperationsList({
 
   const { data: bookings = [], isLoading } = useBookings(rangeStart, rangeEnd);
 
-  const filtered = useMemo(() => {
-    const rows = bookings.filter((b) => !isRetiredCatteryWing(b.rooms?.wing));
+  const dogBoardingRows = useMemo(
+    () => bookings.filter((b) => !isRetiredCatteryWing(b.rooms?.wing)),
+    [bookings],
+  );
 
-    const focusRows = rows.filter((b) => {
+  const listCounts = useMemo(
+    () => ({
+      all: dogBoardingRows.length,
+      checkIns: dogBoardingRows.filter((b) => b.check_in_date === rangeStart).length,
+      checkOuts: dogBoardingRows.filter((b) => b.check_out_date === rangeStart).length,
+    }),
+    [dogBoardingRows, rangeStart],
+  );
+
+  const filtered = useMemo(() => {
+    const focusRows = dogBoardingRows.filter((b) => {
       if (focus === "check-ins") return b.check_in_date === rangeStart;
       if (focus === "check-outs") return b.check_out_date === rangeStart;
       return true;
     });
 
     return focusRows.sort((a, b) => a.check_in_date.localeCompare(b.check_in_date));
-  }, [bookings, focus, rangeStart]);
+  }, [dogBoardingRows, focus, rangeStart]);
+
+  const operationalDayLabel = format(parseISO(rangeStart), "EEEE, d MMM yyyy");
+
+  const emptyListMessage =
+    focus === "check-ins"
+      ? `No check-ins on ${operationalDayLabel}.`
+      : focus === "check-outs"
+        ? `No check-outs on ${operationalDayLabel}.`
+        : datePreset === "next7"
+          ? "No boarding records for this range."
+          : "No boarding records for this day.";
+
+  const listTabClass = (active: boolean) =>
+    `px-3 py-1.5 transition-colors ${active ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`;
 
   return (
     <div className="p-6 space-y-4">
@@ -2954,15 +3006,60 @@ function BoardingOperationsList({
           onClick={() => void printBoardingComingGoingList(filtered, rangeStart, rangeEnd, focus)}
         >
           <Printer className="mr-1.5 h-4 w-4" />
-          Print full list
+          Print list
         </Button>
+      </div>
+
+      <div className="space-y-2">
+        <div
+          className="inline-flex rounded-lg border border-border overflow-hidden text-sm font-medium"
+          role="tablist"
+          aria-label="Operations list view"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={focus === "all"}
+            data-testid="boarding-operations-tab-all"
+            className={listTabClass(focus === "all")}
+            onClick={() => setListFocus("all")}
+          >
+            Full list{listCounts.all > 0 ? ` (${listCounts.all})` : ""}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={focus === "check-ins"}
+            data-testid="boarding-operations-tab-check-ins"
+            className={listTabClass(focus === "check-ins")}
+            onClick={() => setListFocus("check-ins")}
+          >
+            Checking in{listCounts.checkIns > 0 ? ` (${listCounts.checkIns})` : ""}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={focus === "check-outs"}
+            data-testid="boarding-operations-tab-check-outs"
+            className={listTabClass(focus === "check-outs")}
+            onClick={() => setListFocus("check-outs")}
+          >
+            Checking out{listCounts.checkOuts > 0 ? ` (${listCounts.checkOuts})` : ""}
+          </button>
+        </div>
+        {focus !== "all" ? (
+          <p className="text-sm text-muted-foreground">
+            {focus === "check-ins" ? "Arrivals" : "Departures"} on {operationalDayLabel}
+            {datePreset === "next7" ? " (first day of range)" : ""}
+          </p>
+        ) : null}
       </div>
 
       <div className="rounded-lg border">
         {isLoading ? (
           <div className="p-3 space-y-2">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-11 w-full" />)}</div>
         ) : filtered.length === 0 ? (
-          <p className="p-6 text-sm text-muted-foreground text-center">No boarding records for this range.</p>
+          <p className="p-6 text-sm text-muted-foreground text-center">{emptyListMessage}</p>
         ) : (
           <div className="divide-y">
             {filtered.map((booking) => {
@@ -3048,11 +3145,10 @@ function BoardingHubPage() {
     return /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : null;
   }, [requestedDate, todayStr]);
 
-  const listFocus: BoardingListFocus = useMemo(() => {
-    if (requestedView === "check-ins") return "check-ins";
-    if (requestedView === "check-outs") return "check-outs";
-    return "all";
-  }, [requestedView]);
+  const listFocus = useMemo(
+    () => boardingListFocusFromViewParam(requestedView),
+    [requestedView],
+  );
 
   useEffect(() => {
     if (listFocus !== "all") {
@@ -3468,7 +3564,6 @@ function BoardingHubPage() {
           <DayShufflePanel initialDate={normalizedDate ?? todayStr} />
         ) : (
           <BoardingOperationsList
-            focus={listFocus}
             initialAnchorDate={normalizedDate ?? undefined}
             initialDatePreset="today"
             onBookingSelect={openBookingDetail}
