@@ -3046,11 +3046,10 @@ function BoardingHubPage() {
 
   const [occupancyOpen, setOccupancyOpen] = useState(false);
   const [occupancyDate, setOccupancyDate] = useState(todayStr);
-  const [bookingSearch, setBookingSearch] = useState("");
-  const bookingSearchFilter = useDebounce(bookingSearch, 300);
+  const [bookingSearchFilter, setBookingSearchFilter] = useState("");
 
   const handleBookingSearchSelect = (hit: BoardingBookingSearchHit) => {
-    setBookingSearch(hit.booking_ref ?? hit.id);
+    setBookingSearchFilter(hit.booking_ref ?? hit.id);
     setWindowStart(startOfWeek(parseISO(hit.check_in_date), { weekStartsOn: 1 }));
     setViewMode("calendar");
   };
@@ -3341,8 +3340,7 @@ function BoardingHubPage() {
 
         <div className="flex items-center gap-3">
           <BoardingBookingSearch
-            value={bookingSearch}
-            onChange={setBookingSearch}
+            onFilterChange={setBookingSearchFilter}
             onSelect={handleBookingSearchSelect}
           />
           <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium">

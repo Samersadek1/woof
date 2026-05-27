@@ -1,31 +1,26 @@
-import { useState } from "react";
+import { memo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useDismissOnOutsidePointer } from "@/hooks/useDismissOnOutsidePointer";
 import { useOwners } from "@/hooks/useOwners";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { cn } from "@/lib/utils";
 
 export type OwnerClientSearchProps = {
   placeholder?: string;
-  /** Minimum characters before search runs and dropdown shows. */
   minChars?: number;
   debounceMs?: number;
   inputTestId?: string;
   optionTestIdPrefix?: string;
   className?: string;
-  /** When set, shows selected chip instead of the search field. */
   selectedId?: string | null;
   selectedLabel?: string | null;
   onSelect: (id: string, label: string) => void;
   onClear: () => void;
 };
 
-/**
- * Search owners by name, phone, or pet name. Uses a plain input + anchored list
- * (not PopoverTrigger) so focus is not stolen on each keystroke.
- */
-export function OwnerClientSearch({
+export const OwnerClientSearch = memo(function OwnerClientSearch({
   placeholder = "Search client or pet name / phone…",
   minChars = 1,
   debounceMs = 0,
@@ -39,10 +34,13 @@ export function OwnerClientSearch({
 }: OwnerClientSearchProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const debouncedQuery = useDebounce(query, debounceMs);
   const searchTerm =
     debouncedQuery.trim().length >= minChars ? debouncedQuery.trim() : undefined;
   const { data: owners = [], isLoading } = useOwners(searchTerm);
+
+  useDismissOnOutsidePointer(wrapperRef, open, () => setOpen(false));
 
   if (selectedId && selectedLabel) {
     return (
@@ -71,7 +69,7 @@ export function OwnerClientSearch({
   const showDropdown = open && query.trim().length >= minChars;
 
   return (
-    <div className={cn("relative", className)}>
+    <div ref={wrapperRef} className={cn("relative", className)}>
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         data-testid={inputTestId}
@@ -83,18 +81,10 @@ export function OwnerClientSearch({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        onBlur={() => {
-          window.setTimeout(() => setOpen(false), 150);
-        }}
         autoComplete="off"
-        aria-expanded={showDropdown}
-        aria-autocomplete="list"
       />
       {showDropdown ? (
-        <ul
-          className="absolute left-0 right-0 top-full z-[120] mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 text-sm shadow-md"
-          role="listbox"
-        >
+        <ul className="absolute left-0 right-0 top-full z-[120] mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 text-sm shadow-md">
           {isLoading ? (
             <li className="px-3 py-2 text-muted-foreground">Searching…</li>
           ) : owners.length === 0 ? (
@@ -105,7 +95,7 @@ export function OwnerClientSearch({
               const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
               const details = [petNames, o.phone].filter(Boolean).join(" · ");
               return (
-                <li key={o.id} role="option">
+                <li key={o.id}>
                   <button
                     type="button"
                     data-testid={optionTestIdPrefix ? `${optionTestIdPrefix}-${o.id}` : undefined}
@@ -130,4 +120,4 @@ export function OwnerClientSearch({
       ) : null}
     </div>
   );
-}
+});
