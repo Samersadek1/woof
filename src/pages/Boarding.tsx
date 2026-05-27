@@ -31,7 +31,10 @@ import {
   type BookingRoomAssignmentSlice,
 } from "@/lib/bookingRoomDisplay";
 import { BoardingRoomCalendarRow } from "@/components/boarding/BoardingRoomCalendarRow";
+import { BackfillBoardingInvoicesButton } from "@/components/boarding/BackfillBoardingInvoicesButton";
+import { BoardingBookingInvoiceLink } from "@/components/boarding/BoardingBookingInvoiceLink";
 import { BoardingBookingSearch } from "@/components/boarding/BoardingBookingSearch";
+import { BoardingOwnerSearchField } from "@/components/boarding/BoardingOwnerSearchField";
 import { boardingBookingMatchesSearch } from "@/lib/boardingBookingSearch";
 import type { BoardingBookingSearchHit } from "@/hooks/useBookings";
 import {
@@ -47,7 +50,7 @@ import {
   buildBoardingRoomCalendarDayHtml,
   printBoardingRoomCalendarDay,
 } from "@/lib/boardingCalendarPrint";
-import { useOwners, useOwner } from "@/hooks/useOwners";
+import { useOwner } from "@/hooks/useOwners";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePets } from "@/hooks/usePets";
 import {
@@ -1140,13 +1143,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
   const [belongingsReadOnly, setBelongingsReadOnly] = useState(false);
   const [changeRoomOpen, setChangeRoomOpen] = useState(false);
 
-  // owner search
-  const [ownerSearch, setOwnerSearch] = useState("");
-  const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
-  const debouncedOwnerSearch = useDebounce(ownerSearch, 300);
-  const { data: ownerResults = [] } = useOwners(
-    debouncedOwnerSearch.trim().length >= 2 ? debouncedOwnerSearch : undefined,
-  );
+  const [ownerSearchResetKey, setOwnerSearchResetKey] = useState(0);
 
   // pets for selected owner (dog boarding: exclude cats)
   const { data: ownerPets = [] } = usePets(form.owner_id);
@@ -1394,8 +1391,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
       check_in_date: date ?? "",
       check_out_date: date ? toDateStr(addDays(parseISO(date), 1)) : "",
     });
-    setOwnerSearch("");
-    setOwnerDropdownOpen(false);
+    setOwnerSearchResetKey((k) => k + 1);
     setNewBookingOpen(true);
   };
 
@@ -1889,56 +1885,11 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
             {/* Owner search */}
             <div className="space-y-2">
               <Label>Owner <span className="text-destructive">*</span></Label>
-              <div className="relative w-full max-w-md">
-                <Input
-                  data-testid="boarding-owner-search"
-                  placeholder="Search by name or phone…"
-                  value={ownerSearch}
-                  onChange={(e) => {
-                    setOwnerSearch(e.target.value);
-                    setOwnerDropdownOpen(true);
-                  }}
-                  onFocus={() => ownerSearch.trim().length >= 2 && setOwnerDropdownOpen(true)}
-                  onBlur={() => {
-                    window.setTimeout(() => setOwnerDropdownOpen(false), 150);
-                  }}
-                  aria-expanded={ownerDropdownOpen && ownerSearch.trim().length >= 2}
-                  aria-autocomplete="list"
-                />
-                {ownerDropdownOpen && ownerSearch.trim().length >= 2 ? (
-                  <ul
-                    className="absolute left-0 right-0 top-full z-[120] mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 text-sm shadow-md"
-                    role="listbox"
-                  >
-                    {ownerResults.length === 0 ? (
-                      <li className="px-3 py-2 text-muted-foreground">No owners found.</li>
-                    ) : (
-                      ownerResults.map((o) => (
-                        <li key={o.id} role="option">
-                          <button
-                            data-testid={`boarding-owner-option-${o.id}`}
-                            type="button"
-                            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-accent"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => {
-                              setForm((f) => ({ ...f, owner_id: o.id }));
-                              setOwnerSearch(
-                                `${ownerDisplayName(o.first_name, o.last_name)} — ${o.phone}`,
-                              );
-                              setOwnerDropdownOpen(false);
-                            }}
-                          >
-                            <span className="font-medium">
-                              {ownerDisplayName(o.first_name, o.last_name)}
-                            </span>
-                            <span className="ml-2 text-muted-foreground">{o.phone}</span>
-                          </button>
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                ) : null}
-              </div>
+              <BoardingOwnerSearchField
+                ownerId={form.owner_id}
+                onOwnerIdChange={(id) => setForm((f) => ({ ...f, owner_id: id }))}
+                resetKey={ownerSearchResetKey}
+              />
             </div>
 
             {/* Pet selector — dog boarding only */}
@@ -2753,6 +2704,13 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
 
                 <Separator />
 
+                <BoardingBookingInvoiceLink
+                  bookingId={detailBooking.id}
+                  bookingRef={detailBooking.booking_ref}
+                />
+
+                <Separator />
+
                 {/* Actions */}
                 <div className="space-y-3">
 
@@ -3411,6 +3369,8 @@ function BoardingHubPage() {
               Day shuffle
             </button>
           </div>
+
+          <BackfillBoardingInvoicesButton />
 
           <Button
             variant="outline"

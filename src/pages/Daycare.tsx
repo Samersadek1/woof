@@ -25,7 +25,8 @@ import {
   vatLineLabel,
 } from "@/lib/vatConfig";
 import { formatAed, parseBoundedDecimalInput } from "@/lib/money";
-import { useOwners, useOwner } from "@/hooks/useOwners";
+import { useOwner } from "@/hooks/useOwners";
+import { OwnerClientSearch } from "@/components/OwnerClientSearch";
 import { usePets } from "@/hooks/usePets";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -150,17 +151,6 @@ function creditBarColour(remaining: number) {
   return "bg-emerald-500";
 }
 
-// ── Shared: OwnerCombobox ─────────────────────────────────────────────────────
-
-interface OwnerComboboxProps {
-  selectedId:    string | null;
-  selectedLabel: string | null;
-  onSelect:      (id: string, label: string) => void;
-  onClear:       () => void;
-  placeholder?:  string;
-  inputTestId?:  string;
-}
-
 function extractErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -170,92 +160,6 @@ function extractErrorMessage(error: unknown): string {
     }
   }
   return "Unknown error";
-}
-
-function OwnerCombobox({
-  selectedId, selectedLabel, onSelect, onClear, placeholder = "Search client or pet name / phone…",
-  inputTestId,
-}: OwnerComboboxProps) {
-  const [query, setQuery]   = useState("");
-  const [open, setOpen]     = useState(false);
-  const wrapperRef          = useRef<HTMLDivElement>(null);
-
-  const { data: owners, isLoading } = useOwners(query.length >= 1 ? query : undefined);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  if (selectedId && selectedLabel) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-        <span className="flex-1 font-medium">{selectedLabel}</span>
-        <button type="button" onClick={onClear} className="rounded-full hover:bg-muted p-0.5">
-          <X className="h-3.5 w-3.5 text-muted-foreground" />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div ref={wrapperRef} className="relative">
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-      <Input
-        data-testid={inputTestId}
-        className="pl-8 h-9"
-        placeholder={placeholder}
-        value={query}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        autoComplete="off"
-      />
-      {open && query.length >= 1 && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md overflow-hidden">
-          {isLoading ? (
-            <div className="p-2 space-y-1">
-              {[1, 2].map(i => <Skeleton key={i} className="h-7 w-full" />)}
-            </div>
-          ) : !owners?.length ? (
-            <p className="p-3 text-sm text-muted-foreground">No clients or pets found</p>
-          ) : (
-            <ul className="max-h-52 overflow-y-auto divide-y">
-              {owners.map(o => {
-                const label = ownerDisplayName(o.first_name, o.last_name);
-                const petCount = o.pets?.length ?? 0;
-                const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
-                return (
-                  <li key={o.id}>
-                    <button
-                      data-testid={`daycare-owner-option-${o.id}`}
-                      type="button"
-                      className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/60 text-left"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        onSelect(o.id, label);
-                        setQuery("");
-                        setOpen(false);
-                      }}
-                    >
-                      <span className="font-medium">{label}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {petCount} pet{petCount !== 1 ? "s" : ""}{petNames ? ` · ${petNames}` : ""}{o.phone ? ` · ${o.phone}` : ""}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ── Planner: SessionsTable ────────────────────────────────────────────────────
@@ -1200,7 +1104,7 @@ function PlannerTab() {
         <CardContent className="space-y-4">
           <div className="space-y-1 max-w-xl">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Client</Label>
-            <OwnerCombobox
+            <OwnerClientSearch
               selectedId={
                 ownerId && (resolvedOwnerLabel || ownerDetailLoading) ? ownerId : null
               }
@@ -1209,6 +1113,8 @@ function PlannerTab() {
               onClear={handleOwnerClear}
               placeholder="Search by client name, pet name, or phone…"
               inputTestId="daycare-planner-owner-search"
+              optionTestIdPrefix="daycare-owner-option"
+              className="h-9"
             />
           </div>
           <div className="max-w-xl space-y-1">
@@ -1301,7 +1207,7 @@ function PlannerTab() {
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Search owner or dog</Label>
             <div className="flex flex-wrap items-center gap-2">
               <div className="min-w-[12rem] flex-1">
-                <OwnerCombobox
+                <OwnerClientSearch
                   selectedId={
                     ownerId && (resolvedOwnerLabel || ownerDetailLoading)
                       ? ownerId
@@ -1316,6 +1222,8 @@ function PlannerTab() {
                   onClear={handleOwnerClear}
                   placeholder="Search by client name, pet name, or phone…"
                   inputTestId="daycare-pet-search"
+                  optionTestIdPrefix="daycare-owner-option"
+                  className="h-9"
                 />
               </div>
               {ownerFromUrl &&

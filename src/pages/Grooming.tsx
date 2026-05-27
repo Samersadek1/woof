@@ -13,7 +13,8 @@ import TopBar from "@/components/dashboard/TopBar";
 import { useAuth } from "@/contexts/AuthContext";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { groomingServiceToPricingKey } from "@/lib/addonPricing";
-import { useOwners, useOwner } from "@/hooks/useOwners";
+import { useOwner } from "@/hooks/useOwners";
+import { OwnerClientSearch } from "@/components/OwnerClientSearch";
 import { usePets } from "@/hooks/usePets";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -453,109 +454,6 @@ function VisitNotesField({ a }: { a: GroomingAppointmentWithJoins }) {
       onBlur={save}
       disabled={update.isPending}
     />
-  );
-}
-
-function GroomingOwnerSearch({
-  onSelect,
-  selectedOwnerId,
-  selectedLabel,
-  onClear,
-}: {
-  onSelect: (id: string, label: string) => void;
-  selectedOwnerId: string | null;
-  selectedLabel: string | null;
-  onClear: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  const { data: owners, isLoading } = useOwners(
-    query.length >= 1 ? query : undefined,
-  );
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  if (selectedLabel && selectedOwnerId) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
-        <Search className="h-4 w-4 text-muted-foreground shrink-0" />
-        <span className="flex-1 text-sm font-medium truncate">{selectedLabel}</span>
-        <button
-          type="button"
-          onClick={onClear}
-          className="rounded-full p-0.5 hover:bg-muted shrink-0"
-          aria-label="Clear owner"
-        >
-          <X className="h-4 w-4 text-muted-foreground" />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div ref={wrapperRef} className="relative">
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-      <Input
-        className="pl-9"
-        placeholder="Search client or pet name / phone…"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        autoComplete="off"
-      />
-      {open && query.length >= 1 && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md overflow-hidden">
-          {isLoading ? (
-            <div className="p-2 space-y-2">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : !owners?.length ? (
-            <p className="p-3 text-sm text-muted-foreground">No clients or pets found</p>
-          ) : (
-            <ul className="max-h-56 overflow-y-auto divide-y">
-              {owners.map((o) => {
-                const label = ownerDisplayName(o.first_name, o.last_name);
-                const petNames = (o.pets ?? []).map((p) => p.name).filter(Boolean).join(", ");
-                const details = [petNames, o.phone].filter(Boolean).join(" · ");
-                return (
-                  <li key={o.id}>
-                    <button
-                      type="button"
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-muted/60"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        onSelect(o.id, label);
-                        setQuery("");
-                        setOpen(false);
-                      }}
-                    >
-                      <span className="font-medium">{label}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {details}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -2478,8 +2376,8 @@ const GroomingPage = () => {
               </h3>
               <div className="space-y-2">
                 <Label>Owner</Label>
-                <GroomingOwnerSearch
-                  selectedOwnerId={ownerId}
+                <OwnerClientSearch
+                  selectedId={ownerId}
                   selectedLabel={ownerLabel}
                   onSelect={(id, label) => {
                     setOwnerId(id);
