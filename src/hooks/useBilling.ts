@@ -13,6 +13,7 @@ import {
 } from "@/lib/transportPricing";
 import {
   useRefundWallet,
+  walletQueryKeys,
   type WalletMutationPayload,
 } from "@/hooks/useWallet";
 import {
@@ -168,6 +169,21 @@ export const billingKeys = {
     serviceStart: string | null,
   ) => ["cancellation_refund", ownerId, invoiceId, serviceStart] as const,
 };
+
+function invalidateAfterInvoicePayment(
+  queryClient: ReturnType<typeof useQueryClient>,
+  ownerId?: string,
+) {
+  queryClient.invalidateQueries({ queryKey: ["invoices"] });
+  queryClient.invalidateQueries({ queryKey: ["wallet_transactions"] });
+  queryClient.invalidateQueries({ queryKey: ["owners"] });
+  if (!ownerId) return;
+  queryClient.invalidateQueries({ queryKey: billingKeys.statement(ownerId) });
+  queryClient.invalidateQueries({ queryKey: billingKeys.invoices(ownerId) });
+  queryClient.invalidateQueries({ queryKey: ["owners", ownerId] });
+  queryClient.invalidateQueries({ queryKey: ["owner_wallet", ownerId] });
+  queryClient.invalidateQueries({ queryKey: walletQueryKeys.transactions(ownerId) });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Hook 1: usePricing
@@ -745,6 +761,7 @@ interface ProcessPaymentResult {
   success: boolean;
   method: PaymentMethod;
   amountCharged: number;
+  ownerId?: string;
   newWalletBalance?: number;
   error?: string;
   shortfall?: number;
@@ -769,6 +786,7 @@ export function useProcessPayment() {
             success: boolean;
             amount_charged?: number;
             new_balance?: number;
+            owner_id?: string;
             error?: string;
             shortfall?: number;
           };
@@ -783,6 +801,7 @@ export function useProcessPayment() {
             success: result.success,
             method: "wallet",
             amountCharged: result.amount_charged ?? 0,
+            ownerId: result.owner_id,
             newWalletBalance: result.new_balance,
             error: result.error,
             shortfall: result.shortfall,
@@ -836,7 +855,13 @@ export function useProcessPayment() {
         });
 
         toast.success(`${formatAed(amount)} deducted from wallet`);
-        return { success: true, method: "wallet", amountCharged: amount, newWalletBalance: newBalance };
+        return {
+          success: true,
+          method: "wallet",
+          amountCharged: amount,
+          ownerId: inv.owner_id,
+          newWalletBalance: newBalance,
+        };
       }
 
       // Card or cash payment
@@ -853,37 +878,40 @@ export function useProcessPayment() {
         vat_aed: invoice.vat_aed,
       });
 
+      const paidAt = new Date().toISOString();
       const { error: updateErr } = await supabase
         .from("invoices")
         .update({
           status: "paid" as const,
           payment_method: input.method,
           amount_paid: amount,
+          paid_at: paidAt,
         })
         .eq("id", input.invoiceId);
       if (updateErr) throw updateErr;
 
-      // Record audit trail transaction (non-blocking — may fail if schema migration not yet run)
-      try {
-        const { data: owner } = await supabase
-          .from("owners")
-          .select("wallet_balance")
-          .eq("id", invoice.owner_id)
-          .single();
+      const { data: owner, error: ownerErr } = await supabase
+        .from("owners")
+        .select("wallet_balance")
+        .eq("id", invoice.owner_id)
+        .single();
+      if (ownerErr) throw ownerErr;
 
-        const txType = input.method === "card" ? "card_payment" : "cash_payment";
-        await supabase.from("wallet_transactions").insert({
-          owner_id: invoice.owner_id,
-          amount: 0,
-          balance_after: owner?.wallet_balance ?? 0,
-          transaction_type: txType as "card_payment" | "cash_payment",
-          invoice_id: input.invoiceId,
-          performed_by: input.staffName,
-          notes: `Paid by ${input.method}`,
-        });
-      } catch {
-        // Audit trail insert failed (likely schema migration not yet applied) — payment itself succeeded
-        console.warn("Audit trail insert skipped — run sql/fix-invoice-schema.sql to enable full audit logging");
+      const txType = input.method === "card" ? "card_payment" : "cash_payment";
+      const { error: txErr } = await supabase.from("wallet_transactions").insert({
+        owner_id: invoice.owner_id,
+        invoice_id: input.invoiceId,
+        transaction_type: txType,
+        amount,
+        balance_after: owner.wallet_balance ?? 0,
+        payment_method: input.method,
+        performed_by: input.staffName,
+        notes: `Invoice paid by ${input.method}`,
+      });
+      if (txErr) {
+        throw new Error(
+          `Invoice marked paid but payment audit row failed: ${txErr.message}. Check wallet transactions.`,
+        );
       }
 
       toast.success(`${formatAed(amount)} recorded — paid by ${input.method}`);
@@ -892,12 +920,13 @@ export function useProcessPayment() {
         success: true,
         method: input.method,
         amountCharged: amount,
+        ownerId: invoice.owner_id,
       };
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["wallet_transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["owners"] });
+    onSuccess: (result) => {
+      if (result.success) {
+        invalidateAfterInvoicePayment(queryClient, result.ownerId);
+      }
     },
   });
 }

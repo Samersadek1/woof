@@ -334,7 +334,14 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
       method: payMethod,
       staffName: payStaff.trim(),
     });
-    if (result.success) setPayDialogInvoice(null);
+    if (result.success) {
+      setPayDialogInvoice(null);
+      const { data: freshInvoices } = await refetchInvoices();
+      if (viewInvoice) {
+        const fresh = freshInvoices?.find((i) => i.id === viewInvoice.id);
+        if (fresh) setViewInvoice(fresh);
+      }
+    }
   };
 
   const handleVoid = (inv: InvoiceWithItems) => {

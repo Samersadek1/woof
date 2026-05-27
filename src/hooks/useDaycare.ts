@@ -249,6 +249,12 @@ export type AddDaycareDayPayload = AttendancePayload & {
   pet_id:       string;
   owner_id:     string;
   package_id?:  string | null;
+  /**
+   * When set with package_id, consumes this many package units after the session is
+   * created (planner "Add Day"). Rolls back the session if consumption fails.
+   * Check-in uses separate consumption so hourly units can be applied there.
+   */
+  credit_units?: number;
   /** Client-selected size label (Small / Medium / Large / Extra Large). */
   dog_size?: string | null;
 };
@@ -270,6 +276,7 @@ export function useAddDaycareDay() {
       dropoff_used,
       logged_by,
       dog_size,
+      credit_units,
     }: AddDaycareDayPayload) => {
       // Prevent duplicate same-day check-ins for the same pet.
       const { data: existing, error: existingErr } = await supabase
@@ -304,6 +311,21 @@ export function useAddDaycareDay() {
         .single();
 
       if (error) throw error;
+
+      if (package_id && credit_units != null && credit_units > 0) {
+        const { error: consumeErr } = await supabase.rpc("consume_service_credit", {
+          p_credit_id: package_id,
+          p_units: credit_units,
+          p_consumed_for_ref_id: session.id,
+          p_consumed_for_ref_type: "daycare_session",
+        });
+        if (consumeErr) {
+          await supabase.from("daycare_sessions").delete().eq("id", session.id);
+          throw new Error(
+            consumeErr.message?.trim() || "Could not deduct package credit for this day",
+          );
+        }
+      }
 
       return session as DaycareSession;
     },

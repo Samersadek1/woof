@@ -224,6 +224,7 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
       pet_id:       petId,
       owner_id:     ownerId,
       package_id:   packageId,
+      credit_units: 1,
       pickup_used:  addDraft.pickup_used,
       dropoff_used: addDraft.dropoff_used,
       logged_by:    addDraft.logged_by || null,
