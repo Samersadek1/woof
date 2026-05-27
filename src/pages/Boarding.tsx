@@ -14,6 +14,7 @@ import TopBar from "@/components/dashboard/TopBar";
 import {
   useBookings,
   useBookingRoomAssignments,
+  useBookingRoomAssignmentsForBookings,
   useRooms,
   useCreateBooking,
   useUpdateBooking,
@@ -1019,6 +1020,7 @@ export type DogBoardingCalendarProps = {
   /** Hub renders the shared week toolbar */
   suppressToolbar?: boolean;
   bookingSearchQuery?: string;
+  onOpenBookingDetail: (booking: BookingWithDetails, asOfDate: string) => void;
 };
 
 function AssignRealRoomPanel({
@@ -1094,12 +1096,417 @@ function AssignRealRoomPanel({
   );
 }
 
+function BoardingBookingDetailSheets({
+  booking,
+  onBookingChange,
+  detailContext,
+  onDetailContextChange,
+}: {
+  booking: BookingWithDetails | null;
+  onBookingChange: (booking: BookingWithDetails | null) => void;
+  detailContext: { asOfDate: string } | null;
+  onDetailContextChange: (context: { asOfDate: string } | null) => void;
+}) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const updateBooking = useUpdateBooking();
+  const { data: rooms = [] } = useRooms();
+  const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
+  const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
+  const [belongingsReadOnly, setBelongingsReadOnly] = useState(false);
+  const [changeRoomOpen, setChangeRoomOpen] = useState(false);
+
+  const bookingId = booking?.id;
+  const { data: assignmentRows = [] } = useBookingRoomAssignmentsForBookings(
+    bookingId ? [bookingId] : [],
+    { enabled: !!bookingId },
+  );
+
+  const assignmentsForBooking = useMemo(
+    () => assignmentRows.filter((a) => a.booking_id === bookingId),
+    [assignmentRows, bookingId],
+  );
+
+  const assignableDogRooms = useMemo(() => {
+    const { facility: dogFacilityRooms } = splitFacilityAndPlaceholderRooms(rooms);
+    return dogFacilityRooms.filter((r) => !isExcludedBoardingRoom(r));
+  }, [rooms]);
+
+  const handleBelongingsFlowFinished = () => {
+    queryClient.invalidateQueries({ queryKey: ["bookings"] });
+    onBookingChange(null);
+    onDetailContextChange(null);
+    setCheckInSheetOpen(false);
+    setCheckOutSheetOpen(false);
+    setBelongingsReadOnly(false);
+  };
+
+  const closeDetail = () => {
+    onBookingChange(null);
+    onDetailContextChange(null);
+    setCheckInSheetOpen(false);
+    setCheckOutSheetOpen(false);
+    setBelongingsReadOnly(false);
+  };
+
+  return (
+    <>
+      <Sheet
+        open={!!booking}
+        onOpenChange={(open) => {
+          if (!open) closeDetail();
+        }}
+      >
+        <SheetContent
+          className="w-full sm:max-w-md overflow-y-auto"
+          data-testid="boarding-booking-detail-sheet"
+        >
+          {booking && (
+            <>
+              <SheetHeader>
+                <SheetTitle>{booking.booking_ref ?? "Booking Details"}</SheetTitle>
+                <SheetDescription>Reservation overview and actions.</SheetDescription>
+              </SheetHeader>
+
+              <div className="mt-6 space-y-5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="outline" className={STATUS_BADGE[booking.status]}>
+                    {booking.status.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                  </Badge>
+                  {booking.do_not_move && (
+                    <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-200">
+                      DO NOT MOVE
+                    </Badge>
+                  )}
+                </div>
+
+                <Separator />
+
+                <div className="space-y-1">
+                  <p className="text-xs uppercase text-muted-foreground font-medium">Owner</p>
+                  <button
+                    className="flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                    onClick={() => navigate(`/customers/${booking.owner_id}`)}
+                  >
+                    {booking.owners?.first_name} {booking.owners?.last_name}
+                    <ExternalLink className="h-3 w-3" />
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-xs uppercase text-muted-foreground font-medium">
+                    Pet{booking.booking_pets.length !== 1 ? "s" : ""}
+                  </p>
+                  {booking.booking_pets.length === 0 ? (
+                    <p className="text-sm">—</p>
+                  ) : (
+                    <p className="text-sm flex flex-wrap gap-x-1 gap-y-0.5">
+                      {booking.booking_pets.map((bp, i) => (
+                        <span key={bp.pet_id}>
+                          {i > 0 ? <span className="text-muted-foreground">, </span> : null}
+                          <button
+                            type="button"
+                            className="font-medium text-primary hover:underline"
+                            onClick={() =>
+                              navigate(`/customers/${booking.owner_id}/pets/${bp.pet_id}`)
+                            }
+                          >
+                            {bp.pets?.name ?? "Unknown"}
+                          </button>
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                </div>
+
+                <BookingProfileNotes
+                  ownerOtherNotes={booking.owners?.other_notes}
+                  pets={booking.booking_pets.map((bp) => ({
+                    name: bp.pets?.name ?? "Pet",
+                    otherNotes: bp.pets?.other_notes,
+                  }))}
+                />
+
+                <div className="space-y-1">
+                  <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
+                  {(() => {
+                    const slices = sortedAssignmentSlices(
+                      assignmentsForBooking.map((a) => ({
+                        start_date: a.start_date,
+                        end_date: a.end_date,
+                        rooms: a.rooms,
+                      })),
+                    );
+                    const asOfDate = detailContext?.asOfDate ?? toDateStr(new Date());
+                    const label = roomLabelForBooking(booking, slices, { asOfDate });
+                    const summaryLines = formatRoomAssignmentsSummary(slices, {
+                      highlightDate: asOfDate,
+                    });
+                    if (label === "Unassigned" && summaryLines.length === 0) {
+                      return <p className="text-sm text-muted-foreground italic">Unassigned</p>;
+                    }
+                    return (
+                      <>
+                        <p className="text-sm font-medium">
+                          {detailContext?.asOfDate
+                            ? `${label} (on ${format(parseISO(asOfDate), "d MMM yyyy")})`
+                            : label}
+                        </p>
+                        {summaryLines.length > 1 ? (
+                          <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground list-disc pl-4">
+                            {summaryLines.map((line) => (
+                              <li key={line}>{line}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {(!booking.room_id || isImportPlaceholderBooking(booking)) && (
+                  <AssignRealRoomPanel
+                    booking={booking}
+                    facilityRooms={assignableDogRooms}
+                    onRoomAssigned={(room) =>
+                      onBookingChange({ ...booking, room_id: room.id, rooms: room })
+                    }
+                  />
+                )}
+
+                <EditBoardingStayDates
+                  booking={booking}
+                  onUpdated={(patch) => onBookingChange({ ...booking, ...patch })}
+                />
+                <p className="text-sm text-muted-foreground">
+                  {nightsBetween(booking.check_in_date, booking.check_out_date)} night
+                  {nightsBetween(booking.check_in_date, booking.check_out_date) !== 1 ? "s" : ""}
+                </p>
+
+                <div className="rounded-md border p-3 space-y-3">
+                  <p className="text-xs uppercase text-muted-foreground font-medium">Transport</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="detail_pickup_required" className="font-normal text-sm cursor-pointer">
+                      Pickup (check-in)
+                    </Label>
+                    <Switch
+                      id="detail_pickup_required"
+                      checked={booking.pickup_required}
+                      disabled={updateBooking.isPending}
+                      onCheckedChange={(v) => {
+                        const id = booking.id;
+                        updateBooking.mutate(
+                          { id, pickup_required: v },
+                          {
+                            onSuccess: () =>
+                              onBookingChange({ ...booking, pickup_required: v }),
+                            onError: (err) => toast.error(err.message),
+                          },
+                        );
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="detail_dropoff_required" className="font-normal text-sm cursor-pointer">
+                      Drop-off (check-out)
+                    </Label>
+                    <Switch
+                      id="detail_dropoff_required"
+                      checked={booking.dropoff_required}
+                      disabled={updateBooking.isPending}
+                      onCheckedChange={(v) => {
+                        const id = booking.id;
+                        updateBooking.mutate(
+                          { id, dropoff_required: v },
+                          {
+                            onSuccess: () =>
+                              onBookingChange({ ...booking, dropoff_required: v }),
+                            onError: (err) => toast.error(err.message),
+                          },
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {booking.notes && (
+                  <div className="space-y-1">
+                    <p className="text-xs uppercase text-muted-foreground font-medium">Notes</p>
+                    <p className="text-sm whitespace-pre-line">{booking.notes}</p>
+                  </div>
+                )}
+
+                <Separator />
+
+                <BoardingBookingInvoiceLink
+                  bookingId={booking.id}
+                  bookingRef={booking.booking_ref}
+                />
+
+                <Separator />
+
+                <div className="space-y-3">
+                  {booking.status !== "cancelled" && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      data-testid="boarding-change-room-btn"
+                      onClick={() => setChangeRoomOpen(true)}
+                    >
+                      <ArrowRightLeft className="mr-2 h-4 w-4" />
+                      Change room
+                    </Button>
+                  )}
+
+                  {booking.status === "confirmed" && (
+                    <Button
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                      onClick={() => {
+                        setBelongingsReadOnly(false);
+                        setCheckInSheetOpen(true);
+                      }}
+                    >
+                      Check In
+                    </Button>
+                  )}
+
+                  {booking.status === "checked_in" && (
+                    <div className="flex flex-col gap-2">
+                      <Button className="w-full" variant="outline" onClick={() => setCheckOutSheetOpen(true)}>
+                        Check Out
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => {
+                          setBelongingsReadOnly(true);
+                          setCheckInSheetOpen(true);
+                        }}
+                      >
+                        <Eye className="mr-2 h-4 w-4" />
+                        View Belongings
+                      </Button>
+                    </div>
+                  )}
+
+                  {(booking.status === "confirmed" || booking.status === "enquiry") && (
+                    <Button
+                      variant="outline"
+                      className="w-full text-destructive border-destructive/40 hover:bg-destructive/10"
+                      disabled={updateBooking.isPending}
+                      onClick={() =>
+                        updateBooking.mutate(
+                          { id: booking.id, status: "cancelled" },
+                          {
+                            onSuccess: () => {
+                              toast.success("Booking cancelled");
+                              closeDetail();
+                            },
+                            onError: (err) => toast.error(err.message),
+                          },
+                        )
+                      }
+                    >
+                      {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Cancel Booking
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {booking && (
+        <>
+          <ChangeRoomDialog
+            open={changeRoomOpen}
+            onOpenChange={setChangeRoomOpen}
+            booking={booking}
+            assignmentSlices={sortedAssignmentSlices(
+              assignmentsForBooking.map((a) => ({
+                start_date: a.start_date,
+                end_date: a.end_date,
+                rooms: a.rooms,
+              })),
+            )}
+            facilityRooms={assignableDogRooms}
+            defaultEffectiveDate={detailContext?.asOfDate}
+            onMoved={() => {
+              queryClient.invalidateQueries({ queryKey: ["bookings"] });
+              queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
+            }}
+          />
+          <CheckInSheet
+            open={checkInSheetOpen}
+            onOpenChange={(o) => {
+              if (!o) {
+                setCheckInSheetOpen(false);
+                setBelongingsReadOnly(false);
+              }
+            }}
+            bookingId={booking.id}
+            ownerName={`${booking.owners?.first_name ?? ""} ${booking.owners?.last_name ?? ""}`.trim()}
+            petNames={booking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
+            roomName={roomLabelForBooking(
+              booking,
+              sortedAssignmentSlices(
+                assignmentsForBooking.map((a) => ({
+                  start_date: a.start_date,
+                  end_date: a.end_date,
+                  rooms: a.rooms,
+                })),
+              ),
+              {
+                asOfDate: detailContext?.asOfDate ?? booking.check_in_date,
+              },
+            )}
+            bookedCheckInDate={booking.check_in_date}
+            bookedCheckOutDate={booking.check_out_date}
+            readOnly={belongingsReadOnly}
+            onFinished={handleBelongingsFlowFinished}
+          />
+          <CheckOutSheet
+            open={checkOutSheetOpen}
+            onOpenChange={(o) => {
+              if (!o) setCheckOutSheetOpen(false);
+            }}
+            bookingId={booking.id}
+            ownerName={`${booking.owners?.first_name ?? ""} ${booking.owners?.last_name ?? ""}`.trim()}
+            petNames={booking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
+            roomName={roomLabelForBooking(
+              booking,
+              sortedAssignmentSlices(
+                assignmentsForBooking.map((a) => ({
+                  start_date: a.start_date,
+                  end_date: a.end_date,
+                  rooms: a.rooms,
+                })),
+              ),
+              {
+                asOfDate: detailContext?.asOfDate ?? booking.check_out_date,
+              },
+            )}
+            checkInDate={booking.check_in_date}
+            checkOutDate={booking.check_out_date}
+            onFinished={handleBelongingsFlowFinished}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
 // ─── dog boarding calendar (no TopBar — used inside Boarding hub) ─────────────
 export const DogBoardingCalendar = memo(function DogBoardingCalendar({
   windowStart,
   onWindowStartChange,
   suppressToolbar,
   bookingSearchQuery = "",
+  onOpenBookingDetail,
 }: DogBoardingCalendarProps) {
   const navigate = useNavigate();
   const today = new Date();
@@ -1132,16 +1539,10 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
 
   // drawer / panel state
   const [newBookingOpen, setNewBookingOpen] = useState(false);
-  const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
-  const [detailContext, setDetailContext] = useState<{ asOfDate: string } | null>(null);
   const [calendarPrintDate, setCalendarPrintDate] = useState(() => toDateStr(new Date()));
   const [form, setForm] = useState<NewBookingForm>({ ...BLANK_FORM });
   const [roomPickerOpen, setRoomPickerOpen] = useState(false);
   const [roomSearch, setRoomSearch] = useState("");
-  const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
-  const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
-  const [belongingsReadOnly, setBelongingsReadOnly] = useState(false);
-  const [changeRoomOpen, setChangeRoomOpen] = useState(false);
 
   const [ownerSearchResetKey, setOwnerSearchResetKey] = useState(0);
 
@@ -1339,14 +1740,6 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
     [dogGrossAfterMember],
   );
   const dogBookingGrossEstimate = useMemo(() => Math.max(0, dogGrossAfterMember), [dogGrossAfterMember]);
-
-  const handleBelongingsFlowFinished = () => {
-    queryClient.invalidateQueries({ queryKey: ["bookings"] });
-    setDetailBooking(null);
-    setCheckInSheetOpen(false);
-    setCheckOutSheetOpen(false);
-    setBelongingsReadOnly(false);
-  };
 
   // days array for column headers
   const days = useMemo(() => {
@@ -1635,10 +2028,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
       isPlaceholder={options?.isPlaceholder}
       toDateStr={toDateStr}
       onEmptyCellClick={(roomId, dayStr) => openNewBooking(roomId, dayStr)}
-      onGuestClick={(booking, asOfDate) => {
-        setDetailBooking(booking);
-        setDetailContext({ asOfDate });
-      }}
+      onGuestClick={(booking, asOfDate) => onOpenBookingDetail(booking, asOfDate)}
       statusClassFor={(status) => STATUS_CLASSES[status]}
       bookingSearchQuery={bookingSearchQuery}
     />
@@ -2485,390 +2875,6 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
           </form>
         </SheetContent>
       </Sheet>
-
-      {/* ══════════════════════════════════════════
-          BOOKING DETAIL PANEL
-      ══════════════════════════════════════════ */}
-      <Sheet
-        open={!!detailBooking}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDetailBooking(null);
-            setDetailContext(null);
-            setCheckInSheetOpen(false);
-            setCheckOutSheetOpen(false);
-            setBelongingsReadOnly(false);
-          }
-        }}
-      >
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
-          {detailBooking && (
-            <>
-              <SheetHeader>
-                <SheetTitle>
-                  {detailBooking.booking_ref ?? "Booking Details"}
-                </SheetTitle>
-                <SheetDescription>
-                  Reservation overview and actions.
-                </SheetDescription>
-              </SheetHeader>
-
-              <div className="mt-6 space-y-5">
-
-                {/* Status */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant="outline" className={STATUS_BADGE[detailBooking.status]}>
-                    {detailBooking.status.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                  </Badge>
-                  {detailBooking.do_not_move && (
-                    <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-200">
-                      DO NOT MOVE
-                    </Badge>
-                  )}
-                </div>
-
-                <Separator />
-
-                {/* Owner */}
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Owner</p>
-                  <button
-                    className="flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                    onClick={() => navigate(`/customers/${detailBooking.owner_id}`)}
-                  >
-                    {detailBooking.owners?.first_name} {detailBooking.owners?.last_name}
-                    <ExternalLink className="h-3 w-3" />
-                  </button>
-                </div>
-
-                {/* Pets */}
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">
-                    Pet{detailBooking.booking_pets.length !== 1 ? "s" : ""}
-                  </p>
-                  {detailBooking.booking_pets.length === 0 ? (
-                    <p className="text-sm">—</p>
-                  ) : (
-                    <p className="text-sm flex flex-wrap gap-x-1 gap-y-0.5">
-                      {detailBooking.booking_pets.map((bp, i) => (
-                        <span key={bp.pet_id}>
-                          {i > 0 ? <span className="text-muted-foreground">, </span> : null}
-                          <button
-                            type="button"
-                            className="font-medium text-primary hover:underline"
-                            onClick={() =>
-                              navigate(
-                                `/customers/${detailBooking.owner_id}/pets/${bp.pet_id}`
-                              )
-                            }
-                          >
-                            {bp.pets?.name ?? "Unknown"}
-                          </button>
-                        </span>
-                      ))}
-                    </p>
-                  )}
-                </div>
-
-                <BookingProfileNotes
-                  ownerOtherNotes={detailBooking.owners?.other_notes}
-                  pets={detailBooking.booking_pets.map((bp) => ({
-                    name: bp.pets?.name ?? "Pet",
-                    otherNotes: bp.pets?.other_notes,
-                  }))}
-                />
-
-                {/* Room */}
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
-                  {(() => {
-                    const slices = sortedAssignmentSlices(
-                      (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
-                        start_date: a.start_date,
-                        end_date: a.end_date,
-                        rooms: a.rooms,
-                      })),
-                    );
-                    const asOfDate =
-                      detailContext?.asOfDate ?? toDateStr(new Date());
-                    const label = roomLabelForBooking(detailBooking, slices, { asOfDate });
-                    const summaryLines = formatRoomAssignmentsSummary(slices, {
-                      highlightDate: asOfDate,
-                    });
-                    if (label === "Unassigned" && summaryLines.length === 0) {
-                      return <p className="text-sm text-muted-foreground italic">Unassigned</p>;
-                    }
-                    return (
-                      <>
-                        <p className="text-sm font-medium">
-                          {detailContext?.asOfDate
-                            ? `${label} (on ${format(parseISO(asOfDate), "d MMM yyyy")})`
-                            : label}
-                        </p>
-                        {summaryLines.length > 1 ? (
-                          <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground list-disc pl-4">
-                            {summaryLines.map((line) => (
-                              <li key={line}>{line}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </>
-                    );
-                  })()}
-                </div>
-
-                {(!detailBooking.room_id || isImportPlaceholderBooking(detailBooking)) && (
-                  <AssignRealRoomPanel
-                    booking={detailBooking}
-                    facilityRooms={assignableDogRooms}
-                    onRoomAssigned={(room) =>
-                      setDetailBooking((prev) =>
-                        prev && prev.id === detailBooking.id
-                          ? { ...prev, room_id: room.id, rooms: room }
-                          : prev,
-                      )
-                    }
-                  />
-                )}
-
-                <EditBoardingStayDates
-                  booking={detailBooking}
-                  onUpdated={(patch) =>
-                    setDetailBooking((prev) =>
-                      prev && prev.id === detailBooking.id ? { ...prev, ...patch } : prev,
-                    )
-                  }
-                />
-                <p className="text-sm text-muted-foreground">
-                  {nightsBetween(detailBooking.check_in_date, detailBooking.check_out_date)} night
-                  {nightsBetween(detailBooking.check_in_date, detailBooking.check_out_date) !== 1 ? "s" : ""}
-                </p>
-
-                <div className="rounded-md border p-3 space-y-3">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Transport</p>
-                  <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="detail_pickup_required" className="font-normal text-sm cursor-pointer">
-                      Pickup (check-in)
-                    </Label>
-                    <Switch
-                      id="detail_pickup_required"
-                      checked={detailBooking.pickup_required}
-                      disabled={updateBooking.isPending}
-                      onCheckedChange={(v) => {
-                        const id = detailBooking.id;
-                        updateBooking.mutate(
-                          { id, pickup_required: v },
-                          {
-                            onSuccess: () =>
-                              setDetailBooking((prev) =>
-                                prev && prev.id === id ? { ...prev, pickup_required: v } : prev,
-                              ),
-                            onError: (err) => toast.error(err.message),
-                          },
-                        );
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="detail_dropoff_required" className="font-normal text-sm cursor-pointer">
-                      Drop-off (check-out)
-                    </Label>
-                    <Switch
-                      id="detail_dropoff_required"
-                      checked={detailBooking.dropoff_required}
-                      disabled={updateBooking.isPending}
-                      onCheckedChange={(v) => {
-                        const id = detailBooking.id;
-                        updateBooking.mutate(
-                          { id, dropoff_required: v },
-                          {
-                            onSuccess: () =>
-                              setDetailBooking((prev) =>
-                                prev && prev.id === id ? { ...prev, dropoff_required: v } : prev,
-                              ),
-                            onError: (err) => toast.error(err.message),
-                          },
-                        );
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Notes */}
-                {detailBooking.notes && (
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase text-muted-foreground font-medium">Notes</p>
-                    <p className="text-sm whitespace-pre-line">{detailBooking.notes}</p>
-                  </div>
-                )}
-
-                <Separator />
-
-                <BoardingBookingInvoiceLink
-                  bookingId={detailBooking.id}
-                  bookingRef={detailBooking.booking_ref}
-                />
-
-                <Separator />
-
-                {/* Actions */}
-                <div className="space-y-3">
-
-                  {detailBooking.status !== "cancelled" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      data-testid="boarding-change-room-btn"
-                      onClick={() => setChangeRoomOpen(true)}
-                    >
-                      <ArrowRightLeft className="mr-2 h-4 w-4" />
-                      Change room
-                    </Button>
-                  )}
-
-                  {detailBooking.status === "confirmed" && (
-                    <Button
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => {
-                        setBelongingsReadOnly(false);
-                        setCheckInSheetOpen(true);
-                      }}
-                    >
-                      Check In
-                    </Button>
-                  )}
-
-                  {detailBooking.status === "checked_in" && (
-                    <div className="flex flex-col gap-2">
-                      <Button className="w-full" variant="outline" onClick={() => setCheckOutSheetOpen(true)}>
-                        Check Out
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => {
-                          setBelongingsReadOnly(true);
-                          setCheckInSheetOpen(true);
-                        }}
-                      >
-                        <Eye className="mr-2 h-4 w-4" />
-                        View Belongings
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* ── Cancel Booking ── */}
-                  {(detailBooking.status === "confirmed" || detailBooking.status === "enquiry") && (
-                    <Button
-                      variant="outline"
-                      className="w-full text-destructive border-destructive/40 hover:bg-destructive/10"
-                      disabled={updateBooking.isPending}
-                      onClick={() =>
-                        updateBooking.mutate(
-                          { id: detailBooking.id, status: "cancelled" },
-                          {
-                            onSuccess: () => {
-                              toast.success("Booking cancelled");
-                              setDetailBooking(null);
-                            },
-                            onError: (err) => toast.error(err.message),
-                          }
-                        )
-                      }
-                    >
-                      {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Cancel Booking
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      {detailBooking && (
-        <>
-          <ChangeRoomDialog
-            open={changeRoomOpen}
-            onOpenChange={setChangeRoomOpen}
-            booking={detailBooking}
-            assignmentSlices={sortedAssignmentSlices(
-              (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
-                start_date: a.start_date,
-                end_date: a.end_date,
-                rooms: a.rooms,
-              })),
-            )}
-            facilityRooms={assignableDogRooms}
-            defaultEffectiveDate={detailContext?.asOfDate}
-            onMoved={() => {
-              queryClient.invalidateQueries({ queryKey: ["bookings"] });
-              queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
-            }}
-          />
-          <CheckInSheet
-            open={checkInSheetOpen}
-            onOpenChange={(o) => {
-              if (!o) {
-                setCheckInSheetOpen(false);
-                setBelongingsReadOnly(false);
-              }
-            }}
-            bookingId={detailBooking.id}
-            ownerName={`${detailBooking.owners?.first_name ?? ""} ${detailBooking.owners?.last_name ?? ""}`.trim()}
-            petNames={detailBooking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
-            roomName={roomLabelForBooking(
-              detailBooking,
-              sortedAssignmentSlices(
-                (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
-                  start_date: a.start_date,
-                  end_date: a.end_date,
-                  rooms: a.rooms,
-                })),
-              ),
-              {
-                asOfDate:
-                  detailContext?.asOfDate ??
-                  detailBooking.check_in_date,
-              },
-            )}
-            bookedCheckInDate={detailBooking.check_in_date}
-            bookedCheckOutDate={detailBooking.check_out_date}
-            readOnly={belongingsReadOnly}
-            onFinished={handleBelongingsFlowFinished}
-          />
-          <CheckOutSheet
-            open={checkOutSheetOpen}
-            onOpenChange={(o) => {
-              if (!o) setCheckOutSheetOpen(false);
-            }}
-            bookingId={detailBooking.id}
-            ownerName={`${detailBooking.owners?.first_name ?? ""} ${detailBooking.owners?.last_name ?? ""}`.trim()}
-            petNames={detailBooking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
-            roomName={roomLabelForBooking(
-              detailBooking,
-              sortedAssignmentSlices(
-                (assignmentsByBookingId.get(detailBooking.id) ?? []).map((a) => ({
-                  start_date: a.start_date,
-                  end_date: a.end_date,
-                  rooms: a.rooms,
-                })),
-              ),
-              {
-                asOfDate:
-                  detailContext?.asOfDate ??
-                  detailBooking.check_out_date,
-              },
-            )}
-            checkInDate={detailBooking.check_in_date}
-            checkOutDate={detailBooking.check_out_date}
-            onFinished={handleBelongingsFlowFinished}
-          />
-        </>
-      )}
     </>
   );
 });
@@ -2885,10 +2891,12 @@ function BoardingOperationsList({
   initialDatePreset = "today",
   initialAnchorDate,
   focus = "all",
+  onBookingSelect,
 }: {
   initialDatePreset?: BoardingListPreset;
   initialAnchorDate?: string;
   focus?: BoardingListFocus;
+  onBookingSelect?: (booking: BookingWithDetails, asOfDate: string) => void;
 }) {
   const [datePreset, setDatePreset] = useState<BoardingListPreset>(initialDatePreset);
   const [anchorDate, setAnchorDate] = useState(initialAnchorDate ?? toDateStr(new Date()));
@@ -2967,8 +2975,21 @@ function BoardingOperationsList({
               const petNames = booking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ") || "—";
               const owner = ownerDisplayName(booking.owners?.first_name, booking.owners?.last_name);
               return (
-                <div key={booking.id} className="p-3 flex items-start justify-between gap-3">
-                  <div className="space-y-1">
+                <div
+                  key={booking.id}
+                  role="button"
+                  tabIndex={0}
+                  data-testid={`boarding-operations-booking-row-${booking.id}`}
+                  className="p-3 flex items-start justify-between gap-3 cursor-pointer hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                  onClick={() => onBookingSelect?.(booking, rangeStart)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onBookingSelect?.(booking, rangeStart);
+                    }
+                  }}
+                >
+                  <div className="space-y-1 min-w-0 flex-1">
                     <p className="text-sm font-medium">{petNames} - {owner}</p>
                     <p className="text-xs text-muted-foreground">
                       {booking.rooms?.display_name ?? "—"} - {booking.check_in_date} to {booking.check_out_date}
@@ -2984,13 +3005,14 @@ function BoardingOperationsList({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() =>
+                    onClick={(e) => {
+                      e.stopPropagation();
                       window.open(
                         `/print/kennel-card/${booking.id}`,
                         "_blank",
                         "noopener,noreferrer",
-                      )
-                    }
+                      );
+                    }}
                   >
                     <Printer className="mr-1.5 h-4 w-4" />
                     Kennel card
@@ -3047,6 +3069,13 @@ function BoardingHubPage() {
   const [occupancyOpen, setOccupancyOpen] = useState(false);
   const [occupancyDate, setOccupancyDate] = useState(todayStr);
   const [bookingSearchFilter, setBookingSearchFilter] = useState("");
+  const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
+  const [detailContext, setDetailContext] = useState<{ asOfDate: string } | null>(null);
+
+  const openBookingDetail = (booking: BookingWithDetails, asOfDate: string) => {
+    setDetailBooking(booking);
+    setDetailContext({ asOfDate });
+  };
 
   const handleBookingSearchSelect = (hit: BoardingBookingSearchHit) => {
     setBookingSearchFilter(hit.booking_ref ?? hit.id);
@@ -3433,6 +3462,7 @@ function BoardingHubPage() {
             onWindowStartChange={setWindowStart}
             suppressToolbar
             bookingSearchQuery={bookingSearchFilter}
+            onOpenBookingDetail={openBookingDetail}
           />
         ) : viewMode === "shuffle" ? (
           <DayShufflePanel initialDate={normalizedDate ?? todayStr} />
@@ -3441,9 +3471,17 @@ function BoardingHubPage() {
             focus={listFocus}
             initialAnchorDate={normalizedDate ?? undefined}
             initialDatePreset="today"
+            onBookingSelect={openBookingDetail}
           />
         )}
       </div>
+
+      <BoardingBookingDetailSheets
+        booking={detailBooking}
+        onBookingChange={setDetailBooking}
+        detailContext={detailContext}
+        onDetailContextChange={setDetailContext}
+      />
     </div>
   );
 }
