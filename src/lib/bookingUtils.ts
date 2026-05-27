@@ -232,6 +232,7 @@ interface AutoInvoiceParams {
   roomType: string;
   roomName?: string;
   petCount: number;
+  pets?: { id: string; name: string }[];
   checkInDate: string;
   checkOutDate: string;
   roomRateType?: "peak" | "off_peak";
@@ -247,6 +248,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
     roomType,
     roomName,
     petCount,
+    pets,
     checkInDate,
     checkOutDate,
     roomRateType = "off_peak",
@@ -265,6 +267,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
       roomId,
       roomName,
       petCount,
+      pets,
       checkInDate,
       checkOutDate,
     }),
@@ -275,13 +278,22 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
   if (lineItems.length === 0) {
     const fallbackPrefix = roomName ? `${roomName} — ` : "";
     const fallbackLabel = fallbackPrefix ? `${fallbackPrefix}Boarding` : "Boarding";
-    lineItems.push({
-      description: `${fallbackLabel} — ${nights} night${nights !== 1 ? "s" : ""}`,
-      quantity: nights,
-      unitPrice: 0,
-      pricingKey: "boarding_night",
-      serviceType: "boarding",
-    });
+    const billedPets =
+      pets && pets.length > 0
+        ? pets
+        : Array.from({ length: Math.max(1, petCount) }, (_, i) => ({
+            id: `_pet_${i}`,
+            name: petCount === 1 ? "Pet" : `Pet ${i + 1}`,
+          }));
+    for (const pet of billedPets) {
+      lineItems.push({
+        description: `${pet.name} — ${fallbackLabel} — ${nights} night${nights !== 1 ? "s" : ""}`,
+        quantity: nights,
+        unitPrice: 0,
+        pricingKey: "boarding_night",
+        serviceType: "boarding",
+      });
+    }
   }
 
   for (const addon of addons) {

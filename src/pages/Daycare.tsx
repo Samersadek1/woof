@@ -14,6 +14,11 @@ import {
   transportZoneLabel,
 } from "@/lib/transportPricing";
 import {
+  buildDaycareCreditLineItems,
+  buildDaycareHourlyLineItems,
+  buildDaycareSingleDayLineItems,
+} from "@/lib/daycareInvoiceLines";
+import {
   buildPriceMap,
   daycareGroupPricing,
   daycareHourlyLinearTotal,
@@ -952,17 +957,12 @@ function PlannerTab() {
     const okHourlyIds = [...hourlyPetIds.filter((id) => sessionsCreated[id]), ...fallbackHourlyIds];
     const okCreditIds = successfullyCreditCovered.filter((id) => sessionsCreated[id]);
     const invoicedPetTotal = okSingleIds.length + okHourlyIds.length + okCreditIds.length;
-    const hourlyDogsForInvoice = okHourlyIds.length > 0 ? effectiveHourlyDogs : 0;
     const hourlyHoursForInvoice = okHourlyIds.length > 0 ? effectiveHours : 0;
 
     if (invoicedPetTotal > 0) {
-      const singleRate = daycareGroupPricing(okSingleIds.length, daycarePriceMap);
-      const hourlyLinear =
-        hourlyDogsForInvoice > 0 && hourlyHoursForInvoice > 0
-          ? daycareHourlyLinearTotal(hourlyDogsForInvoice, hourlyHoursForInvoice, daycarePriceMap)
-          : { pricingKey: "", unitRate: 0, total: 0, label: "", dogHours: 0 };
       const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
       const transportKey = transportPricingKey(checkInDraft.transport_zone);
+      const daycarePets = (pets ?? []).map((pet) => ({ id: pet.id, name: pet.name }));
       const lineItems: {
         description: string;
         quantity: number;
@@ -970,49 +970,28 @@ function PlannerTab() {
         pricingKey?: string;
         serviceType?: string;
         preserveUnitPrice?: boolean;
-      }[] = [];
-
-      if (okSingleIds.length > 0 && singleRate.pricingKey) {
-        lineItems.push({
-          description: `${singleRate.label} (${okSingleIds.length} dog${okSingleIds.length === 1 ? "" : "s"})`,
-          quantity: okSingleIds.length,
-          unitPrice: singleRate.total / okSingleIds.length,
-          pricingKey: singleRate.pricingKey,
-          serviceType: "daycare",
-          preserveUnitPrice: true,
-        });
-      }
-      if (
-        okHourlyIds.length > 0 &&
-        hourlyDogsForInvoice > 0 &&
-        hourlyHoursForInvoice > 0 &&
-        hourlyLinear.total > 0
-      ) {
-        lineItems.push({
-          description: hourlyLinear.label,
-          quantity: hourlyLinear.dogHours,
-          unitPrice: hourlyLinear.unitRate,
-          pricingKey: hourlyLinear.pricingKey,
-          serviceType: "daycare",
-          preserveUnitPrice: true,
-        });
-      }
-      if (okCreditIds.length > 0) {
-        for (const petId of okCreditIds) {
-          const petName = pets?.find((p) => p.id === petId)?.name ?? "Pet";
-          const credit = consumedCreditByPet[petId];
-          const packageName = credit?.package_name ?? "package credit";
-          const isHourlyCredit = credit?.service_code === "daycare_hourly";
-          const units = isHourlyCredit ? Math.max(1, effectiveHours) : 1;
-          lineItems.push({
-            description: `${isHourlyCredit ? "Daycare hourly" : "Daycare full day"} — ${petName} (covered by ${packageName})`,
-            quantity: units,
-            unitPrice: 0,
-            serviceType: "daycare",
-            preserveUnitPrice: true,
-          });
-        }
-      }
+      }[] = [
+        ...buildDaycareSingleDayLineItems({
+          petIds: okSingleIds,
+          pets: daycarePets,
+          sessionDate: checkInDraft.session_date,
+          prices: daycarePriceMap,
+        }),
+        ...buildDaycareHourlyLineItems({
+          petIds: okHourlyIds,
+          pets: daycarePets,
+          sessionDate: checkInDraft.session_date,
+          hours: hourlyHoursForInvoice,
+          prices: daycarePriceMap,
+        }),
+        ...buildDaycareCreditLineItems({
+          petIds: okCreditIds,
+          pets: daycarePets,
+          sessionDate: checkInDraft.session_date,
+          consumedCreditByPet,
+          hours: effectiveHours,
+        }),
+      ];
 
       const includePickup = checkInDraft.pickup_used;
       const includeDropoff = checkInDraft.dropoff_used;

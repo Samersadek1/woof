@@ -76,12 +76,21 @@ async function loadBookingForInvoice(bookingId: string) {
   const { data, error } = await supabase
     .from("bookings")
     .select(
-      "id, owner_id, room_id, check_in_date, check_out_date, status, rooms(room_number, display_name, room_type), booking_pets(pet_id)",
+      "id, owner_id, room_id, check_in_date, check_out_date, status, rooms(room_number, display_name, room_type), booking_pets(pet_id, pets(name))",
     )
     .eq("id", bookingId)
     .single();
   if (error) throw error;
   return data;
+}
+
+function bookingPetsForInvoice(
+  bookingPets: Array<{ pet_id: string; pets: { name: string } | null }> | null | undefined,
+): { id: string; name: string }[] {
+  return (bookingPets ?? []).map((bp) => ({
+    id: bp.pet_id,
+    name: bp.pets?.name ?? "Pet",
+  }));
 }
 
 /**
@@ -111,7 +120,10 @@ export async function syncBoardingBookingInvoice(
 
   const invoice = (invoices ?? [])[0] as InvoiceRow | undefined;
   const room = booking.rooms as { room_number?: string; display_name?: string; room_type?: string } | null;
-  const petCount = Math.max(1, (booking.booking_pets ?? []).length);
+  const pets = bookingPetsForInvoice(
+    booking.booking_pets as Array<{ pet_id: string; pets: { name: string } | null }> | null,
+  );
+  const petCount = Math.max(1, pets.length);
 
   if (!invoice) {
     await createBookingInvoice({
@@ -122,6 +134,7 @@ export async function syncBoardingBookingInvoice(
       roomType: room?.room_type ?? "boarding",
       roomName: room?.room_number ?? room?.display_name ?? undefined,
       petCount,
+      pets,
       checkInDate: booking.check_in_date,
       checkOutDate: booking.check_out_date,
     });
@@ -151,6 +164,7 @@ export async function syncBoardingBookingInvoice(
     roomId: booking.room_id,
     roomName: room?.room_number ?? room?.display_name ?? undefined,
     petCount,
+    pets,
     checkInDate: booking.check_in_date,
     checkOutDate: booking.check_out_date,
   });
