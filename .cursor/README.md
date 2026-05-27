@@ -45,6 +45,66 @@ and remove the `"--read-only",` line, then reload Cursor.
   The server stops working immediately. Regenerate and update `mcp.json` to
   restore.
 
+## Google Stitch MCP (wireframes → implementation)
+
+Stitch connects Cursor to [Google Stitch](https://stitch.withgoogle.com/) so you
+can generate wireframes and UI screens in chat, iterate on them, then implement
+them in woof (React + shadcn/ui + Tailwind).
+
+Use the local stdio proxy in `scripts/stitch-mcp-proxy.mjs` (not the remote
+`url` config). Cursor's remote MCP client fails OAuth discovery on Google's
+Stitch endpoint; the proxy forwards stdio JSON-RPC with your API key.
+
+### One-time setup
+
+1. **Create a Stitch API key**
+   - Open https://stitch.withgoogle.com and sign in
+   - Profile picture (top right) → **Stitch Settings** → **API Key** → **Create Key**
+   - Copy the key immediately (shown only once)
+
+2. **Expose the key to Cursor** (pick one)
+
+   **Option A — shell profile (recommended on macOS):**
+   ```bash
+   echo 'export STITCH_API_KEY="your-key-here"' >> ~/.zshrc
+   source ~/.zshrc
+   ```
+   Restart Cursor so MCP subprocesses inherit the variable.
+
+   **Option B — launchctl (persists across reboots):**
+   ```bash
+   launchctl setenv STITCH_API_KEY "your-key-here"
+   ```
+   Re-run after each reboot, or add a LaunchAgent plist.
+
+3. **Add Stitch to `.cursor/mcp.json`**
+   If you created `mcp.json` before Stitch was added to the template, merge in:
+   ```json
+   "stitch": {
+     "command": "node",
+     "args": ["${workspaceFolder}/scripts/stitch-mcp-proxy.mjs"],
+     "env": {
+       "STITCH_API_KEY": "${env:STITCH_API_KEY}"
+     }
+   }
+   ```
+
+4. **Enable in Cursor**
+   - Reload Cursor (Command Palette → *Developer: Reload Window*)
+   - Settings → **MCP** — `stitch` should show a green dot
+   - Start a **new chat** (MCP tools load at session start)
+
+### Wireframe → implement workflow
+
+1. **Pick a screen** in woof (see suggestions below).
+2. **Create a Stitch project** in chat: *"Create a Stitch project called woof — kennel admin"*
+3. **Generate the screen** with context about woof's layout (sidebar nav, TopBar, shadcn card patterns, desktop-first staff app).
+4. **Review** the screenshot Stitch returns; iterate with edit prompts.
+5. **Implement** in `src/` using the wireframe as reference — map HTML/CSS to existing shadcn components rather than pasting raw HTML.
+
+Stitch outputs HTML/CSS, not React. Treat designs as visual specs; wire them into
+existing hooks and Supabase-backed components.
+
 ### Alternative: keep token out of the file entirely (macOS)
 
 If you would prefer not to store the token in `mcp.json` at all, you can put it

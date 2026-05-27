@@ -12,6 +12,13 @@
       "env": {
         "SUPABASE_ACCESS_TOKEN": "past_your_token_here"
       }
+    },
+    "stitch": {
+      "command": "node",
+      "args": ["${workspaceFolder}/scripts/stitch-mcp-proxy.mjs"],
+      "env": {
+        "STITCH_API_KEY": "${env:STITCH_API_KEY}"
+      }
     }
   }
 }

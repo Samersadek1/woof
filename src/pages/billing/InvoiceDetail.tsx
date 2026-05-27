@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
 import { useInvoiceDetail } from "@/hooks/useInvoiceDetail";
+import { useLinkedDaycareSessionsForInvoice } from "@/hooks/useDaycare";
 import { useCancellationRefundPreview } from "@/hooks/useCancellationRefund";
 import { useProcessWalletPayment, useRecordCashOrCardPayment } from "@/hooks/usePayments";
 import { Card, CardContent } from "@/components/ui/card";
@@ -74,6 +75,12 @@ export default function InvoiceDetailPage() {
     data?.invoice?.owner_id,
     data?.invoice?.id,
     serviceStart || undefined,
+  );
+
+  const isDaycareInvoice = data?.invoice?.service_type === "daycare";
+  const { data: linkedDaycareSessions = [] } = useLinkedDaycareSessionsForInvoice(
+    isDaycareInvoice ? data?.invoice?.id : undefined,
+    isDaycareInvoice ? data?.invoice?.service_id ?? undefined : undefined,
   );
 
   const computed = useMemo(() => {
@@ -272,6 +279,31 @@ export default function InvoiceDetailPage() {
             </CardContent>
           </Card>
         ) : null}
+
+        {isDaycareInvoice && linkedDaycareSessions.length > 0 && (
+          <Card>
+            <CardContent className="p-5 space-y-2">
+              <h3 className="font-semibold text-sm">Linked daycare check-ins</h3>
+              <p className="text-xs text-muted-foreground">
+                Dogs on this invoice (including hourly family billing marked on each session).
+              </p>
+              <ul className="text-sm space-y-1">
+                {linkedDaycareSessions.map((session) => (
+                  <li key={session.id}>
+                    <Link
+                      to="/daycare?tab=operations"
+                      className="text-primary hover:underline"
+                    >
+                      {session.pet_name}
+                    </Link>
+                    {" — "}
+                    {format(parseISO(session.session_date), "d MMM yyyy")}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
 
         <Card><CardContent className="p-0">
           <Table>

@@ -8,6 +8,7 @@ export function useDeleteInvoice() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
       queryClient.invalidateQueries({ queryKey: ["invoice", variables.invoiceUuid] });
+      queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
     },
   });
 }

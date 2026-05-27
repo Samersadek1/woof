@@ -1,20 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { addDays, format, parseISO } from "date-fns";
+import { useQueryClient } from "@tanstack/react-query";
 import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
+import { ownerDisplayName } from "@/lib/bookingUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { buildBoardingTags, buildDaycareTags, tagToneClass } from "@/lib/operationsTags";
+import {
+  parseDaycareBillingPath,
+  visibleDaycareNotes,
+  resolveDaycareSessionInvoiceId,
+  isDaycareHourlyPending,
+  isSingleDayInvoiceMissing,
+} from "@/lib/daycareSessionMeta";
+import { useDaycareSessionInvoiceMap } from "@/hooks/useDaycareSessionInvoiceMap";
+import { DaycareSessionInvoiceLink } from "@/components/daycare/DaycareSessionInvoiceLink";
+import {
+  CompleteHourlyBillingDialog,
+  type HourlyBillingSession,
+} from "@/components/daycare/CompleteHourlyBillingDialog";
 
 type ServiceType = "daycare" | "boarding";
 type DatePreset = "day" | "today" | "tomorrow" | "next7";
 
 interface DaycareRow {
   id: string;
+  ownerId: string;
+  petId: string;
   petName: string;
   ownerName: string;
   sessionDate: string;
@@ -36,6 +53,8 @@ interface BoardingRow {
 
 type DaycareSessionSelectRow = {
   id: string;
+  owner_id: string;
+  pet_id: string;
   session_date: string;
   checked_in: boolean | null;
   package_id: string | null;
@@ -63,6 +82,7 @@ function normalizeService(value: string | null): ServiceType {
 
 export default function ServiceCheckinsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const service = normalizeService(searchParams.get("service"));
@@ -72,6 +92,11 @@ export default function ServiceCheckinsPage() {
   const [loading, setLoading] = useState(true);
   const [daycareRows, setDaycareRows] = useState<DaycareRow[]>([]);
   const [boardingRows, setBoardingRows] = useState<BoardingRow[]>([]);
+  const [hourlyBillingTarget, setHourlyBillingTarget] = useState<{
+    ownerId: string;
+    ownerName: string;
+    sessionDate: string;
+  } | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -80,7 +105,9 @@ export default function ServiceCheckinsPage() {
       if (service === "daycare") {
         const { data, error } = await supabase
           .from("daycare_sessions")
-          .select("id, session_date, checked_in, package_id, checked_in_at, notes, pets(name), owners(first_name, last_name)")
+          .select(
+            "id, owner_id, pet_id, session_date, checked_in, package_id, checked_in_at, notes, pets(name), owners(first_name, last_name)",
+          )
           .gte("session_date", date)
           .lte("session_date", endDate)
           .order("checked_in_at", { ascending: true });
@@ -88,8 +115,10 @@ export default function ServiceCheckinsPage() {
         if (!error) {
           const mapped = ((data ?? []) as DaycareSessionSelectRow[]).map((row) => ({
             id: row.id,
+            ownerId: row.owner_id,
+            petId: row.pet_id,
             petName: row.pets?.name ?? "—",
-            ownerName: [row.owners?.first_name, row.owners?.last_name].filter(Boolean).join(" ") || "—",
+            ownerName: ownerDisplayName(row.owners?.first_name, row.owners?.last_name),
             sessionDate: row.session_date,
             checkedIn: Boolean(row.checked_in),
             packageId: row.package_id ?? null,
@@ -131,6 +160,50 @@ export default function ServiceCheckinsPage() {
     };
     void load();
   }, [service, date, preset]);
+
+  const daycareSessionIds = useMemo(() => daycareRows.map((r) => r.id), [daycareRows]);
+  const { data: invoiceIdByServiceId = new Map<string, string>() } =
+    useDaycareSessionInvoiceMap(daycareSessionIds);
+
+  const hourlyBillingSessions = useMemo((): HourlyBillingSession[] => {
+    if (!hourlyBillingTarget) return [];
+    return daycareRows
+      .filter((row) => {
+        if (row.ownerId !== hourlyBillingTarget.ownerId) return false;
+        if (row.sessionDate !== hourlyBillingTarget.sessionDate) return false;
+        return isDaycareHourlyPending(
+          {
+            sessionId: row.id,
+            notes: row.notes,
+            packageId: row.packageId,
+            checkedIn: row.checkedIn,
+          },
+          invoiceIdByServiceId,
+        );
+      })
+      .map((row) => ({
+        id: row.id,
+        petId: row.petId,
+        petName: row.petName,
+        notes: row.notes,
+      }));
+  }, [hourlyBillingTarget, daycareRows, invoiceIdByServiceId]);
+
+  const pendingHourlyCount = useMemo(
+    () =>
+      daycareRows.filter((row) =>
+        isDaycareHourlyPending(
+          {
+            sessionId: row.id,
+            notes: row.notes,
+            packageId: row.packageId,
+            checkedIn: row.checkedIn,
+          },
+          invoiceIdByServiceId,
+        ),
+      ).length,
+    [daycareRows, invoiceIdByServiceId],
+  );
 
   const title = useMemo(
     () => (service === "daycare" ? "Daycare check-ins by day" : "Boarding check-ins by day"),
@@ -215,8 +288,15 @@ export default function ServiceCheckinsPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">
-              {service === "daycare" ? "Daycare check-ins" : "Boarding check-ins"} on {selectedDateLabel}
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <span>
+                {service === "daycare" ? "Daycare check-ins" : "Boarding check-ins"} on {selectedDateLabel}
+              </span>
+              {service === "daycare" && pendingHourlyCount > 0 && (
+                <Badge variant="outline" className="bg-orange-50 text-orange-800 border-orange-200 font-normal">
+                  Pending hourly billing: {pendingHourlyCount}
+                </Badge>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -229,30 +309,100 @@ export default function ServiceCheckinsPage() {
                 <p className="text-sm text-muted-foreground py-6 text-center">No daycare check-ins for this day.</p>
               ) : (
                 <div className="space-y-2">
-                  {daycareRows.map((row) => (
-                    <div key={row.id} className="rounded-md border px-3 py-2 text-sm flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs text-muted-foreground">{format(parseISO(row.sessionDate), "d MMM yyyy")}</p>
-                        <p className="font-medium">{row.petName} - {row.ownerName}</p>
-                        <p className="text-xs text-muted-foreground">{row.notes || "No notes"}</p>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {buildDaycareTags({
-                            sessionDate: row.sessionDate,
-                            todayDate: TODAY,
-                            checkedIn: row.checkedIn,
-                            packageId: row.packageId,
-                          }).map((tag) => (
-                            <Badge key={`${row.id}-${tag.key}`} variant="outline" className={tagToneClass(tag.tone)}>
-                              {tag.label}
-                            </Badge>
-                          ))}
+                  {daycareRows.map((row) => {
+                    const billingPath = parseDaycareBillingPath(row.notes, row.packageId);
+                    const invoiceId = resolveDaycareSessionInvoiceId(
+                      row.id,
+                      row.notes,
+                      invoiceIdByServiceId,
+                    );
+                    const hourlyPending = isDaycareHourlyPending(
+                      {
+                        sessionId: row.id,
+                        notes: row.notes,
+                        packageId: row.packageId,
+                        checkedIn: row.checkedIn,
+                      },
+                      invoiceIdByServiceId,
+                    );
+                    const invoiceMissing = isSingleDayInvoiceMissing(
+                      {
+                        sessionId: row.id,
+                        notes: row.notes,
+                        packageId: row.packageId,
+                        checkedIn: row.checkedIn,
+                      },
+                      invoiceIdByServiceId,
+                    );
+                    const visibleNotes = visibleDaycareNotes(row.notes);
+
+                    return (
+                      <div
+                        key={row.id}
+                        className="rounded-md border px-3 py-2 text-sm flex items-start justify-between gap-3"
+                      >
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            {format(parseISO(row.sessionDate), "d MMM yyyy")}
+                          </p>
+                          <p className="font-medium">{row.petName} - {row.ownerName}</p>
+                          <p className="text-xs text-muted-foreground">{visibleNotes || "No notes"}</p>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {buildDaycareTags({
+                              sessionDate: row.sessionDate,
+                              todayDate: TODAY,
+                              checkedIn: row.checkedIn,
+                              packageId: row.packageId,
+                              billingPath,
+                              hasInvoice: Boolean(invoiceId),
+                            }).map((tag) => (
+                              <Badge
+                                key={`${row.id}-${tag.key}`}
+                                variant="outline"
+                                className={tagToneClass(tag.tone)}
+                              >
+                                {tag.label}
+                              </Badge>
+                            ))}
+                            {invoiceMissing && (
+                              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                                Invoice missing
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="min-w-[190px] space-y-2 shrink-0">
+                          <p className="text-right text-xs text-muted-foreground">
+                            {row.checkedInAt ? format(parseISO(row.checkedInAt), "HH:mm") : "—"}
+                          </p>
+                          {invoiceId && (
+                            <DaycareSessionInvoiceLink
+                              invoiceId={invoiceId}
+                              testId={`service-checkins-view-invoice-${row.id}`}
+                            />
+                          )}
+                          {hourlyPending && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              className="w-full h-8 text-xs"
+                              data-testid={`service-checkins-complete-hourly-${row.id}`}
+                              onClick={() =>
+                                setHourlyBillingTarget({
+                                  ownerId: row.ownerId,
+                                  ownerName: row.ownerName,
+                                  sessionDate: row.sessionDate,
+                                })
+                              }
+                            >
+                              Complete hourly billing
+                            </Button>
+                          )}
                         </div>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {row.checkedInAt ? format(parseISO(row.checkedInAt), "HH:mm") : "—"}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )
             ) : boardingRows.length === 0 ? (
@@ -287,7 +437,50 @@ export default function ServiceCheckinsPage() {
           </CardContent>
         </Card>
       </main>
+
+      <CompleteHourlyBillingDialog
+        open={Boolean(hourlyBillingTarget) && hourlyBillingSessions.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setHourlyBillingTarget(null);
+        }}
+        ownerId={hourlyBillingTarget?.ownerId ?? ""}
+        ownerName={hourlyBillingTarget?.ownerName ?? ""}
+        sessions={hourlyBillingSessions}
+        onSuccess={() => {
+          setHourlyBillingTarget(null);
+          queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+          queryClient.invalidateQueries({ queryKey: ["invoices"] });
+          void (async () => {
+            setLoading(true);
+            const endDate = preset === "next7" ? format(addDays(parseISO(date), 6), "yyyy-MM-dd") : date;
+            const { data } = await supabase
+              .from("daycare_sessions")
+              .select(
+                "id, owner_id, pet_id, session_date, checked_in, package_id, checked_in_at, notes, pets(name), owners(first_name, last_name)",
+              )
+              .gte("session_date", date)
+              .lte("session_date", endDate)
+              .order("checked_in_at", { ascending: true });
+            if (data) {
+              setDaycareRows(
+                (data as DaycareSessionSelectRow[]).map((row) => ({
+                  id: row.id,
+                  ownerId: row.owner_id,
+                  petId: row.pet_id,
+                  petName: row.pets?.name ?? "—",
+                  ownerName: ownerDisplayName(row.owners?.first_name, row.owners?.last_name),
+                  sessionDate: row.session_date,
+                  checkedIn: Boolean(row.checked_in),
+                  packageId: row.package_id ?? null,
+                  checkedInAt: row.checked_in_at,
+                  notes: row.notes,
+                })),
+              );
+            }
+            setLoading(false);
+          })();
+        }}
+      />
     </>
   );
 }
-
