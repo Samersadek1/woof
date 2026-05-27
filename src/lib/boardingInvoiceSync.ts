@@ -1,3 +1,5 @@
+import { differenceInCalendarDays, parseISO } from "date-fns";
+
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { buildBoardingNightLineItems, type BoardingInvoiceLineItem } from "@/lib/boardingInvoiceLines";
@@ -257,4 +259,98 @@ export function formatSyncBoardingInvoiceToast(result: SyncBoardingInvoiceResult
   if (result.kind === "created") return "Draft invoice created for this stay.";
   if (result.kind === "skipped") return result.reason;
   return "Stay dates saved (no invoice on this booking).";
+}
+
+export type BoardingBookingMissingInvoice = {
+  id: string;
+  booking_ref: string | null;
+};
+
+export type BackfillBoardingInvoicesResult = {
+  total: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  errors: { id: string; bookingRef: string | null; message: string }[];
+};
+
+/** Active boarding stays with no non-voided invoice (eligible for draft invoice creation). */
+export async function listBoardingBookingsMissingInvoice(): Promise<BoardingBookingMissingInvoice[]> {
+  const { data: invoicedRows, error: invErr } = await supabase
+    .from("invoices")
+    .select("booking_id")
+    .not("booking_id", "is", null)
+    .neq("status", "voided");
+  if (invErr) throw invErr;
+
+  const invoicedBookingIds = new Set(
+    (invoicedRows ?? []).map((row) => row.booking_id).filter(Boolean) as string[],
+  );
+
+  const { data: bookings, error: bookErr } = await supabase
+    .from("bookings")
+    .select("id, booking_ref, owner_id, check_in_date, check_out_date, status")
+    .eq("booking_type", "boarding")
+    .neq("status", "cancelled")
+    .not("owner_id", "is", null)
+    .order("check_in_date", { ascending: true });
+  if (bookErr) throw bookErr;
+
+  return (bookings ?? [])
+    .filter((b) => {
+      if (invoicedBookingIds.has(b.id)) return false;
+      const nights = differenceInCalendarDays(
+        parseISO(b.check_out_date),
+        parseISO(b.check_in_date),
+      );
+      return nights > 0;
+    })
+    .map((b) => ({ id: b.id, booking_ref: b.booking_ref }));
+}
+
+export type BackfillBoardingInvoicesOptions = {
+  onProgress?: (done: number, total: number) => void;
+};
+
+/** Create draft invoices for boarding stays that do not have one yet. */
+export async function backfillBoardingInvoicesMissing(
+  options: BackfillBoardingInvoicesOptions = {},
+): Promise<BackfillBoardingInvoicesResult> {
+  const targets = await listBoardingBookingsMissingInvoice();
+  const total = targets.length;
+  let created = 0;
+  let skipped = 0;
+  let failed = 0;
+  const errors: BackfillBoardingInvoicesResult["errors"] = [];
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i]!;
+    options.onProgress?.(i + 1, total);
+    try {
+      const result = await syncBoardingBookingInvoice(target.id);
+      if (result.kind === "created") {
+        created += 1;
+      } else if (result.kind === "skipped" || result.kind === "updated") {
+        skipped += 1;
+      } else if (result.kind === "no_invoice") {
+        failed += 1;
+        errors.push({
+          id: target.id,
+          bookingRef: target.booking_ref,
+          message: "Invoice was not created",
+        });
+      }
+    } catch (err) {
+      failed += 1;
+      errors.push({
+        id: target.id,
+        bookingRef: target.booking_ref,
+        message: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  }
+
+  options.onProgress?.(total, total);
+
+  return { total, created, skipped, failed, errors };
 }
