@@ -37,11 +37,34 @@ export type OccupancyStats = {
   occupiedCount: number;
   availableCount: number;
   pct: number;
+  /** Pets on site (sum of booking_pets; multi-pet rooms count each pet). */
+  totalPetCount: number;
+  /** Pets in assigned kennel rooms. */
+  roomOccupiedPetCount: number;
+  /** Pets in unassigned bookings. */
+  unassignedPetCount: number;
   byGroup: Map<string, { occupied: { room: Room; booking: BookingWithDetails }[]; available: Room[] }>;
   groupOrder: string[];
   importedUnassignedCount: number;
   unassignedGuests: BookingWithDetails[];
 };
+
+export function bookingPetCount(booking: BookingWithDetails): number {
+  return booking.booking_pets?.length ?? 0;
+}
+
+function isBookingImportPlaceholderOnlyOnDate(
+  bookingId: string,
+  assignments: OccupancyAssignmentRow[],
+  placeholderIds: Set<string>,
+  asOfDate: string,
+): boolean {
+  const onDate = assignments.filter(
+    (row) => row.booking_id === bookingId && assignmentCoversDate(row, asOfDate),
+  );
+  if (onDate.length === 0) return false;
+  return onDate.every((row) => placeholderIds.has(row.room_id));
+}
 
 function occupancyFacilityRooms(rooms: Room[]): Room[] {
   return kennelOccupancyRoomPool(rooms);
@@ -119,6 +142,23 @@ export function computeBoardingOccupancyStats(args: {
   const availableCount = Math.max(0, total - occupiedCount);
   const pct = total > 0 ? Math.round((occupiedCount / total) * 1000) / 10 : 0;
 
+  let totalPetCount = 0;
+  let roomOccupiedPetCount = 0;
+  let unassignedPetCount = 0;
+
+  for (const b of bookings) {
+    if (!bookingOccupiesDate(b.check_in_date, b.check_out_date, asOfDate)) continue;
+    if (isBookingImportPlaceholderOnlyOnDate(b.id, assignments, placeholderIds, asOfDate)) continue;
+    totalPetCount += bookingPetCount(b);
+  }
+
+  for (const booking of occupiedByRoomId.values()) {
+    roomOccupiedPetCount += bookingPetCount(booking);
+  }
+  for (const booking of unassignedGuests) {
+    unassignedPetCount += bookingPetCount(booking);
+  }
+
   const byGroup = new Map<string, { occupied: { room: Room; booking: BookingWithDetails }[]; available: Room[] }>();
   const sortRooms = (a: Room, b: Room) => sortRoomsBySectionNumber(a, b);
 
@@ -144,6 +184,9 @@ export function computeBoardingOccupancyStats(args: {
     occupiedCount,
     availableCount,
     pct,
+    totalPetCount,
+    roomOccupiedPetCount,
+    unassignedPetCount,
     byGroup,
     groupOrder,
     importedUnassignedCount,

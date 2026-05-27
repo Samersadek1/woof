@@ -133,4 +133,39 @@ describe("computeBoardingOccupancyStats", () => {
     expect(stats.occupiedCount).toBe(1);
     expect(stats.roomOccupiedCount).toBe(0);
   });
+
+  it("counts each pet on site including multi-pet room bookings", () => {
+    const multiPetBooking = booking({
+      id: "b-multi",
+      booking_pets: [
+        { pet_id: "p1", pets: { name: "Max" } },
+        { pet_id: "p2", pets: { name: "Milo" } },
+      ] as TestBooking["booking_pets"],
+    });
+    const stats = computeBoardingOccupancyStats({
+      asOfDate: "2026-05-26",
+      facilityRooms: [a1],
+      bookings: [
+        multiPetBooking,
+        booking({
+          id: "b-single",
+          booking_pets: [{ pet_id: "p3", pets: { name: "Rex" } }] as TestBooking["booking_pets"],
+        }),
+      ],
+      assignments: [
+        {
+          booking_id: "b-multi",
+          room_id: a1.id,
+          start_date: "2026-05-26",
+          end_date: "2026-05-26",
+          bookings: multiPetBooking,
+        },
+      ],
+    });
+
+    expect(stats.roomOccupiedCount).toBe(1);
+    expect(stats.totalPetCount).toBe(3);
+    expect(stats.roomOccupiedPetCount).toBe(2);
+    expect(stats.unassignedPetCount).toBe(1);
+  });
 });
