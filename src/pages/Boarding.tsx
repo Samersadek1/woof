@@ -3541,31 +3541,8 @@ function BoardingHubPage() {
 
       {/* ── Toolbar: week nav + manage rooms ── */}
       <div className="flex items-center justify-between gap-4 px-6 py-3 border-b border-border bg-card shrink-0">
-        <div className="flex items-center gap-2">
-          {viewMode === "calendar" && (
-            <>
-              <Button variant="outline" size="icon" onClick={() => setWindowStart((d) => addDays(d, -7))}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setWindowStart(startOfWeek(today, { weekStartsOn: 1 }))}>
-                Today
-              </Button>
-              <Button variant="outline" size="icon" onClick={() => setWindowStart((d) => addDays(d, 7))}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <span className="ml-2 text-sm font-medium text-foreground">
-                {format(windowStart, "d MMM")} – {format(windowEnd, "d MMM yyyy")}
-              </span>
-            </>
-          )}
-        </div>
-
         <div className="flex items-center gap-3">
-          <BoardingBookingSearch
-            onFilterChange={setBookingSearchFilter}
-            onSelect={handleBookingSearchSelect}
-          />
-          <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
+          <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium shrink-0">
             <button
               type="button"
               className={`px-3 py-1.5 transition-colors ${viewMode === "calendar" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
@@ -3589,6 +3566,29 @@ function BoardingHubPage() {
               Day shuffle
             </button>
           </div>
+          {viewMode === "calendar" && (
+            <>
+              <Button variant="outline" size="icon" onClick={() => setWindowStart((d) => addDays(d, -7))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setWindowStart(startOfWeek(today, { weekStartsOn: 1 }))}>
+                Today
+              </Button>
+              <Button variant="outline" size="icon" onClick={() => setWindowStart((d) => addDays(d, 7))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <span className="ml-2 text-sm font-medium text-foreground">
+                {format(windowStart, "d MMM")} – {format(windowEnd, "d MMM yyyy")}
+              </span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          <BoardingBookingSearch
+            onFilterChange={setBookingSearchFilter}
+            onSelect={handleBookingSearchSelect}
+          />
 
           <BackfillBoardingInvoicesButton />
           <RepriceBoardingInvoicesButton />
