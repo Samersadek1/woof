@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, addDays, format, parseISO } from "date-fns";
-import { supabase } from "@/integrations/supabase/client";
+import { getSupabase } from "@/lib/supabaseRuntime";
 import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
 import { buildBoardingNightLineItems } from "@/lib/boardingInvoiceLines";
 import { MAX_BOARDING_STAY_NIGHTS } from "@/lib/boardingLimits";
@@ -175,7 +175,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   const vatAed = vatAmountFromGrossInclusive(grossTotal);
   const netAfterDiscount = netFromGrossInclusive(grossTotal);
 
-  const { data: inv, error: invErr } = await supabase
+  const { data: inv, error: invErr } = await getSupabase()
     .from("invoices")
     .insert({
       owner_id: ownerId,
@@ -220,9 +220,9 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   });
 
   if (lineRows.length > 0) {
-    const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);
+    const { error: liErr } = await getSupabase().from("invoice_line_items").insert(lineRows);
     if (liErr) {
-      await supabase.from("invoices").delete().eq("id", inv.id);
+      await getSupabase().from("invoices").delete().eq("id", inv.id);
       throw liErr;
     }
   }
@@ -232,7 +232,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
 
 /** Deletes an unpaid service invoice and its line items (rollback when session metadata update fails). */
 export async function removeUnpaidServiceInvoice(invoiceId: string): Promise<void> {
-  const { data: inv, error: fetchErr } = await supabase
+  const { data: inv, error: fetchErr } = await getSupabase()
     .from("invoices")
     .select("id, amount_paid, status")
     .eq("id", invoiceId)
@@ -244,13 +244,13 @@ export async function removeUnpaidServiceInvoice(invoiceId: string): Promise<voi
   }
   if (inv.status === "voided") return;
 
-  const { error: lineErr } = await supabase
+  const { error: lineErr } = await getSupabase()
     .from("invoice_line_items")
     .delete()
     .eq("invoice_id", invoiceId);
   if (lineErr) throw lineErr;
 
-  const { error: invErr } = await supabase.from("invoices").delete().eq("id", invoiceId);
+  const { error: invErr } = await getSupabase().from("invoices").delete().eq("id", invoiceId);
   if (invErr) throw invErr;
 }
 
@@ -352,7 +352,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
     lineItems,
   });
 
-  const { error: occupancyErr } = await supabase.rpc("apply_double_occupancy_discount", {
+  const { error: occupancyErr } = await getSupabase().rpc("apply_double_occupancy_discount", {
     p_booking_id: bookingId,
   });
   if (occupancyErr) {

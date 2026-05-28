@@ -1,6 +1,6 @@
 import { differenceInCalendarDays, parseISO } from "date-fns";
 
-import { supabase } from "@/integrations/supabase/client";
+import { getSupabase } from "@/lib/supabaseRuntime";
 import type { Database } from "@/integrations/supabase/types";
 import { buildBoardingNightLineItems, type BoardingInvoiceLineItem } from "@/lib/boardingInvoiceLines";
 import {
@@ -59,7 +59,7 @@ function totalsFromLineItems(
 
 async function effectiveAmountPaid(invoice: InvoiceRow): Promise<number> {
   const stored = roundAed(invoice.amount_paid ?? 0);
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("wallet_transactions")
     .select("amount, transaction_type")
     .eq("invoice_id", invoice.id);
@@ -74,7 +74,7 @@ async function effectiveAmountPaid(invoice: InvoiceRow): Promise<number> {
 }
 
 async function loadBookingForInvoice(bookingId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("bookings")
     .select(
       "id, owner_id, room_id, check_in_date, check_out_date, status, rooms(room_number, display_name, room_type), booking_pets(pet_id, pets(name))",
@@ -109,7 +109,7 @@ export async function syncBoardingBookingInvoice(
     return { kind: "skipped", reason: "Cancelled booking" };
   }
 
-  const { data: invoices, error: invListErr } = await supabase
+  const { data: invoices, error: invListErr } = await getSupabase()
     .from("invoices")
     .select("*")
     .eq("booking_id", bookingId)
@@ -139,7 +139,7 @@ export async function syncBoardingBookingInvoice(
       checkInDate: booking.check_in_date,
       checkOutDate: booking.check_out_date,
     });
-    const { data: created } = await supabase
+    const { data: created } = await getSupabase()
       .from("invoices")
       .select("id")
       .eq("booking_id", bookingId)
@@ -151,7 +151,7 @@ export async function syncBoardingBookingInvoice(
       : { kind: "no_invoice" };
   }
 
-  const { data: existingLines, error: linesErr } = await supabase
+  const { data: existingLines, error: linesErr } = await getSupabase()
     .from("invoice_line_items")
     .select("*")
     .eq("invoice_id", invoice.id)
@@ -182,7 +182,7 @@ export async function syncBoardingBookingInvoice(
   const outstanding = roundAed(Math.max(0, grandTotal - amountPaid));
   const status = deriveInvoiceStatusAfterRecalc(invoice.status, amountPaid, grandTotal);
 
-  const { error: delErr } = await supabase
+  const { error: delErr } = await getSupabase()
     .from("invoice_line_items")
     .delete()
     .eq("invoice_id", invoice.id);
@@ -200,7 +200,7 @@ export async function syncBoardingBookingInvoice(
   }));
 
   if (lineRows.length > 0) {
-    const { error: insErr } = await supabase.from("invoice_line_items").insert(lineRows);
+    const { error: insErr } = await getSupabase().from("invoice_line_items").insert(lineRows);
     if (insErr) throw insErr;
   }
 
@@ -222,18 +222,18 @@ export async function syncBoardingBookingInvoice(
     updatePayload.paid_at = null;
   }
 
-  const { error: updErr } = await supabase
+  const { error: updErr } = await getSupabase()
     .from("invoices")
     .update(updatePayload)
     .eq("id", invoice.id);
   if (updErr) throw updErr;
 
-  const { error: occupancyErr } = await supabase.rpc("apply_double_occupancy_discount", {
+  const { error: occupancyErr } = await getSupabase().rpc("apply_double_occupancy_discount", {
     p_booking_id: bookingId,
   });
   if (occupancyErr) throw occupancyErr;
 
-  const { data: refreshedInvoice, error: refreshErr } = await supabase
+  const { data: refreshedInvoice, error: refreshErr } = await getSupabase()
     .from("invoices")
     .select("*")
     .eq("id", invoice.id)
@@ -291,7 +291,7 @@ export type BackfillBoardingInvoicesResult = {
 
 /** Active boarding stays with no non-voided invoice (eligible for draft invoice creation). */
 export async function listBoardingBookingsMissingInvoice(): Promise<BoardingBookingMissingInvoice[]> {
-  const { data: invoicedRows, error: invErr } = await supabase
+  const { data: invoicedRows, error: invErr } = await getSupabase()
     .from("invoices")
     .select("booking_id")
     .not("booking_id", "is", null)
@@ -302,7 +302,7 @@ export async function listBoardingBookingsMissingInvoice(): Promise<BoardingBook
     (invoicedRows ?? []).map((row) => row.booking_id).filter(Boolean) as string[],
   );
 
-  const { data: bookings, error: bookErr } = await supabase
+  const { data: bookings, error: bookErr } = await getSupabase()
     .from("bookings")
     .select("id, booking_ref, owner_id, check_in_date, check_out_date, status")
     .eq("booking_type", "boarding")
@@ -368,4 +368,94 @@ export async function backfillBoardingInvoicesMissing(
   options.onProgress?.(total, total);
 
   return { total, created, skipped, failed, errors };
+}
+
+export type BoardingBookingWithInvoice = {
+  id: string;
+  booking_ref: string | null;
+};
+
+/** Active boarding stays that already have a non-voided invoice (eligible for night-line repricing). */
+export async function listBoardingBookingsWithInvoice(): Promise<BoardingBookingWithInvoice[]> {
+  const { data: invoicedRows, error: invErr } = await getSupabase()
+    .from("invoices")
+    .select("booking_id")
+    .not("booking_id", "is", null)
+    .neq("status", "voided");
+  if (invErr) throw invErr;
+
+  const invoicedBookingIds = new Set(
+    (invoicedRows ?? []).map((row) => row.booking_id).filter(Boolean) as string[],
+  );
+  if (invoicedBookingIds.size === 0) return [];
+
+  const { data: bookings, error: bookErr } = await getSupabase()
+    .from("bookings")
+    .select("id, booking_ref, owner_id, check_in_date, check_out_date, status")
+    .eq("booking_type", "boarding")
+    .neq("status", "cancelled")
+    .not("owner_id", "is", null)
+    .in("id", [...invoicedBookingIds])
+    .order("check_in_date", { ascending: true });
+  if (bookErr) throw bookErr;
+
+  return (bookings ?? [])
+    .filter((b) => {
+      const nights = differenceInCalendarDays(
+        parseISO(b.check_out_date),
+        parseISO(b.check_in_date),
+      );
+      return nights > 0;
+    })
+    .map((b) => ({ id: b.id, booking_ref: b.booking_ref }));
+}
+
+export type RepriceBoardingInvoicesResult = {
+  total: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  errors: { id: string; bookingRef: string | null; message: string }[];
+};
+
+export type RepriceBoardingInvoicesOptions = {
+  onProgress?: (done: number, total: number) => void;
+};
+
+/** Re-price boarding night lines on every existing boarding invoice using current peak calendar and rates. */
+export async function repriceAllBoardingInvoices(
+  options: RepriceBoardingInvoicesOptions = {},
+): Promise<RepriceBoardingInvoicesResult> {
+  const targets = await listBoardingBookingsWithInvoice();
+  const total = targets.length;
+  let updated = 0;
+  let skipped = 0;
+  let failed = 0;
+  const errors: RepriceBoardingInvoicesResult["errors"] = [];
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i]!;
+    options.onProgress?.(i + 1, total);
+    try {
+      const result = await syncBoardingBookingInvoice(target.id);
+      if (result.kind === "updated") {
+        updated += 1;
+      } else if (result.kind === "skipped" || result.kind === "no_invoice") {
+        skipped += 1;
+      } else if (result.kind === "created") {
+        updated += 1;
+      }
+    } catch (err) {
+      failed += 1;
+      errors.push({
+        id: target.id,
+        bookingRef: target.booking_ref,
+        message: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  }
+
+  options.onProgress?.(total, total);
+
+  return { total, updated, skipped, failed, errors };
 }

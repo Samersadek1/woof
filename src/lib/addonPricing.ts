@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { getSupabase } from "@/lib/supabaseRuntime";
 import type { Database } from "@/integrations/supabase/types";
 
 export const GROOMING_SERVICE_TO_SERVICE_CODE: Record<
@@ -103,7 +103,7 @@ async function resolveServiceRate(
   serviceCode: Database["public"]["Enums"]["service_code"],
   key?: string,
 ): Promise<number> {
-  const { data, error } = await supabase.rpc("resolve_woof_service_rate", {
+  const { data, error } = await getSupabase().rpc("resolve_woof_service_rate", {
     p_service_code: serviceCode,
     p_pet_size: key ? petSizeFromLegacyKey(key) : null,
     p_coat_type: key ? coatTypeFromLegacyKey(key) : null,

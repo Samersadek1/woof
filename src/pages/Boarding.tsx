@@ -34,6 +34,7 @@ import {
 } from "@/lib/bookingRoomDisplay";
 import { BoardingRoomCalendarRow } from "@/components/boarding/BoardingRoomCalendarRow";
 import { BackfillBoardingInvoicesButton } from "@/components/boarding/BackfillBoardingInvoicesButton";
+import { RepriceBoardingInvoicesButton } from "@/components/boarding/RepriceBoardingInvoicesButton";
 import { BoardingBookingInvoiceLink } from "@/components/boarding/BoardingBookingInvoiceLink";
 import { BoardingBookingSearch } from "@/components/boarding/BoardingBookingSearch";
 import { BoardingOwnerSearchField } from "@/components/boarding/BoardingOwnerSearchField";
@@ -3590,6 +3591,7 @@ function BoardingHubPage() {
           </div>
 
           <BackfillBoardingInvoicesButton />
+          <RepriceBoardingInvoicesButton />
 
           <Button
             variant="outline"

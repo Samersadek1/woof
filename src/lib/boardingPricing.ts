@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { getSupabase } from "@/lib/supabaseRuntime";
 import {
   boardingRateSeasonLabel,
   boardingStaySeasonSummary,
@@ -7,7 +7,7 @@ import {
 } from "@/lib/boardingSeason";
 
 async function isPeakBoardingDate(date: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc("is_peak_date", { p_date: date });
+  const { data, error } = await getSupabase().rpc("is_peak_date", { p_date: date });
   if (error) throw error;
   return Boolean(data);
 }
@@ -42,7 +42,7 @@ async function resolveBoardingRateForDate(
   bookingDate: string,
 ): Promise<BoardingRate> {
   const [rateResult, isPeak] = await Promise.all([
-    supabase.rpc("resolve_woof_service_rate", {
+    getSupabase().rpc("resolve_woof_service_rate", {
       p_service_code: "boarding_night",
       p_pet_size: null,
       p_coat_type: null,
