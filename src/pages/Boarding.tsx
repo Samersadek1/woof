@@ -132,7 +132,13 @@ import { ChangeRoomDialog } from "@/components/boarding/ChangeRoomDialog";
 import { EditBoardingStayDates } from "@/components/boarding/EditBoardingStayDates";
 import { DayShufflePanel } from "@/components/boarding/DayShufflePanel";
 import { useMoveBoardingRoom } from "@/hooks/useMoveBoardingRoom";
-import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
+import {
+  formatBookingCell,
+  bookingBelongingsCount,
+  createBookingInvoice,
+  ownerDisplayName,
+  validateBoardingDateRange,
+} from "@/lib/bookingUtils";
 import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
@@ -1581,6 +1587,13 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
   );
   const dogRatePetCount = Math.max(1, form.pet_ids.length);
   const dogNights = nightsBetween(form.check_in_date, form.check_out_date);
+  const dogDateRangeError = useMemo(
+    () =>
+      form.check_in_date && form.check_out_date
+        ? validateBoardingDateRange(form.check_in_date, form.check_out_date)
+        : null,
+    [form.check_in_date, form.check_out_date],
+  );
   const dogTransportPromo = useMemo(
     () => boardingTransportFreePromoFromRegion(dogNights, form.transport_region),
     [dogNights, form.transport_region],
@@ -1602,7 +1615,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
       form.check_in_date,
       form.check_out_date,
     ],
-    enabled: Boolean(form.check_in_date && form.check_out_date),
+    enabled: Boolean(form.check_in_date && form.check_out_date && !dogDateRangeError),
     queryFn: async () =>
       resolveBoardingStayRates(
         "",
@@ -1842,6 +1855,11 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
     }
     if (!form.check_in_date || !form.check_out_date) {
       toast.error("Check-in and check-out dates are required");
+      return;
+    }
+    const dateErr = validateBoardingDateRange(form.check_in_date, form.check_out_date);
+    if (dateErr) {
+      toast.error(dateErr);
       return;
     }
     if (form.pet_ids.length === 0) {
@@ -2598,6 +2616,13 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
                 />
               </div>
             </div>
+            {dogDateRangeError ? (
+              <p className="text-xs text-destructive">{dogDateRangeError}</p>
+            ) : form.check_in_date && form.check_out_date && dogNights > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {dogNights} night{dogNights !== 1 ? "s" : ""} (check-out day is departure, not charged)
+              </p>
+            ) : null}
 
             <div className="space-y-2">
               <Label className="text-sm font-medium">Transport</Label>

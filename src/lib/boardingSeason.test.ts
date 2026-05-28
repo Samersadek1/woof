@@ -15,6 +15,10 @@ describe("boardingSeason", () => {
     ]);
   });
 
+  it("returns no nights when the stay exceeds the safety cap", () => {
+    expect(eachBoardingNight("2026-01-01", "2028-01-01")).toEqual([]);
+  });
+
   it("summarizes mixed peak stays", () => {
     expect(boardingStaySeasonSummary(2, 1)).toBe("Mixed (2 peak, 1 off-peak)");
     expect(boardingStaySeasonSummary(3, 0)).toBe("Peak");

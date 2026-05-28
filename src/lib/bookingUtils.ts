@@ -2,9 +2,12 @@ import { differenceInCalendarDays, addDays, format, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
 import { buildBoardingNightLineItems } from "@/lib/boardingInvoiceLines";
+import { MAX_BOARDING_STAY_NIGHTS } from "@/lib/boardingLimits";
 import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import { serviceTypeForBoardingAddonKey } from "@/lib/groomingCatalog";
 import { netFromGrossInclusive, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
+
+export { MAX_BOARDING_STAY_NIGHTS } from "@/lib/boardingLimits";
 
 /**
  * Returns the number of nights between two ISO date strings.
@@ -20,6 +23,10 @@ export function validateBoardingDateRange(
 ): string | null {
   if (!checkIn || !checkOutExclusive) return "Check-in and check-out are required";
   if (checkOutExclusive <= checkIn) return "Check-out must be after check-in";
+  const nights = differenceInCalendarDays(parseISO(checkOutExclusive), parseISO(checkIn));
+  if (nights > MAX_BOARDING_STAY_NIGHTS) {
+    return `Stay cannot exceed ${MAX_BOARDING_STAY_NIGHTS} nights — check the check-out date`;
+  }
   return null;
 }
 
