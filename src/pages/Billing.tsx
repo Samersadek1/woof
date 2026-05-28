@@ -34,6 +34,7 @@ import {
 } from "@/lib/paymentMethod";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
+import { InvoiceDeletionLogPanel } from "@/components/billing/InvoiceDeletionLogPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -101,7 +102,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { OwnerClientSearch } from "@/components/OwnerClientSearch";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
-import { useInvoiceDeletionLog } from "@/hooks/useInvoices";
 
 type PaymentMethod = Database["public"]["Enums"]["payment_method"];
 type TransactionType = Database["public"]["Enums"]["transaction_type"];

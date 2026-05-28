@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAddInvoiceLineItem } from "@/hooks/useAddInvoiceLineItem";
 import { useInvoicePricingRows } from "@/hooks/useInvoicePricingRows";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
