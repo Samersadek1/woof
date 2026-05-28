@@ -1,4 +1,4 @@
-import { memo, useState, useMemo, useEffect } from "react";
+import { memo, useState, useMemo, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -1545,6 +1545,9 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
   const [roomSearch, setRoomSearch] = useState("");
 
   const [ownerSearchResetKey, setOwnerSearchResetKey] = useState(0);
+  const handleOwnerIdChange = useCallback((id: string) => {
+    setForm((f) => ({ ...f, owner_id: id }));
+  }, []);
 
   // pets for selected owner (dog boarding: exclude cats)
   const { data: ownerPets = [] } = usePets(form.owner_id);
@@ -2266,7 +2269,10 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
           NEW BOOKING DRAWER
       ══════════════════════════════════════════ */}
       <Sheet open={newBookingOpen} onOpenChange={setNewBookingOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetContent
+          className="w-full sm:max-w-lg overflow-y-auto"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <SheetHeader>
             <SheetTitle>New Booking</SheetTitle>
             <SheetDescription>
@@ -2281,7 +2287,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
               <Label>Owner <span className="text-destructive">*</span></Label>
               <BoardingOwnerSearchField
                 ownerId={form.owner_id}
-                onOwnerIdChange={(id) => setForm((f) => ({ ...f, owner_id: id }))}
+                onOwnerIdChange={handleOwnerIdChange}
                 resetKey={ownerSearchResetKey}
               />
             </div>

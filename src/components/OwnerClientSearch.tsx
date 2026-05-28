@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -35,12 +35,19 @@ export const OwnerClientSearch = memo(function OwnerClientSearch({
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebounce(query, debounceMs);
   const searchTerm =
     debouncedQuery.trim().length >= minChars ? debouncedQuery.trim() : undefined;
   const { data: owners = [], isLoading } = useOwners(searchTerm);
 
   useDismissOnOutsidePointer(wrapperRef, open, () => setOpen(false));
+
+  useEffect(() => {
+    if (query.trim().length < minChars) return;
+    if (document.activeElement !== inputRef.current) return;
+    setOpen(true);
+  }, [owners, query, minChars]);
 
   if (selectedId && selectedLabel) {
     return (
@@ -72,6 +79,7 @@ export const OwnerClientSearch = memo(function OwnerClientSearch({
     <div ref={wrapperRef} className={cn("relative", className)}>
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <Input
+        ref={inputRef}
         data-testid={inputTestId}
         className="pl-9"
         placeholder={placeholder}
@@ -82,6 +90,8 @@ export const OwnerClientSearch = memo(function OwnerClientSearch({
         }}
         onFocus={() => setOpen(true)}
         autoComplete="off"
+        data-1p-ignore
+        data-lpignore="true"
       />
       {showDropdown ? (
         <ul className="absolute left-0 right-0 top-full z-[120] mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 text-sm shadow-md">

@@ -11,6 +11,8 @@ export function useDismissOnOutsidePointer(
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (ref.current?.contains(target)) return;
+      const active = document.activeElement;
+      if (active && ref.current?.contains(active)) return;
       onDismiss();
     };
     document.addEventListener("pointerdown", onPointerDown, true);

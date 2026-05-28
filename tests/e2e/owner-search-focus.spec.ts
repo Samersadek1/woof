@@ -9,13 +9,18 @@ test.describe("owner-search-focus", () => {
     await expect(page.getByTestId("boarding-owner-search")).toBeVisible();
   });
 
-  test("boarding owner search keeps focus after each keystroke", async ({ page }) => {
+  test("boarding owner search keeps focus and dropdown after each keystroke", async ({ page }) => {
     const input = page.getByTestId("boarding-owner-search");
     await input.click();
 
-    await input.pressSequentially("samer", { delay: 60 });
+    await input.pressSequentially("sa", { delay: 80 });
     await page.waitForTimeout(400);
     await expect(input).toBeFocused();
+    const dropdown = page
+      .locator("div.relative")
+      .filter({ has: page.getByTestId("boarding-owner-search") })
+      .locator("ul");
+    await expect(dropdown).toBeVisible();
   });
 
   test("hub booking search keeps focus while typing", async ({ page }) => {
