@@ -17,6 +17,7 @@ import { createServiceInvoice, removeUnpaidServiceInvoice } from "@/lib/bookingU
 import { composeNotesWithHourlyInvoiced } from "@/lib/daycareSessionMeta";
 import {
   buildPriceMap,
+  daycareHourlyInvoiceLineUnits,
   daycareHourlyPetSubtotal,
   DAYCARE_HOURLY_UNIT_KEY,
 } from "@/lib/servicePricing";
@@ -139,14 +140,20 @@ export function CompleteHourlyBillingDialog({
 
     const lineItems = rowPreviews
       .filter((row) => row.subtotal.total > 0)
-      .map((row) => ({
-        description: `Daycare hourly — ${row.session.petName} (${formatHourLabel(row.subtotal.roundedHours)} hr)`,
-        quantity: row.subtotal.roundedHours,
-        unitPrice: row.subtotal.unitRate,
-        pricingKey: row.subtotal.pricingKey,
-        serviceType: "daycare",
-        preserveUnitPrice: true,
-      }));
+      .map((row) => {
+        const lineUnits = daycareHourlyInvoiceLineUnits(
+          row.subtotal.roundedHours,
+          row.subtotal.unitRate,
+        );
+        return {
+          description: `Daycare hourly — ${row.session.petName} (${formatHourLabel(lineUnits.roundedHours)} hr)`,
+          quantity: lineUnits.quantity,
+          unitPrice: lineUnits.unitPrice,
+          pricingKey: row.subtotal.pricingKey,
+          serviceType: "daycare",
+          preserveUnitPrice: true,
+        };
+      });
 
     if (lineItems.length === 0) {
       toast.error("Enter billable hours for each dog");

@@ -222,6 +222,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   if (lineRows.length > 0) {
     const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);
     if (liErr) {
+      await supabase.from("invoices").delete().eq("id", inv.id);
       throw liErr;
     }
   }

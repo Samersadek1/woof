@@ -2,7 +2,10 @@ import { format, parseISO } from "date-fns";
 
 import {
   daycareGroupPricing,
+  daycareHourlyInvoiceLineUnits,
   daycareHourlyLinearTotal,
+  daycareHourlyHalfHourSlots,
+  billableDaycareHourlyHours,
   type PriceByKey,
 } from "@/lib/servicePricing";
 
@@ -67,12 +70,14 @@ export function buildDaycareHourlyLineItems(args: {
   if (hourly.total <= 0) return [];
 
   const dateLabel = formatSessionDate(sessionDate);
-  const hoursLabel = `${hours} hr${hours === 1 ? "" : "s"}`;
+  const roundedHours = hourly.roundedHours;
+  const hoursLabel = `${roundedHours} hr${roundedHours === 1 ? "" : "s"}`;
+  const lineUnits = daycareHourlyInvoiceLineUnits(roundedHours, hourly.unitRate);
 
   return petIds.map((petId) => ({
     description: `${petNameFor(petId, pets)} — Daycare hourly — ${dateLabel} (${hoursLabel})`,
-    quantity: hours,
-    unitPrice: hourly.unitRate,
+    quantity: lineUnits.quantity,
+    unitPrice: lineUnits.unitPrice,
     pricingKey: hourly.pricingKey,
     serviceType: "daycare",
     preserveUnitPrice: true,
@@ -93,7 +98,9 @@ export function buildDaycareCreditLineItems(args: {
     const credit = consumedCreditByPet[petId];
     const packageName = credit?.package_name ?? "package credit";
     const isHourlyCredit = credit?.service_code === "daycare_hourly";
-    const units = isHourlyCredit ? Math.max(1, hours) : 1;
+    const units = isHourlyCredit
+      ? Math.max(1, daycareHourlyHalfHourSlots(billableDaycareHourlyHours(hours)))
+      : 1;
     const serviceLabel = isHourlyCredit ? "Daycare hourly" : "Daycare full day";
     return {
       description: `${petNameFor(petId, pets)} — ${serviceLabel} — ${dateLabel} (covered by ${packageName})`,

@@ -27,7 +27,14 @@ async function creditUnitsToRestore(
     .eq("invoice_id", invoiceId);
 
   const hourlyLine = (lines ?? []).find((line) => /hourly/i.test(line.description ?? ""));
-  if (hourlyLine && hourlyLine.quantity > 0) return hourlyLine.quantity;
+  if (hourlyLine && hourlyLine.quantity > 0) {
+    const fromDescription = hourlyLine.description?.match(/\(([\d.]+)\s*hr\)/i)?.[1];
+    if (fromDescription) {
+      const parsed = Number(fromDescription);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return hourlyLine.quantity;
+  }
   return 1;
 }
 

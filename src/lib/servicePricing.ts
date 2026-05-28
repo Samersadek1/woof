@@ -8,18 +8,60 @@ export function buildPriceMap(rows: { key: string; amount_aed: number }[]): Pric
   return new Map(rows.map((r) => [r.key, r.amount_aed]));
 }
 
-/** Round billable hours to the nearest 30 minutes (0.5 hr). */
+/**
+ * Billable daycare hours from actual duration (30-minute blocks):
+ * - Each full hour counts as 1 hr.
+ * - Leftover up to 30 min counts as 0.5 hr (first half hour).
+ * - Leftover over 30 min counts as 1 hr (full hour, not another half).
+ */
+export function billableDaycareHourlyHours(hours: number): number {
+  if (!Number.isFinite(hours) || hours <= 0) return 0;
+  const totalMinutes = hours * 60;
+  const fullHours = Math.floor(totalMinutes / 60);
+  const remainderMinutes = totalMinutes % 60;
+  if (remainderMinutes === 0) return fullHours;
+  if (remainderMinutes <= 30) return fullHours + 0.5;
+  return fullHours + 1;
+}
+
+/** @deprecated Use billableDaycareHourlyHours for daycare hourly billing. */
 export function roundHoursToNearestHalfHour(hours: number): number {
   if (!Number.isFinite(hours) || hours <= 0) return 0;
   return Math.round(hours * 2) / 2;
 }
 
-/** Per-dog hourly subtotal using rounded billable hours (nearest 30 minutes). */
+/** invoice_line_items.quantity is integer — store billable time as 30-minute slots. */
+export function daycareHourlyHalfHourSlots(billableHours: number): number {
+  if (!Number.isFinite(billableHours) || billableHours <= 0) return 0;
+  return Math.round(billableHours * 2);
+}
+
+export function roundedHoursFromHalfHourSlots(slots: number): number {
+  if (!Number.isFinite(slots) || slots <= 0) return 0;
+  return slots / 2;
+}
+
+export function daycareHourlyHalfHourUnitRate(hourlyUnitRate: number): number {
+  return hourlyUnitRate / 2;
+}
+
+/** Integer quantity + per-30-min unit price for hourly daycare invoice rows. */
+export function daycareHourlyInvoiceLineUnits(
+  billableHours: number,
+  hourlyUnitRate: number,
+): { roundedHours: number; quantity: number; unitPrice: number; lineTotal: number } {
+  const roundedHours = billableDaycareHourlyHours(billableHours);
+  const quantity = daycareHourlyHalfHourSlots(roundedHours);
+  const unitPrice = daycareHourlyHalfHourUnitRate(hourlyUnitRate);
+  return { roundedHours, quantity, unitPrice, lineTotal: quantity * unitPrice };
+}
+
+/** Per-dog hourly subtotal using 30-minute block billing rules. */
 export function daycareHourlyPetSubtotal(
   hours: number,
   prices: PriceByKey,
 ): { roundedHours: number; unitRate: number; total: number; pricingKey: string } {
-  const roundedHours = roundHoursToNearestHalfHour(hours);
+  const roundedHours = billableDaycareHourlyHours(hours);
   if (roundedHours <= 0) {
     return { roundedHours: 0, unitRate: 0, total: 0, pricingKey: DAYCARE_HOURLY_UNIT_KEY };
   }
@@ -56,25 +98,27 @@ function formatHourCount(hours: number): string {
 /**
  * Linear daycare hourly total: unit rate × dogs × hours.
  * Uses `daycare_hourly_single_day` as the per-dog hourly rate from `pricing`.
- * Keeps full numeric precision — do not round before invoicing.
+ * Billable hours use 30-minute block rules before totals.
  */
 export function daycareHourlyLinearTotal(
   dogCount: number,
   hours: number,
   prices: PriceByKey,
-): { pricingKey: string; unitRate: number; total: number; label: string; dogHours: number } {
+): { pricingKey: string; unitRate: number; total: number; label: string; dogHours: number; roundedHours: number } {
   if (dogCount <= 0 || hours <= 0) {
-    return { pricingKey: DAYCARE_HOURLY_UNIT_KEY, unitRate: 0, total: 0, label: "", dogHours: 0 };
+    return { pricingKey: DAYCARE_HOURLY_UNIT_KEY, unitRate: 0, total: 0, label: "", dogHours: 0, roundedHours: 0 };
   }
   const unitRate = amountFor(prices, DAYCARE_HOURLY_UNIT_KEY);
-  const dogHours = dogCount * hours;
+  const roundedHours = billableDaycareHourlyHours(hours);
+  const dogHours = dogCount * roundedHours;
   const total = unitRate * dogHours;
   return {
     pricingKey: DAYCARE_HOURLY_UNIT_KEY,
     unitRate,
     total,
     dogHours,
-    label: `Daycare hourly (${dogCount} dog${dogCount === 1 ? "" : "s"} × ${formatHourCount(hours)})`,
+    roundedHours,
+    label: `Daycare hourly (${dogCount} dog${dogCount === 1 ? "" : "s"} × ${formatHourCount(roundedHours)})`,
   };
 }
 
