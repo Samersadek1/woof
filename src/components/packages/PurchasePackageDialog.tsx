@@ -25,7 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-type PaymentMethod = Database["public"]["Enums"]["payment_method"];
+import { INVOICE_PAYMENT_METHOD_OPTIONS, type PaymentMethod } from "@/lib/paymentMethod";
 type Pet = Pick<Database["public"]["Tables"]["pets"]["Row"], "id" | "name" | "size" | "coat_type" | "species" | "active">;
 type PackageDef = Database["public"]["Tables"]["package_definitions"]["Row"];
 type PackagePricing = Database["public"]["Tables"]["package_pricing"]["Row"];
@@ -588,9 +588,9 @@ export function PurchasePackageDialog({
               <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="wallet">Wallet</SelectItem>
+                  {INVOICE_PAYMENT_METHOD_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

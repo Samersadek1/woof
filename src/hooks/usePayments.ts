@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
 import { invoiceAmountDue } from "@/lib/vatConfig";
+import { invoicePaymentMethodToTransactionType, type ExternalPaymentMethod } from "@/lib/paymentMethod";
 
-type PaymentMethod = Extract<Database["public"]["Enums"]["payment_method"], "cash" | "card">;
+type PaymentMethod = ExternalPaymentMethod;
 
 interface WalletPaymentArgs {
   invoiceId: string;
@@ -81,8 +81,7 @@ export function useRecordCashOrCardPayment() {
         total_aed: invoice.total_aed,
         vat_aed: invoice.vat_aed,
       });
-      const txType: Database["public"]["Enums"]["transaction_type"] =
-        method === "cash" ? "cash_payment" : "card_payment";
+      const txType = invoicePaymentMethodToTransactionType(method);
 
       const { error: txErr } = await supabase.from("wallet_transactions").insert({
         owner_id: invoice.owner_id,

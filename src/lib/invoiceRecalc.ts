@@ -10,6 +10,7 @@ type LineRow = Database["public"]["Tables"]["invoice_line_items"]["Row"];
 const PAYMENT_TX_TYPES = new Set([
   "cash_payment",
   "card_payment",
+  "bank_transfer_payment",
   "deduction",
 ]);
 

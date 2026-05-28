@@ -31,6 +31,10 @@ import {
   type ServiceType,
 } from "@/hooks/useBilling";
 import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import {
+  INVOICE_PAYMENT_METHOD_OPTIONS,
+  WALLET_TOPUP_PAYMENT_METHOD_OPTIONS,
+} from "@/lib/paymentMethod";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { Button } from "@/components/ui/button";
@@ -119,6 +123,7 @@ const TX_BADGE: Record<string, { label: string; className: string }> = {
   adjustment: { label: "Adjustment", className: "bg-gray-100 text-gray-600 border-gray-200" },
   card_payment: { label: "Card Payment", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   cash_payment: { label: "Cash Payment", className: "bg-teal-50 text-teal-700 border-teal-200" },
+  bank_transfer_payment: { label: "Bank Transfer", className: "bg-amber-50 text-amber-800 border-amber-200" },
 };
 
 const INVOICE_STATUS_BADGE: Record<string, { label: string; className: string }> = {
@@ -237,8 +242,9 @@ function WalletModal({ open, mode, ownerId, onClose }: WalletModalProps) {
             <Select value={method} onValueChange={(v) => setMethod(v as PaymentMethod)}>
               <SelectTrigger id="tx_method"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="card">Card</SelectItem>
+                {WALLET_TOPUP_PAYMENT_METHOD_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -306,9 +312,9 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
             <Select value={method} onValueChange={(v) => setMethod(v as BillingPaymentMethod)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="wallet">Wallet</SelectItem>
-                <SelectItem value="card">Card</SelectItem>
-                <SelectItem value="cash">Cash</SelectItem>
+                {INVOICE_PAYMENT_METHOD_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

@@ -87,7 +87,7 @@ async function fetchInvoicePrintable(invoiceId: string) {
         .from("wallet_transactions")
         .select("id, created_at, transaction_type, payment_method, performed_by, notes, amount")
         .eq("invoice_id", invoiceId)
-        .in("transaction_type", ["cash_payment", "card_payment", "deduction"])
+        .in("transaction_type", ["cash_payment", "card_payment", "bank_transfer_payment", "deduction"])
         .order("created_at", { ascending: true }),
       supabase
         .from("billing_adjustments")

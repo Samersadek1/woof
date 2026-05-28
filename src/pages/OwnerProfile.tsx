@@ -34,6 +34,7 @@ import {
   type InvoiceStatus,
 } from "@/hooks/useBilling";
 import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { INVOICE_PAYMENT_METHOD_OPTIONS, type PaymentMethod } from "@/lib/paymentMethod";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { usePendingHourlyDaycareForOwner } from "@/hooks/useDaycare";
@@ -287,7 +288,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const voidInvoice = useVoidInvoice();
 
   const [payDialogInvoice, setPayDialogInvoice] = useState<InvoiceWithItems | null>(null);
-  const [payMethod, setPayMethod] = useState<"wallet" | "card" | "cash">("wallet");
+  const [payMethod, setPayMethod] = useState<PaymentMethod>("wallet");
   const [payStaff, setPayStaff] = useState("");
   const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
   const [addLineOpen, setAddLineOpen] = useState(false);
@@ -577,12 +578,12 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
               ) : null}
               <div className="space-y-2">
                 <Label>Payment method</Label>
-                <Select value={payMethod} onValueChange={(v) => setPayMethod(v as "wallet" | "card" | "cash")}>
+                <Select value={payMethod} onValueChange={(v) => setPayMethod(v as PaymentMethod)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="wallet">Wallet</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="cash">Cash</SelectItem>
+                    {INVOICE_PAYMENT_METHOD_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

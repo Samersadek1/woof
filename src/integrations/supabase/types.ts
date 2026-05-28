@@ -2933,7 +2933,7 @@ export type Database = {
         | "outstanding"
         | "overdue"
         | "voided"
-      payment_method: "wallet" | "card" | "cash"
+      payment_method: "wallet" | "card" | "cash" | "bank_transfer"
       pet_gender: "male" | "female"
       pet_size: "small" | "medium" | "large"
       rate_season: "peak" | "off_peak"
@@ -3042,6 +3042,7 @@ export type Database = {
         | "adjustment"
         | "card_payment"
         | "cash_payment"
+        | "bank_transfer_payment"
         | "manual_topup"
     }
     CompositeTypes: {
@@ -3230,7 +3231,7 @@ export const Constants = {
         "overdue",
         "voided",
       ],
-      payment_method: ["wallet", "card", "cash"],
+      payment_method: ["wallet", "card", "cash", "bank_transfer"],
       pet_gender: ["male", "female"],
       pet_size: ["small", "medium", "large"],
       rate_season: ["peak", "off_peak"],
@@ -3344,6 +3345,7 @@ export const Constants = {
         "adjustment",
         "card_payment",
         "cash_payment",
+        "bank_transfer_payment",
         "manual_topup",
       ],
     },

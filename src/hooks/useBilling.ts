@@ -17,6 +17,9 @@ import {
   type WalletMutationPayload,
 } from "@/hooks/useWallet";
 import {
+  invoicePaymentMethodToTransactionType,
+} from "@/lib/paymentMethod";
+import {
   invoiceAmountDue,
   invoiceDisplayTotals,
   netFromGrossInclusive,
@@ -36,7 +39,7 @@ export type InvoiceStatus =
   | "voided"
   | "cancelled";
 
-export type PaymentMethod = "wallet" | "card" | "cash";
+export type PaymentMethod = import("@/lib/paymentMethod").PaymentMethod;
 
 export type ServiceType =
   | "boarding"
@@ -897,7 +900,7 @@ export function useProcessPayment() {
         .single();
       if (ownerErr) throw ownerErr;
 
-      const txType = input.method === "card" ? "card_payment" : "cash_payment";
+      const txType = invoicePaymentMethodToTransactionType(input.method);
       const { error: txErr } = await supabase.from("wallet_transactions").insert({
         owner_id: invoice.owner_id,
         invoice_id: input.invoiceId,

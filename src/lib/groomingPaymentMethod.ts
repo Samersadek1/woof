@@ -5,6 +5,7 @@ export const GROOMING_PAYMENT_METHOD_OPTIONS = [
   { value: "card", label: "Card" },
   { value: "wallet", label: "Wallet" },
   { value: "mamo_pay", label: "Mamo Pay" },
+  { value: "bank_transfer", label: "Bank Transfer" },
   { value: "complimentary", label: "Complimentary" },
 ] as const;
 
