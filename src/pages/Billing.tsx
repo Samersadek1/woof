@@ -285,11 +285,15 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
 
   const handlePay = async () => {
     if (!staffName.trim()) { toast.error("Enter staff name"); return; }
-    const result = await processPayment.mutateAsync({ invoiceId: invoice.id, method, staffName: staffName.trim() });
-    if (result.success) {
+    try {
+      await processPayment.mutateAsync({
+        invoiceId: invoice.id,
+        method,
+        staffName: staffName.trim(),
+      });
       onClose();
-    } else if (!result.success && method === "wallet") {
-      // wallet errors are toasted inside useProcessPayment — just keep the dialog open
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Payment failed.");
     }
   };
 
@@ -328,7 +332,7 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
         </div>
         <DialogFooter className="gap-2 pt-4">
           <Button variant="outline" onClick={onClose} disabled={processPayment.isPending}>Cancel</Button>
-          <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
+          <Button type="button" className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
             {processPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Pay {formatAed(pay.grandTotal)}
           </Button>

@@ -337,18 +337,20 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
       toast.error("Enter staff name");
       return;
     }
-    const result = await processPayment.mutateAsync({
-      invoiceId: payDialogInvoice.id,
-      method: payMethod,
-      staffName: payStaff.trim(),
-    });
-    if (result.success) {
+    try {
+      await processPayment.mutateAsync({
+        invoiceId: payDialogInvoice.id,
+        method: payMethod,
+        staffName: payStaff.trim(),
+      });
       setPayDialogInvoice(null);
       const { data: freshInvoices } = await refetchInvoices();
       if (viewInvoice) {
         const fresh = freshInvoices?.find((i) => i.id === viewInvoice.id);
         if (fresh) setViewInvoice(fresh);
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Payment failed.");
     }
   };
 
@@ -425,7 +427,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
               <div>
                 <p className="text-sm font-semibold text-orange-900">Pending hourly daycare billing</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  These check-ins are on hourly billing and still need an invoice.
+                  These check-ins are on hourly billing and still need hours entered before they can be finalised.
                 </p>
               </div>
               <Button
@@ -439,8 +441,18 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
             </div>
             <ul className="text-sm space-y-1">
               {pendingHourly.map((session) => (
-                <li key={session.id}>
-                  {session.pet_name} — {format(parseISO(session.session_date), "d MMM yyyy")}
+                <li key={session.id} className="flex items-center justify-between gap-2">
+                  <span>
+                    {session.pet_name} — {format(parseISO(session.session_date), "d MMM yyyy")}
+                  </span>
+                  {session.draft_invoice_id && (
+                    <Link
+                      to={`/billing/invoices/${session.draft_invoice_id}`}
+                      className="text-xs text-orange-700 underline underline-offset-2"
+                    >
+                      View draft
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>
@@ -474,7 +486,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                 {invoices.slice(0, 10).map((inv) => {
                   const sb = INVOICE_STATUS_BADGE[inv.status] ?? INVOICE_STATUS_BADGE.draft;
                   const canFinalise = inv.status === "draft";
-                  const canPay = ["finalised", "issued", "outstanding", "overdue"].includes(inv.status);
+                  const canPay = ["finalised", "issued", "outstanding", "overdue", "partially_paid"].includes(inv.status);
                   const canVoid = !["voided", "cancelled", "paid"].includes(inv.status);
                   return (
                     <TableRow key={inv.id}>
@@ -600,7 +612,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
             </div>
             <DialogFooter className="gap-2 pt-4">
               <Button variant="outline" onClick={() => setPayDialogInvoice(null)} disabled={processPayment.isPending}>Cancel</Button>
-              <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
+              <Button type="button" className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
                 {processPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Pay {payDialogTotals ? formatAed(payDialogTotals.grandTotal) : "—"}
               </Button>
