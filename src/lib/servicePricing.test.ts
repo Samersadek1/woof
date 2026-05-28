@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPriceMap, daycareHourlyLinearTotal, DAYCARE_HOURLY_UNIT_KEY } from "./servicePricing";
+import { buildPriceMap, daycareHourlyLinearTotal, daycareHourlyPetSubtotal, DAYCARE_HOURLY_UNIT_KEY } from "./servicePricing";
 
 describe("servicePricing", () => {
   it("daycareHourlyLinearTotal multiplies rate × dogs × hours without rounding", () => {
@@ -12,10 +12,11 @@ describe("servicePricing", () => {
     expect(result.label).toContain("1.5 hr");
   });
 
-  it("daycareHourlyLinearTotal supports fractional dog-hours on invoice quantity", () => {
-    const prices = buildPriceMap([{ key: DAYCARE_HOURLY_UNIT_KEY, amount_aed: 10.5 }]);
-    const { unitRate, dogHours, total } = daycareHourlyLinearTotal(1, 2.5, prices);
-    expect(unitRate * dogHours).toBe(total);
-    expect(total).toBe(26.25);
+  it("daycareHourlyPetSubtotal rounds hours to nearest 30 minutes", () => {
+    const prices = buildPriceMap([{ key: DAYCARE_HOURLY_UNIT_KEY, amount_aed: 10 }]);
+    expect(daycareHourlyPetSubtotal(1.2, prices).roundedHours).toBe(1);
+    expect(daycareHourlyPetSubtotal(1.3, prices).roundedHours).toBe(1.5);
+    expect(daycareHourlyPetSubtotal(1.2, prices).total).toBe(10);
+    expect(daycareHourlyPetSubtotal(1.3, prices).total).toBe(15);
   });
 });

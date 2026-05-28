@@ -14,14 +14,8 @@ import {
   transportZoneLabel,
 } from "@/lib/transportPricing";
 import {
-  buildDaycareCreditLineItems,
-  buildDaycareHourlyLineItems,
-  buildDaycareSingleDayLineItems,
-} from "@/lib/daycareInvoiceLines";
-import {
   buildPriceMap,
   daycareGroupPricing,
-  daycareHourlyLinearTotal,
   DAYCARE_HOURLY_UNIT_KEY,
 } from "@/lib/servicePricing";
 import {
@@ -29,7 +23,7 @@ import {
   vatAmountFromGrossInclusive,
   vatLineLabel,
 } from "@/lib/vatConfig";
-import { formatAed, parseBoundedDecimalInput } from "@/lib/money";
+import { formatAed } from "@/lib/money";
 import { useOwner } from "@/hooks/useOwners";
 import { OwnerClientSearch } from "@/components/OwnerClientSearch";
 import { usePets } from "@/hooks/usePets";
@@ -48,6 +42,21 @@ import {
   type SessionRow,
 } from "@/hooks/useDaycare";
 import { DaycarePackagesTab } from "@/components/daycare/DaycarePackagesTab";
+import { DaycareSessionInvoiceLink } from "@/components/daycare/DaycareSessionInvoiceLink";
+import {
+  CompleteHourlyBillingDialog,
+  type HourlyBillingSession,
+} from "@/components/daycare/CompleteHourlyBillingDialog";
+import {
+  composeNotesWithBillingPath,
+  parseDaycareBillingPath,
+  visibleDaycareNotes,
+  BILLING_PATH_PREFIX,
+  resolveDaycareSessionInvoiceId,
+  isDaycareHourlyPending,
+  isSingleDayInvoiceMissing,
+} from "@/lib/daycareSessionMeta";
+import { useDaycareSessionInvoiceMap } from "@/hooks/useDaycareSessionInvoiceMap";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -625,10 +634,6 @@ function PlannerTab() {
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [billingChoiceByPet, setBillingChoiceByPet] = useState<Record<string, string>>({});
   const [skipInvoiceDiscount, setSkipInvoiceDiscount] = useState(false);
-  const [hourlyDogsInput, setHourlyDogsInput] = useState("");
-  const [hourlyDogsTouched, setHourlyDogsTouched] = useState(false);
-  const [hourlyHoursInput, setHourlyHoursInput] = useState("");
-  const [hourlyHoursTouched, setHourlyHoursTouched] = useState(false);
   const [checkInDraft, setCheckInDraft] = useState({
     session_date: TODAY,
     pickup_used: false,
@@ -703,42 +708,26 @@ function PlannerTab() {
   );
   const singleDayCount = singleDayPetIds.length;
   const hourlyCount = hourlyPetIds.length;
-  /** Pets actually checked in on single-day or hourly (drives transport capacity). */
+  /** Pets checked in on single-day billing (immediate invoice at check-in). */
+  const immediateInvoicePetCount = singleDayCount;
+  /** Pets physically checking in on single-day or hourly (drives transport capacity). */
   const physicalInvoicePetCount = singleDayCount + hourlyCount;
-
-  const effectiveHourlyDogs = useMemo(() => {
-    if (hourlyCount === 0) return 0;
-    return Math.round(parseBoundedDecimalInput(hourlyDogsInput, 1, { min: 1, max: 99 }));
-  }, [hourlyCount, hourlyDogsInput]);
-
-  const effectiveHours = useMemo(() => {
-    if (hourlyCount === 0) return 0;
-    return parseBoundedDecimalInput(hourlyHoursInput, 1, { min: 0.5, max: 48 });
-  }, [hourlyCount, hourlyHoursInput]);
 
   const singleDayRatePreview = useMemo(
     () => daycareGroupPricing(singleDayCount, daycarePriceMap),
     [singleDayCount, daycarePriceMap],
-  );
-  const hourlyLinearPreview = useMemo(
-    () =>
-      hourlyCount > 0
-        ? daycareHourlyLinearTotal(effectiveHourlyDogs, effectiveHours, daycarePriceMap)
-        : { pricingKey: "", unitRate: 0, total: 0, label: "", dogHours: 0 },
-    [hourlyCount, effectiveHourlyDogs, effectiveHours, daycarePriceMap],
   );
   const transportRate = useMemo(() => {
     const key = transportPricingKey(checkInDraft.transport_zone);
     return transportPricingRows.find((r) => r.key === key)?.amount_aed ?? 0;
   }, [transportPricingRows, checkInDraft.transport_zone]);
   const transportTrips = [checkInDraft.pickup_used, checkInDraft.dropoff_used].filter(Boolean).length;
-  const previewTransportQty = physicalInvoicePetCount
-    ? transportQuantityForPets(checkInDraft.transport_zone, physicalInvoicePetCount)
+  const previewTransportQty = immediateInvoicePetCount
+    ? transportQuantityForPets(checkInDraft.transport_zone, immediateInvoicePetCount)
     : 0;
   const previewTransportTotal = transportRate * previewTransportQty * transportTrips;
-  const hourlyDurationTotal = hourlyCount > 0 ? hourlyLinearPreview.total : 0;
   const immediateInvoiceSubtotalPreview =
-    singleDayRatePreview.total + hourlyDurationTotal + previewTransportTotal;
+    singleDayRatePreview.total + previewTransportTotal;
   const { data: discountPreview, isLoading: discountPreviewLoading } = useQuery<{
     discount_pct: number;
     discount_aed: number;
@@ -753,7 +742,7 @@ function PlannerTab() {
     ],
     enabled:
       !!ownerId &&
-      physicalInvoicePetCount > 0 &&
+      immediateInvoicePetCount > 0 &&
       immediateInvoiceSubtotalPreview > 0 &&
       !skipInvoiceDiscount,
     queryFn: async () => {
@@ -766,12 +755,12 @@ function PlannerTab() {
   });
 
   const daycareInvoiceNetExVatPreview = useMemo(() => {
-    if (physicalInvoicePetCount === 0 || immediateInvoiceSubtotalPreview <= 0) return null;
+    if (immediateInvoicePetCount === 0 || immediateInvoiceSubtotalPreview <= 0) return null;
     if (skipInvoiceDiscount) return immediateInvoiceSubtotalPreview;
     if (discountPreviewLoading) return immediateInvoiceSubtotalPreview;
     return discountPreview?.final_aed ?? immediateInvoiceSubtotalPreview;
   }, [
-    physicalInvoicePetCount,
+    immediateInvoicePetCount,
     immediateInvoiceSubtotalPreview,
     skipInvoiceDiscount,
     discountPreviewLoading,
@@ -818,31 +807,11 @@ function PlannerTab() {
     });
   }, [selectedPetIds, getUsablePackagesForPet]);
 
-  useEffect(() => {
-    if (hourlyCount === 0) {
-      setHourlyDogsInput("");
-      setHourlyDogsTouched(false);
-      setHourlyHoursInput("");
-      setHourlyHoursTouched(false);
-      return;
-    }
-    if (!hourlyDogsTouched) {
-      setHourlyDogsInput("1");
-    }
-    if (!hourlyHoursTouched) {
-      setHourlyHoursInput("1");
-    }
-  }, [hourlyCount, hourlyDogsTouched, hourlyHoursTouched]);
-
   const handleOwnerSelect = (id: string, _label: string) => {
     setOwnerId(id);
     setPackageId(null);
     setSelectedPetIds([]);
     setBillingChoiceByPet({});
-    setHourlyDogsInput("");
-    setHourlyDogsTouched(false);
-    setHourlyHoursInput("");
-    setHourlyHoursTouched(false);
     syncPlannerSearchParams(setSearchParams, id, null);
   };
 
@@ -851,10 +820,6 @@ function PlannerTab() {
     setPackageId(null);
     setSelectedPetIds([]);
     setBillingChoiceByPet({});
-    setHourlyDogsInput("");
-    setHourlyDogsTouched(false);
-    setHourlyHoursInput("");
-    setHourlyHoursTouched(false);
     syncPlannerSearchParams(setSearchParams, null, null);
   };
 
@@ -900,15 +865,21 @@ function PlannerTab() {
     const consumedCreditByPet: Record<string, DaycarePackage> = {};
     const successfullyCreditCovered: string[] = [];
     const fallbackSingleIds: string[] = [];
-    const fallbackHourlyIds: string[] = [];
     const privateFlat = checkInDraft.transport_zone === "dubai_private";
 
     for (const petId of selectedPetIds) {
       const pet = pets?.find((p) => p.id === petId);
       const petName = pet?.name ?? "Pet";
       const choice = billingChoiceByPet[petId] ?? "single";
-      const chosenPackageId = choice === "single" || choice === "hourly" ? null : choice;
+      const isHourlyBilling = choice === "hourly";
+      const chosenPackageId = choice === "single" || isHourlyBilling ? null : choice;
       const chosenCredit = chosenPackageId ? packages?.find((pkg) => pkg.id === chosenPackageId) : null;
+      const billingPath =
+        !chosenPackageId && choice === "single"
+          ? "single"
+          : !chosenPackageId && isHourlyBilling
+            ? "hourly"
+            : null;
 
       try {
         const session = await addDay.mutateAsync({
@@ -916,6 +887,7 @@ function PlannerTab() {
           pet_id: petId,
           owner_id: ownerId,
           package_id: chosenPackageId,
+          billing_path: billingPath,
           pickup_used: checkInDraft.pickup_used,
           dropoff_used: checkInDraft.dropoff_used,
           logged_by: checkInDraft.logged_by || null,
@@ -927,7 +899,7 @@ function PlannerTab() {
         successCount += 1;
 
         if (chosenCredit) {
-          const consumeUnits = chosenCredit.service_code === "daycare_hourly" ? Math.max(1, effectiveHours) : 1;
+          const consumeUnits = 1;
           try {
             await consumeCredit.mutateAsync({
               creditId: chosenCredit.id,
@@ -941,7 +913,19 @@ function PlannerTab() {
             const message = extractErrorMessage(error);
             failures.push(`${petName}: credit consumption failed (${message}); charging this check-in instead`);
             if (chosenCredit.service_code === "daycare_hourly") {
-              fallbackHourlyIds.push(petId);
+              try {
+                await supabase
+                  .from("daycare_sessions")
+                  .update({
+                    package_id: null,
+                    notes: composeNotesWithBillingPath(session.notes, "hourly"),
+                  })
+                  .eq("id", session.id);
+              } catch (updateErr) {
+                failures.push(
+                  `${petName}: could not switch to hourly billing (${extractErrorMessage(updateErr)})`,
+                );
+              }
             } else {
               fallbackSingleIds.push(petId);
             }
@@ -953,16 +937,17 @@ function PlannerTab() {
       }
     }
 
-    const okSingleIds = [...singleDayPetIds.filter((id) => sessionsCreated[id]), ...fallbackSingleIds];
-    const okHourlyIds = [...hourlyPetIds.filter((id) => sessionsCreated[id]), ...fallbackHourlyIds];
+    const okSingleIds = [
+      ...singleDayPetIds.filter((id) => sessionsCreated[id]),
+      ...fallbackSingleIds,
+    ];
     const okCreditIds = successfullyCreditCovered.filter((id) => sessionsCreated[id]);
-    const invoicedPetTotal = okSingleIds.length + okHourlyIds.length + okCreditIds.length;
-    const hourlyHoursForInvoice = okHourlyIds.length > 0 ? effectiveHours : 0;
+    const invoicedPetTotal = okSingleIds.length + okCreditIds.length;
 
     if (invoicedPetTotal > 0) {
+      const singleRate = daycareGroupPricing(okSingleIds.length, daycarePriceMap);
       const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
       const transportKey = transportPricingKey(checkInDraft.transport_zone);
-      const daycarePets = (pets ?? []).map((pet) => ({ id: pet.id, name: pet.name }));
       const lineItems: {
         description: string;
         quantity: number;
@@ -970,28 +955,33 @@ function PlannerTab() {
         pricingKey?: string;
         serviceType?: string;
         preserveUnitPrice?: boolean;
-      }[] = [
-        ...buildDaycareSingleDayLineItems({
-          petIds: okSingleIds,
-          pets: daycarePets,
-          sessionDate: checkInDraft.session_date,
-          prices: daycarePriceMap,
-        }),
-        ...buildDaycareHourlyLineItems({
-          petIds: okHourlyIds,
-          pets: daycarePets,
-          sessionDate: checkInDraft.session_date,
-          hours: hourlyHoursForInvoice,
-          prices: daycarePriceMap,
-        }),
-        ...buildDaycareCreditLineItems({
-          petIds: okCreditIds,
-          pets: daycarePets,
-          sessionDate: checkInDraft.session_date,
-          consumedCreditByPet,
-          hours: effectiveHours,
-        }),
-      ];
+      }[] = [];
+
+      if (okSingleIds.length > 0 && singleRate.pricingKey) {
+        lineItems.push({
+          description: `${singleRate.label} (${okSingleIds.length} dog${okSingleIds.length === 1 ? "" : "s"})`,
+          quantity: okSingleIds.length,
+          unitPrice: singleRate.total / okSingleIds.length,
+          pricingKey: singleRate.pricingKey,
+          serviceType: "daycare",
+          preserveUnitPrice: true,
+        });
+      }
+      if (okCreditIds.length > 0) {
+        for (const petId of okCreditIds) {
+          const petName = pets?.find((p) => p.id === petId)?.name ?? "Pet";
+          const credit = consumedCreditByPet[petId];
+          const packageName = credit?.package_name ?? "package credit";
+          const isHourlyCredit = credit?.service_code === "daycare_hourly";
+          lineItems.push({
+            description: `${isHourlyCredit ? "Daycare hourly" : "Daycare full day"} — ${petName} (covered by ${packageName})`,
+            quantity: 1,
+            unitPrice: 0,
+            serviceType: "daycare",
+            preserveUnitPrice: true,
+          });
+        }
+      }
 
       const includePickup = checkInDraft.pickup_used;
       const includeDropoff = checkInDraft.dropoff_used;
@@ -1024,7 +1014,7 @@ function PlannerTab() {
       }
 
       const referencePetId =
-        selectedPetIds.find((id) => sessionsCreated[id] && (okSingleIds.includes(id) || okHourlyIds.includes(id))) ??
+        selectedPetIds.find((id) => sessionsCreated[id] && okSingleIds.includes(id)) ??
         selectedPetIds.find((id) => sessionsCreated[id]);
       const referenceSessionId = referencePetId ? sessionsCreated[referencePetId] : null;
 
@@ -1052,10 +1042,6 @@ function PlannerTab() {
       toast.success(`Checked in ${successCount} dog${successCount !== 1 ? "s" : ""}`);
       setSelectedPetIds([]);
       setBillingChoiceByPet({});
-      setHourlyDogsInput("");
-      setHourlyDogsTouched(false);
-      setHourlyHoursInput("");
-      setHourlyHoursTouched(false);
       setSkipInvoiceDiscount(false);
       setCheckInDraft((prev) => ({
         ...prev,
@@ -1259,7 +1245,7 @@ function PlannerTab() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="single">Single day (invoice now)</SelectItem>
-                                  <SelectItem value="hourly">Hourly (invoice now)</SelectItem>
+                                  <SelectItem value="hourly">Hourly (invoice at checkout)</SelectItem>
                                   {usablePackages.map((pkg) => (
                                     <SelectItem key={pkg.id} value={pkg.id}>
                                       Use credit ({pkg.total_days - pkg.days_used} remaining{pkg.service_code === "daycare_hourly" ? " hourly" : ""})
@@ -1277,71 +1263,10 @@ function PlannerTab() {
               </div>
 
               {hourlyCount > 0 && (
-                <div className="rounded-lg border bg-muted/20 p-3 space-y-4 max-w-xl">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">Hourly daycare</p>
-                    <p className="text-xs text-muted-foreground">
-                      Hourly rate comes from the Live Rate Card (per dog per hour). Total = rate × dogs × hours. Transport follows pets checked in above ({hourlyCount} on hourly).
-                    </p>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="hourly_dog_count">Number of dogs</Label>
-                      <Input
-                        id="hourly_dog_count"
-                        type="number"
-                        min={1}
-                        max={99}
-                        step={1}
-                        placeholder="1"
-                        inputMode="numeric"
-                        className="h-9 max-w-[8rem]"
-                        value={hourlyDogsInput}
-                        onChange={(e) => {
-                          setHourlyDogsInput(e.target.value);
-                          setHourlyDogsTouched(true);
-                        }}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="hourly_hours_count">Number of hours</Label>
-                      <Input
-                        id="hourly_hours_count"
-                        type="number"
-                        min={0.5}
-                        max={48}
-                        step={0.5}
-                        placeholder="1"
-                        inputMode="decimal"
-                        className="h-9 max-w-[8rem]"
-                        value={hourlyHoursInput}
-                        onChange={(e) => {
-                          setHourlyHoursInput(e.target.value);
-                          setHourlyHoursTouched(true);
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-primary/25 bg-background/90 p-4 space-y-1">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Hourly total (check before confirming)
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {formatAed(hourlyLinearPreview.unitRate)} × {effectiveHourlyDogs} dog
-                      {effectiveHourlyDogs === 1 ? "" : "s"} ×{" "}
-                      {Number.isInteger(effectiveHours)
-                        ? effectiveHours
-                        : effectiveHours.toLocaleString("en-AE", {
-                            minimumFractionDigits: 1,
-                            maximumFractionDigits: 3,
-                          })}{" "}
-                      hr
-                    </p>
-                    <p className="text-2xl font-semibold tabular-nums">
-                      {formatAed(hourlyDurationTotal)}
-                    </p>
-                  </div>
-                </div>
+                <p className="text-sm text-muted-foreground rounded-lg border bg-muted/20 px-3 py-2 max-w-xl">
+                  {hourlyCount} dog{hourlyCount === 1 ? "" : "s"} on hourly billing — invoice when you complete
+                  hourly billing from Operations.
+                </p>
               )}
 
               <DogSizeField
@@ -1465,7 +1390,11 @@ function PlannerTab() {
                   </p>
                   {physicalInvoicePetCount === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      No immediate invoice — all selected pets are using package credits.
+                      No immediate invoice — all selected pets are using package credits or hourly billing.
+                    </p>
+                  ) : immediateInvoicePetCount === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No immediate invoice — hourly billing is completed from Operations when the dogs leave.
                     </p>
                   ) : (
                     <>
@@ -1476,23 +1405,6 @@ function PlannerTab() {
                             {singleDayCount === 1 ? "" : "s"})
                           </span>
                           <span>{formatAed(singleDayRatePreview.total)}</span>
-                        </div>
-                      )}
-                      {hourlyCount > 0 && (
-                        <div className="space-y-0.5">
-                          <div className="flex items-center justify-between text-sm">
-                            <span>Hourly daycare (rate × dogs × hours)</span>
-                            <span className="tabular-nums">{formatAed(hourlyDurationTotal)}</span>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {formatAed(hourlyLinearPreview.unitRate)} × {effectiveHourlyDogs} ×{" "}
-                            {Number.isInteger(effectiveHours)
-                              ? effectiveHours
-                              : effectiveHours.toLocaleString("en-AE", {
-                                  minimumFractionDigits: 1,
-                                  maximumFractionDigits: 3,
-                                })}
-                          </p>
                         </div>
                       )}
                       {(checkInDraft.pickup_used || checkInDraft.dropoff_used) && (
@@ -1580,7 +1492,8 @@ function PlannerTab() {
                   onChange={(e) => setCheckInDraft((prev) => ({ ...prev, remark: e.target.value }))}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Single-day and hourly billing paths create a finalized invoice immediately using the Live Rate Card daycare keys (combined per check-in batch).
+                  Single-day billing creates a finalized invoice immediately. Hourly billing is invoiced later from
+                  Operations. Package credits are recorded without a charge line.
                 </p>
               </div>
 
@@ -1612,6 +1525,7 @@ function parseCollectionStatus(
   checkedOutAt: string | null | undefined,
 ): { status: CollectionStatus; visibleNotes: string } {
   const raw = (notes ?? "").trim();
+  const visibleNotes = visibleDaycareNotes(notes);
   if (!raw) {
     return {
       status: checkedOutAt ? "owner" : "not_collected",
@@ -1620,33 +1534,34 @@ function parseCollectionStatus(
   }
   const lines = raw.split("\n").map((line) => line.trim());
   const marker = lines.find((line) => line.startsWith(COLLECTION_META_PREFIX));
-  const cleaned = lines.filter((line) => !line.startsWith(COLLECTION_META_PREFIX)).join("\n").trim();
   if (!marker) {
     return {
       status: checkedOutAt ? "owner" : "not_collected",
-      visibleNotes: cleaned,
+      visibleNotes,
     };
   }
   const value = marker.replace(COLLECTION_META_PREFIX, "").trim();
-  if (value === "pet_taxi") return { status: "pet_taxi", visibleNotes: cleaned };
-  if (value === "owner") return { status: "owner", visibleNotes: cleaned };
+  if (value === "pet_taxi") return { status: "pet_taxi", visibleNotes };
+  if (value === "owner") return { status: "owner", visibleNotes };
   return {
     status: checkedOutAt ? "owner" : "not_collected",
-    visibleNotes: cleaned,
+    visibleNotes,
   };
 }
 
 function composeNotesWithCollection(notes: string | null | undefined, status: CollectionStatus): string | null {
   const raw = (notes ?? "").trim();
-  const cleaned = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => !line.startsWith(COLLECTION_META_PREFIX))
-    .join("\n")
-    .trim();
-  if (status === "not_collected") return cleaned || null;
+  const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+  const billingLine = lines.find((line) => line.startsWith(BILLING_PATH_PREFIX));
+  const invoicedLine = lines.find((line) => line.startsWith("HOURLY_INVOICED:"));
+  const cleaned = visibleDaycareNotes(notes);
+  if (status === "not_collected") {
+    const parts = [cleaned, billingLine, invoicedLine].filter(Boolean);
+    return parts.length > 0 ? parts.join("\n") : null;
+  }
   const meta = `${COLLECTION_META_PREFIX}${status}`;
-  return cleaned ? `${cleaned}\n${meta}` : meta;
+  const parts = [cleaned, billingLine, invoicedLine, meta].filter(Boolean);
+  return parts.join("\n");
 }
 
 function DaycareOperationsTab() {
@@ -1654,6 +1569,11 @@ function DaycareOperationsTab() {
   const [anchorDate, setAnchorDate] = useState(TODAY);
   const [updatingSessionId, setUpdatingSessionId] = useState<string | null>(null);
   const [cancelSessionId, setCancelSessionId] = useState<string | null>(null);
+  const [hourlyBillingTarget, setHourlyBillingTarget] = useState<{
+    ownerId: string;
+    ownerName: string;
+    sessionDate: string;
+  } | null>(null);
   const queryClient = useQueryClient();
   const cancelCheckIn = useCancelDaycareCheckIn();
 
@@ -1671,7 +1591,7 @@ function DaycareOperationsTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daycare_sessions")
-        .select("id, session_date, checked_in, checked_in_at, checked_out_at, notes, package_id, pickup_used, dropoff_used, pets(name), owners(first_name, last_name)")
+        .select("id, owner_id, pet_id, session_date, checked_in, checked_in_at, checked_out_at, notes, package_id, pickup_used, dropoff_used, pets(name), owners(first_name, last_name)")
         .gte("session_date", rangeStart)
         .lte("session_date", rangeEnd)
         .order("session_date", { ascending: true })
@@ -1680,6 +1600,50 @@ function DaycareOperationsTab() {
       return data ?? [];
     },
   });
+
+  const sessionIds = useMemo(() => sessions.map((s) => s.id), [sessions]);
+  const { data: invoiceIdByServiceId = new Map<string, string>() } =
+    useDaycareSessionInvoiceMap(sessionIds);
+
+  const hourlyBillingSessions = useMemo((): HourlyBillingSession[] => {
+    if (!hourlyBillingTarget) return [];
+    return sessions
+      .filter((session) => {
+        if (session.owner_id !== hourlyBillingTarget.ownerId) return false;
+        if (session.session_date !== hourlyBillingTarget.sessionDate) return false;
+        return isDaycareHourlyPending(
+          {
+            sessionId: session.id,
+            notes: session.notes,
+            packageId: session.package_id,
+            checkedIn: Boolean(session.checked_in),
+          },
+          invoiceIdByServiceId,
+        );
+      })
+      .map((session) => ({
+        id: session.id,
+        petId: session.pet_id,
+        petName: session.pets?.name ?? "Pet",
+        notes: session.notes,
+      }));
+  }, [hourlyBillingTarget, sessions, invoiceIdByServiceId]);
+
+  const pendingHourlyCount = useMemo(
+    () =>
+      sessions.filter((session) =>
+        isDaycareHourlyPending(
+          {
+            sessionId: session.id,
+            notes: session.notes,
+            packageId: session.package_id,
+            checkedIn: Boolean(session.checked_in),
+          },
+          invoiceIdByServiceId,
+        ),
+      ).length,
+    [sessions, invoiceIdByServiceId],
+  );
 
   const totalDogs = sessions.length;
   const collectedDogs = sessions.filter((s) => Boolean(s.checked_out_at)).length;
@@ -1750,6 +1714,11 @@ function DaycareOperationsTab() {
             <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
               Remaining: {remainingDogs}
             </Badge>
+            {pendingHourlyCount > 0 && (
+              <Badge variant="outline" className="bg-orange-50 text-orange-800 border-orange-200">
+                Pending hourly billing: {pendingHourlyCount}
+              </Badge>
+            )}
           </div>
           {isLoading ? (
             <div className="space-y-2">
@@ -1762,11 +1731,37 @@ function DaycareOperationsTab() {
               {sessions.map((s) => {
                 const owner = ownerDisplayName(s.owners?.first_name, s.owners?.last_name);
                 const collection = parseCollectionStatus(s.notes, s.checked_out_at);
+                const billingPath = parseDaycareBillingPath(s.notes, s.package_id);
+                const invoiceId = resolveDaycareSessionInvoiceId(
+                  s.id,
+                  s.notes,
+                  invoiceIdByServiceId,
+                );
+                const hourlyPending = isDaycareHourlyPending(
+                  {
+                    sessionId: s.id,
+                    notes: s.notes,
+                    packageId: s.package_id,
+                    checkedIn: Boolean(s.checked_in),
+                  },
+                  invoiceIdByServiceId,
+                );
+                const invoiceMissing = isSingleDayInvoiceMissing(
+                  {
+                    sessionId: s.id,
+                    notes: s.notes,
+                    packageId: s.package_id,
+                    checkedIn: Boolean(s.checked_in),
+                  },
+                  invoiceIdByServiceId,
+                );
                 const tags = buildDaycareTags({
                   sessionDate: s.session_date,
                   todayDate: TODAY,
                   checkedIn: Boolean(s.checked_in),
                   packageId: s.package_id,
+                  billingPath,
+                  hasInvoice: Boolean(invoiceId),
                 });
                 return (
                   <div key={s.id} className="rounded-md border px-3 py-2 text-sm flex items-start justify-between gap-3">
@@ -1782,6 +1777,11 @@ function DaycareOperationsTab() {
                             {tag.label}
                           </Badge>
                         ))}
+                        {invoiceMissing && (
+                          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                            Invoice missing
+                          </Badge>
+                        )}
                         {s.pickup_used && <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200">Pickup</Badge>}
                         {s.dropoff_used && <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200">Drop-off</Badge>}
                         {collection.status === "not_collected" ? (
@@ -1822,6 +1822,30 @@ function DaycareOperationsTab() {
                           <SelectItem value="pet_taxi">Collected by pet taxi</SelectItem>
                         </SelectContent>
                       </Select>
+                      {invoiceId && (
+                        <DaycareSessionInvoiceLink
+                          invoiceId={invoiceId}
+                          testId={`daycare-view-invoice-${s.id}`}
+                        />
+                      )}
+                      {hourlyPending && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="w-full h-8 text-xs"
+                          data-testid={`daycare-complete-hourly-${s.id}`}
+                          onClick={() =>
+                            setHourlyBillingTarget({
+                              ownerId: s.owner_id,
+                              ownerName: owner,
+                              sessionDate: s.session_date,
+                            })
+                          }
+                        >
+                          Complete hourly billing
+                        </Button>
+                      )}
                       {s.checked_in && (
                         <Button
                           type="button"
@@ -1877,6 +1901,21 @@ function DaycareOperationsTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CompleteHourlyBillingDialog
+        open={Boolean(hourlyBillingTarget) && hourlyBillingSessions.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setHourlyBillingTarget(null);
+        }}
+        ownerId={hourlyBillingTarget?.ownerId ?? ""}
+        ownerName={hourlyBillingTarget?.ownerName ?? ""}
+        sessions={hourlyBillingSessions}
+        onSuccess={() => {
+          setHourlyBillingTarget(null);
+          queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
+          queryClient.invalidateQueries({ queryKey: ["invoices"] });
+        }}
+      />
     </div>
   );
 }

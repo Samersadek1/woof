@@ -222,6 +222,30 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   return inv.id;
 }
 
+/** Deletes an unpaid service invoice and its line items (rollback when session metadata update fails). */
+export async function removeUnpaidServiceInvoice(invoiceId: string): Promise<void> {
+  const { data: inv, error: fetchErr } = await supabase
+    .from("invoices")
+    .select("id, amount_paid, status")
+    .eq("id", invoiceId)
+    .single();
+  if (fetchErr) throw fetchErr;
+  if (!inv) return;
+  if (Number(inv.amount_paid ?? 0) > 0) {
+    throw new Error("Invoice already has payments and cannot be rolled back automatically.");
+  }
+  if (inv.status === "voided") return;
+
+  const { error: lineErr } = await supabase
+    .from("invoice_line_items")
+    .delete()
+    .eq("invoice_id", invoiceId);
+  if (lineErr) throw lineErr;
+
+  const { error: invErr } = await supabase.from("invoices").delete().eq("id", invoiceId);
+  if (invErr) throw invErr;
+}
+
 // ── Boarding-specific invoice helper ─────────────────────────────────────────
 
 interface AutoInvoiceParams {

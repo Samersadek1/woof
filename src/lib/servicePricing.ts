@@ -8,6 +8,30 @@ export function buildPriceMap(rows: { key: string; amount_aed: number }[]): Pric
   return new Map(rows.map((r) => [r.key, r.amount_aed]));
 }
 
+/** Round billable hours to the nearest 30 minutes (0.5 hr). */
+export function roundHoursToNearestHalfHour(hours: number): number {
+  if (!Number.isFinite(hours) || hours <= 0) return 0;
+  return Math.round(hours * 2) / 2;
+}
+
+/** Per-dog hourly subtotal using rounded billable hours (nearest 30 minutes). */
+export function daycareHourlyPetSubtotal(
+  hours: number,
+  prices: PriceByKey,
+): { roundedHours: number; unitRate: number; total: number; pricingKey: string } {
+  const roundedHours = roundHoursToNearestHalfHour(hours);
+  if (roundedHours <= 0) {
+    return { roundedHours: 0, unitRate: 0, total: 0, pricingKey: DAYCARE_HOURLY_UNIT_KEY };
+  }
+  const unitRate = amountFor(prices, DAYCARE_HOURLY_UNIT_KEY);
+  return {
+    roundedHours,
+    unitRate,
+    total: unitRate * roundedHours,
+    pricingKey: DAYCARE_HOURLY_UNIT_KEY,
+  };
+}
+
 /** Keys used by the Live Rate Card (matches `pricing.key`). */
 export const DAYCARE_HOURLY_PRICING_KEYS = [
   "daycare_hourly_single_day",

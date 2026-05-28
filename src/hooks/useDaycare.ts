@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
+import { composeNotesWithBillingPath, isDaycareHourlyPending, type DaycareBillingPath } from "@/lib/daycareSessionMeta";
 import { ownerMemberTierFromFlags, type OwnerMemberTier } from "@/lib/memberTier";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
@@ -257,6 +258,10 @@ export type AddDaycareDayPayload = AttendancePayload & {
   pet_id:       string;
   owner_id:     string;
   package_id?:  string | null;
+  /** When package_id is null, persisted in session notes as BILLING_PATH metadata. */
+  billing_path?: DaycareBillingPath | null;
+  /** Client-selected check-in timestamp; defaults to now when omitted. */
+  checked_in_at?: string | null;
   /**
    * When set with package_id, consumes this many package units after the session is
    * created (planner "Add Day"). Rolls back the session if consumption fails.
@@ -285,6 +290,8 @@ export function useAddDaycareDay() {
       logged_by,
       dog_size,
       credit_units,
+      billing_path,
+      checked_in_at,
     }: AddDaycareDayPayload) => {
       // Prevent duplicate same-day check-ins for the same pet.
       const { data: existing, error: existingErr } = await supabase
@@ -299,14 +306,20 @@ export function useAddDaycareDay() {
         throw new Error("Pet is already checked in for this date");
       }
 
+      const baseNotes = appendDogSizeToNotes(remark ?? null, dog_size);
+      const notes =
+        !package_id && billing_path
+          ? composeNotesWithBillingPath(baseNotes, billing_path)
+          : baseNotes;
+
       const insert = {
         session_date,
         pet_id,
         owner_id,
         package_id: package_id ?? null,
         checked_in: true,
-        checked_in_at: new Date().toISOString(),
-        notes: appendDogSizeToNotes(remark ?? null, dog_size),
+        checked_in_at: checked_in_at ?? new Date().toISOString(),
+        notes,
         pickup_used: pickup_used ?? false,
         dropoff_used: dropoff_used ?? false,
         logged_by: logged_by ?? null,
@@ -685,6 +698,105 @@ export function useCancelDaycareCheckIn() {
       queryClient.invalidateQueries({ queryKey: ["daycare_sessions"] });
       queryClient.invalidateQueries({ queryKey: ["service_credits"] });
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
+    },
+  });
+}
+
+export type PendingHourlyDaycareSession = {
+  id: string;
+  session_date: string;
+  pet_name: string;
+};
+
+/** Checked-in hourly daycare sessions for an owner that still need an invoice. */
+export function usePendingHourlyDaycareForOwner(ownerId: string) {
+  return useQuery({
+    queryKey: ["daycare_sessions", "pending_hourly", ownerId],
+    enabled: !!ownerId,
+    queryFn: async (): Promise<PendingHourlyDaycareSession[]> => {
+      const { data, error } = await supabase
+        .from("daycare_sessions")
+        .select("id, session_date, notes, package_id, checked_in, pets(name)")
+        .eq("owner_id", ownerId)
+        .eq("checked_in", true)
+        .order("session_date", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+
+      const sessions = data ?? [];
+      const sessionIds = sessions.map((s) => s.id);
+      const invoiceIdByServiceId = new Map<string, string>();
+      if (sessionIds.length > 0) {
+        const { data: invoices, error: invErr } = await supabase
+          .from("invoices")
+          .select("id, service_id")
+          .in("service_id", sessionIds)
+          .neq("status", "voided");
+        if (invErr) throw invErr;
+        for (const inv of invoices ?? []) {
+          if (inv.service_id) invoiceIdByServiceId.set(inv.service_id, inv.id);
+        }
+      }
+
+      return sessions
+        .filter((session) =>
+          isDaycareHourlyPending(
+            {
+              sessionId: session.id,
+              notes: session.notes,
+              packageId: session.package_id,
+              checkedIn: Boolean(session.checked_in),
+            },
+            invoiceIdByServiceId,
+          ),
+        )
+        .map((session) => ({
+          id: session.id,
+          session_date: session.session_date,
+          pet_name: (session as { pets: { name: string } | null }).pets?.name ?? "Pet",
+        }));
+    },
+  });
+}
+
+export type LinkedDaycareSessionForInvoice = {
+  id: string;
+  session_date: string;
+  pet_name: string;
+};
+
+/** Daycare sessions linked to an invoice (primary service_id or hourly family marker in notes). */
+export function useLinkedDaycareSessionsForInvoice(
+  invoiceId: string | undefined,
+  primarySessionId: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: ["daycare_sessions", "linked_invoice", invoiceId, primarySessionId],
+    enabled: !!invoiceId,
+    queryFn: async (): Promise<LinkedDaycareSessionForInvoice[]> => {
+      const marker = `HOURLY_INVOICED:${invoiceId}`;
+      const filters: string[] = [`notes.ilike.%${marker}%`];
+      if (primarySessionId) filters.push(`id.eq.${primarySessionId}`);
+
+      const { data, error } = await supabase
+        .from("daycare_sessions")
+        .select("id, session_date, pets(name)")
+        .or(filters.join(","))
+        .order("session_date", { ascending: true });
+      if (error) throw error;
+
+      const seen = new Set<string>();
+      const rows: LinkedDaycareSessionForInvoice[] = [];
+      for (const row of data ?? []) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        rows.push({
+          id: row.id,
+          session_date: row.session_date,
+          pet_name: (row as { pets: { name: string } | null }).pets?.name ?? "Pet",
+        });
+      }
+      return rows;
     },
   });
 }

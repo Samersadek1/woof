@@ -84,6 +84,8 @@ export function buildDaycareTags(input: {
   todayDate: string;
   checkedIn: boolean;
   packageId: string | null;
+  billingPath?: "single" | "hourly" | "package";
+  hasInvoice?: boolean;
 }): OperationTag[] {
   const tags: OperationTag[] = [];
 
@@ -100,11 +102,17 @@ export function buildDaycareTags(input: {
     tags.push({ key: "past_session", label: "Past session", tone: "muted" });
   }
 
-  tags.push(
-    input.packageId
-      ? { key: "package", label: "Package", tone: "default" }
-      : { key: "single_day", label: "Single day", tone: "warning" },
-  );
+  if (input.billingPath === "hourly") {
+    if (input.hasInvoice) {
+      tags.push({ key: "hourly_invoiced", label: "Hourly · Invoiced", tone: "success" });
+    } else {
+      tags.push({ key: "hourly", label: "Hourly · Pending invoice", tone: "warning" });
+    }
+  } else if (input.packageId || input.billingPath === "package") {
+    tags.push({ key: "package", label: "Package", tone: "default" });
+  } else {
+    tags.push({ key: "single_day", label: "Single day", tone: "warning" });
+  }
 
   return tags;
 }

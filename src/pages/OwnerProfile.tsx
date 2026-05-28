@@ -36,6 +36,7 @@ import {
 import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
+import { usePendingHourlyDaycareForOwner } from "@/hooks/useDaycare";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -276,6 +277,8 @@ function makePetForm(ownerId: string): PetInsert {
 function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const navigate = useNavigate();
   const statement = useOwnerStatement(ownerId);
+  const { data: pendingHourly = [], isLoading: pendingHourlyLoading } =
+    usePendingHourlyDaycareForOwner(ownerId);
   const { data: invoices = [], isLoading: invoicesLoading, refetch: refetchInvoices } =
     useInvoicesForOwner(ownerId);
   const { adjustments, isLoading: adjLoading } = useBillingAdjustments(ownerId);
@@ -408,6 +411,36 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {!pendingHourlyLoading && pendingHourly.length > 0 && (
+        <Card className="mb-4 border-orange-200 bg-orange-50/40">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-orange-900">Pending hourly daycare billing</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  These check-ins are on hourly billing and still need an invoice.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-orange-300"
+                onClick={() => navigate("/daycare?tab=operations")}
+              >
+                Open Daycare Operations
+              </Button>
+            </div>
+            <ul className="text-sm space-y-1">
+              {pendingHourly.map((session) => (
+                <li key={session.id}>
+                  {session.pet_name} — {format(parseISO(session.session_date), "d MMM yyyy")}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       )}
 
       {/* Recent invoices */}
