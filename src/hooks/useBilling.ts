@@ -120,9 +120,14 @@ export interface StatementRow {
   service_type: string | null;
   status: string;
   total_aed: number;
+  amount_paid?: number;
   created_at: string;
   due_date: string | null;
   days_overdue: number;
+}
+
+function statementBalanceDue(row: StatementRow): number {
+  return Math.max(0, row.total_aed - (row.amount_paid ?? 0));
 }
 
 export interface BillingAdjustment {
@@ -1076,6 +1081,15 @@ export function useOwnerStatement(ownerId: string) {
     queryKey: billingKeys.statement(ownerId),
     enabled: !!ownerId,
     queryFn: async () => {
+      const { data: paidRows, error: paidErr } = await supabase
+        .from("invoices")
+        .select("id, amount_paid")
+        .eq("owner_id", ownerId);
+      if (paidErr) throw paidErr;
+      const paidById = new Map(
+        (paidRows ?? []).map((r) => [r.id, Number(r.amount_paid ?? 0)]),
+      );
+
       const { data, error } = await supabase.rpc("get_statement_of_account", {
         p_owner_id: ownerId,
       });
@@ -1083,7 +1097,7 @@ export function useOwnerStatement(ownerId: string) {
       if (error) {
         const { data: rows, error: qErr } = await supabase
           .from("invoices")
-          .select("id, invoice_number, status, total, total_aed, vat_aed, created_at, due_date, booking_id")
+          .select("id, invoice_number, status, total, total_aed, vat_aed, amount_paid, created_at, due_date, booking_id")
           .eq("owner_id", ownerId)
           .order("created_at", { ascending: false });
         if (qErr) throw qErr;
@@ -1097,12 +1111,16 @@ export function useOwnerStatement(ownerId: string) {
             total_aed: r.total_aed,
             vat_aed: r.vat_aed,
           }).grandTotal,
+          amount_paid: Number(r.amount_paid ?? 0),
           created_at: r.created_at,
           due_date: r.due_date,
           days_overdue: 0,
         })) as StatementRow[];
       }
-      return (data ?? []) as StatementRow[];
+      return ((data ?? []) as StatementRow[]).map((r) => ({
+        ...r,
+        amount_paid: paidById.get(r.invoice_id) ?? 0,
+      }));
     },
   });
 
@@ -1126,7 +1144,7 @@ export function useOwnerStatement(ownerId: string) {
   const UNPAID: string[] = ["draft", "finalised", "issued", "outstanding", "overdue", "partially_paid"];
   const totalOutstanding = invoices
     .filter((i) => UNPAID.includes(i.status))
-    .reduce((sum, i) => sum + i.total_aed, 0);
+    .reduce((sum, i) => sum + statementBalanceDue(i), 0);
 
   const netPosition = walletBalance - totalOutstanding;
 
