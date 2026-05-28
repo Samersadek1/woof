@@ -218,12 +218,11 @@ BEGIN
     RAISE EXCEPTION 'revoke_daycare_package_credit requires authenticated user';
   END IF;
 
-  SELECT sc.*, pg.invoice_id AS pg_invoice_id
+  SELECT *
   INTO v_credit
-  FROM service_credits sc
-  LEFT JOIN purchase_groups pg ON pg.id = sc.purchase_group_id
-  WHERE sc.id = p_credit_id
-  FOR UPDATE OF sc;
+  FROM service_credits
+  WHERE id = p_credit_id
+  FOR UPDATE;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Package credit % not found', p_credit_id;
@@ -256,7 +255,12 @@ BEGIN
   SET status = 'revoked'
   WHERE id = p_credit_id;
 
-  v_invoice_id := v_credit.pg_invoice_id;
+  v_invoice_id := NULL;
+  IF v_credit.purchase_group_id IS NOT NULL THEN
+    SELECT pg.invoice_id INTO v_invoice_id
+    FROM purchase_groups pg
+    WHERE pg.id = v_credit.purchase_group_id;
+  END IF;
 
   IF v_invoice_id IS NOT NULL AND v_credit.purchase_group_id IS NOT NULL THEN
     SELECT count(*) INTO v_active_sibling_count
