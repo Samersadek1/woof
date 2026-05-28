@@ -1,5 +1,5 @@
 import { format, parseISO } from "date-fns";
-import { CalendarDays, ExternalLink } from "lucide-react";
+import { AlertTriangle, CalendarDays, ExternalLink } from "lucide-react";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { serviceGrantLabel } from "@/lib/packageCatalog";
 import { useSessionsByPackage, type PackageWithDetails } from "@/hooks/useDaycare";
@@ -36,10 +36,14 @@ export function PackageUsageDialog({
   onOpenInPlanner,
 }: PackageUsageDialogProps) {
   const creditId = open && pkg ? pkg.id : "";
-  const { data: sessions, isLoading, isError, error } = useSessionsByPackage(creditId);
+  const { data: sessions, isLoading, isError, error } = useSessionsByPackage(
+    creditId,
+    pkg?.pet_id,
+  );
 
   const remaining = pkg ? pkg.total_days - pkg.days_used : 0;
   const sessionCount = sessions?.length ?? 0;
+  const balanceMismatch = pkg ? pkg.days_used !== sessionCount : false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -64,14 +68,18 @@ export function PackageUsageDialog({
 
             <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
               <div>
-                <p className="text-xs text-muted-foreground">Days used</p>
+                <p className="text-xs text-muted-foreground">Package balance (units)</p>
                 <p className="font-semibold tabular-nums">
                   {pkg.days_used}
                   <span className="font-normal text-muted-foreground"> / {pkg.total_days}</span>
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Remaining</p>
+                <p className="text-xs text-muted-foreground">Check-ins linked</p>
+                <p className="font-semibold tabular-nums">{sessionCount}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-xs text-muted-foreground">Days left on package</p>
                 <p className="font-semibold tabular-nums">{remaining}</p>
               </div>
               {pkg.expiry_date ? (
@@ -82,12 +90,24 @@ export function PackageUsageDialog({
               ) : null}
             </div>
 
+            {balanceMismatch ? (
+              <div
+                className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                data-testid="daycare-package-balance-mismatch"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>
+                  Package balance shows <strong>{pkg.days_used}</strong> used, but{" "}
+                  <strong>{sessionCount}</strong> check-in
+                  {sessionCount === 1 ? "" : "s"} are linked. Planner and this list use check-ins;
+                  the card fraction uses the package balance.
+                </p>
+              </div>
+            ) : null}
+
             <div className="space-y-2">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Days used in
-                {!isLoading && sessionCount > 0 ? (
-                  <span className="normal-case font-normal"> ({sessionCount})</span>
-                ) : null}
               </p>
 
               {isLoading ? (

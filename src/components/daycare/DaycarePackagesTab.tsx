@@ -157,7 +157,9 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
               {pkg.days_used}
               <span className="text-base font-normal text-muted-foreground">/{pkg.total_days}</span>
             </p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">{remaining} remaining</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              {remaining} left · {pkg.days_used} used
+            </p>
           </div>
         </div>
         <div className="h-2 w-full rounded-full bg-muted overflow-hidden">

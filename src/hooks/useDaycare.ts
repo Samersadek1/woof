@@ -454,19 +454,80 @@ export type SessionRow = DaycareSession & {
   logged_by:    string | null;
 };
 
-export function useSessionsByPackage(packageId: string) {
+function trackerIdFromInvoiceNotes(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  const match = notes.match(/tracker=([^ |]+)/);
+  return match?.[1] ?? null;
+}
+
+/** Sessions linked to a package credit, plus same-tracker rows for the pet (legacy orphans). */
+export function useSessionsByPackage(packageId: string, petId?: string) {
   return useQuery({
-    queryKey: ["daycare_sessions", "package", packageId] as const,
-    enabled:  !!packageId,
-    queryFn:  async () => {
-      const { data, error } = await supabase
+    queryKey: ["daycare_sessions", "package", packageId, petId ?? ""] as const,
+    enabled: !!packageId,
+    queryFn: async () => {
+      const { data: byPackage, error: packageErr } = await supabase
         .from("daycare_sessions")
         .select("*")
         .eq("package_id", packageId)
         .order("session_date", { ascending: true });
 
-      if (error) throw error;
-      return data as unknown as SessionRow[];
+      if (packageErr) throw packageErr;
+
+      const merged = new Map<string, SessionRow>();
+      for (const row of byPackage ?? []) {
+        merged.set(row.id, row as unknown as SessionRow);
+      }
+
+      if (!petId) {
+        return Array.from(merged.values());
+      }
+
+      const { data: creditRow, error: creditErr } = await supabase
+        .from("service_credits")
+        .select("purchase_group_id")
+        .eq("id", packageId)
+        .maybeSingle();
+
+      if (creditErr) throw creditErr;
+      if (!creditRow?.purchase_group_id) {
+        return Array.from(merged.values());
+      }
+
+      const { data: pgRow, error: pgErr } = await supabase
+        .from("purchase_groups")
+        .select("invoices(notes)")
+        .eq("id", creditRow.purchase_group_id)
+        .maybeSingle();
+
+      if (pgErr) throw pgErr;
+
+      const invoiceNotes = (
+        pgRow as { invoices?: { notes?: string | null } | null } | null
+      )?.invoices?.notes;
+      const trackerId = trackerIdFromInvoiceNotes(invoiceNotes);
+
+      if (trackerId) {
+        const { data: byTracker, error: trackerErr } = await supabase
+          .from("daycare_sessions")
+          .select("*")
+          .eq("pet_id", petId)
+          .like("notes", `%tracker=${trackerId}%`)
+          .order("session_date", { ascending: true });
+
+        if (trackerErr) throw trackerErr;
+
+        for (const row of byTracker ?? []) {
+          const session = row as unknown as SessionRow;
+          if (session.package_id !== packageId) {
+            merged.set(session.id, session);
+          }
+        }
+      }
+
+      return Array.from(merged.values()).sort((a, b) =>
+        a.session_date.localeCompare(b.session_date),
+      );
     },
   });
 }

@@ -661,10 +661,13 @@ function PlannerTab() {
 
   const { data: pets } = usePets(ownerId ?? "");
   const { data: packages } = useDaycarePackages(ownerId ?? "");
+  const selectedPkg = packages?.find((p) => p.id === packageId) ?? null;
   const addDay = useAddDaycareDay();
   const consumeCredit = useConsumeServiceCredit();
-  const { data: sessions, isLoading: sessionsLoading } =
-    useSessionsByPackage(packageId ?? "");
+  const { data: sessions, isLoading: sessionsLoading } = useSessionsByPackage(
+    packageId ?? "",
+    selectedPkg?.pet_id,
+  );
   const { data: pricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
     queryKey: ["pricing", "daycare_checkin"],
     queryFn: async () => {
@@ -692,7 +695,6 @@ function PlannerTab() {
     },
   });
 
-  const selectedPkg = packages?.find((p) => p.id === packageId) ?? null;
   const selectedPet = pets?.find((p) => p.id === selectedPkg?.pet_id) ?? null;
 
   const pickupsUsed = sessions?.filter((s) => s.pickup_used).length ?? 0;
