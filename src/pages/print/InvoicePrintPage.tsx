@@ -23,12 +23,18 @@ type InvoiceRow = {
   payment_method: string | null;
   notes: string | null;
   owner_id: string;
+  booking_id: string | null;
   owners: {
     first_name: string;
     last_name: string | null;
     phone: string | null;
     address: string | null;
     email: string | null;
+  } | null;
+  bookings: {
+    booking_ref: string | null;
+    check_in_date: string;
+    check_out_date: string;
   } | null;
   line_items: Array<{
     id: string;
@@ -38,6 +44,13 @@ type InvoiceRow = {
     total_price: number;
     sort_order: number | null;
   }>;
+};
+
+type AdjustmentRow = {
+  id: string;
+  adjustment_type: string;
+  reason: string | null;
+  adjusted_amount: number | null;
 };
 
 type PaymentHistoryRow = {
@@ -56,8 +69,9 @@ async function fetchInvoicePrintable(invoiceId: string) {
     .select(
       `
       id, invoice_number, status, issue_date, due_date, subtotal_aed, subtotal,
-      discount_aed, discount_amount, total_aed, total, vat_aed, amount_paid, payment_method, notes, owner_id,
+      discount_aed, discount_amount, total_aed, total, vat_aed, amount_paid, payment_method, notes, owner_id, booking_id,
       owners(first_name, last_name, phone, address, email),
+      bookings(booking_ref, check_in_date, check_out_date),
       line_items:invoice_line_items(id, description, quantity, unit_price, total_price, sort_order)
     `,
     )
@@ -67,15 +81,28 @@ async function fetchInvoicePrintable(invoiceId: string) {
   if (error) throw error;
   const invoice = data as InvoiceRow;
 
-  const { data: payments, error: paymentError } = await supabase
-    .from("wallet_transactions")
-    .select("id, created_at, transaction_type, payment_method, performed_by, notes, amount")
-    .eq("invoice_id", invoiceId)
-    .in("transaction_type", ["cash_payment", "card_payment", "deduction"])
-    .order("created_at", { ascending: true });
+  const [{ data: payments, error: paymentError }, { data: adjustments, error: adjustmentError }] =
+    await Promise.all([
+      supabase
+        .from("wallet_transactions")
+        .select("id, created_at, transaction_type, payment_method, performed_by, notes, amount")
+        .eq("invoice_id", invoiceId)
+        .in("transaction_type", ["cash_payment", "card_payment", "deduction"])
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("billing_adjustments")
+        .select("id, adjustment_type, reason, adjusted_amount")
+        .eq("invoice_id", invoiceId)
+        .order("created_at", { ascending: true }),
+    ]);
 
   if (paymentError) throw paymentError;
-  return { invoice, payments: (payments ?? []) as PaymentHistoryRow[] };
+  if (adjustmentError) throw adjustmentError;
+  return {
+    invoice,
+    payments: (payments ?? []) as PaymentHistoryRow[],
+    adjustments: (adjustments ?? []) as AdjustmentRow[],
+  };
 }
 
 function watermark(status: string): { text: string; className: string } | null {
@@ -94,6 +121,7 @@ export default function InvoicePrintPage() {
 
   const invoice = data?.invoice;
   const payments = data?.payments ?? [];
+  const adjustments = data?.adjustments ?? [];
 
   const subtotal = invoice ? invoice.subtotal_aed ?? invoice.subtotal : 0;
   const discount = invoice ? invoice.discount_aed ?? invoice.discount_amount ?? 0 : 0;
@@ -155,6 +183,19 @@ export default function InvoicePrintPage() {
             <p>{invoice.owners?.address ?? "Address not provided"}</p>
           </section>
 
+          {invoice.bookings ? (
+            <section className="relative z-[1] mb-4 border border-black p-2 print-sans text-[11px]">
+              <p className="print-label mb-1 font-semibold uppercase">Stay</p>
+              {invoice.bookings.booking_ref ? (
+                <p>Booking: {invoice.bookings.booking_ref}</p>
+              ) : null}
+              <p>
+                {format(parseISO(invoice.bookings.check_in_date), "d MMM yyyy")} →{" "}
+                {format(parseISO(invoice.bookings.check_out_date), "d MMM yyyy")}
+              </p>
+            </section>
+          ) : null}
+
           <section className="relative z-[1] mb-4">
             <table className="w-full border-collapse border border-black">
               <thead className="print-sans text-[11px]">
@@ -187,6 +228,34 @@ export default function InvoicePrintPage() {
               </tbody>
             </table>
           </section>
+
+          {adjustments.length > 0 ? (
+            <section className="relative z-[1] mb-4">
+              <p className="print-label mb-1 text-[11px] font-semibold uppercase">Adjustments</p>
+              <table className="w-full border-collapse border border-black print-sans text-[11px]">
+                <thead>
+                  <tr>
+                    <th className="border border-black px-2 py-1 text-left">Type</th>
+                    <th className="border border-black px-2 py-1 text-left">Reason</th>
+                    <th className="border border-black px-2 py-1 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adjustments.map((adjustment) => (
+                    <tr key={adjustment.id}>
+                      <td className="border border-black px-2 py-1 capitalize">
+                        {adjustment.adjustment_type.replace(/_/g, " ")}
+                      </td>
+                      <td className="border border-black px-2 py-1">{adjustment.reason ?? "—"}</td>
+                      <td className="border border-black px-2 py-1 text-right">
+                        AED {Math.abs(adjustment.adjusted_amount ?? 0).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
 
           <section className="relative z-[1] mb-4 flex justify-end">
             <div className="w-[220px] space-y-1 print-sans text-xs">

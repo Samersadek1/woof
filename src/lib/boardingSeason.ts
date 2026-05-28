@@ -26,3 +26,58 @@ export function boardingStaySeasonSummary(
   if (offPeakNights > 0) return "Off-peak";
   return "—";
 }
+
+export type BoardingNightSeasonInput = {
+  date: string;
+  season: BoardingRateSeason;
+};
+
+export type BoardingContiguousSeasonRun = {
+  season: BoardingRateSeason;
+  startDate: string;
+  endDate: string;
+  nights: BoardingNightSeasonInput[];
+};
+
+/** Split ordered nights into contiguous calendar runs of the same season. */
+export function groupBoardingNightsByContiguousSeason(
+  nights: BoardingNightSeasonInput[],
+): BoardingContiguousSeasonRun[] {
+  if (nights.length === 0) return [];
+
+  const runs: BoardingContiguousSeasonRun[] = [];
+  for (const night of nights) {
+    const last = runs[runs.length - 1];
+    const isContiguous =
+      last &&
+      last.season === night.season &&
+      differenceInCalendarDays(parseISO(night.date), parseISO(last.endDate)) === 1;
+
+    if (isContiguous) {
+      last.endDate = night.date;
+      last.nights.push(night);
+    } else {
+      runs.push({
+        season: night.season,
+        startDate: night.date,
+        endDate: night.date,
+        nights: [night],
+      });
+    }
+  }
+  return runs;
+}
+
+/** Human-readable billed date or range, e.g. "4 Dec 2025" or "1 Dec – 3 Dec 2025". */
+export function formatBoardingDateRange(startDate: string, endDate: string): string {
+  const start = parseISO(startDate);
+  const end = parseISO(endDate);
+  if (startDate === endDate) {
+    return format(start, "d MMM yyyy");
+  }
+  const sameYear = format(start, "yyyy") === format(end, "yyyy");
+  if (sameYear) {
+    return `${format(start, "d MMM")} – ${format(end, "d MMM yyyy")}`;
+  }
+  return `${format(start, "d MMM yyyy")} – ${format(end, "d MMM yyyy")}`;
+}

@@ -9,6 +9,9 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{ts,tsx}", "tests/**/*.test.ts"],
     projects: [
       {
+        resolve: {
+          alias: { "@": path.resolve(__dirname, "./src") },
+        },
         test: {
           name: "unit",
           globals: true,
