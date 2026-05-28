@@ -12,6 +12,7 @@ const PAYMENT_TRANSACTION_TYPES = new Set([
   "card_payment",
   "cash_payment",
   "bank_transfer_payment",
+  "payment_link_payment",
 ]);
 
 export type RevertInvoicePaymentResult = {
@@ -31,7 +32,7 @@ export function canRevertInvoicePayment(
   payments: Array<{ created_at: string; transaction_type?: string }>,
   now: Date = new Date(),
 ): boolean {
-  if (invoice.status !== "paid") return false;
+  if (invoice.status !== "paid" && invoice.status !== "partially_paid") return false;
 
   const paymentRows = payments.filter(
     (p) => !p.transaction_type || PAYMENT_TRANSACTION_TYPES.has(p.transaction_type),

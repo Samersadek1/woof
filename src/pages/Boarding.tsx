@@ -19,7 +19,9 @@ import {
   useCreateBooking,
   useUpdateBooking,
   useUndoCheckOut,
+  useUndoCheckIn,
   isAssessmentRequiredError,
+  BOOKING_DETAIL_SELECT,
 } from "@/hooks/useBookings";
 import type {
   BookingWithDetails,
@@ -37,6 +39,7 @@ import { BackfillBoardingInvoicesButton } from "@/components/boarding/BackfillBo
 import { RepriceBoardingInvoicesButton } from "@/components/boarding/RepriceBoardingInvoicesButton";
 import { BoardingBookingInvoiceLink } from "@/components/boarding/BoardingBookingInvoiceLink";
 import { BoardingBookingSearch } from "@/components/boarding/BoardingBookingSearch";
+import { CancelBookingDialog } from "@/components/boarding/CancelBookingDialog";
 import { BoardingOwnerSearchField } from "@/components/boarding/BoardingOwnerSearchField";
 import { boardingBookingMatchesSearch } from "@/lib/boardingBookingSearch";
 import type { BoardingBookingSearchHit } from "@/hooks/useBookings";
@@ -944,6 +947,21 @@ const BLANK_FORM: NewBookingForm = {
   dog_size: null,
 };
 
+const BOARDING_DRAFT_KEY = "boarding-new-booking-draft";
+
+function loadBoardingDraft(): NewBookingForm | null {
+  try {
+    const raw = sessionStorage.getItem(BOARDING_DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as NewBookingForm) : null;
+  } catch {
+    return null;
+  }
+}
+
+function boardingDraftIsDirty(form: NewBookingForm): boolean {
+  return Boolean(form.owner_id || form.pet_ids.length || form.check_in_date || form.notes.trim());
+}
+
 export type DogBoardingCalendarProps = {
   windowStart: Date;
   onWindowStartChange: React.Dispatch<React.SetStateAction<Date>>;
@@ -1041,11 +1059,14 @@ function BoardingBookingDetailSheets({
   const queryClient = useQueryClient();
   const updateBooking = useUpdateBooking();
   const undoCheckOut = useUndoCheckOut();
+  const undoCheckIn = useUndoCheckIn();
   const { data: rooms = [] } = useRooms();
   const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
   const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
   const [belongingsReadOnly, setBelongingsReadOnly] = useState(false);
   const [changeRoomOpen, setChangeRoomOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [undoCheckInOpen, setUndoCheckInOpen] = useState(false);
 
   const bookingId = booking?.id;
   const { data: assignmentRows = [] } = useBookingRoomAssignmentsForBookings(
@@ -1311,6 +1332,15 @@ function BoardingBookingDetailSheets({
                         type="button"
                         variant="outline"
                         className="w-full"
+                        data-testid="boarding-undo-check-in-btn"
+                        onClick={() => setUndoCheckInOpen(true)}
+                      >
+                        Undo check-in
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
                         onClick={() => {
                           setBelongingsReadOnly(true);
                           setCheckInSheetOpen(true);
@@ -1339,25 +1369,15 @@ function BoardingBookingDetailSheets({
                     </Button>
                   )}
 
-                  {(booking.status === "confirmed" || booking.status === "enquiry") && (
+                  {(booking.status === "confirmed" ||
+                    booking.status === "enquiry" ||
+                    booking.status === "checked_in") && (
                     <Button
                       variant="outline"
                       className="w-full text-destructive border-destructive/40 hover:bg-destructive/10"
-                      disabled={updateBooking.isPending}
-                      onClick={() =>
-                        updateBooking.mutate(
-                          { id: booking.id, status: "cancelled" },
-                          {
-                            onSuccess: () => {
-                              toast.success("Booking cancelled");
-                              closeDetail();
-                            },
-                            onError: (err) => toast.error(err.message),
-                          },
-                        )
-                      }
+                      data-testid="boarding-cancel-booking-btn"
+                      onClick={() => setCancelOpen(true)}
                     >
-                      {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                       Cancel Booking
                     </Button>
                   )}
@@ -1367,6 +1387,47 @@ function BoardingBookingDetailSheets({
           )}
         </SheetContent>
       </Sheet>
+
+      {booking && (
+        <>
+          <CancelBookingDialog
+            open={cancelOpen}
+            onOpenChange={setCancelOpen}
+            booking={booking}
+            onCancelled={() => onBookingChange(null)}
+          />
+          <Dialog open={undoCheckInOpen} onOpenChange={setUndoCheckInOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Undo check-in?</DialogTitle>
+                <DialogDescription>
+                  Reverts this stay to confirmed. The booking, room assignment, and invoice stay as they are.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setUndoCheckInOpen(false)}>
+                  Keep checked in
+                </Button>
+                <Button
+                  onClick={() =>
+                    undoCheckIn.mutate(booking.id, {
+                      onSuccess: () => {
+                        toast.success("Check-in undone — booking is confirmed again.");
+                        onBookingChange({ ...booking, status: "confirmed", actual_check_in_at: null });
+                        setUndoCheckInOpen(false);
+                      },
+                      onError: (err) => toast.error(err.message),
+                    })
+                  }
+                  disabled={undoCheckIn.isPending}
+                >
+                  {undoCheckIn.isPending ? "Reverting…" : "Undo check-in"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
 
       {booking && (
         <>
@@ -1736,15 +1797,23 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
 
   // open new booking drawer, optionally pre-fill room + date
   const openNewBooking = (roomId?: string, date?: string) => {
+    const draft = !roomId && !date ? loadBoardingDraft() : null;
     setForm({
-      ...BLANK_FORM,
-      room_id: roomId ?? "",
-      check_in_date: date ?? "",
-      check_out_date: date ? toDateStr(addDays(parseISO(date), 1)) : "",
+      ...(draft ?? BLANK_FORM),
+      room_id: roomId ?? draft?.room_id ?? "",
+      check_in_date: date ?? draft?.check_in_date ?? "",
+      check_out_date: date
+        ? toDateStr(addDays(parseISO(date), 1))
+        : draft?.check_out_date ?? "",
     });
     setOwnerSearchResetKey((k) => k + 1);
     setNewBookingOpen(true);
   };
+
+  useEffect(() => {
+    if (!newBookingOpen) return;
+    sessionStorage.setItem(BOARDING_DRAFT_KEY, JSON.stringify(form));
+  }, [newBookingOpen, form]);
 
   // clear pets when owner changes
   useEffect(() => {
@@ -1897,6 +1966,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
           }
         }
         toast.success("Booking created");
+        sessionStorage.removeItem(BOARDING_DRAFT_KEY);
         setNewBookingOpen(false);
         queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
 
@@ -2228,7 +2298,19 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
       {/* ══════════════════════════════════════════
           NEW BOOKING DRAWER
       ══════════════════════════════════════════ */}
-      <Sheet open={newBookingOpen} onOpenChange={setNewBookingOpen}>
+      <Sheet
+        open={newBookingOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setNewBookingOpen(true);
+            return;
+          }
+          if (boardingDraftIsDirty(form) && !window.confirm("Discard in-progress new booking?")) {
+            return;
+          }
+          setNewBookingOpen(false);
+        }}
+      >
         <SheetContent
           className="w-full sm:max-w-lg overflow-y-auto"
           onOpenAutoFocus={(e) => e.preventDefault()}
@@ -3147,22 +3229,21 @@ function BoardingHubPage() {
   };
 
   const handleBookingSearchSelect = async (hit: BoardingBookingSearchHit) => {
-    const { data: invoice } = await supabase
-      .from("invoices")
-      .select("id")
-      .eq("booking_id", hit.id)
-      .neq("status", "voided")
-      .order("created_at", { ascending: false })
-      .limit(1)
+    const { data: booking, error } = await supabase
+      .from("bookings")
+      .select(BOOKING_DETAIL_SELECT)
+      .eq("id", hit.id)
       .maybeSingle();
 
-    if (invoice) {
-      navigate(`/billing/invoices/${invoice.id}`);
-    } else {
-      setBookingSearchFilter(hit.booking_ref ?? hit.id);
-      setWindowStart(startOfWeek(parseISO(hit.check_in_date), { weekStartsOn: 1 }));
-      setViewMode("calendar");
+    if (error || !booking) {
+      toast.error(error?.message ?? "Could not open booking.");
+      return;
     }
+
+    setBookingSearchFilter(hit.booking_ref ?? hit.id);
+    setWindowStart(startOfWeek(parseISO(hit.check_in_date), { weekStartsOn: 1 }));
+    setViewMode("calendar");
+    openBookingDetail(booking as BookingWithDetails, hit.check_in_date);
   };
 
   const { data: facilityRooms = [] } = useRooms();
@@ -3511,6 +3592,50 @@ function BoardingHubPage() {
             onFilterChange={setBookingSearchFilter}
             onSelect={handleBookingSearchSelect}
           />
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="boarding-quick-check-ins-btn"
+            onClick={() => {
+              setViewMode("list");
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set("view", "check-ins");
+                next.set("date", normalizedDate ?? todayStr);
+                return next;
+              });
+            }}
+          >
+            Check-ins
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="boarding-quick-check-outs-btn"
+            onClick={() => {
+              setViewMode("list");
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set("view", "check-outs");
+                next.set("date", normalizedDate ?? todayStr);
+                return next;
+              });
+            }}
+          >
+            Check-outs
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="boarding-quick-sell-package-btn"
+            onClick={() => navigate("/billing")}
+          >
+            Sell package
+          </Button>
 
           <BackfillBoardingInvoicesButton />
           <RepriceBoardingInvoicesButton />

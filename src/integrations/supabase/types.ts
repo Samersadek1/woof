@@ -2711,6 +2711,14 @@ export type Database = {
         Args: { p_as_of: string }
         Returns: Json
       }
+      consolidate_owner_invoices: {
+        Args: {
+          p_invoice_ids: string[]
+          p_owner_id: string
+          p_performed_by: string
+        }
+        Returns: string
+      }
       calculate_cancellation_refund: {
         Args: {
           p_invoice_id: string
@@ -2806,6 +2814,7 @@ export type Database = {
       issue_custom_daycare_package: {
         Args: {
           p_amount_aed?: number
+          p_issue_date?: string
           p_label?: string
           p_owner_id: string
           p_payment_method?: Database["public"]["Enums"]["payment_method"]
@@ -2854,6 +2863,7 @@ export type Database = {
       }
       purchase_package: {
         Args: {
+          p_issue_date?: string
           p_owner_id: string
           p_package_code: string
           p_payment_method?: Database["public"]["Enums"]["payment_method"]
@@ -2964,7 +2974,7 @@ export type Database = {
         | "outstanding"
         | "overdue"
         | "voided"
-      payment_method: "wallet" | "card" | "cash" | "bank_transfer"
+      payment_method: "wallet" | "card" | "cash" | "bank_transfer" | "payment_link"
       pet_gender: "male" | "female"
       pet_size: "small" | "medium" | "large"
       rate_season: "peak" | "off_peak"
@@ -3075,6 +3085,7 @@ export type Database = {
         | "cash_payment"
         | "manual_topup"
         | "bank_transfer_payment"
+        | "payment_link_payment"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -3262,7 +3273,7 @@ export const Constants = {
         "overdue",
         "voided",
       ],
-      payment_method: ["wallet", "card", "cash", "bank_transfer"],
+      payment_method: ["wallet", "card", "cash", "bank_transfer", "payment_link"],
       pet_gender: ["male", "female"],
       pet_size: ["small", "medium", "large"],
       rate_season: ["peak", "off_peak"],
@@ -3378,6 +3389,7 @@ export const Constants = {
         "cash_payment",
         "manual_topup",
         "bank_transfer_payment",
+        "payment_link_payment",
       ],
     },
   },

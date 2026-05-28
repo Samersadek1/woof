@@ -25,6 +25,7 @@ export interface InvoiceSummary {
   service_type: string | null;
   status: InvoiceStatus;
   total_aed: number;
+  amount_paid: number;
   due_date: string | null;
   created_at: string;
   days_overdue: number;
@@ -51,7 +52,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
     queryKey: ["invoices", "list", filters],
     queryFn: async () => {
       const invoiceSelect =
-        "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, due_date, created_at, owners(first_name, last_name, phone)";
+        "id, invoice_number, owner_id, service_type, status, total, total_aed, vat_aed, amount_paid, due_date, created_at, owners(first_name, last_name, phone)";
 
       let q = supabase
         .from("invoices")
@@ -81,6 +82,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         total: number;
         total_aed: number | null;
         vat_aed: number | null;
+        amount_paid: number | null;
         due_date: string | null;
         created_at: string;
         owners: { first_name: string | null; last_name: string | null; phone: string | null } | null;
@@ -111,6 +113,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
           service_type: row.service_type,
           status: row.status,
           total_aed: grand,
+          amount_paid: Math.max(0, row.amount_paid ?? 0),
           due_date: row.due_date,
           created_at: row.created_at,
           days_overdue: daysOverdue,
@@ -128,8 +131,8 @@ export function useInvoiceKpis(invoices: InvoiceSummary[]) {
     in7Days.setDate(now.getDate() + 7);
 
     const outstandingTotal = invoices
-      .filter((i) => i.status === "outstanding" || i.status === "overdue")
-      .reduce((sum, i) => sum + i.total_aed, 0);
+      .filter((i) => UNPAID.includes(i.status))
+      .reduce((sum, i) => sum + Math.max(0, i.total_aed - i.amount_paid), 0);
 
     const overdueCount = invoices.filter((i) => i.status === "overdue" || i.days_overdue > 0).length;
 

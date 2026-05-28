@@ -32,10 +32,13 @@ import {
   INVOICE_PAYMENT_METHOD_OPTIONS,
   WALLET_TOPUP_PAYMENT_METHOD_OPTIONS,
 } from "@/lib/paymentMethod";
+import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
+import { useConsolidateInvoices } from "@/hooks/usePayments";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { InvoiceDeletionLogPanel } from "@/components/billing/InvoiceDeletionLogPanel";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -222,6 +225,13 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
   const processPayment = useProcessPayment();
   const [method, setMethod] = useState<BillingPaymentMethod>("wallet");
   const [staffName, setStaffName] = useState("");
+  const [amountAed, setAmountAed] = useState("");
+
+  useEffect(() => {
+    if (!open || !invoice) return;
+    setMethod("wallet");
+    setAmountAed("");
+  }, [open, invoice?.id]);
 
   if (!invoice) return null;
 
@@ -232,14 +242,17 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
     service_type: invoice.service_type,
     notes: invoice.notes,
   });
+  const outstanding = Math.max(0, pay.grandTotal - (invoice.amount_paid ?? 0));
 
   const handlePay = async () => {
     if (!staffName.trim()) { toast.error("Enter staff name"); return; }
+    const parsedAmount = method === "wallet" ? undefined : parseFloat(amountAed || String(outstanding));
     try {
       await processPayment.mutateAsync({
         invoiceId: invoice.id,
         method,
         staffName: staffName.trim(),
+        amountAed: parsedAmount,
       });
       onClose();
     } catch (err) {
@@ -255,14 +268,13 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
             <CreditCard className="h-5 w-5" /> Process Payment
           </DialogTitle>
           <DialogDescription>
-            Invoice {invoice.invoice_number ?? invoice.id.slice(0, 8)} — {formatAed(pay.grandTotal)} incl. VAT
+            Invoice {invoice.invoice_number ?? invoice.id.slice(0, 8)} — outstanding {formatAed(outstanding)}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-2">
           <div className="rounded-md border p-3 text-sm space-y-1">
-            <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (before VAT)</span><span>{formatAed(pay.netExVat)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{formatAed(pay.vat)}</span></div>
-            <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{formatAed(pay.grandTotal)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Grand total</span><span>{formatAed(pay.grandTotal)}</span></div>
+            <div className="flex justify-between font-semibold border-t pt-1"><span>Outstanding</span><span>{formatAed(outstanding)}</span></div>
           </div>
           <div className="space-y-2">
             <Label>Payment method</Label>
@@ -275,16 +287,26 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label>Staff name <span className="text-destructive">*</span></Label>
-            <Input placeholder="Who is processing?" value={staffName} onChange={(e) => setStaffName(e.target.value)} />
-          </div>
+          {method !== "wallet" && (
+            <div className="space-y-2">
+              <Label>Amount (AED)</Label>
+              <Input
+                type="number"
+                min="0.01"
+                step="0.01"
+                max={outstanding}
+                value={amountAed || outstanding.toFixed(2)}
+                onChange={(e) => setAmountAed(e.target.value)}
+              />
+            </div>
+          )}
+          <StaffNameSelect value={staffName} onChange={setStaffName} label="Staff name" />
         </div>
         <DialogFooter className="gap-2 pt-4">
           <Button variant="outline" onClick={onClose} disabled={processPayment.isPending}>Cancel</Button>
           <Button type="button" className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
             {processPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Pay {formatAed(pay.grandTotal)}
+            {method === "wallet" ? `Pay ${formatAed(outstanding)}` : "Record payment"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -399,6 +421,7 @@ function InvoiceDetailDialog({
   onClose: () => void;
   onInvoiceUpdated?: () => void;
 }) {
+  const navigate = useNavigate();
   const [addLineOpen, setAddLineOpen] = useState(false);
   const handlePrint = useCallback(() => {
     if (!invoice) return;
@@ -543,8 +566,17 @@ function InvoiceDetailDialog({
             </Button>
           )}
           <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (!invoice) return;
+              navigate(`/billing/invoices/${invoice.id}`);
+            }}
+          >
+            Open full view
+          </Button>
           <Button onClick={handlePrint}>
-            <Printer className="mr-2 h-4 w-4" /> Print receipt
+            <Printer className="mr-2 h-4 w-4" /> Print
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -749,11 +781,16 @@ function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: s
 // ── InvoicesTab ──────────────────────────────────────────────────────────────
 
 function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: string }) {
+  const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const finalise = useFinaliseInvoice();
+  const consolidate = useConsolidateInvoices();
   const [payInvoice, setPayInvoice] = useState<InvoiceWithItems | null>(null);
   const [voidInvoice, setVoidInvoice] = useState<InvoiceWithItems | null>(null);
   const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [consolidateStaff, setConsolidateStaff] = useState("");
+  const [consolidateOpen, setConsolidateOpen] = useState(false);
 
   const filters = statusFilter !== "all" ? { status: statusFilter as InvoiceStatus } : undefined;
   const { data: invoices = [], isLoading, refetch: refetchInvoices } = useInvoicesForOwner(ownerId, filters);
@@ -807,11 +844,19 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
             <SelectItem value="finalised">Finalised</SelectItem>
             <SelectItem value="issued">Issued</SelectItem>
             <SelectItem value="paid">Paid</SelectItem>
+            <SelectItem value="partially_paid">Partial</SelectItem>
             <SelectItem value="outstanding">Outstanding</SelectItem>
             <SelectItem value="overdue">Overdue</SelectItem>
             <SelectItem value="voided">Voided</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
+
+        {selectedIds.length >= 2 && (
+          <Button size="sm" variant="secondary" onClick={() => setConsolidateOpen(true)}>
+            Consolidate selected ({selectedIds.length})
+          </Button>
+        )}
 
         {statement.totalOutstanding > 0 && (
           <Button size="sm" variant="outline" onClick={statement.payAllOutstanding}>
@@ -834,6 +879,7 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
+                  <TableHead className="w-10" />
                   <TableHead className="min-w-[120px]">Invoice #</TableHead>
                   <TableHead>Branch</TableHead>
                   <TableHead className="min-w-[100px]">Date</TableHead>
@@ -849,8 +895,23 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                   const canFinalise = inv.status === "draft";
                   const canPay = ["finalised", "issued", "outstanding", "overdue", "partially_paid"].includes(inv.status);
                   const canVoid = !["cancelled", "voided", "paid"].includes(inv.status);
+                  const canSelect = canPay || inv.status === "draft" || inv.status === "finalised";
                   return (
                     <TableRow key={inv.id}>
+                      <TableCell>
+                        {canSelect ? (
+                          <Checkbox
+                            checked={selectedIds.includes(inv.id)}
+                            onCheckedChange={(checked) => {
+                              setSelectedIds((prev) =>
+                                checked
+                                  ? [...prev, inv.id]
+                                  : prev.filter((id) => id !== inv.id),
+                              );
+                            }}
+                          />
+                        ) : null}
+                      </TableCell>
                       <TableCell>
                         <button type="button" className="text-sm font-medium text-primary hover:underline" onClick={() => setViewInvoice(inv)}>
                           {inv.invoice_number ?? inv.id.slice(0, 8)}
@@ -926,6 +987,46 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
           });
         }}
       />
+
+      <Dialog open={consolidateOpen} onOpenChange={setConsolidateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Consolidate {selectedIds.length} invoices</DialogTitle>
+            <DialogDescription>
+              Creates one new finalised invoice and voids the selected sources.
+            </DialogDescription>
+          </DialogHeader>
+          <StaffNameSelect value={consolidateStaff} onChange={setConsolidateStaff} label="Processed by" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConsolidateOpen(false)}>Cancel</Button>
+            <Button
+              disabled={consolidate.isPending}
+              onClick={async () => {
+                if (!consolidateStaff.trim()) {
+                  toast.error("Staff name is required.");
+                  return;
+                }
+                try {
+                  const newId = await consolidate.mutateAsync({
+                    ownerId,
+                    invoiceIds: selectedIds,
+                    performedBy: consolidateStaff.trim(),
+                  });
+                  toast.success("Invoices consolidated.");
+                  setSelectedIds([]);
+                  setConsolidateOpen(false);
+                  refetchInvoices();
+                  navigate(`/billing/invoices/${newId}`);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Consolidation failed.");
+                }
+              }}
+            >
+              {consolidate.isPending ? "Consolidating…" : "Consolidate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

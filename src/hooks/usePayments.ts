@@ -1,21 +1,20 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { invoiceAmountDue } from "@/lib/vatConfig";
-import { invoicePaymentMethodToTransactionType, type ExternalPaymentMethod } from "@/lib/paymentMethod";
 import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
 import { revertInvoicePayment } from "@/lib/revertInvoicePayment";
-
-type PaymentMethod = ExternalPaymentMethod;
+import { recordExternalInvoicePayment } from "@/lib/recordExternalInvoicePayment";
+import type { ExternalPaymentMethod } from "@/lib/paymentMethod";
 
 interface WalletPaymentArgs {
   invoiceId: string;
   performedBy: string;
 }
 
-interface CashCardPaymentArgs {
+interface ExternalPaymentArgs {
   invoiceId: string;
-  method: PaymentMethod;
+  method: ExternalPaymentMethod;
   performedBy: string;
+  amountAed?: number;
   note?: string;
 }
 
@@ -53,69 +52,25 @@ export function useProcessWalletPayment() {
   });
 }
 
-export function useRecordCashOrCardPayment() {
+export function useRecordExternalPayment() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ invoiceId, method, performedBy, note }: CashCardPaymentArgs) => {
-      const { data: invoice, error: invoiceErr } = await supabase
-        .from("invoices")
-        .select("id, owner_id, total, total_aed, vat_aed, service_type, notes")
-        .eq("id", invoiceId)
-        .single();
-      if (invoiceErr) throw invoiceErr;
-
-      const { data: owner, error: ownerErr } = await supabase
-        .from("owners")
-        .select("wallet_balance")
-        .eq("id", invoice.owner_id)
-        .single();
-      if (ownerErr) throw ownerErr;
-
-      const amount = invoiceAmountDue({
-        total: invoice.total,
-        total_aed: invoice.total_aed,
-        vat_aed: invoice.vat_aed,
-        service_type: invoice.service_type,
-        notes: invoice.notes,
-      });
-      const txType = invoicePaymentMethodToTransactionType(method);
-
-      const { error: txErr } = await supabase.from("wallet_transactions").insert({
-        owner_id: invoice.owner_id,
-        invoice_id: invoice.id,
-        transaction_type: txType,
-        amount,
-        balance_after: owner.wallet_balance ?? 0,
-        payment_method: method,
-        performed_by: performedBy,
-        notes: note?.trim() || `Invoice paid by ${method}`,
-      });
-      if (txErr) throw txErr;
-
-      const { error: payErr } = await supabase
-        .from("invoices")
-        .update({
-          status: "paid",
-          payment_method: method,
-          amount_paid: amount,
-          paid_at: new Date().toISOString(),
-        })
-        .eq("id", invoice.id);
-
-      if (payErr) {
-        throw new Error(
-          `Payment transaction recorded but invoice status update failed: ${payErr.message}. Please set invoice status to paid manually.`,
-        );
+    mutationFn: async (args: ExternalPaymentArgs) => {
+      const result = await recordExternalInvoicePayment(supabase, args);
+      if (!result.success) {
+        throw new Error(result.error || "Could not record payment.");
       }
-
-      return { ownerId: invoice.owner_id, invoiceId: invoice.id };
+      return result;
     },
-    onSuccess: (data) => {
-      invalidateBilling(qc, data.invoiceId, data.ownerId);
+    onSuccess: (data, vars) => {
+      invalidateBilling(qc, vars.invoiceId, data.ownerId);
     },
   });
 }
+
+/** @deprecated Use useRecordExternalPayment */
+export const useRecordCashOrCardPayment = useRecordExternalPayment;
 
 export function useRevertInvoicePayment() {
   const qc = useQueryClient();
@@ -140,8 +95,64 @@ export function useRevertInvoicePayment() {
       }
       return result;
     },
-    onSuccess: (data, vars) => {
-      invalidateBilling(qc, vars.invoiceId, data.ownerId);
+    onSuccess: (_data, vars) => {
+      invalidateBilling(qc, vars.invoiceId);
+    },
+  });
+}
+
+export function useUpdatePaymentAttribution() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      paymentId,
+      performedBy,
+      invoiceId,
+      ownerId,
+    }: {
+      paymentId: string;
+      performedBy: string;
+      invoiceId: string;
+      ownerId: string;
+    }) => {
+      const { error } = await supabase
+        .from("wallet_transactions")
+        .update({ performed_by: performedBy.trim() })
+        .eq("id", paymentId);
+      if (error) throw error;
+      return { invoiceId, ownerId };
+    },
+    onSuccess: (data) => {
+      invalidateBilling(qc, data.invoiceId, data.ownerId);
+    },
+  });
+}
+
+export function useConsolidateInvoices() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      ownerId,
+      invoiceIds,
+      performedBy,
+    }: {
+      ownerId: string;
+      invoiceIds: string[];
+      performedBy: string;
+    }) => {
+      const { data, error } = await supabase.rpc("consolidate_owner_invoices", {
+        p_owner_id: ownerId,
+        p_invoice_ids: invoiceIds,
+        p_performed_by: performedBy,
+      });
+      if (error) throw error;
+      return data as string;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      qc.invalidateQueries({ queryKey: ["statement"] });
     },
   });
 }

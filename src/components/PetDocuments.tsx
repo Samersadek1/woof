@@ -36,6 +36,7 @@ interface StorageFile {
 }
 
 const BUCKET = "pet-photos";
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 function passportFolder(petId: string) {
   return `passports/${petId}`;
@@ -85,6 +86,10 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
     let successCount = 0;
 
     for (const file of selected) {
+      if (file.size > MAX_UPLOAD_BYTES) {
+        toast.error(`${file.name} is too large (max 10 MB).`);
+        continue;
+      }
       const safeName = `${Date.now()}_${file.name.replace(/\s+/g, "_")}`;
       const path = `${passportFolder(petId)}/${safeName}`;
       const { error } = await supabase.storage
@@ -159,6 +164,7 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
           accept="image/*,application/pdf"
           multiple
           className="hidden"
+          data-testid="pet-passport-upload"
           onChange={handleUpload}
         />
       </div>

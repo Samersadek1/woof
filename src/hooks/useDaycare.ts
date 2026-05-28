@@ -734,6 +734,7 @@ export type IssueCustomDaycarePackageInput = {
   validity_months?: number;
   payment_method?: Database["public"]["Enums"]["payment_method"];
   service_code?: Extract<ServiceCode, "daycare_full_day" | "daycare_hourly">;
+  issue_date?: string;
 };
 
 export function useIssueCustomDaycarePackage() {
@@ -750,6 +751,7 @@ export function useIssueCustomDaycarePackage() {
         p_validity_months: input.validity_months ?? 6,
         p_payment_method: input.payment_method ?? "card",
         p_service_code: input.service_code ?? "daycare_full_day",
+        p_issue_date: input.issue_date,
       });
       if (error) throw error;
       return (data as {

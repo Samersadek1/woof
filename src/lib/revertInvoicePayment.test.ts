@@ -28,7 +28,7 @@ describe("canRevertInvoicePayment", () => {
     ).toBe(false);
   });
 
-  it("blocks non-paid invoices", () => {
+  it("blocks outstanding invoices", () => {
     expect(
       canRevertInvoicePayment(
         { status: "outstanding", paid_at: subDays(now, 1).toISOString() },
@@ -36,6 +36,16 @@ describe("canRevertInvoicePayment", () => {
         now,
       ),
     ).toBe(false);
+  });
+
+  it("allows partially paid invoices within the revert window", () => {
+    expect(
+      canRevertInvoicePayment(
+        { status: "partially_paid", paid_at: subDays(now, 2).toISOString() },
+        [{ created_at: subDays(now, 2).toISOString(), transaction_type: "cash_payment" }],
+        now,
+      ),
+    ).toBe(true);
   });
 
   it("falls back to latest payment timestamp when paid_at is missing", () => {

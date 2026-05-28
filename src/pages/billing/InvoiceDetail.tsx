@@ -6,7 +6,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useInvoiceDetail } from "@/hooks/useInvoiceDetail";
 import { useLinkedDaycareSessionsForInvoice } from "@/hooks/useDaycare";
 import { useCancellationRefundPreview } from "@/hooks/useCancellationRefund";
-import { useProcessWalletPayment, useRecordCashOrCardPayment, useRevertInvoicePayment } from "@/hooks/usePayments";
+import { useProcessWalletPayment, useRecordExternalPayment, useRevertInvoicePayment, useUpdatePaymentAttribution } from "@/hooks/usePayments";
+import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
+import { paymentMethodLabel, type ExternalPaymentMethod } from "@/lib/paymentMethod";
+import { Printer } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,11 +62,16 @@ export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading, refetch } = useInvoiceDetail(id);
   const walletPay = useProcessWalletPayment();
-  const cashCardPay = useRecordCashOrCardPayment();
+  const externalPay = useRecordExternalPayment();
   const revertPayment = useRevertInvoicePayment();
+  const updateAttribution = useUpdatePaymentAttribution();
 
   const [walletOpen, setWalletOpen] = useState(false);
-  const [cashCardOpen, setCashCardOpen] = useState<"cash" | "card" | null>(null);
+  const [externalPayOpen, setExternalPayOpen] = useState<ExternalPaymentMethod | null>(null);
+  const [payAmount, setPayAmount] = useState("");
+  const [voidBlockedOpen, setVoidBlockedOpen] = useState(false);
+  const [editPaymentId, setEditPaymentId] = useState<string | null>(null);
+  const [editPaymentName, setEditPaymentName] = useState("");
   const [cancelOpen, setCancelOpen] = useState(false);
   const [revertOpen, setRevertOpen] = useState(false);
   const [revertReason, setRevertReason] = useState("");
@@ -173,6 +181,11 @@ export default function InvoiceDetailPage() {
   };
 
   const doVoid = async () => {
+    if (computed.amountPaid > 0) {
+      setRefundAmount(String(walletRefundFromPayments(data?.payments ?? [])));
+      setVoidBlockedOpen(true);
+      return;
+    }
     const { error } = await supabase
       .from("invoices")
       .update({ status: "voided", voided_at: new Date().toISOString() })
@@ -182,20 +195,36 @@ export default function InvoiceDetailPage() {
     refetch();
   };
 
-  const doRecordCashOrCard = async () => {
-    if (!cashCardOpen) return;
+  const handlePrint = () => {
+    window.open(`/print/invoice/${inv.id}`, "_blank", "noopener,noreferrer");
+  };
+
+  const openExternalPay = (method: ExternalPaymentMethod) => {
+    setExternalPayOpen(method);
+    setPayAmount(computed.outstanding.toFixed(2));
+  };
+
+  const doRecordExternal = async () => {
+    if (!externalPayOpen) return;
     if (!performedBy.trim()) return toast.error("Staff name is required.");
+    const amount = parseFloat(payAmount || "0");
+    if (!amount || Number.isNaN(amount)) return toast.error("Enter a valid payment amount.");
     try {
-      await cashCardPay.mutateAsync({
+      const result = await externalPay.mutateAsync({
         invoiceId: inv.id,
-        method: cashCardOpen,
+        method: externalPayOpen,
         performedBy: performedBy.trim(),
+        amountAed: amount,
         note: refundNote.trim() || undefined,
       });
-      toast.success(`Recorded ${cashCardOpen} payment.`);
-      setCashCardOpen(null);
+      toast.success(
+        result.partial
+          ? `Partial ${paymentMethodLabel(externalPayOpen)} payment recorded.`
+          : `Recorded ${paymentMethodLabel(externalPayOpen)} payment.`,
+      );
+      setExternalPayOpen(null);
       setRefundNote("");
-      setPerformedBy("");
+      setPayAmount("");
       refetch();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Could not record payment.");
@@ -418,12 +447,25 @@ export default function InvoiceDetailPage() {
             ) : (
               <div className="space-y-2">
                 {data.payments.map((p) => (
-                  <div key={p.id} className="rounded-md border p-3 text-sm flex items-center justify-between">
+                  <div key={p.id} className="rounded-md border p-3 text-sm flex items-center justify-between gap-3">
                     <div>
                       <p className="capitalize">{p.payment_method ?? p.transaction_type.replace(/_/g, " ")}</p>
                       <p className="text-muted-foreground">{format(new Date(p.created_at), "d MMM yyyy, HH:mm")} · {p.performed_by ?? "—"}</p>
                     </div>
-                    <span className="font-semibold tabular-nums">{aed(p.amount)}</span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setEditPaymentId(p.id);
+                          setEditPaymentName(p.performed_by ?? "");
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <span className="font-semibold tabular-nums">{aed(Math.abs(p.amount))}</span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -445,6 +487,12 @@ export default function InvoiceDetailPage() {
 
         <Card>
           <CardContent className="p-4 flex flex-wrap gap-2">
+            {status !== "voided" && status !== "cancelled" && (
+              <Button variant="outline" onClick={handlePrint} data-testid="invoice-detail-print-btn">
+                <Printer className="mr-2 h-4 w-4" />
+                Print
+              </Button>
+            )}
             {status === "draft" && (
               <>
                 <Button onClick={doFinalise}>Finalise</Button>
@@ -458,36 +506,37 @@ export default function InvoiceDetailPage() {
             )}
             {["finalised", "outstanding", "overdue", "issued", "partially_paid"].includes(status) && (
               <>
-                <Button onClick={() => setWalletOpen(true)}>Pay with wallet</Button>
-                <Button variant="outline" onClick={() => setCashCardOpen("cash")}>Record cash</Button>
-                <Button variant="outline" onClick={() => setCashCardOpen("card")}>Record card</Button>
+                <Button onClick={() => { setPayAmount(computed.outstanding.toFixed(2)); setWalletOpen(true); }}>
+                  {status === "partially_paid" ? `Pay remainder (${aed(computed.outstanding)})` : "Pay with wallet"}
+                </Button>
+                <Button variant="outline" onClick={() => openExternalPay("cash")}>Record cash</Button>
+                <Button variant="outline" onClick={() => openExternalPay("card")}>Record card</Button>
+                <Button variant="outline" onClick={() => openExternalPay("bank_transfer")}>Bank transfer</Button>
+                <Button variant="outline" onClick={() => openExternalPay("payment_link")}>Payment link</Button>
                 <Button variant="destructive" onClick={doVoid}>Void</Button>
                 <Button variant="outline" onClick={() => {
                   setServiceStart(inv.issue_date || inv.created_at.slice(0, 10));
-                  setRefundAmount("0");
+                  setRefundAmount(String(walletRefundFromPayments(data.payments)));
                   setCancelOpen(true);
                 }}>Cancel & refund</Button>
               </>
             )}
+            {(status === "paid" || status === "partially_paid") && showRevertPayment && (
+              <Button
+                type="button"
+                variant="outline"
+                className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                data-testid="invoice-detail-revert-payment-btn"
+                onClick={() => {
+                  setRevertReason("");
+                  setRevertOpen(true);
+                }}
+              >
+                Revert payment
+              </Button>
+            )}
             {status === "paid" && (
-              <>
-                <Button variant="outline" onClick={() => window.print()}>Print receipt</Button>
-                {showRevertPayment && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="border-amber-300 text-amber-800 hover:bg-amber-50"
-                    data-testid="invoice-detail-revert-payment-btn"
-                    onClick={() => {
-                      setRevertReason("");
-                      setRevertOpen(true);
-                    }}
-                  >
-                    Revert payment
-                  </Button>
-                )}
-                <Button variant="destructive" onClick={doVoid}>Void</Button>
-              </>
+              <Button variant="destructive" onClick={doVoid}>Void</Button>
             )}
             {status === "voided" && <p className="text-sm text-muted-foreground">Voided invoice is read-only.</p>}
             <Button type="button" variant="destructive" onClick={() => setDeleteOpen(true)}>
@@ -506,9 +555,8 @@ export default function InvoiceDetailPage() {
               <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{aed(computed.vat)}</span></div>
               <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{aed(computed.grandTotal)}</span></div>
             </div>
-            <p>Shortfall: <strong>{aed(Math.max(0, computed.grandTotal - (inv.owners?.wallet_balance ?? 0)))}</strong></p>
-            <Label>Processed by</Label>
-            <Input value={performedBy} onChange={(e) => setPerformedBy(e.target.value)} placeholder="Staff name" />
+            <p>Outstanding: <strong>{aed(computed.outstanding)}</strong></p>
+            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWalletOpen(false)}>Cancel</Button>
@@ -517,23 +565,65 @@ export default function InvoiceDetailPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!cashCardOpen} onOpenChange={() => setCashCardOpen(null)}>
+      <Dialog open={!!externalPayOpen} onOpenChange={() => setExternalPayOpen(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Record {cashCardOpen} payment</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Record {externalPayOpen ? paymentMethodLabel(externalPayOpen) : "payment"}</DialogTitle></DialogHeader>
           <div className="space-y-2 text-sm">
             <div className="rounded-md border p-3 space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (before VAT)</span><span>{aed(computed.netExVat)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{aed(computed.vat)}</span></div>
-              <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{aed(computed.grandTotal)}</span></div>
+              <div className="flex justify-between font-semibold border-t pt-1"><span>Balance outstanding</span><span>{aed(computed.outstanding)}</span></div>
+            </div>
+            <div className="space-y-2">
+              <Label>Amount (AED)</Label>
+              <Input type="number" min="0.01" step="0.01" max={computed.outstanding} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
             </div>
             <Label>Reference note (optional)</Label>
             <Textarea value={refundNote} onChange={(e) => setRefundNote(e.target.value)} />
-            <Label>Processed by</Label>
-            <Input value={performedBy} onChange={(e) => setPerformedBy(e.target.value)} placeholder="Staff name" />
+            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCashCardOpen(null)}>Cancel</Button>
-            <Button onClick={doRecordCashOrCard} disabled={cashCardPay.isPending}>{cashCardPay.isPending ? "Saving..." : "Confirm"}</Button>
+            <Button variant="outline" onClick={() => setExternalPayOpen(null)}>Cancel</Button>
+            <Button onClick={doRecordExternal} disabled={externalPay.isPending}>{externalPay.isPending ? "Saving..." : "Confirm"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={voidBlockedOpen} onOpenChange={setVoidBlockedOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invoice has payments</DialogTitle>
+            <DialogDescription>
+              Voiding will not automatically refund the wallet. Use Cancel &amp; refund or Revert payment first.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVoidBlockedOpen(false)}>Close</Button>
+            <Button onClick={() => { setVoidBlockedOpen(false); setCancelOpen(true); }}>Cancel &amp; refund</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editPaymentId} onOpenChange={() => setEditPaymentId(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit processed by</DialogTitle></DialogHeader>
+          <StaffNameSelect value={editPaymentName} onChange={setEditPaymentName} label="Processed by" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPaymentId(null)}>Cancel</Button>
+            <Button
+              onClick={async () => {
+                if (!editPaymentId || !editPaymentName.trim()) return;
+                await updateAttribution.mutateAsync({
+                  paymentId: editPaymentId,
+                  performedBy: editPaymentName.trim(),
+                  invoiceId: inv.id,
+                  ownerId: inv.owner_id,
+                });
+                toast.success("Payment attribution updated.");
+                setEditPaymentId(null);
+                refetch();
+              }}
+            >
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -554,8 +644,7 @@ export default function InvoiceDetailPage() {
             <Input type="number" min="0" step="0.01" value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} />
             <Label>Note</Label>
             <Textarea value={refundNote} onChange={(e) => setRefundNote(e.target.value)} />
-            <Label>Processed by</Label>
-            <Input value={performedBy} onChange={(e) => setPerformedBy(e.target.value)} placeholder="Staff name" />
+            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelOpen(false)}>Cancel</Button>
@@ -591,12 +680,7 @@ export default function InvoiceDetailPage() {
               onChange={(e) => setRevertReason(e.target.value)}
               placeholder="e.g. recorded against wrong invoice"
             />
-            <Label>Processed by</Label>
-            <Input
-              value={performedBy}
-              onChange={(e) => setPerformedBy(e.target.value)}
-              placeholder="Staff name"
-            />
+            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRevertOpen(false)}>Cancel</Button>

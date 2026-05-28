@@ -8,6 +8,7 @@ import {
   formatSyncBoardingInvoiceToast,
   syncBoardingBookingInvoice,
 } from "@/lib/boardingInvoiceSync";
+import { syncBoardingRoomAssignmentsAfterDateChange } from "@/lib/boardingRoomAssignmentSync";
 import { calculateNights, validateBoardingDateRange } from "@/lib/bookingUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +64,11 @@ export function EditBoardingStayDates({ booking, onUpdated }: EditBoardingStayDa
           queryClient.invalidateQueries({ queryKey: ["invoices"] });
 
           try {
+            const roomResult = await syncBoardingRoomAssignmentsAfterDateChange(
+              booking.id,
+              checkIn,
+              checkOut,
+            );
             const invoiceResult = await syncBoardingBookingInvoice(booking.id);
             queryClient.invalidateQueries({ queryKey: ["invoice"] });
             const detail = formatSyncBoardingInvoiceToast(invoiceResult);
@@ -70,6 +76,11 @@ export function EditBoardingStayDates({ booking, onUpdated }: EditBoardingStayDa
               toast.warning(`Stay dates updated. ${detail}`);
             } else {
               toast.success(`Stay dates updated. ${detail}`);
+            }
+            if (roomResult.warning) {
+              toast.warning(roomResult.warning);
+            } else if (roomResult.trimmed > 0 || roomResult.extended) {
+              toast.message("Kennel assignment adjusted to match new stay dates.");
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : "Invoice sync failed";

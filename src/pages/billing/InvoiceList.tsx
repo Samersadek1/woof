@@ -31,10 +31,22 @@ type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
 const STATUSES: InvoiceStatus[] = [
   "draft",
   "finalised",
+  "issued",
   "outstanding",
   "overdue",
+  "partially_paid",
   "paid",
   "voided",
+  "cancelled",
+];
+
+const STATUS_PRESETS: { label: string; statuses: InvoiceStatus[] }[] = [
+  {
+    label: "Awaiting payment",
+    statuses: ["finalised", "issued", "outstanding", "overdue", "partially_paid"],
+  },
+  { label: "Settled", statuses: ["paid"] },
+  { label: "Closed", statuses: ["voided", "cancelled"] },
 ];
 
 const WHATSAPP_REMINDER_STATUSES: InvoiceStatus[] = [
@@ -58,6 +70,9 @@ const STATUS_BADGE: Record<string, string> = {
   finalised: "border-blue-300 text-blue-700 bg-blue-50",
   outstanding: "border-amber-300 text-amber-700 bg-amber-50",
   overdue: "border-red-300 text-red-700 bg-red-50",
+  partially_paid: "border-amber-300 text-amber-700 bg-amber-50",
+  issued: "border-sky-300 text-sky-700 bg-sky-50",
+  cancelled: "border-slate-300 text-slate-500 bg-slate-100 line-through",
   paid: "border-emerald-300 text-emerald-700 bg-emerald-50",
   voided: "border-slate-300 text-slate-500 bg-slate-100 line-through",
 };
@@ -200,6 +215,20 @@ export default function InvoiceListPage() {
                   </Button>
                 </div>
               </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {STATUS_PRESETS.map((preset) => (
+                <Button
+                  key={preset.label}
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setStatus(preset.statuses)}
+                >
+                  {preset.label}
+                </Button>
+              ))}
             </div>
 
             <div className="flex flex-wrap gap-2">

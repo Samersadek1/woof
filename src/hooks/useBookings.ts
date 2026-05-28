@@ -42,7 +42,7 @@ export type BookingWithDetails = Booking & {
 const BOOKING_BASE_SELECT =
   `*, rooms(*), owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, ${PET_CARE_NOTES_SELECT}, special_alerts))`;
 
-const BOOKING_DETAIL_SELECT =
+export const BOOKING_DETAIL_SELECT =
   `${BOOKING_BASE_SELECT}, booking_items(count)`;
 
 /** Payload accepted by useCreateBooking — booking fields + pet_ids to link */
@@ -622,6 +622,31 @@ export function useUndoCheckOut() {
         .update({
           status: "checked_in",
           actual_check_out_at: null,
+        })
+        .eq("id", bookingId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as Booking;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["bookings"] });
+    },
+  });
+}
+
+/** Revert check-in while keeping the booking active (confirmed, not cancelled). */
+export function useUndoCheckIn() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (bookingId: string) => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .update({
+          status: "confirmed",
+          actual_check_in_at: null,
         })
         .eq("id", bookingId)
         .select()

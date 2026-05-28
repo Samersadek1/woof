@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -84,6 +84,7 @@ export function PurchasePackageDialog({
   const [customServiceCode, setCustomServiceCode] = useState<"daycare_full_day" | "daycare_hourly">(
     "daycare_full_day",
   );
+  const [issueDate, setIssueDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
 
   const { data: packageDefs = [], isLoading: packageDefsLoading } = useQuery({
     queryKey: ["package_definitions", "active"],
@@ -208,6 +209,7 @@ export function PurchasePackageDialog({
     setCustomAmount("0");
     setCustomValidityMonths("6");
     setCustomServiceCode("daycare_full_day");
+    setIssueDate(format(new Date(), "yyyy-MM-dd"));
   };
 
   const handleCustomIssue = async () => {
@@ -231,6 +233,7 @@ export function PurchasePackageDialog({
         validity_months: customValidityNum,
         payment_method: paymentMethod,
         service_code: customServiceCode,
+        issue_date: issueDate,
       },
       {
         onSuccess: (result) => {
@@ -272,6 +275,7 @@ export function PurchasePackageDialog({
       p_package_code: selectedPackage.code,
       p_pet_ids: selectedPetIds,
       p_payment_method: paymentMethod,
+      p_issue_date: issueDate,
     });
     setIsSubmitting(false);
     if (error) {
@@ -584,6 +588,10 @@ export function PurchasePackageDialog({
           <section className="space-y-2">
             <h4 className="text-sm font-semibold">4) Confirm</h4>
             <div className="grid gap-2 sm:grid-cols-[160px_1fr] sm:items-center">
+              <Label>Purchase date</Label>
+              <Input type="date" value={issueDate} max={format(new Date(), "yyyy-MM-dd")} onChange={(e) => setIssueDate(e.target.value)} />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[160px_1fr] sm:items-center">
               <Label>Payment method</Label>
               <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -595,7 +603,7 @@ export function PurchasePackageDialog({
               </Select>
             </div>
             <div className="text-xs text-muted-foreground">
-              Validity starts from purchase date ({format(new Date(), "dd MMM yyyy")}).
+              Validity starts from purchase date ({format(parseISO(issueDate), "dd MMM yyyy")}).
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onClose} disabled={busy}>

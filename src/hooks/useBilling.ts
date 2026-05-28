@@ -21,6 +21,7 @@ import {
 } from "@/lib/vatConfig";
 import { formatAed, roundAed, AED_DECIMAL_DIGITS } from "@/lib/money";
 import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
+import { recordExternalInvoicePayment } from "@/lib/recordExternalInvoicePayment";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -560,6 +561,7 @@ interface ProcessPaymentInput {
   invoiceId: string;
   method: PaymentMethod;
   staffName: string;
+  amountAed?: number;
 }
 
 interface ProcessPaymentResult {
@@ -613,65 +615,35 @@ export function useProcessPayment() {
         };
       }
 
-      // Card or cash payment
-      const { data: invoice, error: fetchErr } = await supabase
-        .from("invoices")
-        .select("owner_id, total, total_aed, vat_aed, service_type, notes")
-        .eq("id", input.invoiceId)
-        .single();
-      if (fetchErr) throw fetchErr;
-
-      const amount = invoiceAmountDue({
-        total: invoice.total,
-        total_aed: invoice.total_aed,
-        vat_aed: invoice.vat_aed,
-        service_type: invoice.service_type,
-        notes: invoice.notes,
+      // External payment (card, cash, bank transfer, payment link)
+      const result = await recordExternalInvoicePayment(supabase, {
+        invoiceId: input.invoiceId,
+        method: input.method,
+        performedBy: input.staffName,
+        amountAed: input.amountAed,
       });
 
-      const paidAt = new Date().toISOString();
-      const { error: updateErr } = await supabase
-        .from("invoices")
-        .update({
-          status: "paid" as const,
-          payment_method: input.method,
-          amount_paid: amount,
-          paid_at: paidAt,
-        })
-        .eq("id", input.invoiceId);
-      if (updateErr) throw updateErr;
-
-      const { data: owner, error: ownerErr } = await supabase
-        .from("owners")
-        .select("wallet_balance")
-        .eq("id", invoice.owner_id)
-        .single();
-      if (ownerErr) throw ownerErr;
-
-      const txType = invoicePaymentMethodToTransactionType(input.method);
-      const { error: txErr } = await supabase.from("wallet_transactions").insert({
-        owner_id: invoice.owner_id,
-        invoice_id: input.invoiceId,
-        transaction_type: txType,
-        amount,
-        balance_after: owner.wallet_balance ?? 0,
-        payment_method: input.method,
-        performed_by: input.staffName,
-        notes: `Invoice paid by ${input.method}`,
-      });
-      if (txErr) {
-        throw new Error(
-          `Invoice marked paid but payment audit row failed: ${txErr.message}. Check wallet transactions.`,
-        );
+      if (!result.success) {
+        toast.error(result.error ?? "Payment failed");
+        return {
+          success: false,
+          method: input.method,
+          amountCharged: 0,
+          error: result.error,
+        };
       }
 
-      toast.success(`${formatAed(amount)} recorded — paid by ${input.method}`);
+      toast.success(
+        result.partial
+          ? `${formatAed(result.amountRecorded ?? 0)} recorded — balance still outstanding`
+          : `${formatAed(result.amountRecorded ?? 0)} recorded — paid by ${input.method}`,
+      );
 
       return {
         success: true,
         method: input.method,
-        amountCharged: amount,
-        ownerId: invoice.owner_id,
+        amountCharged: result.amountRecorded ?? 0,
+        ownerId: result.ownerId,
       };
     },
     onSuccess: (result) => {

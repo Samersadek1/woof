@@ -9,6 +9,7 @@ export const INVOICE_PAYMENT_METHOD_OPTIONS = [
   { value: "card", label: "Card" },
   { value: "cash", label: "Cash" },
   { value: "bank_transfer", label: "Bank Transfer" },
+  { value: "payment_link", label: "Payment Link" },
 ] as const satisfies ReadonlyArray<{ value: PaymentMethod; label: string }>;
 
 export const WALLET_TOPUP_PAYMENT_METHOD_OPTIONS = [
@@ -33,5 +34,7 @@ export function invoicePaymentMethodToTransactionType(
       return "cash_payment";
     case "bank_transfer":
       return "bank_transfer_payment";
+    case "payment_link":
+      return "payment_link_payment";
   }
 }
