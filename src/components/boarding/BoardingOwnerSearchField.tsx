@@ -30,26 +30,7 @@ export const BoardingOwnerSearchField = memo(
       setDropdownOpen(false);
     }, [resetKey]);
 
-    const dismissDropdown = useCallback(() => {
-      // #region agent log
-      fetch("http://127.0.0.1:7660/ingest/ef44b5b8-e0cd-43f6-8b62-f750ed144fa8", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ee2093" },
-        body: JSON.stringify({
-          sessionId: "ee2093",
-          runId: "post-fix-v3",
-          hypothesisId: "E",
-          location: "BoardingOwnerSearchField.tsx:dismissDropdown",
-          message: "dropdown dismissed",
-          data: {
-            activeTestId: (document.activeElement as HTMLElement | null)?.dataset?.testid ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      setDropdownOpen(false);
-    }, []);
+    const dismissDropdown = useCallback(() => setDropdownOpen(false), []);
 
     useDismissOnOutsidePointer(wrapperRef, dropdownOpen, dismissDropdown);
 
@@ -94,53 +75,8 @@ export const BoardingOwnerSearchField = memo(
           placeholder="Search by name or phone…"
           value={search}
           onChange={(e) => {
-            const input = e.target;
-            const hadFocus = document.activeElement === input;
             setSearch(e.target.value);
             setDropdownOpen(true);
-            // #region agent log
-            requestAnimationFrame(() => {
-              fetch("http://127.0.0.1:7660/ingest/ef44b5b8-e0cd-43f6-8b62-f750ed144fa8", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ee2093" },
-                body: JSON.stringify({
-                  sessionId: "ee2093",
-                  runId: "post-fix-v3",
-                  hypothesisId: "E,F",
-                  location: "BoardingOwnerSearchField.tsx:onChange:rAF",
-                  message: "owner search keystroke",
-                  data: {
-                    hadFocusBefore: hadFocus,
-                    hasFocusAfter: document.activeElement === input,
-                    dropdownOpen: true,
-                    valueLen: e.target.value.length,
-                  },
-                  timestamp: Date.now(),
-                }),
-              }).catch(() => {});
-            });
-            window.setTimeout(() => {
-              const listVisible = Boolean(wrapperRef.current?.querySelector("ul"));
-              fetch("http://127.0.0.1:7660/ingest/ef44b5b8-e0cd-43f6-8b62-f750ed144fa8", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ee2093" },
-                body: JSON.stringify({
-                  sessionId: "ee2093",
-                  runId: "post-fix-v3",
-                  hypothesisId: "F",
-                  location: "BoardingOwnerSearchField.tsx:onChange:delayed",
-                  message: "owner search 500ms after keystroke",
-                  data: {
-                    hasFocusAfter: document.activeElement === inputRef.current,
-                    dropdownListVisible: listVisible,
-                    activeTestId: (document.activeElement as HTMLElement | null)?.dataset?.testid ?? null,
-                    valueLen: inputRef.current?.value.length ?? 0,
-                  },
-                  timestamp: Date.now(),
-                }),
-              }).catch(() => {});
-            }, 500);
-            // #endregion
           }}
           onFocus={() => {
             if (search.trim().length >= 2) setDropdownOpen(true);
