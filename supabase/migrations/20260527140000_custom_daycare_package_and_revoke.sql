@@ -223,7 +223,7 @@ BEGIN
   FROM service_credits sc
   LEFT JOIN purchase_groups pg ON pg.id = sc.purchase_group_id
   WHERE sc.id = p_credit_id
-  FOR UPDATE;
+  FOR UPDATE OF sc;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Package credit % not found', p_credit_id;
