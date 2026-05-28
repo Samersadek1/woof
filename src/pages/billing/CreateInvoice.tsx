@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { OwnerSearchPopover } from "@/components/billing/OwnerSearchPopover";
-import { addDays, format } from "date-fns";
+import { format } from "date-fns";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
@@ -59,7 +59,7 @@ export default function CreateInvoicePage() {
   const [ownerId, setOwnerId] = useState<string>(presetOwnerId);
   const [ownerLabel, setOwnerLabel] = useState("");
   const [serviceType, setServiceType] = useState("other");
-  const [dueDate, setDueDate] = useState(format(addDays(new Date(), 14), "yyyy-MM-dd"));
+  const [dueDate, setDueDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [lines, setLines] = useState<LineDraft[]>([

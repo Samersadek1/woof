@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { createServiceInvoice, removeUnpaidServiceInvoice } from "@/lib/bookingUtils";
+import { invoiceDueDateAtCheckIn, invoiceDueDateToday } from "@/lib/invoiceDueDate";
 import {
   composeNotesWithHourlyInvoiced,
   parseHourlyDraftId,
@@ -187,6 +188,23 @@ export function CompleteHourlyBillingDialog({
 
     setIsSubmitting(true);
 
+    const { data: sessionDateRows, error: sessionDateErr } = await supabase
+      .from("daycare_sessions")
+      .select("session_date")
+      .in(
+        "id",
+        sessions.map((s) => s.id),
+      );
+    if (sessionDateErr) {
+      toast.error(sessionDateErr.message);
+      setIsSubmitting(false);
+      return;
+    }
+    const checkInDate =
+      (sessionDateRows ?? [])
+        .map((row) => row.session_date)
+        .sort()[0] ?? invoiceDueDateToday();
+
     // Detect whether a draft invoice already exists for these sessions.
     const draftInvoiceId = parseHourlyDraftId(sessions[0].notes ?? null);
 
@@ -258,7 +276,10 @@ export function CompleteHourlyBillingDialog({
         await recalculateInvoiceTotals(draftInvoiceId);
         const { error: finaliseErr } = await supabase
           .from("invoices")
-          .update({ status: "finalised" })
+          .update({
+            status: "finalised",
+            due_date: invoiceDueDateAtCheckIn(checkInDate),
+          })
           .eq("id", draftInvoiceId);
         if (finaliseErr) throw finaliseErr;
 
@@ -305,6 +326,7 @@ export function CompleteHourlyBillingDialog({
         lineItems: hourLineItems,
         invoiceStatus: "finalised",
         skipMemberDiscount: skipInvoiceDiscount,
+        checkInDate,
       });
 
       const updateResults = await Promise.all(

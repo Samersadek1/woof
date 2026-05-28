@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDebounce } from "@/hooks/useDebounce";
+import { syncInvoiceDueDateForBooking } from "@/lib/invoiceDueDate";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { extractErrorMessage } from "@/lib/bookingAvailabilityErrors";
@@ -551,6 +552,9 @@ export function useUpdateBooking() {
         .single();
 
       if (error) throw error;
+      if (updates.check_in_date) {
+        await syncInvoiceDueDateForBooking(id, updates.check_in_date);
+      }
       return data as Booking;
     },
     onSuccess: () => {
@@ -575,6 +579,7 @@ export function useCheckIn() {
         .single();
 
       if (error) throw error;
+      await syncInvoiceDueDateForBooking(bookingId, data.check_in_date);
       return data as Booking;
     },
     onSuccess: () => {

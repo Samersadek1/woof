@@ -1224,6 +1224,7 @@ const GroomingPage = () => {
         ownerId: ownerId!,
         serviceType: "grooming",
         referenceId: createdRows[0].id,
+        checkInDate: format(apptDate, "yyyy-MM-dd"),
         notes: paymentMethod
           ? `Payment method: ${groomingPaymentMethodLabel(paymentMethod)}`
           : undefined,

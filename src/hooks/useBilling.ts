@@ -12,6 +12,7 @@ import {
 import {
   invoicePaymentMethodToTransactionType,
 } from "@/lib/paymentMethod";
+import { invoiceDueDateToday } from "@/lib/invoiceDueDate";
 import {
   invoiceAmountDue,
   invoiceDisplayTotals,
@@ -467,9 +468,7 @@ export function useCreateInvoice() {
       const vatAed = vatAmountFromGrossInclusive(grossTotal);
       const netExVat = netFromGrossInclusive(grossTotal);
 
-      const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0];
+      const dueDate = invoiceDueDateToday();
 
       const { data: inv, error: invErr } = await supabase
         .from("invoices")

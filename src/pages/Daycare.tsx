@@ -1075,6 +1075,7 @@ function PlannerTab() {
             notes: checkInDraft.remark || null,
             invoiceStatus: "finalised",
             skipMemberDiscount: skipInvoiceDiscount,
+            checkInDate: checkInDraft.session_date,
           });
         } catch (error) {
           const message = extractErrorMessage(error);
