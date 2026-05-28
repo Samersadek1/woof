@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
-import { composeNotesWithBillingPath, isDaycareHourlyPending, type DaycareBillingPath } from "@/lib/daycareSessionMeta";
+import { composeNotesWithBillingPath, isDaycareHourlyPending, isHourlyBillingDraft, parseHourlyDraftId, type DaycareBillingPath } from "@/lib/daycareSessionMeta";
 import { DAYCARE_CREDIT_CODES } from "@/lib/daycareCredits";
 import { ownerMemberTierFromFlags, type OwnerMemberTier } from "@/lib/memberTier";
 
@@ -571,6 +571,7 @@ export function useAllDaycarePackages() {
         .neq("status", "revoked")
         .order("created_at", { ascending: false });
       if (error) throw error;
+
       const mapped = (data ?? []).map((row) => {
         type PetJoin = {
           name: string;
@@ -778,6 +779,8 @@ export type PendingHourlyDaycareSession = {
   id: string;
   session_date: string;
   pet_name: string;
+  /** Draft invoice id if one was created at check-in (hours not yet entered). */
+  draft_invoice_id: string | null;
 };
 
 /** Checked-in hourly daycare sessions for an owner that still need an invoice. */
@@ -822,11 +825,19 @@ export function usePendingHourlyDaycareForOwner(ownerId: string) {
             invoiceIdByServiceId,
           ),
         )
-        .map((session) => ({
-          id: session.id,
-          session_date: session.session_date,
-          pet_name: (session as { pets: { name: string } | null }).pets?.name ?? "Pet",
-        }));
+        .map((session) => {
+          // Resolve draft invoice id: primary session via service_id map, sibling via HOURLY_DRAFT marker.
+          const draftFromServiceId = invoiceIdByServiceId.get(session.id) ?? null;
+          const draftFromNotes = isHourlyBillingDraft(session.notes)
+            ? parseHourlyDraftId(session.notes)
+            : null;
+          return {
+            id: session.id,
+            session_date: session.session_date,
+            pet_name: (session as { pets: { name: string } | null }).pets?.name ?? "Pet",
+            draft_invoice_id: draftFromServiceId ?? draftFromNotes,
+          };
+        });
     },
   });
 }

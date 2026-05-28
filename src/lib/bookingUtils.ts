@@ -6,6 +6,7 @@ import { MAX_BOARDING_STAY_NIGHTS } from "@/lib/boardingLimits";
 import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import { serviceTypeForBoardingAddonKey } from "@/lib/groomingCatalog";
 import { netFromGrossInclusive, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
+import { roundAed } from "@/lib/money";
 
 export { MAX_BOARDING_STAY_NIGHTS } from "@/lib/boardingLimits";
 
@@ -163,10 +164,23 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   }
 
   const subtotal = normalizedLines.reduce((s, li) => s + li.unitPrice * li.quantity, 0);
-  void skipMemberDiscount;
-  const discountPct = 0;
-  const discountAed = 0;
-  const total = subtotal;
+
+  let discountPct = 0;
+  let discountAed = 0;
+  if (!skipMemberDiscount && subtotal > 0) {
+    const { data: ownerRow } = await supabase
+      .from("owners")
+      .select("extra_discount_pct")
+      .eq("id", ownerId)
+      .single();
+    const pct = ownerRow?.extra_discount_pct ?? 0;
+    if (pct > 0) {
+      discountPct = pct;
+      discountAed = roundAed(subtotal * pct / 100);
+    }
+  }
+
+  const total = subtotal - discountAed;
 
   const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
   const isBoardingReference = serviceType === "boarding";

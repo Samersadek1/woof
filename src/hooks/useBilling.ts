@@ -26,6 +26,7 @@ import {
   vatAmountFromGrossInclusive,
 } from "@/lib/vatConfig";
 import { formatAed, roundAed, AED_DECIMAL_DIGITS } from "@/lib/money";
+import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -784,94 +785,36 @@ export function useProcessPayment() {
       input: ProcessPaymentInput,
     ): Promise<ProcessPaymentResult> => {
       if (input.method === "wallet") {
-        const { data, error: rpcErr } = await supabase.rpc("process_wallet_payment", {
-          p_invoice_id: input.invoiceId,
-          p_performed_by: input.staffName,
+        const result = await payInvoiceFromWallet(supabase, {
+          invoiceId: input.invoiceId,
+          performedBy: input.staffName,
         });
 
-        // If RPC exists and succeeded, use its result
-        if (!rpcErr) {
-          const result = data as {
-            success: boolean;
-            amount_charged?: number;
-            new_balance?: number;
-            owner_id?: string;
-            error?: string;
-            shortfall?: number;
-          };
-
-          if (result.success) {
-            toast.success(`${formatAed(result.amount_charged!)} deducted from wallet`);
+        if (result.success) {
+          if (result.partial) {
+            toast.success(
+              `${formatAed(result.amountCharged)} deducted from wallet — ${formatAed(result.shortfall ?? 0)} still outstanding`,
+            );
           } else {
-            toast.error(result.error ?? (result.shortfall ? `Insufficient balance — shortfall of ${formatAed(result.shortfall)}` : "Wallet payment failed"));
+            toast.success(`${formatAed(result.amountCharged)} deducted from wallet`);
           }
-
-          return {
-            success: result.success,
-            method: "wallet",
-            amountCharged: result.amount_charged ?? 0,
-            ownerId: result.owner_id,
-            newWalletBalance: result.new_balance,
-            error: result.error,
-            shortfall: result.shortfall,
-          };
+        } else {
+          toast.error(
+            result.error ??
+              (result.shortfall
+                ? `Insufficient balance — shortfall of ${formatAed(result.shortfall)}`
+                : "Wallet payment failed"),
+          );
         }
 
-        // Fallback: client-side wallet deduction (used before process_wallet_payment RPC is deployed)
-        const { data: inv, error: invErr } = await supabase
-          .from("invoices")
-          .select("owner_id, total, total_aed, vat_aed, service_type, notes")
-          .eq("id", input.invoiceId)
-          .single();
-        if (invErr) throw invErr;
-
-        const { data: ownerRow, error: ownerErr } = await supabase
-          .from("owners")
-          .select("wallet_balance")
-          .eq("id", inv.owner_id)
-          .single();
-        if (ownerErr) throw ownerErr;
-
-        const amount = invoiceAmountDue({
-          total: inv.total,
-          total_aed: inv.total_aed,
-          vat_aed: inv.vat_aed,
-          service_type: inv.service_type,
-          notes: inv.notes,
-        });
-        const currentBalance = ownerRow.wallet_balance ?? 0;
-
-        if (currentBalance < amount) {
-          const shortfall = amount - currentBalance;
-          toast.error(`Insufficient balance — shortfall of ${formatAed(shortfall)}`);
-          return { success: false, method: "wallet", amountCharged: 0, shortfall };
-        }
-
-        const newBalance = Math.round((currentBalance - amount) * 100) / 100;
-
-        await supabase.from("owners").update({ wallet_balance: newBalance }).eq("id", inv.owner_id);
-        await supabase.from("invoices").update({
-          status: "paid" as const,
-          payment_method: "wallet",
-          amount_paid: amount,
-        }).eq("id", input.invoiceId);
-        await supabase.from("wallet_transactions").insert({
-          owner_id: inv.owner_id,
-          transaction_type: "deduction" as const,
-          amount: -amount,
-          balance_after: newBalance,
-          notes: `Invoice payment via wallet — ${input.staffName}`,
-          reference_id: input.invoiceId,
-          reference_type: "invoice",
-        });
-
-        toast.success(`${formatAed(amount)} deducted from wallet`);
         return {
-          success: true,
+          success: result.success,
           method: "wallet",
-          amountCharged: amount,
-          ownerId: inv.owner_id,
-          newWalletBalance: newBalance,
+          amountCharged: result.amountCharged,
+          ownerId: result.ownerId,
+          newWalletBalance: result.newWalletBalance,
+          error: result.error,
+          shortfall: result.shortfall,
         };
       }
 
@@ -1169,17 +1112,10 @@ export function useOwnerStatement(ownerId: string) {
     let totalDeducted = 0;
 
     for (const inv of unpaid) {
-      const { data, error } = await supabase.rpc("process_wallet_payment", {
-        p_invoice_id: inv.invoice_id,
-        p_performed_by: "bulk_payment",
+      const result = await payInvoiceFromWallet(supabase, {
+        invoiceId: inv.invoice_id,
+        performedBy: "bulk_payment",
       });
-      if (error) throw error;
-
-      const result = data as {
-        success: boolean;
-        amount_charged?: number;
-        error?: string;
-      };
 
       if (!result.success) {
         toast.error(`Payment stopped: ${result.error ?? "Insufficient funds"}`);
@@ -1187,7 +1123,14 @@ export function useOwnerStatement(ownerId: string) {
       }
 
       cleared++;
-      totalDeducted += result.amount_charged ?? 0;
+      totalDeducted += result.amountCharged ?? 0;
+
+      if (result.partial) {
+        toast.message(
+          `Partial payment applied — ${formatAed(result.amountCharged ?? 0)} deducted; wallet exhausted.`,
+        );
+        break;
+      }
     }
 
     if (cleared > 0) {

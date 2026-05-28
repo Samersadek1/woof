@@ -14,14 +14,20 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { createServiceInvoice, removeUnpaidServiceInvoice } from "@/lib/bookingUtils";
-import { composeNotesWithHourlyInvoiced } from "@/lib/daycareSessionMeta";
+import {
+  composeNotesWithHourlyInvoiced,
+  parseHourlyDraftId,
+  upgradeHourlyDraftToInvoiced,
+} from "@/lib/daycareSessionMeta";
+import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
+import { recalculateInvoiceTotals } from "@/lib/invoiceRecalc";
 import {
   buildPriceMap,
   daycareHourlyInvoiceLineUnits,
   daycareHourlyPetSubtotal,
   DAYCARE_HOURLY_UNIT_KEY,
 } from "@/lib/servicePricing";
-import { formatAed, parseBoundedDecimalInput } from "@/lib/money";
+import { formatAed, parseBoundedDecimalInput, roundAed } from "@/lib/money";
 import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
@@ -116,11 +122,20 @@ export function CompleteHourlyBillingDialog({
       skipInvoiceDiscount,
     ],
     enabled: open && invoiceSubtotal > 0 && !skipInvoiceDiscount,
-    queryFn: async () => ({
-      discount_pct: 0,
-      discount_aed: 0,
-      final_aed: invoiceSubtotal,
-    }),
+    queryFn: async () => {
+      const { data: ownerRow } = await supabase
+        .from("owners")
+        .select("extra_discount_pct")
+        .eq("id", ownerId)
+        .single();
+      const pct = ownerRow?.extra_discount_pct ?? 0;
+      const discountAed = roundAed(invoiceSubtotal * pct / 100);
+      return {
+        discount_pct: pct,
+        discount_aed: discountAed,
+        final_aed: invoiceSubtotal - discountAed,
+      };
+    },
   });
 
   const invoiceNetExVat = useMemo(() => {
@@ -138,7 +153,18 @@ export function CompleteHourlyBillingDialog({
       return;
     }
 
-    const lineItems = rowPreviews
+    // Resolve the owner's profile discount once for use in both paths below.
+    let ownerDiscountPct = 0;
+    if (!skipInvoiceDiscount) {
+      const { data: ownerRow } = await supabase
+        .from("owners")
+        .select("extra_discount_pct")
+        .eq("id", ownerId)
+        .single();
+      ownerDiscountPct = ownerRow?.extra_discount_pct ?? 0;
+    }
+
+    const hourLineItems = rowPreviews
       .filter((row) => row.subtotal.total > 0)
       .map((row) => {
         const lineUnits = daycareHourlyInvoiceLineUnits(
@@ -150,24 +176,133 @@ export function CompleteHourlyBillingDialog({
           quantity: lineUnits.quantity,
           unitPrice: lineUnits.unitPrice,
           pricingKey: row.subtotal.pricingKey,
-          serviceType: "daycare",
-          preserveUnitPrice: true,
+          serviceType: "daycare" as const,
         };
       });
 
-    if (lineItems.length === 0) {
+    if (hourLineItems.length === 0) {
       toast.error("Enter billable hours for each dog");
       return;
     }
 
     setIsSubmitting(true);
+
+    // Detect whether a draft invoice already exists for these sessions.
+    const draftInvoiceId = parseHourlyDraftId(sessions[0].notes ?? null);
+
+    if (draftInvoiceId) {
+      // ── Update-draft path ────────────────────────────────────────────────
+      try {
+        // 1. Remove placeholder lines (auto-generated at check-in).
+        const { error: delErr } = await supabase
+          .from("invoice_line_items")
+          .delete()
+          .eq("invoice_id", draftInvoiceId)
+          .eq("service_type", HOURLY_PLACEHOLDER_SERVICE_TYPE);
+        if (delErr) throw delErr;
+
+        // 2. Determine sort_order for new lines (append after existing kept lines).
+        const { data: existingLines } = await supabase
+          .from("invoice_line_items")
+          .select("sort_order")
+          .eq("invoice_id", draftInvoiceId)
+          .order("sort_order", { ascending: false })
+          .limit(1);
+        const maxSort = existingLines?.[0]?.sort_order ?? -1;
+
+        // 3. Insert real hour-based lines.
+        const insertRows = hourLineItems.map((li, i) => ({
+          invoice_id: draftInvoiceId,
+          description: li.description,
+          quantity: li.quantity,
+          unit_price: li.unitPrice,
+          total_price: li.unitPrice * li.quantity,
+          line_total: li.unitPrice * li.quantity,
+          pricing_key: li.pricingKey ?? null,
+          service_type: li.serviceType,
+          sort_order: (maxSort ?? -1) + 1 + i,
+        }));
+
+        if (insertRows.length > 0) {
+          const { error: insErr } = await supabase.from("invoice_line_items").insert(insertRows);
+          if (insErr) throw insErr;
+        }
+
+        // 4. Apply owner discount to the invoice header.
+        //    The draft was created with discount_aed = 0 (fixed going forward in
+        //    createServiceInvoice, but existing drafts still need it set here).
+        if (ownerDiscountPct > 0) {
+          const { data: currentLines } = await supabase
+            .from("invoice_line_items")
+            .select("quantity, unit_price")
+            .eq("invoice_id", draftInvoiceId);
+          const linesSubtotal = (currentLines ?? []).reduce(
+            (s, li) => s + li.unit_price * Math.max(1, li.quantity),
+            0,
+          );
+          const discountAed = roundAed(linesSubtotal * ownerDiscountPct / 100);
+          if (discountAed > 0) {
+            const { error: discErr } = await supabase
+              .from("invoices")
+              .update({
+                discount_pct: ownerDiscountPct,
+                discount_aed: discountAed,
+                discount_amount: discountAed,
+              })
+              .eq("id", draftInvoiceId);
+            if (discErr) throw discErr;
+          }
+        }
+
+        // 5. Recalculate totals (picks up discount_aed set above), then finalise.
+        await recalculateInvoiceTotals(draftInvoiceId);
+        const { error: finaliseErr } = await supabase
+          .from("invoices")
+          .update({ status: "finalised" })
+          .eq("id", draftInvoiceId);
+        if (finaliseErr) throw finaliseErr;
+
+        // 6. Upgrade HOURLY_DRAFT → HOURLY_INVOICED on all sessions.
+        const updateResults = await Promise.all(
+          sessions.map(async (session) => {
+            const { error } = await supabase
+              .from("daycare_sessions")
+              .update({
+                notes: upgradeHourlyDraftToInvoiced(session.notes ?? null, draftInvoiceId),
+              })
+              .eq("id", session.id);
+            return { sessionId: session.id, error };
+          }),
+        );
+
+        const failed = updateResults.filter((r) => r.error);
+        if (failed.length > 0) {
+          toast.error(
+            "Invoice finalised but some sessions could not be marked as billed. Check the invoice and re-run if needed.",
+          );
+        } else {
+          toast.success("Hourly daycare invoice finalised");
+        }
+
+        onOpenChange(false);
+        onSuccess?.();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not finalise invoice";
+        toast.error(message);
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // ── Legacy create path (no draft exists) ────────────────────────────────
     let invoiceId: string | null = null;
     try {
       invoiceId = await createServiceInvoice({
         ownerId,
         serviceType: "daycare",
         referenceId: sessions[0].id,
-        lineItems,
+        lineItems: hourLineItems,
         invoiceStatus: "finalised",
         skipMemberDiscount: skipInvoiceDiscount,
       });

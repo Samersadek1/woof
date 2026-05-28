@@ -86,6 +86,8 @@ export function buildDaycareTags(input: {
   packageId: string | null;
   billingPath?: "single" | "hourly" | "package";
   hasInvoice?: boolean;
+  /** True when the session is linked to a draft invoice (hours not yet entered). */
+  hasDraftInvoice?: boolean;
 }): OperationTag[] {
   const tags: OperationTag[] = [];
 
@@ -105,6 +107,8 @@ export function buildDaycareTags(input: {
   if (input.billingPath === "hourly") {
     if (input.hasInvoice) {
       tags.push({ key: "hourly_invoiced", label: "Hourly · Invoiced", tone: "success" });
+    } else if (input.hasDraftInvoice) {
+      tags.push({ key: "hourly_draft", label: "Hourly · Draft invoice", tone: "warning" });
     } else {
       tags.push({ key: "hourly", label: "Hourly · Pending invoice", tone: "warning" });
     }

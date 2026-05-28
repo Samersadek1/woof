@@ -1,5 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
-import { clearHourlyInvoicedFromNotes, HOURLY_INVOICED_PREFIX } from "@/lib/daycareSessionMeta";
+import {
+  clearHourlyInvoicedFromNotes,
+  clearHourlyDraftFromNotes,
+  HOURLY_INVOICED_PREFIX,
+  HOURLY_DRAFT_PREFIX,
+} from "@/lib/daycareSessionMeta";
 
 /**
  * Run in Supabase SQL Editor: `sql/invoice-deletion-log-insert-policy.sql`
@@ -20,18 +25,24 @@ function deleteStepError(step: string, message: string, code?: string): Error {
 }
 
 async function clearDaycareHourlyInvoiceMarkers(invoiceUuid: string): Promise<void> {
-  const marker = `${HOURLY_INVOICED_PREFIX}${invoiceUuid}`;
+  const invoicedMarker = `${HOURLY_INVOICED_PREFIX}${invoiceUuid}`;
+  const draftMarker = `${HOURLY_DRAFT_PREFIX}${invoiceUuid}`;
+
+  // Fetch sessions that have either the finalised or draft marker.
   const { data: sessions, error: fetchErr } = await supabase
     .from("daycare_sessions")
     .select("id, notes")
-    .ilike("notes", `%${marker}%`);
+    .or(`notes.ilike.%${invoicedMarker}%,notes.ilike.%${draftMarker}%`);
   if (fetchErr) {
     throw deleteStepError("Could not load linked daycare sessions", fetchErr.message, fetchErr.code);
   }
   for (const session of sessions ?? []) {
+    // Clear both markers in one pass.
+    let notes = clearHourlyInvoicedFromNotes(session.notes, invoiceUuid);
+    notes = clearHourlyDraftFromNotes(notes, invoiceUuid);
     const { error: updateErr } = await supabase
       .from("daycare_sessions")
-      .update({ notes: clearHourlyInvoicedFromNotes(session.notes, invoiceUuid) })
+      .update({ notes })
       .eq("id", session.id);
     if (updateErr) {
       throw deleteStepError(

@@ -59,7 +59,10 @@ import {
   resolveDaycareSessionInvoiceId,
   isDaycareHourlyPending,
   isSingleDayInvoiceMissing,
+  isHourlyBillingInvoiced,
+  isHourlyBillingDraft,
 } from "@/lib/daycareSessionMeta";
+import { findOrCreateHourlyDraft } from "@/lib/daycareHourlyDraftInvoice";
 import { useDaycareSessionInvoiceMap } from "@/hooks/useDaycareSessionInvoiceMap";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -888,6 +891,7 @@ function PlannerTab() {
     const failures: string[] = [];
     let successCount = 0;
     const sessionsCreated: Record<string, string> = {};
+    const sessionNotes: Record<string, string | null> = {};
     const consumedCreditByPet: Record<string, DaycarePackage> = {};
     const successfullyCreditCovered: string[] = [];
     const expiredPackageUsed: string[] = [];
@@ -923,6 +927,7 @@ function PlannerTab() {
         });
 
         sessionsCreated[petId] = session.id;
+        sessionNotes[petId] = session.notes ?? null;
         successCount += 1;
 
         if (chosenCredit) {
@@ -1069,6 +1074,45 @@ function PlannerTab() {
           const message = extractErrorMessage(error);
           toast.error(`Invoice failed: ${message}`);
         }
+      }
+    }
+
+    // ── Draft invoice for hourly dogs ─────────────────────────────────────
+    const okHourlyIds = hourlyPetIds.filter((id) => sessionsCreated[id]);
+    if (okHourlyIds.length > 0) {
+      const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
+      const transportKey = transportPricingKey(checkInDraft.transport_zone);
+      const billTransport = checkInDraft.transport_zone !== "complimentary";
+      // Only put transport on the hourly draft when there are no single-day dogs
+      // in this batch — if single-day dogs exist, transport is already on their invoice.
+      const hourlyTransportQty =
+        billTransport && okSingleIds.length === 0
+          ? transportQuantityForPets(checkInDraft.transport_zone, okHourlyIds.length)
+          : 0;
+
+      try {
+        await findOrCreateHourlyDraft({
+          ownerId,
+          sessionDate: checkInDraft.session_date,
+          sessions: okHourlyIds.map((id) => ({
+            id: sessionsCreated[id],
+            notes: sessionNotes[id] ?? null,
+            petName: pets?.find((p) => p.id === id)?.name ?? "Pet",
+          })),
+          transport: {
+            pickupUsed: checkInDraft.pickup_used,
+            dropoffUsed: checkInDraft.dropoff_used,
+            skip: okSingleIds.length > 0 || hourlyTransportQty === 0,
+            qty: hourlyTransportQty,
+            rate: transportRate,
+            pricingKey: transportKey,
+            zoneLabel,
+            isPrivateFlat: privateFlat,
+          },
+        });
+      } catch (error) {
+        const message = extractErrorMessage(error);
+        toast.error(`Draft invoice failed: ${message}. Check-in was saved — invoice can be added from Billing.`);
       }
     }
 
@@ -1846,7 +1890,8 @@ function DaycareOperationsTab() {
                   checkedIn: Boolean(s.checked_in),
                   packageId: s.package_id,
                   billingPath,
-                  hasInvoice: Boolean(invoiceId),
+                  hasInvoice: isHourlyBillingInvoiced(s.notes),
+                  hasDraftInvoice: isHourlyBillingDraft(s.notes),
                 });
                 return (
                   <div key={s.id} className="rounded-md border px-3 py-2 text-sm flex items-start justify-between gap-3">

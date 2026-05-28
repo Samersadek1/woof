@@ -17,6 +17,8 @@ import {
   resolveDaycareSessionInvoiceId,
   isDaycareHourlyPending,
   isSingleDayInvoiceMissing,
+  isHourlyBillingInvoiced,
+  isHourlyBillingDraft,
 } from "@/lib/daycareSessionMeta";
 import { useDaycareSessionInvoiceMap } from "@/hooks/useDaycareSessionInvoiceMap";
 import { DaycareSessionInvoiceLink } from "@/components/daycare/DaycareSessionInvoiceLink";
@@ -354,7 +356,8 @@ export default function ServiceCheckinsPage() {
                               checkedIn: row.checkedIn,
                               packageId: row.packageId,
                               billingPath,
-                              hasInvoice: Boolean(invoiceId),
+                              hasInvoice: isHourlyBillingInvoiced(row.notes),
+                              hasDraftInvoice: isHourlyBillingDraft(row.notes),
                             }).map((tag) => (
                               <Badge
                                 key={`${row.id}-${tag.key}`}

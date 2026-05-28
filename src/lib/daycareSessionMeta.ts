@@ -2,8 +2,13 @@ export type DaycareBillingPath = "single" | "hourly";
 
 export const BILLING_PATH_PREFIX = "BILLING_PATH:";
 export const HOURLY_INVOICED_PREFIX = "HOURLY_INVOICED:";
+/**
+ * Written at check-in for sibling sessions (not the primary) when a draft
+ * invoice is created. Replaced by HOURLY_INVOICED once the invoice is finalised.
+ */
+export const HOURLY_DRAFT_PREFIX = "HOURLY_DRAFT:";
 
-const META_LINE_PREFIXES = [BILLING_PATH_PREFIX, HOURLY_INVOICED_PREFIX, "COLLECTION_BY:"];
+const META_LINE_PREFIXES = [BILLING_PATH_PREFIX, HOURLY_INVOICED_PREFIX, HOURLY_DRAFT_PREFIX, "COLLECTION_BY:"];
 
 /** Strip internal metadata lines from notes shown in the UI. */
 export function visibleDaycareNotes(notes: string | null | undefined): string {
@@ -69,7 +74,13 @@ export function parseHourlyInvoicedId(notes: string | null | undefined): string 
   return id || null;
 }
 
-/** Resolve invoice id for a daycare session (direct service_id link or hourly family marker in notes). */
+/**
+ * Resolve invoice id for a daycare session.
+ * Checks (in priority order):
+ *  1. Direct service_id link (primary session of any invoice)
+ *  2. HOURLY_INVOICED marker (finalised family billing)
+ *  3. HOURLY_DRAFT marker (draft invoice created at check-in)
+ */
 export function resolveDaycareSessionInvoiceId(
   sessionId: string,
   notes: string | null | undefined,
@@ -77,7 +88,9 @@ export function resolveDaycareSessionInvoiceId(
 ): string | null {
   const fromService = invoiceIdByServiceId.get(sessionId);
   if (fromService) return fromService;
-  return parseHourlyInvoicedId(notes);
+  const fromInvoiced = parseHourlyInvoicedId(notes);
+  if (fromInvoiced) return fromInvoiced;
+  return parseHourlyDraftId(notes);
 }
 
 export type DaycareSessionBillingFlags = {
@@ -87,14 +100,23 @@ export type DaycareSessionBillingFlags = {
   checkedIn: boolean;
 };
 
+/**
+ * Returns true when an hourly session still needs billing to be completed (finalised).
+ * True for both "no invoice yet" (legacy) and "has a draft invoice" (needs hours entered).
+ * False once the invoice is finalised (HOURLY_INVOICED marker or service_id invoice present
+ * and that invoice is assumed finalised by callers that have already filtered it).
+ *
+ * The `invoiceIdByServiceId` parameter is kept for backward compatibility but is no longer
+ * the primary signal — HOURLY_INVOICED is the canonical "done" marker on all sessions.
+ */
 export function isDaycareHourlyPending(
   session: DaycareSessionBillingFlags,
-  invoiceIdByServiceId: Map<string, string>,
+  _invoiceIdByServiceId: Map<string, string>,
 ): boolean {
   if (!session.checkedIn) return false;
   if (parseDaycareBillingPath(session.notes, session.packageId) !== "hourly") return false;
+  // HOURLY_INVOICED means the invoice has been finalised — billing complete.
   if (isHourlyBillingInvoiced(session.notes)) return false;
-  if (invoiceIdByServiceId.has(session.sessionId)) return false;
   return true;
 }
 
@@ -130,4 +152,81 @@ export function clearHourlyInvoicedFromNotes(
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith(markerPrefix));
   return lines.length > 0 ? lines.join("\n") : null;
+}
+
+// ── HOURLY_DRAFT helpers ──────────────────────────────────────────────────────
+
+export function isHourlyBillingDraft(notes: string | null | undefined): boolean {
+  const raw = (notes ?? "").trim();
+  if (!raw) return false;
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .some((line) => line.startsWith(HOURLY_DRAFT_PREFIX));
+}
+
+export function parseHourlyDraftId(notes: string | null | undefined): string | null {
+  const raw = (notes ?? "").trim();
+  if (!raw) return null;
+  const marker = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith(HOURLY_DRAFT_PREFIX));
+  if (!marker) return null;
+  const id = marker.replace(HOURLY_DRAFT_PREFIX, "").trim();
+  return id || null;
+}
+
+/** Append HOURLY_DRAFT:{invoiceId} to notes, preserving billing path and visible text. */
+export function composeNotesWithHourlyDraft(
+  notes: string | null | undefined,
+  invoiceId: string,
+): string | null {
+  const cleaned = visibleDaycareNotes(notes);
+  const meta = `${HOURLY_DRAFT_PREFIX}${invoiceId}`;
+  const billingLine = (notes ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith(BILLING_PATH_PREFIX));
+  const parts = [cleaned, billingLine, meta].filter(Boolean);
+  return parts.length > 0 ? parts.join("\n") : meta;
+}
+
+/** Remove HOURLY_DRAFT:{invoiceId} from notes. */
+export function clearHourlyDraftFromNotes(
+  notes: string | null | undefined,
+  invoiceId: string,
+): string | null {
+  const raw = (notes ?? "").trim();
+  if (!raw) return null;
+  const markerPrefix = `${HOURLY_DRAFT_PREFIX}${invoiceId}`;
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith(markerPrefix));
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+/**
+ * Replace HOURLY_DRAFT:{invoiceId} with HOURLY_INVOICED:{invoiceId} in a session's notes.
+ * Used when the draft invoice is finalised.
+ */
+export function upgradeHourlyDraftToInvoiced(
+  notes: string | null | undefined,
+  invoiceId: string,
+): string | null {
+  const raw = (notes ?? "").trim();
+  if (!raw) return composeNotesWithHourlyInvoiced(notes, invoiceId);
+  const draftMarker = `${HOURLY_DRAFT_PREFIX}${invoiceId}`;
+  const invoicedMarker = `${HOURLY_INVOICED_PREFIX}${invoiceId}`;
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .map((line) => (line === draftMarker ? invoicedMarker : line))
+    .filter(Boolean);
+  // If draft marker wasn't present, just append HOURLY_INVOICED
+  if (!lines.includes(invoicedMarker)) {
+    lines.push(invoicedMarker);
+  }
+  return lines.join("\n");
 }

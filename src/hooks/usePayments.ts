@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { invoiceAmountDue } from "@/lib/vatConfig";
 import { invoicePaymentMethodToTransactionType, type ExternalPaymentMethod } from "@/lib/paymentMethod";
+import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
 
 type PaymentMethod = ExternalPaymentMethod;
 
@@ -33,25 +34,17 @@ export function useProcessWalletPayment() {
 
   return useMutation({
     mutationFn: async ({ invoiceId, performedBy }: WalletPaymentArgs) => {
-      const { data, error } = await supabase.rpc("process_wallet_payment", {
-        p_invoice_id: invoiceId,
-        p_performed_by: performedBy,
-      });
-      if (error) throw error;
-
-      const result = data as {
-        success?: boolean;
-        error?: string;
-        partial?: boolean;
-        amount_charged?: number;
-        new_balance?: number;
-        owner_id?: string;
-        shortfall?: number;
-      };
-      if (result?.success === false) {
+      const result = await payInvoiceFromWallet(supabase, { invoiceId, performedBy });
+      if (!result.success) {
         throw new Error(result.error || "Wallet payment failed.");
       }
-      return result;
+      return {
+        success: true,
+        amount_charged: result.amountCharged,
+        new_balance: result.newWalletBalance,
+        owner_id: result.ownerId,
+        partial: result.partial,
+      };
     },
     onSuccess: (data, vars) => {
       invalidateBilling(qc, vars.invoiceId, data?.owner_id);
