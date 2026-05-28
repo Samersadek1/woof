@@ -48,12 +48,12 @@ export function PackageUsageDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-lg"
+        className="flex max-h-[90vh] flex-col gap-4 overflow-hidden sm:max-w-lg"
         data-testid={pkg ? `daycare-package-detail-${pkg.id}` : undefined}
       >
         {pkg ? (
           <>
-            <DialogHeader>
+            <DialogHeader className="shrink-0">
               <DialogTitle className="pr-6">
                 {pkg.pets?.name ?? "Pet"}
                 <span className="font-normal text-muted-foreground"> — </span>
@@ -66,7 +66,7 @@ export function PackageUsageDialog({
               </p>
             </DialogHeader>
 
-            <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+            <div className="grid shrink-0 grid-cols-2 gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
               <div>
                 <p className="text-xs text-muted-foreground">Package balance (units)</p>
                 <p className="font-semibold tabular-nums">
@@ -92,7 +92,7 @@ export function PackageUsageDialog({
 
             {balanceMismatch ? (
               <div
-                className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                className="flex shrink-0 gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
                 data-testid="daycare-package-balance-mismatch"
               >
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -105,8 +105,8 @@ export function PackageUsageDialog({
               </div>
             ) : null}
 
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+              <p className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Days used in
               </p>
 
@@ -135,7 +135,10 @@ export function PackageUsageDialog({
                   ) : null}
                 </div>
               ) : (
-                <ScrollArea className="max-h-[min(50vh,320px)] rounded-lg border">
+                <ScrollArea
+                  className="h-[min(45vh,360px)] min-h-[12rem] rounded-lg border"
+                  data-testid="daycare-package-usage-scroll"
+                >
                   <Table data-testid="daycare-package-usage-dates">
                     <TableHeader>
                       <TableRow className="bg-muted/40">
@@ -168,7 +171,7 @@ export function PackageUsageDialog({
               )}
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="shrink-0 gap-2 sm:gap-0">
               {onOpenInPlanner ? (
                 <Button
                   type="button"
