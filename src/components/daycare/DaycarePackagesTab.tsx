@@ -98,6 +98,8 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
   const remaining = pkg.total_days - pkg.days_used;
   const pct = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
   const isExhausted = remaining <= 0;
+  const isExpired =
+    !isExhausted && !!pkg.expiry_date && pkg.expiry_date < format(new Date(), "yyyy-MM-dd");
   const canDelete = pkg.days_used === 0 && remaining > 0;
   const memberType = pkg.owners?.member_tier ?? "standard";
 
@@ -143,6 +145,10 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
               {isExhausted ? (
                 <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-[10px]">
                   Exhausted
+                </Badge>
+              ) : isExpired ? (
+                <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200 text-[10px]">
+                  Expired
                 </Badge>
               ) : (
                 <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">

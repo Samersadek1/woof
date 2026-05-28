@@ -2725,6 +2725,7 @@ export type Database = {
       }
       consume_service_credit: {
         Args: {
+          p_allow_expired?: boolean
           p_consumed_for_ref_id?: string
           p_consumed_for_ref_type?: string
           p_credit_id: string

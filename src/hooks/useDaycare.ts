@@ -27,6 +27,7 @@ export type DaycarePackage = {
   is_bonus: boolean;
   units_remaining: number;
   status: string;
+  is_expired: boolean;
   source_ref_id: string | null;
   redemption_group_id: string | null;
 };
@@ -89,27 +90,31 @@ export function useDaycarePackages(ownerId: string) {
         .in("pet_id", petIds)
         .in("service_code", DAYCARE_CREDIT_CODES)
         .eq("is_bonus", false)
-        .eq("status", "active")
-        .gte("expires_at", new Date().toISOString().slice(0, 10))
+        .in("status", ["active", "expired"])
         .order("expires_at", { ascending: true });
       if (error) throw error;
-      return (data ?? []).map((row) => {
+      const today = new Date().toISOString().slice(0, 10);
+      return (data ?? [])
+        .filter((row) => row.units_total - row.units_consumed > 0)
+        .map((row) => {
         const packageName = creditPackageDisplayName(
           (row as unknown as { purchase_groups?: PurchaseGroupJoin }).purchase_groups ?? null,
         );
+        const expiryDate = row.expires_at;
         return {
           id: row.id,
           owner_id: ownerId,
           pet_id: row.pet_id,
           total_days: row.units_total,
           days_used: row.units_consumed,
-          expiry_date: row.expires_at,
+          expiry_date: expiryDate,
           purchase_date: row.created_at,
           package_name: packageName,
           service_code: row.service_code,
           is_bonus: row.is_bonus,
           status: row.status,
           units_remaining: row.units_total - row.units_consumed,
+          is_expired: !!expiryDate && expiryDate < today,
           source_ref_id: row.source_ref_id,
           redemption_group_id: row.redemption_group_id,
         };
@@ -143,17 +148,20 @@ export function useConsumeServiceCredit() {
       units = 1,
       consumedForRefId = null,
       consumedForRefType = null,
+      allowExpired = false,
     }: {
       creditId: string;
       units?: number;
       consumedForRefId?: string | null;
       consumedForRefType?: string | null;
+      allowExpired?: boolean;
     }) => {
       const { data, error } = await supabase.rpc("consume_service_credit", {
         p_credit_id: creditId,
         p_units: units,
         p_consumed_for_ref_id: consumedForRefId,
         p_consumed_for_ref_type: consumedForRefType,
+        p_allow_expired: allowExpired,
       });
       if (error) throw error;
       return data;
@@ -268,6 +276,8 @@ export type AddDaycareDayPayload = AttendancePayload & {
    * Check-in uses separate consumption so hourly units can be applied there.
    */
   credit_units?: number;
+  /** Allow consuming credits past expires_at (daycare staff override). */
+  allow_expired_credit?: boolean;
   /** Client-selected size label (Small / Medium / Large / Extra Large). */
   dog_size?: string | null;
 };
@@ -292,6 +302,7 @@ export function useAddDaycareDay() {
       credit_units,
       billing_path,
       checked_in_at,
+      allow_expired_credit,
     }: AddDaycareDayPayload) => {
       // Prevent duplicate same-day check-ins for the same pet.
       const { data: existing, error: existingErr } = await supabase
@@ -339,6 +350,7 @@ export function useAddDaycareDay() {
           p_units: credit_units,
           p_consumed_for_ref_id: session.id,
           p_consumed_for_ref_type: "daycare_session",
+          p_allow_expired: allow_expired_credit ?? false,
         });
         if (consumeErr) {
           await supabase.from("daycare_sessions").delete().eq("id", session.id);

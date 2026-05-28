@@ -24,6 +24,10 @@ import {
   vatLineLabel,
 } from "@/lib/vatConfig";
 import { formatAed } from "@/lib/money";
+import {
+  daycarePackageCreditLabel,
+  daycarePackageExpiryLabel,
+} from "@/lib/daycarePackageUtils";
 import { useOwner } from "@/hooks/useOwners";
 import { OwnerClientSearch } from "@/components/OwnerClientSearch";
 import { usePets } from "@/hooks/usePets";
@@ -59,6 +63,7 @@ import {
 import { useDaycareSessionInvoiceMap } from "@/hooks/useDaycareSessionInvoiceMap";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -181,12 +186,13 @@ function extractErrorMessage(error: unknown): string {
 interface SessionsTableProps {
   sessions:  SessionRow[];
   packageId: string;
+  packageIsExpired?: boolean;
   petId:     string;
   ownerId:   string;
   isLoading: boolean;
 }
 
-function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: SessionsTableProps) {
+function SessionsTable({ sessions, packageId, packageIsExpired, petId, ownerId, isLoading }: SessionsTableProps) {
   const updateSession = useUpdateDaycareSession();
   const rescheduleSession = useRescheduleDaycareSession();
   const deleteSession = useDeleteDaycareSession();
@@ -239,13 +245,18 @@ function SessionsTable({ sessions, packageId, petId, ownerId, isLoading }: Sessi
       owner_id:     ownerId,
       package_id:   packageId,
       credit_units: 1,
+      allow_expired_credit: packageIsExpired,
       pickup_used:  addDraft.pickup_used,
       dropoff_used: addDraft.dropoff_used,
       logged_by:    addDraft.logged_by || null,
       remark:       addDraft.remark    || null,
     }, {
       onSuccess: () => {
-        toast.success("Day added");
+        if (packageIsExpired) {
+          toast.warning("Day added using an expired package — confirm with the client.");
+        } else {
+          toast.success("Day added");
+        }
         setAddOpen(false);
         setAddDraft({ session_date: TODAY, pickup_used: false, dropoff_used: false, logged_by: "", remark: "" });
       },
@@ -782,7 +793,6 @@ function PlannerTab() {
       if (pkg.pet_id !== petId) return false;
       if (pkg.is_bonus) return false;
       if ((pkg.days_used ?? 0) >= (pkg.total_days ?? 0)) return false;
-      if (pkg.expiry_date && pkg.expiry_date < TODAY) return false;
       return true;
     });
   }, [packages]);
@@ -827,8 +837,22 @@ function PlannerTab() {
 
   function pkgLabel(pkg: DaycarePackage) {
     const pet = pets?.find((p) => p.id === pkg.pet_id);
-    return `${pet?.name ?? "Unknown"} — ${pkg.days_used}/${pkg.total_days}`;
+    const expiredSuffix = pkg.is_expired && pkg.expiry_date
+      ? ` · expired ${daycarePackageExpiryLabel(pkg.expiry_date)}`
+      : "";
+    return `${pet?.name ?? "Unknown"} — ${pkg.days_used}/${pkg.total_days}${expiredSuffix}`;
   }
+
+  const expiredPackageSelections = useMemo(() => {
+    if (!packages?.length || selectedPetIds.length === 0) return [];
+    return selectedPetIds.flatMap((petId) => {
+      const choice = billingChoiceByPet[petId];
+      const pkg = packages.find((p) => p.id === choice);
+      if (!pkg?.is_expired) return [];
+      const petName = pets?.find((p) => p.id === petId)?.name ?? "Pet";
+      return [{ petId, petName, pkg }];
+    });
+  }, [billingChoiceByPet, packages, pets, selectedPetIds]);
 
   const togglePetSelection = (petId: string, checked: boolean) => {
     setSelectedPetIds((prev) => {
@@ -866,6 +890,7 @@ function PlannerTab() {
     const sessionsCreated: Record<string, string> = {};
     const consumedCreditByPet: Record<string, DaycarePackage> = {};
     const successfullyCreditCovered: string[] = [];
+    const expiredPackageUsed: string[] = [];
     const fallbackSingleIds: string[] = [];
     const privateFlat = checkInDraft.transport_zone === "dubai_private";
 
@@ -908,9 +933,13 @@ function PlannerTab() {
               units: consumeUnits,
               consumedForRefId: session.id,
               consumedForRefType: "daycare_session",
+              allowExpired: chosenCredit.is_expired,
             });
             consumedCreditByPet[petId] = chosenCredit;
             successfullyCreditCovered.push(petId);
+            if (chosenCredit.is_expired) {
+              expiredPackageUsed.push(petName);
+            }
           } catch (error) {
             const message = extractErrorMessage(error);
             failures.push(`${petName}: credit consumption failed (${message}); charging this check-in instead`);
@@ -1042,6 +1071,11 @@ function PlannerTab() {
 
     if (successCount > 0) {
       toast.success(`Checked in ${successCount} dog${successCount !== 1 ? "s" : ""}`);
+      if (expiredPackageUsed.length > 0) {
+        toast.warning(
+          `Used expired package for ${expiredPackageUsed.join(", ")} — confirm with the client before redeeming further credits.`,
+        );
+      }
       setSelectedPetIds([]);
       setBillingChoiceByPet({});
       setSkipInvoiceDiscount(false);
@@ -1128,6 +1162,19 @@ function PlannerTab() {
 
       {packageId && selectedPkg && (
         <>
+          {selectedPkg.is_expired && (
+            <Alert variant="destructive" className="border-amber-300 bg-amber-50 text-amber-950 [&>svg]:text-amber-700">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Expired package</AlertTitle>
+              <AlertDescription>
+                This package expired{" "}
+                {selectedPkg.expiry_date
+                  ? daycarePackageExpiryLabel(selectedPkg.expiry_date)
+                  : "before today"}
+                . You can still add days, but confirm with the client first.
+              </AlertDescription>
+            </Alert>
+          )}
           <div className="flex items-start justify-between gap-4">
             <Card className="flex-1">
               <CardContent className="pt-5 pb-4">
@@ -1160,6 +1207,7 @@ function PlannerTab() {
           <SessionsTable
             sessions={sessions ?? []}
             packageId={packageId}
+            packageIsExpired={selectedPkg.is_expired}
             petId={selectedPkg.pet_id}
             ownerId={selectedPkg.owner_id}
             isLoading={sessionsLoading}
@@ -1225,8 +1273,21 @@ function PlannerTab() {
                                 {pet.name}
                               </Label>
                             </div>
-                            <Badge variant="outline" className={usablePackages.length > 0 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : ""}>
-                              {usablePackages.length > 0 ? `${usablePackages.length} active package${usablePackages.length !== 1 ? "s" : ""}` : "No active package"}
+                            <Badge
+                              variant="outline"
+                              className={
+                                usablePackages.length > 0
+                                  ? usablePackages.some((pkg) => pkg.is_expired)
+                                    ? "bg-amber-50 text-amber-800 border-amber-200"
+                                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  : ""
+                              }
+                            >
+                              {usablePackages.length > 0
+                                ? usablePackages.some((pkg) => pkg.is_expired)
+                                  ? `${usablePackages.length} package${usablePackages.length !== 1 ? "s" : ""} (includes expired)`
+                                  : `${usablePackages.length} active package${usablePackages.length !== 1 ? "s" : ""}`
+                                : "No active package"}
                             </Badge>
                           </div>
 
@@ -1250,7 +1311,7 @@ function PlannerTab() {
                                   <SelectItem value="hourly">Hourly (invoice at checkout)</SelectItem>
                                   {usablePackages.map((pkg) => (
                                     <SelectItem key={pkg.id} value={pkg.id}>
-                                      Use credit ({pkg.total_days - pkg.days_used} remaining{pkg.service_code === "daycare_hourly" ? " hourly" : ""})
+                                      {daycarePackageCreditLabel(pkg)}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -1498,6 +1559,23 @@ function PlannerTab() {
                   Operations. Package credits are recorded without a charge line.
                 </p>
               </div>
+
+              {expiredPackageSelections.length > 0 && (
+                <Alert variant="destructive" className="border-amber-300 bg-amber-50 text-amber-950 [&>svg]:text-amber-700">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Expired package selected</AlertTitle>
+                  <AlertDescription>
+                    {expiredPackageSelections.map(({ petName, pkg }) => (
+                      <span key={pkg.id} className="block">
+                        {petName}: expired{" "}
+                        {pkg.expiry_date ? daycarePackageExpiryLabel(pkg.expiry_date) : "before today"} (
+                        {pkg.total_days - pkg.days_used} remaining)
+                      </span>
+                    ))}
+                    Check-in will proceed — confirm with the client first.
+                  </AlertDescription>
+                </Alert>
+              )}
 
               <Button
                 data-testid="daycare-create-session-btn"
