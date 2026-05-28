@@ -308,3 +308,4 @@ export async function removeSingleSessionFromDraft(params: {
   }
 
   await recalculateInvoiceTotals(invoiceId);
+}
