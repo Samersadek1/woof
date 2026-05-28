@@ -524,6 +524,7 @@ export function useCreateBooking() {
           .insert(bookingPets);
 
         if (petsError) {
+          await supabase.from("bookings").delete().eq("id", booking.id);
           throw petsError;
         }
       }
