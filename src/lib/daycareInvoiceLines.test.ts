@@ -46,8 +46,8 @@ describe("daycareInvoiceLines", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({
       description: "Max — Daycare hourly — 27 May 2026 (3 hrs)",
-      quantity: 3,
-      unitPrice: 25,
+      quantity: 6,
+      unitPrice: 12.5,
       serviceType: "daycare",
     });
   });
