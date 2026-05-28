@@ -1,0 +1,6 @@
+credit_id,tracker_id,pet_name,old_units_total,new_units_total,old_units_consumed,new_units_consumed,applied_at,note
+5729a11a-22c7-44a2-9e51-f4cf0422e9aa,PKG-84262-84380,Pepe Sameni,30,30,22,23,2026-05-27,remainder on first credit (45/2 consumed)
+e8e20dbd-bf7b-440f-adfb-4a2801b46e76,PKG-84262-84380,Bobby,30,30,22,22,2026-05-27,
+7c29d7af-59b1-4f11-90ef-cca31b1fcf31,PKG-Invoice-Lotus-Meimei-Rocky-Kronfol-Tax-Invoice-Lotus-Meimei-Rocky-Kronfol-May-23-2026-packages-upaid-xlsx,Lotus,10,30,1,0,2026-05-27,90/3 total 0/3 consumed
+f7b407ea-84c2-40f3-9ddd-2f223fa0848d,PKG-Invoice-Lotus-Meimei-Rocky-Kronfol-Tax-Invoice-Lotus-Meimei-Rocky-Kronfol-May-23-2026-packages-upaid-xlsx,Mei Mei,10,30,1,0,2026-05-27,
+b00c1546-6046-4bfa-b1aa-87a8d56cf053,PKG-Invoice-Lotus-Meimei-Rocky-Kronfol-Tax-Invoice-Lotus-Meimei-Rocky-Kronfol-May-23-2026-packages-upaid-xlsx,Rocky,10,30,1,0,2026-05-27,
