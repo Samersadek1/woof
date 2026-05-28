@@ -22,4 +22,14 @@ describe("daycarePackageUtils", () => {
     expect(label).toContain("4 remaining");
     expect(label).toContain("expired");
   });
+
+  it("labels half-day credits in billing dropdown copy", () => {
+    const label = daycarePackageCreditLabel({
+      total_days: 6,
+      days_used: 2,
+      service_code: "daycare_half_day",
+    });
+    expect(label).toContain("4 remaining");
+    expect(label).toContain("half-day");
+  });
 });

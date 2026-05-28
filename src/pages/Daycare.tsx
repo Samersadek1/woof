@@ -1003,9 +1003,14 @@ function PlannerTab() {
           const petName = pets?.find((p) => p.id === petId)?.name ?? "Pet";
           const credit = consumedCreditByPet[petId];
           const packageName = credit?.package_name ?? "package credit";
-          const isHourlyCredit = credit?.service_code === "daycare_hourly";
+          const creditKind =
+            credit?.service_code === "daycare_hourly"
+              ? "Daycare hourly"
+              : credit?.service_code === "daycare_half_day"
+                ? "Daycare half day"
+                : "Daycare full day";
           lineItems.push({
-            description: `${isHourlyCredit ? "Daycare hourly" : "Daycare full day"} — ${petName} (covered by ${packageName})`,
+            description: `${creditKind} — ${petName} (covered by ${packageName})`,
             quantity: 1,
             unitPrice: 0,
             serviceType: "daycare",

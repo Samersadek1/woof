@@ -1,6 +1,7 @@
 import { format, parseISO } from "date-fns";
 import * as XLSX from "xlsx";
 
+import { daycareCreditTypeLabel } from "@/lib/daycareCredits";
 import type { PackageWithDetails } from "../hooks/useDaycare";
 
 function ownerLabel(
@@ -19,12 +20,6 @@ function formatExportDate(iso: string | null | undefined): string {
   }
 }
 
-function serviceCodeLabel(code: string): string {
-  if (code === "daycare_hourly") return "Hourly";
-  if (code === "daycare_full_day") return "Full day";
-  return code;
-}
-
 function utilizationPct(daysUsed: number, totalDays: number): number | "" {
   if (totalDays <= 0) return "";
   return Math.round((daysUsed / totalDays) * 1000) / 10;
@@ -37,7 +32,7 @@ export function daycarePackagesExportRows(packages: PackageWithDetails[]) {
       Owner: ownerLabel(pkg.owners),
       Pet: pkg.pets?.name ?? "",
       "Package name": pkg.package_name ?? "",
-      Type: serviceCodeLabel(pkg.service_code),
+      Type: daycareCreditTypeLabel(pkg.service_code),
       "Total days": pkg.total_days,
       "Days used": pkg.days_used,
       "Days remaining": remaining,

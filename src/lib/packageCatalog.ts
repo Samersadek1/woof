@@ -16,6 +16,7 @@ export const PET_SIZE_COLUMNS: { size: PetSize; label: string }[] = [
 /** Credits issued by sold multi-session packages (daycare, grooming, treadmill). */
 export const SOLD_PACKAGE_CREDIT_CODES: ServiceCode[] = [
   "daycare_full_day",
+  "daycare_half_day",
   "daycare_hourly",
   "grooming_splash",
   "grooming_full_service",
@@ -24,6 +25,7 @@ export const SOLD_PACKAGE_CREDIT_CODES: ServiceCode[] = [
 
 const SERVICE_GRANT_LABELS: Partial<Record<ServiceCode, string>> = {
   daycare_full_day: "Full Daycare Day",
+  daycare_half_day: "Half Daycare Day",
   daycare_hourly: "Daycare Hour",
   grooming_splash: "Splash",
   grooming_full_service: "Full Service",

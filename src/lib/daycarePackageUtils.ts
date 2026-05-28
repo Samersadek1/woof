@@ -24,12 +24,17 @@ export function daycarePackageCreditLabel(pkg: {
   is_expired?: boolean;
 }): string {
   const remaining = pkg.total_days - pkg.days_used;
-  const hourly = pkg.service_code === "daycare_hourly" ? " hourly" : "";
+  const unitSuffix =
+    pkg.service_code === "daycare_hourly"
+      ? " hourly"
+      : pkg.service_code === "daycare_half_day"
+        ? " half-day"
+        : "";
   const expired =
     pkg.is_expired ?? daycarePackageIsExpired(pkg.expiry_date ?? null);
   const expirySuffix =
     expired && pkg.expiry_date
       ? ` · expired ${daycarePackageExpiryLabel(pkg.expiry_date)}`
       : "";
-  return `Use credit (${remaining} remaining${hourly}${expirySuffix})`;
+  return `Use credit (${remaining} remaining${unitSuffix}${expirySuffix})`;
 }

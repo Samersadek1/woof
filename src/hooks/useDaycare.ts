@@ -4,6 +4,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
 import { composeNotesWithBillingPath, isDaycareHourlyPending, type DaycareBillingPath } from "@/lib/daycareSessionMeta";
+import { DAYCARE_CREDIT_CODES } from "@/lib/daycareCredits";
 import { ownerMemberTierFromFlags, type OwnerMemberTier } from "@/lib/memberTier";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
@@ -33,8 +34,6 @@ export type DaycarePackage = {
 };
 
 export type { DaycareSession };
-
-const DAYCARE_CREDIT_CODES: ServiceCode[] = ["daycare_full_day", "daycare_hourly"];
 
 type CreditRpcRow = Database["public"]["Functions"]["list_active_credits_for_pet"]["Returns"][number];
 
