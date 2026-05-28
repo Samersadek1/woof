@@ -3223,10 +3223,23 @@ function BoardingHubPage() {
     setDetailContext({ asOfDate });
   };
 
-  const handleBookingSearchSelect = (hit: BoardingBookingSearchHit) => {
-    setBookingSearchFilter(hit.booking_ref ?? hit.id);
-    setWindowStart(startOfWeek(parseISO(hit.check_in_date), { weekStartsOn: 1 }));
-    setViewMode("calendar");
+  const handleBookingSearchSelect = async (hit: BoardingBookingSearchHit) => {
+    const { data: invoice } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("booking_id", hit.id)
+      .neq("status", "voided")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (invoice) {
+      navigate(`/billing/invoices/${invoice.id}`);
+    } else {
+      setBookingSearchFilter(hit.booking_ref ?? hit.id);
+      setWindowStart(startOfWeek(parseISO(hit.check_in_date), { weekStartsOn: 1 }));
+      setViewMode("calendar");
+    }
   };
 
   const { data: facilityRooms = [] } = useRooms();
