@@ -50,6 +50,7 @@ export function PackageUsageDialog({
       <DialogContent
         className="flex max-h-[90vh] flex-col gap-4 overflow-hidden sm:max-w-lg"
         data-testid={pkg ? `daycare-package-detail-${pkg.id}` : undefined}
+        onCloseAutoFocus={(e) => e.preventDefault()}
       >
         {pkg ? (
           <>

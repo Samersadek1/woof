@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { format, parseISO } from "date-fns";
 import { AlertTriangle, Download, Loader2, Package, Plus, Trash2 } from "lucide-react";
@@ -95,6 +95,8 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
   const revokePackage = useDeleteDaycarePackage();
   const [detailOpen, setDetailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  /** Prevents the card click handler from re-opening after dialog close (mouseup lands on card). */
+  const ignoreCardOpenRef = useRef(false);
   const remaining = pkg.total_days - pkg.days_used;
   const pct = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
   const isExhausted = remaining <= 0;
@@ -116,12 +118,29 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
     );
   };
 
+  const openDetail = () => setDetailOpen(true);
+
+  const handleDetailOpenChange = (open: boolean) => {
+    setDetailOpen(open);
+    if (!open) {
+      ignoreCardOpenRef.current = true;
+      window.setTimeout(() => {
+        ignoreCardOpenRef.current = false;
+      }, 400);
+    }
+  };
+
+  const handleCardClick = () => {
+    if (ignoreCardOpenRef.current || detailOpen) return;
+    openDetail();
+  };
+
   return (
     <>
     <Card
-      className={`transition-shadow hover:shadow-md cursor-pointer ${isExhausted ? "opacity-60" : ""}`}
+      className={`transition-shadow hover:shadow-md cursor-pointer ${isExhausted ? "opacity-60" : ""} ${detailOpen ? "pointer-events-none" : ""}`}
       data-testid={`daycare-package-card-${pkg.id}`}
-      onClick={() => setDetailOpen(true)}
+      onClick={handleCardClick}
     >
       <CardContent className="p-4 space-y-3">
         <div className="flex items-start justify-between gap-3">
@@ -188,7 +207,7 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
             data-testid={`daycare-package-view-${pkg.id}`}
             onClick={(e) => {
               e.stopPropagation();
-              setDetailOpen(true);
+              openDetail();
             }}
           >
             View days used
@@ -222,49 +241,49 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
           ) : null}
         </div>
       </CardContent>
-
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove this package?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Removes unused credit for {pkg.pets?.name ?? "this pet"}
-              {pkg.package_name ? ` (${pkg.package_name})` : ""}. Only allowed when no days have been used
-              and no planner sessions are linked. Any unpaid invoice for this purchase will be voided.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={revokePackage.isPending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={revokePackage.isPending}
-              onClick={(e) => {
-                e.preventDefault();
-                revokePackage.mutate(
-                  { creditId: pkg.id, reason: "Removed from daycare packages" },
-                  {
-                    onSuccess: () => {
-                      toast.success("Package removed");
-                      setDeleteOpen(false);
-                    },
-                    onError: (err) => toast.error(err.message),
-                  },
-                );
-              }}
-            >
-              {revokePackage.isPending ? "Removing…" : "Remove package"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <PackageUsageDialog
-        pkg={pkg}
-        open={detailOpen}
-        onOpenChange={setDetailOpen}
-        onOpenInPlanner={openInPlanner}
-      />
     </Card>
+
+    <PackageUsageDialog
+      pkg={pkg}
+      open={detailOpen}
+      onOpenChange={handleDetailOpenChange}
+      onOpenInPlanner={openInPlanner}
+    />
+
+    <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove this package?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Removes unused credit for {pkg.pets?.name ?? "this pet"}
+            {pkg.package_name ? ` (${pkg.package_name})` : ""}. Only allowed when no days have been used
+            and no planner sessions are linked. Any unpaid invoice for this purchase will be voided.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={revokePackage.isPending}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            disabled={revokePackage.isPending}
+            onClick={(e) => {
+              e.preventDefault();
+              revokePackage.mutate(
+                { creditId: pkg.id, reason: "Removed from daycare packages" },
+                {
+                  onSuccess: () => {
+                    toast.success("Package removed");
+                    setDeleteOpen(false);
+                  },
+                  onError: (err) => toast.error(err.message),
+                },
+              );
+            }}
+          >
+            {revokePackage.isPending ? "Removing…" : "Remove package"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }
