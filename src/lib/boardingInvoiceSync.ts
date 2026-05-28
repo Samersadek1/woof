@@ -240,8 +240,20 @@ export async function syncBoardingBookingInvoice(
     .single();
   if (refreshErr) throw refreshErr;
 
+  // apply_double_occupancy_discount updates `total` to the post-discount gross but leaves
+  // `total_aed` at the pre-discount value. Sync them so invoiceDisplayTotals reads correctly.
   const refreshedGrossTotal = roundAed(refreshedInvoice.total ?? grossTotal);
-  const refreshedVatAed = roundAed(refreshedInvoice.vat_aed ?? vatAed);
+  const refreshedVatAed = vatAmountFromGrossInclusive(refreshedGrossTotal);
+
+  const { error: syncTotalsErr } = await getSupabase()
+    .from("invoices")
+    .update({
+      total_aed: refreshedGrossTotal,
+      vat_aed: refreshedVatAed,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", invoice.id);
+  if (syncTotalsErr) throw syncTotalsErr;
   const { grandTotal: refreshedGrandTotal } = invoiceDisplayTotals({
     total: refreshedGrossTotal,
     total_aed: refreshedGrossTotal,

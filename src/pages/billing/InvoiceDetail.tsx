@@ -31,8 +31,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { invoiceDisplayTotals, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
+import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
+import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700 border-slate-300",
@@ -70,6 +73,7 @@ export default function InvoiceDetailPage() {
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustApprover, setAdjustApprover] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [addLineOpen, setAddLineOpen] = useState(false);
 
   const refundPreview = useCancellationRefundPreview(
     data?.invoice?.owner_id,
@@ -104,7 +108,10 @@ export default function InvoiceDetailPage() {
           notes: invoice.notes,
         })
       : { netExVat: 0, vat: 0, grandTotal: 0 };
-    const amountPaid = (data?.payments ?? []).reduce((sum, p) => sum + Math.max(0, p.amount), 0);
+    // invoice.amount_paid is maintained by both wallet and cash/card payment flows.
+    // Summing wallet_transactions directly doesn't work because wallet deductions
+    // are stored as negative amounts (Math.max(0, amount) would skip them).
+    const amountPaid = roundMoney2(Math.max(0, invoice?.amount_paid ?? 0));
     const outstanding = Math.max(0, money.grandTotal - amountPaid);
     return {
       lineSubtotal,
@@ -184,8 +191,12 @@ export default function InvoiceDetailPage() {
   const doWalletPay = async () => {
     if (!performedBy.trim()) return toast.error("Staff name is required.");
     try {
-      await walletPay.mutateAsync({ invoiceId: inv.id, performedBy: performedBy.trim() });
-      toast.success("Wallet payment completed.");
+      const result = await walletPay.mutateAsync({ invoiceId: inv.id, performedBy: performedBy.trim() });
+      if (result.partial) {
+        toast.success(`Partial wallet payment recorded — AED ${result.amount_charged?.toFixed(2)} deducted.`);
+      } else {
+        toast.success("Wallet payment completed.");
+      }
       setWalletOpen(false);
       setPerformedBy("");
       refetch();
@@ -307,6 +318,15 @@ export default function InvoiceDetailPage() {
           </Card>
         )}
 
+        {status === "draft" && inv.service_type === "daycare" &&
+          data.lines.some((l) => l.service_type === HOURLY_PLACEHOLDER_SERVICE_TYPE) && (
+          <Card className="border-amber-200 bg-amber-50/40">
+            <CardContent className="p-4 text-sm text-amber-900">
+              This draft invoice has placeholder hourly lines. Use <strong>Complete Hourly Billing</strong> in Daycare Operations to enter hours and finalise, or add line items manually and click <strong>Finalise</strong>.
+            </CardContent>
+          </Card>
+        )}
+
         <Card><CardContent className="p-0">
           <Table>
             <TableHeader><TableRow className="bg-muted/40"><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Unit</TableHead><TableHead className="text-right">Discount</TableHead><TableHead className="text-right">Line Total</TableHead></TableRow></TableHeader>
@@ -392,7 +412,11 @@ export default function InvoiceDetailPage() {
             {status === "draft" && (
               <>
                 <Button onClick={doFinalise}>Finalise</Button>
-                <Button variant="outline">Edit line items</Button>
+                {canEditInvoiceLineItems(status) && (
+                  <Button variant="outline" onClick={() => setAddLineOpen(true)}>
+                    Add line item
+                  </Button>
+                )}
                 <Button variant="destructive" onClick={doVoid}>Void</Button>
               </>
             )}
@@ -438,7 +462,7 @@ export default function InvoiceDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWalletOpen(false)}>Cancel</Button>
-            <Button onClick={doWalletPay} disabled={walletPay.isPending}>{walletPay.isPending ? "Processing..." : "Confirm payment"}</Button>
+            <Button type="button" onClick={doWalletPay} disabled={walletPay.isPending}>{walletPay.isPending ? "Processing..." : "Confirm payment"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -524,6 +548,18 @@ export default function InvoiceDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {inv && inv.owner_id && (
+        <AddInvoiceLineItemDialog
+          open={addLineOpen}
+          onOpenChange={setAddLineOpen}
+          invoiceId={inv.id}
+          ownerId={inv.owner_id}
+          serviceType={inv.service_type}
+          invoiceLabel={inv.invoice_number ?? undefined}
+          onAdded={() => void refetch()}
+        />
+      )}
     </>
   );
 }
