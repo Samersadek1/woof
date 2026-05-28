@@ -5,6 +5,7 @@ import { buildBoardingNightLineItems } from "@/lib/boardingInvoiceLines";
 import { MAX_BOARDING_STAY_NIGHTS } from "@/lib/boardingLimits";
 import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import { serviceTypeForBoardingAddonKey } from "@/lib/groomingCatalog";
+import { invoiceDueDateAtCheckIn, invoiceDueDateToday } from "@/lib/invoiceDueDate";
 import { netFromGrossInclusive, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
 import { roundAed } from "@/lib/money";
 
@@ -132,6 +133,10 @@ export interface CreateServiceInvoiceParams {
   invoiceStatus?: "draft" | "finalised";
   /** When true, member/profile discount is not applied (full subtotal). */
   skipMemberDiscount?: boolean;
+  /** Service check-in date (YYYY-MM-DD). Due date defaults to this. */
+  checkInDate?: string;
+  /** Explicit due date override (YYYY-MM-DD). */
+  dueDate?: string;
 }
 
 /**
@@ -148,6 +153,8 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
     notes,
     invoiceStatus = "draft",
     skipMemberDiscount = false,
+    checkInDate,
+    dueDate: dueDateOverride,
   } = params;
 
   const normalizedLines: ServiceInvoiceLineItem[] = [];
@@ -182,7 +189,9 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
 
   const total = subtotal - discountAed;
 
-  const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const dueDate =
+    dueDateOverride ??
+    (checkInDate ? invoiceDueDateAtCheckIn(checkInDate) : invoiceDueDateToday());
   const isBoardingReference = serviceType === "boarding";
 
   const grossTotal = Math.max(0, total);
@@ -364,6 +373,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
     serviceType: "boarding",
     referenceId: bookingId,
     lineItems,
+    checkInDate,
   });
 
   const { error: occupancyErr } = await getSupabase().rpc("apply_double_occupancy_discount", {

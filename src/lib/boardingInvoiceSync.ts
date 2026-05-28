@@ -9,6 +9,7 @@ import {
 } from "@/lib/boardingInvoiceLineUtils";
 import { createBookingInvoice } from "@/lib/bookingUtils";
 import { formatAed, roundAed } from "@/lib/money";
+import { invoiceDueDateAtCheckIn } from "@/lib/invoiceDueDate";
 import { invoiceDisplayTotals, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
 
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -210,6 +211,7 @@ export async function syncBoardingBookingInvoice(
     total: grossTotal,
     total_aed: grossTotal,
     vat_aed: vatAed,
+    due_date: invoiceDueDateAtCheckIn(booking.check_in_date),
     status: status as Database["public"]["Enums"]["invoice_status"],
     amount_paid: amountPaid,
     updated_at: new Date().toISOString(),

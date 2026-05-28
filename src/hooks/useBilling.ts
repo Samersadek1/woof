@@ -3,14 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { toast } from "sonner";
-import { resolveBoardingRate } from "@/lib/boardingPricing";
-import { getPricingAmountByKey, groomingServiceToPricingKey, resolveAddonPricesForKeys } from "@/lib/addonPricing";
-import {
-  type TransportZone,
-  normalizeStoredTransportZone,
-  transportPricingKey,
-  transportZoneLabel,
-} from "@/lib/transportPricing";
+import { invalidateServiceRatesQueries } from "@/lib/billingQueryKeys";
 import {
   useRefundWallet,
   walletQueryKeys,
@@ -19,6 +12,7 @@ import {
 import {
   invoicePaymentMethodToTransactionType,
 } from "@/lib/paymentMethod";
+import { invoiceDueDateToday } from "@/lib/invoiceDueDate";
 import {
   invoiceAmountDue,
   invoiceDisplayTotals,
@@ -291,7 +285,7 @@ export function usePricing() {
       .update({ amount_aed: amount, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
     if (error) throw error;
-    queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
+    invalidateServiceRatesQueries(queryClient);
   };
 
   /** Update price, or insert the row when the key is not in the database yet. */
@@ -314,14 +308,14 @@ export function usePricing() {
         onConflict: "service_code,pet_size,coat_type,season",
       });
     if (error) throwPricingError(error, "Failed to save pricing item");
-    queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
+    invalidateServiceRatesQueries(queryClient);
   };
 
   const updatePrices = async (updates: Record<string, number>) => {
     for (const [key, amount_aed] of Object.entries(updates)) {
       await updatePrice(key, amount_aed);
     }
-    queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
+    invalidateServiceRatesQueries(queryClient);
     toast.success("Pricing saved");
   };
 
@@ -335,7 +329,7 @@ export function usePricing() {
     if (!existing) return;
     const { error } = await supabase.from("service_rates").delete().eq("id", existing.id);
     if (error) throwPricingError(error, "Failed to delete pricing item");
-    queryClient.invalidateQueries({ queryKey: billingKeys.pricing() });
+    invalidateServiceRatesQueries(queryClient);
     toast.success("Pricing item deleted");
   };
 
@@ -362,27 +356,6 @@ export interface DaycarePackageTypeRow { id: string; name: string; total_days: n
 export interface AddonRateRow { id: string; addon_type: string; label: string; price_aed: number; unit: string; applicable_services: string[]; is_active: boolean }
 
 export function useServiceRates() {
-  const groomingQuery = useQuery({
-    queryKey: ["grooming_service_rates"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("service_rates")
-        .select("id, service_code, amount_aed, is_active, service_code_meta!inner(display_name)")
-        .or("service_code.like.grooming_%,service_code.like.cat_grooming_%")
-        .eq("is_active", true)
-        .order("service_code");
-      if (error) throw error;
-      return (data ?? []).map((r) => ({
-        id: r.id,
-        service: r.service_code,
-        label: r.service_code_meta?.display_name ?? r.service_code,
-        price_aed: r.amount_aed,
-        duration_minutes: null,
-        is_active: r.is_active,
-      })) as GroomingRateRow[];
-    },
-  });
-
   const daycareQuery = useQuery({
     queryKey: ["package_definitions", "rates_view"],
     queryFn: async () => {
@@ -440,201 +413,25 @@ export function useServiceRates() {
 
   const queryClient = useQueryClient();
 
-  const updateGroomingRate = async (id: string, price_aed: number) => {
-    const { error } = await supabase
-      .from("service_rates")
-      .update({ amount_aed: price_aed, updated_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) throw error;
-    queryClient.invalidateQueries({ queryKey: ["grooming_service_rates"] });
-  };
-
-  const updateDaycarePackageType = async (
-    id: string,
-    fields: { name: string; total_days: number; base_price_aed: number },
-  ) => {
-    void id;
-    void fields;
-    throw new Error("Package definitions are managed via Phase 3 package settings.");
-  };
-
-  const createDaycarePackageType = async (input: {
-    name: string;
-    total_days: number;
-    base_price_aed: number;
-  }) => {
-    void input;
-    throw new Error("Package definitions are managed via Phase 3 package settings.");
-  };
-
   const updateAddonRate = async (id: string, price_aed: number) => {
     const { error } = await supabase
       .from("service_rates")
       .update({ amount_aed: price_aed, updated_at: new Date().toISOString() })
       .eq("id", id);
     if (error) throw error;
-    queryClient.invalidateQueries({ queryKey: ["addon_rates"] });
+    invalidateServiceRatesQueries(queryClient);
   };
 
   return {
-    groomingRates: groomingQuery.data ?? [],
     daycarePackageTypes: daycareQuery.data ?? [],
     addonRates: addonQuery.data ?? [],
-    updateGroomingRate,
-    updateDaycarePackageType,
-    createDaycarePackageType,
     updateAddonRate,
-    isLoading: groomingQuery.isLoading || daycareQuery.isLoading || addonQuery.isLoading,
+    isLoading: daycareQuery.isLoading || addonQuery.isLoading,
   };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Hook 2: useBillingCalculator (reads from service-specific rate tables)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-type ServiceParams =
-  | {
-      type: "boarding";
-      roomId: string;
-      petCount: number;
-      nights: number;
-      addons?: { addonType: string; label: string; qty?: number }[];
-    }
-  | { type: "grooming"; service: string }
-  | { type: "package_purchase"; packageTypeId: string; pickup?: boolean; dropoff?: boolean; transportZone?: TransportZone | string | null }
-  | { type: "membership"; pricingKey: string };
-
-export function useBillingCalculator(
-  ownerId: string | null,
-  params: ServiceParams | null,
-): { breakdown: BillingBreakdown | null; isLoading: boolean } {
-  const discountQuery = useQuery({
-    queryKey: ["member_discount_v2", ownerId, params],
-    enabled: !!ownerId && !!params,
-    queryFn: async () => {
-      if (!ownerId || !params) return null;
-
-      const lineItems: LineItem[] = [];
-
-      switch (params.type) {
-        case "boarding": {
-          const resolved = await resolveBoardingRate(params.roomId, params.petCount);
-          const rate = resolved.unitPrice;
-          lineItems.push({
-            pricingKey: resolved.pricingKey,
-            label: "Boarding",
-            quantity: params.nights,
-            unitPrice: rate,
-            total: rate * params.nights,
-          });
-
-          if (params.addons?.length) {
-            const priceMap = await resolveAddonPricesForKeys(params.addons.map((a) => a.addonType));
-            for (const a of params.addons) {
-              const p = priceMap.get(a.addonType) ?? 0;
-              const q = a.qty ?? 1;
-              lineItems.push({ pricingKey: a.addonType, label: a.label, quantity: q, unitPrice: p, total: p * q });
-            }
-          }
-          break;
-        }
-        case "grooming": {
-          const serviceCode = groomingServiceToPricingKey(params.service);
-          let p = 0;
-          if (serviceCode) {
-            const { data, error } = await supabase.rpc("resolve_woof_service_rate", {
-              p_service_code: serviceCode as Database["public"]["Enums"]["service_code"],
-            });
-            if (error) throw error;
-            p = (data as { amount_aed: number }[] | null)?.[0]?.amount_aed ?? 0;
-          }
-          lineItems.push({ pricingKey: serviceCode ?? params.service, label: params.service, quantity: 1, unitPrice: p, total: p });
-          break;
-        }
-        case "package_purchase": {
-          const { data: pkgDef, error: pkgErr } = await supabase
-            .from("package_definitions")
-            .select("id, display_name")
-            .eq("id", params.packageTypeId)
-            .single();
-          if (pkgErr) throw pkgErr;
-
-          const { data: pkgPrices, error: pkgPriceErr } = await supabase
-            .from("package_pricing")
-            .select("amount_aed")
-            .eq("package_def_id", params.packageTypeId)
-            .eq("is_active", true);
-          if (pkgPriceErr) throw pkgPriceErr;
-
-          const basePrice = (pkgPrices ?? []).reduce<number | null>(
-            (acc, row) => (acc === null ? row.amount_aed : Math.min(acc, row.amount_aed)),
-            null,
-          ) ?? 0;
-
-          if (pkgDef) {
-            lineItems.push({ pricingKey: `package:${pkgDef.id}`, label: pkgDef.display_name, quantity: 1, unitPrice: basePrice, total: basePrice });
-            if (params.pickup || params.dropoff) {
-              const zone: TransportZone =
-                normalizeStoredTransportZone(params.transportZone ?? null) ?? "dubai_shared";
-              if (zone !== "complimentary") {
-                const tKey = transportPricingKey(zone);
-                const tMap = await resolveAddonPricesForKeys([tKey]);
-                const tp = tMap.get(tKey) ?? 0;
-                const zoneLabel = transportZoneLabel(zone);
-                if (params.pickup)
-                  lineItems.push({
-                    pricingKey: tKey,
-                    label: `Pickup (${zoneLabel})`,
-                    quantity: 1,
-                    unitPrice: tp,
-                    total: tp,
-                  });
-                if (params.dropoff)
-                  lineItems.push({
-                    pricingKey: tKey,
-                    label: `Drop-off (${zoneLabel})`,
-                    quantity: 1,
-                    unitPrice: tp,
-                    total: tp,
-                  });
-              }
-            }
-          }
-          break;
-        }
-        case "membership": {
-          const { getPrice } = await loadPricingMap();
-          const p = getPrice(params.pricingKey);
-          lineItems.push({ pricingKey: params.pricingKey, label: params.pricingKey.replace(/_/g, " "), quantity: 1, unitPrice: p, total: p });
-          break;
-        }
-      }
-
-      const subtotal = lineItems.reduce((s, li) => s + li.total, 0);
-
-      return {
-        lineItems,
-        subtotal,
-        discountPct: 0,
-        discountAed: 0,
-        total: subtotal,
-        memberType: "none",
-      } satisfies BillingBreakdown;
-    },
-  });
-
-  return {
-    breakdown: discountQuery.data ?? null,
-    isLoading: discountQuery.isLoading,
-  };
-}
-
-async function loadPricingMap() {
-  return { getPrice: (_k: string) => 0 };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Hook 3: useCreateInvoice
+// Hook 2: useCreateInvoice
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface CreateInvoiceInput {
@@ -671,9 +468,7 @@ export function useCreateInvoice() {
       const vatAed = vatAmountFromGrossInclusive(grossTotal);
       const netExVat = netFromGrossInclusive(grossTotal);
 
-      const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0];
+      const dueDate = invoiceDueDateToday();
 
       const { data: inv, error: invErr } = await supabase
         .from("invoices")

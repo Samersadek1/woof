@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { useAddInvoiceLineItem } from "@/hooks/useAddInvoiceLineItem";
+import { useInvoicePricingRows } from "@/hooks/useInvoicePricingRows";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import { useAddInvoiceLineItem } from "@/hooks/useAddInvoiceLineItem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,12 +15,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
-
-type PricingRow = {
-  key: Database["public"]["Enums"]["service_code"];
-  label: string;
-  amount_aed: number;
-};
 
 export interface AddInvoiceLineItemDialogProps {
   open: boolean;
@@ -46,7 +41,7 @@ export function AddInvoiceLineItemDialog({
   const [customMode, setCustomMode] = useState(true);
   const [quantity, setQuantity] = useState("1");
   const [unitPrice, setUnitPrice] = useState("");
-  const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
+  const { data: pricingRows = [] } = useInvoicePricingRows(open);
 
   useEffect(() => {
     if (!open) return;
@@ -55,29 +50,6 @@ export function AddInvoiceLineItemDialog({
     setCustomMode(true);
     setQuantity("1");
     setUnitPrice("");
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    (async () => {
-      const { data, error } = await supabase
-        .from("service_rates")
-        .select("service_code, amount_aed, service_code_meta!inner(display_name)")
-        .is("pet_size", null)
-        .is("coat_type", null)
-        .is("season", null)
-        .eq("is_active", true)
-        .order("service_code");
-      if (!error) {
-        setPricingRows(
-          (data ?? []).map((r) => ({
-            key: r.service_code,
-            label: r.service_code_meta?.display_name ?? r.service_code,
-            amount_aed: r.amount_aed,
-          })),
-        );
-      }
-    })();
   }, [open]);
 
   const handlePricingKeyChange = async (key: string) => {

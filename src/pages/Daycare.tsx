@@ -28,6 +28,7 @@ import {
   daycarePackageCreditLabel,
   daycarePackageExpiryLabel,
 } from "@/lib/daycarePackageUtils";
+import { daycarePackagePetDisplayTitle } from "@/lib/daycareSharedPool";
 import { useOwner } from "@/hooks/useOwners";
 import { OwnerClientSearch } from "@/components/OwnerClientSearch";
 import { usePets } from "@/hooks/usePets";
@@ -793,10 +794,10 @@ function PlannerTab() {
 
   const getUsablePackagesForPet = useCallback((petId: string) => {
     return (packages ?? []).filter((pkg) => {
-      if (pkg.pet_id !== petId) return false;
       if (pkg.is_bonus) return false;
       if ((pkg.days_used ?? 0) >= (pkg.total_days ?? 0)) return false;
-      return true;
+      if (pkg.is_shared_pool) return true;
+      return pkg.pet_id === petId;
     });
   }, [packages]);
 
@@ -839,11 +840,16 @@ function PlannerTab() {
   };
 
   function pkgLabel(pkg: DaycarePackage) {
-    const pet = pets?.find((p) => p.id === pkg.pet_id);
     const expiredSuffix = pkg.is_expired && pkg.expiry_date
       ? ` · expired ${daycarePackageExpiryLabel(pkg.expiry_date)}`
       : "";
-    return `${pet?.name ?? "Unknown"} — ${pkg.days_used}/${pkg.total_days}${expiredSuffix}`;
+    const title = daycarePackagePetDisplayTitle({
+      is_shared_pool: pkg.is_shared_pool,
+      shared_pool_pets_label: pkg.shared_pool_pets_label,
+      anchor_pet_name: pkg.anchor_pet_name,
+      pet_name: pets?.find((p) => p.id === pkg.pet_id)?.name ?? null,
+    });
+    return `${title} — ${pkg.days_used}/${pkg.total_days}${expiredSuffix}`;
   }
 
   const expiredPackageSelections = useMemo(() => {
@@ -1069,6 +1075,7 @@ function PlannerTab() {
             notes: checkInDraft.remark || null,
             invoiceStatus: "finalised",
             skipMemberDiscount: skipInvoiceDiscount,
+            checkInDate: checkInDraft.session_date,
           });
         } catch (error) {
           const message = extractErrorMessage(error);
@@ -1230,7 +1237,12 @@ function PlannerTab() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-4">
                   {[
                     { label: "Client", value: resolvedOwnerLabel },
-                    { label: "Dog", value: selectedPet?.name },
+                    {
+                      label: selectedPkg.is_shared_pool ? "Dogs (shared)" : "Dog",
+                      value: selectedPkg.is_shared_pool
+                        ? selectedPkg.shared_pool_pets_label ?? selectedPet?.name
+                        : selectedPet?.name,
+                    },
                     {
                       label: "Day Care Days",
                       value: `${selectedPkg.days_used} / ${selectedPkg.total_days}`,

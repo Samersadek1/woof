@@ -17,6 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { recalculateInvoiceTotals } from "@/lib/invoiceRecalc";
 import { composeNotesWithHourlyDraft } from "@/lib/daycareSessionMeta";
+import { invoiceDueDateAtCheckIn } from "@/lib/invoiceDueDate";
 import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
@@ -160,7 +161,7 @@ export async function findOrCreateHourlyDraft(
     const grossTotal = Math.max(0, transportSubtotal);
     const vatAed = vatAmountFromGrossInclusive(grossTotal);
     const netExVat = netFromGrossInclusive(grossTotal);
-    const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const dueDate = invoiceDueDateAtCheckIn(sessionDate);
 
     const { data: inv, error: invErr } = await supabase
       .from("invoices")

@@ -183,7 +183,7 @@ booking_pets_payload = []
 
 def split_pet_uids(s):
     if pd.isna(s): return []
-    return [p.strip() for p in re.split(r'\s*/\s*|\s*;\s*', str(s)) if p.strip()]
+    return [p.strip() for p in re.split(r'\s*/\s*|\s*;\s*|\s*,\s*', str(s)) if p.strip()]
 
 for _, r in bookings.iterrows():
     bid = r['BoardingBookingID']

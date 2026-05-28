@@ -101,6 +101,8 @@ import {
 } from "@/lib/groomingNewAppointmentPricing";
 import { useGroomingManualFeeBounds } from "@/hooks/useGroomingManualFeeBounds";
 import { useNewGroomingAppointmentPrice } from "@/hooks/useNewGroomingAppointmentPrice";
+import { PetSafetyNotesBanner } from "@/components/grooming/PetSafetyNotesBanner";
+import { VisitNotesField } from "@/components/grooming/VisitNotesField";
 import { fetchCheckboxBasePriceAed } from "@/lib/groomingNewAppointmentRates";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -302,30 +304,6 @@ function formatLastGroomedDisplayLine(isoDate: string | undefined): string {
   }
 }
 
-function PetSafetyNotesBanner({
-  petLabel,
-  notesText,
-}: {
-  petLabel?: string;
-  notesText: string;
-}) {
-  return (
-    <div
-      role="alert"
-      className="rounded-md border border-amber-400/90 bg-amber-50 px-3 py-2 text-sm text-amber-950"
-    >
-      <p className="leading-snug">
-        <span aria-hidden>⚠️ </span>
-        This pet has special notes — please review before proceeding:
-        {petLabel ? <span className="mt-1 block font-semibold">{petLabel}</span> : null}
-      </p>
-      <p className="mt-2 whitespace-pre-wrap rounded border border-amber-200/80 bg-white/60 p-2 text-xs leading-relaxed">
-        {notesText}
-      </p>
-    </div>
-  );
-}
-
 function eodAppointmentStatusBucket(status: string): "completed" | "pending" | "cancelled" {
   const n = normalizeGroomingWorkflowStatus(status);
   if (n === "cancelled") return "cancelled";
@@ -422,39 +400,6 @@ function formatApptTime(t: string | null): string {
 function groomerDisplay(a: GroomingAppointmentWithJoins): string {
   if (a.grooming_notes?.trim()) return a.grooming_notes.trim();
   return "—";
-}
-
-function VisitNotesField({ a }: { a: GroomingAppointmentWithJoins }) {
-  const update = useUpdateGroomingAppointment();
-  const [val, setVal] = useState(a.notes ?? "");
-
-  useEffect(() => {
-    setVal(a.notes ?? "");
-  }, [a.id, a.notes]);
-
-  const save = () => {
-    const next = val.trim() || null;
-    const prev = a.notes ?? null;
-    if (next === prev) return;
-    update.mutate(
-      { id: a.id, notes: next },
-      {
-        onError: (e) =>
-          toast.error(e instanceof Error ? e.message : "Could not save notes."),
-      },
-    );
-  };
-
-  return (
-    <Textarea
-      className="min-h-[72px] text-sm resize-y"
-      placeholder="Visit notes…"
-      value={val}
-      onChange={(e) => setVal(e.target.value)}
-      onBlur={save}
-      disabled={update.isPending}
-    />
-  );
 }
 
 function AppointmentCard({
@@ -1279,6 +1224,7 @@ const GroomingPage = () => {
         ownerId: ownerId!,
         serviceType: "grooming",
         referenceId: createdRows[0].id,
+        checkInDate: format(apptDate, "yyyy-MM-dd"),
         notes: paymentMethod
           ? `Payment method: ${groomingPaymentMethodLabel(paymentMethod)}`
           : undefined,

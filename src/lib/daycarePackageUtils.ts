@@ -22,8 +22,10 @@ export function daycarePackageCreditLabel(pkg: {
   service_code: string;
   expiry_date?: string | null;
   is_expired?: boolean;
+  is_shared_pool?: boolean;
 }): string {
   const remaining = pkg.total_days - pkg.days_used;
+  const poolPrefix = pkg.is_shared_pool ? "Shared household — " : "";
   const unitSuffix =
     pkg.service_code === "daycare_hourly"
       ? " hourly"
@@ -36,5 +38,5 @@ export function daycarePackageCreditLabel(pkg: {
     expired && pkg.expiry_date
       ? ` · expired ${daycarePackageExpiryLabel(pkg.expiry_date)}`
       : "";
-  return `Use credit (${remaining} remaining${unitSuffix}${expirySuffix})`;
+  return `${poolPrefix}Use credit (${remaining} remaining${unitSuffix}${expirySuffix})`;
 }

@@ -58,8 +58,8 @@ export async function createTestRoom(
     room_number: `${scope.scopeId.slice(-6)}`,
     room_type: "kennels",
     wing: "back_kennels",
-    capacity_type: "single",
-    max_pets: 2,
+    capacity_type: "multiple",
+    max_pets: 99,
     is_active: true,
     ...overrides,
   };

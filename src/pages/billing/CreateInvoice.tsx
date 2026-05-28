@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { OwnerSearchPopover } from "@/components/billing/OwnerSearchPopover";
-import { addDays, format } from "date-fns";
+import { format } from "date-fns";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { useInvoicePricingRows } from "@/hooks/useInvoicePricingRows";
 import { useOwner } from "@/hooks/useOwners";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { Button } from "@/components/ui/button";
@@ -20,11 +21,6 @@ import {
   vatLineLabel,
 } from "@/lib/vatConfig";
 
-type PricingRow = {
-  key: Database["public"]["Enums"]["service_code"];
-  label: string;
-  amount_aed: number;
-};
 type InvoiceInsert = Database["public"]["Tables"]["invoices"]["Insert"];
 type InvoiceLineInsert = Database["public"]["Tables"]["invoice_line_items"]["Insert"];
 type AdjustmentInsert = Database["public"]["Tables"]["billing_adjustments"]["Insert"];
@@ -63,7 +59,7 @@ export default function CreateInvoicePage() {
   const [ownerId, setOwnerId] = useState<string>(presetOwnerId);
   const [ownerLabel, setOwnerLabel] = useState("");
   const [serviceType, setServiceType] = useState("other");
-  const [dueDate, setDueDate] = useState(format(addDays(new Date(), 14), "yyyy-MM-dd"));
+  const [dueDate, setDueDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [lines, setLines] = useState<LineDraft[]>([
@@ -88,29 +84,7 @@ export default function CreateInvoicePage() {
   }, [owner, ownerId]);
   const linesRef = useRef(lines);
   linesRef.current = lines;
-  const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
-
-  useMemo(() => {
-    (async () => {
-      const { data, error } = await supabase
-        .from("service_rates")
-        .select("service_code, amount_aed, service_code_meta!inner(display_name)")
-        .is("pet_size", null)
-        .is("coat_type", null)
-        .is("season", null)
-        .eq("is_active", true)
-        .order("service_code");
-      if (!error) {
-        setPricingRows(
-          (data ?? []).map((r) => ({
-            key: r.service_code,
-            label: r.service_code_meta?.display_name ?? r.service_code,
-            amount_aed: r.amount_aed,
-          })),
-        );
-      }
-    })();
-  }, []);
+  const { data: pricingRows = [] } = useInvoicePricingRows();
 
   const addLine = () =>
     setLines((prev) => [

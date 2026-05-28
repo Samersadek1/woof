@@ -5,6 +5,11 @@ import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
 import { composeNotesWithBillingPath, isDaycareHourlyPending, isHourlyBillingDraft, parseHourlyDraftId, type DaycareBillingPath } from "@/lib/daycareSessionMeta";
 import { DAYCARE_CREDIT_CODES } from "@/lib/daycareCredits";
+import {
+  isSharedHouseholdDaycarePool,
+  parseSharedPoolFromInvoiceNotes,
+  sharedPoolPetLabel,
+} from "@/lib/daycareSharedPool";
 import { ownerMemberTierFromFlags, type OwnerMemberTier } from "@/lib/memberTier";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
@@ -31,6 +36,11 @@ export type DaycarePackage = {
   is_expired: boolean;
   source_ref_id: string | null;
   redemption_group_id: string | null;
+  /** True when days are shared across multiple dogs on one purchase (not per-pet caps). */
+  is_shared_pool: boolean;
+  /** Comma-separated dog names when is_shared_pool (from invoice notes). */
+  shared_pool_pets_label: string | null;
+  anchor_pet_name: string | null;
 };
 
 export type { DaycareSession };
@@ -39,13 +49,56 @@ type CreditRpcRow = Database["public"]["Functions"]["list_active_credits_for_pet
 
 type PurchaseGroupJoin = {
   staff_label?: string | null;
+  pet_count?: number | null;
   package_definitions?: { display_name?: string | null } | null;
+  invoices?: { notes?: string | null } | null;
 } | null;
+
+const DAYCARE_PACKAGE_SELECT =
+  "*, purchase_groups(staff_label, pet_count, package_definitions(display_name), invoices(notes))";
 
 function creditPackageDisplayName(purchaseGroups: PurchaseGroupJoin): string | null {
   const label = purchaseGroups?.staff_label?.trim();
   if (label) return label;
   return purchaseGroups?.package_definitions?.display_name ?? null;
+}
+
+function mapDaycarePackageRow(
+  row: Database["public"]["Tables"]["service_credits"]["Row"],
+  ownerId: string,
+  anchorPetName: string | null,
+  purchaseGroups: PurchaseGroupJoin,
+): DaycarePackage {
+  const packageName = creditPackageDisplayName(purchaseGroups);
+  const expiryDate = row.expires_at;
+  const today = new Date().toISOString().slice(0, 10);
+  const invoiceNotes = purchaseGroups?.invoices?.notes ?? null;
+  const { petNames } = parseSharedPoolFromInvoiceNotes(invoiceNotes);
+  const isSharedPool = isSharedHouseholdDaycarePool({
+    invoiceNotes,
+    purchasePetCount: purchaseGroups?.pet_count,
+  });
+
+  return {
+    id: row.id,
+    owner_id: ownerId,
+    pet_id: row.pet_id,
+    total_days: row.units_total,
+    days_used: row.units_consumed,
+    expiry_date: expiryDate,
+    purchase_date: row.created_at,
+    package_name: packageName,
+    service_code: row.service_code as ServiceCode,
+    is_bonus: row.is_bonus,
+    status: row.status,
+    units_remaining: row.units_total - row.units_consumed,
+    is_expired: !!expiryDate && expiryDate < today,
+    source_ref_id: row.source_ref_id,
+    redemption_group_id: row.redemption_group_id,
+    is_shared_pool: isSharedPool,
+    shared_pool_pets_label: isSharedPool ? sharedPoolPetLabel(petNames) : null,
+    anchor_pet_name: anchorPetName,
+  };
 }
 
 export const daycareQueryKeys = {
@@ -83,41 +136,33 @@ export function useDaycarePackages(ownerId: string) {
       const petIds = (petRows ?? []).map((p) => p.id);
       if (petIds.length === 0) return [] as DaycarePackage[];
 
+      const { data: petNameRows } = await supabase
+        .from("pets")
+        .select("id, name")
+        .in("id", petIds);
+      const petNameById = new Map((petNameRows ?? []).map((p) => [p.id, p.name]));
+
       const { data, error } = await supabase
         .from("service_credits")
-        .select("*, purchase_groups(staff_label, package_definitions(display_name))")
+        .select(DAYCARE_PACKAGE_SELECT)
         .in("pet_id", petIds)
         .in("service_code", DAYCARE_CREDIT_CODES)
         .eq("is_bonus", false)
         .in("status", ["active", "expired"])
         .order("expires_at", { ascending: true });
       if (error) throw error;
-      const today = new Date().toISOString().slice(0, 10);
       return (data ?? [])
         .filter((row) => row.units_total - row.units_consumed > 0)
         .map((row) => {
-        const packageName = creditPackageDisplayName(
-          (row as unknown as { purchase_groups?: PurchaseGroupJoin }).purchase_groups ?? null,
-        );
-        const expiryDate = row.expires_at;
-        return {
-          id: row.id,
-          owner_id: ownerId,
-          pet_id: row.pet_id,
-          total_days: row.units_total,
-          days_used: row.units_consumed,
-          expiry_date: expiryDate,
-          purchase_date: row.created_at,
-          package_name: packageName,
-          service_code: row.service_code,
-          is_bonus: row.is_bonus,
-          status: row.status,
-          units_remaining: row.units_total - row.units_consumed,
-          is_expired: !!expiryDate && expiryDate < today,
-          source_ref_id: row.source_ref_id,
-          redemption_group_id: row.redemption_group_id,
-        };
-      }) as DaycarePackage[];
+          const purchaseGroups =
+            (row as unknown as { purchase_groups?: PurchaseGroupJoin }).purchase_groups ?? null;
+          return mapDaycarePackageRow(
+            row,
+            ownerId,
+            petNameById.get(row.pet_id) ?? null,
+            purchaseGroups,
+          );
+        }) as DaycarePackage[];
     },
   });
 }
@@ -563,7 +608,7 @@ export function useAllDaycarePackages() {
       const { data, error } = await supabase
         .from("service_credits")
         .select(
-          "*, pets!inner(name, owner_id, owners(first_name, last_name, is_elite, is_vip)), purchase_groups(staff_label, package_definitions(display_name))",
+          "*, pets!inner(name, owner_id, owners(first_name, last_name, is_elite, is_vip)), purchase_groups(staff_label, pet_count, package_definitions(display_name), invoices(notes))",
         )
         // Daycare UI only — base credits (no bonus-choice rows).
         .in("service_code", DAYCARE_CREDIT_CODES)
@@ -586,24 +631,11 @@ export function useAllDaycarePackages() {
         const pet = (row as unknown as { pets: PetJoin | null }).pets;
         const ownerId = pet?.owner_id ?? "";
         const ownerJoin = pet?.owners;
-        const pkgName = creditPackageDisplayName(
-          (row as unknown as { purchase_groups?: PurchaseGroupJoin }).purchase_groups ?? null,
-        );
+        const purchaseGroups =
+          (row as unknown as { purchase_groups?: PurchaseGroupJoin }).purchase_groups ?? null;
+        const pkg = mapDaycarePackageRow(row, ownerId, pet?.name ?? null, purchaseGroups);
         return {
-          id: row.id,
-          owner_id: ownerId,
-          pet_id: row.pet_id,
-          total_days: row.units_total,
-          days_used: row.units_consumed,
-          expiry_date: row.expires_at,
-          purchase_date: row.created_at,
-          package_name: pkgName ?? null,
-          service_code: row.service_code,
-          is_bonus: row.is_bonus,
-          status: row.status,
-          units_remaining: row.units_total - row.units_consumed,
-          source_ref_id: row.source_ref_id,
-          redemption_group_id: row.redemption_group_id,
+          ...pkg,
           pets: { name: pet?.name ?? "Pet" },
           owners: ownerJoin
             ? {

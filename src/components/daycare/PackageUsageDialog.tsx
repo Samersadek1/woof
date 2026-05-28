@@ -1,6 +1,7 @@
 import { format, parseISO } from "date-fns";
 import { AlertTriangle, CalendarDays, ExternalLink } from "lucide-react";
 import { ownerDisplayName } from "@/lib/bookingUtils";
+import { daycarePackagePetDisplayTitle } from "@/lib/daycareSharedPool";
 import { serviceGrantLabel } from "@/lib/packageCatalog";
 import { useSessionsByPackage, type PackageWithDetails } from "@/hooks/useDaycare";
 import { Button } from "@/components/ui/button";
@@ -56,7 +57,12 @@ export function PackageUsageDialog({
           <>
             <DialogHeader className="shrink-0">
               <DialogTitle className="pr-6">
-                {pkg.pets?.name ?? "Pet"}
+                {daycarePackagePetDisplayTitle({
+                  is_shared_pool: pkg.is_shared_pool,
+                  shared_pool_pets_label: pkg.shared_pool_pets_label,
+                  anchor_pet_name: pkg.pets?.name ?? null,
+                  pet_name: pkg.pets?.name ?? null,
+                })}
                 <span className="font-normal text-muted-foreground"> — </span>
                 {pkg.package_name ?? serviceGrantLabel(pkg.service_code)}
               </DialogTitle>
