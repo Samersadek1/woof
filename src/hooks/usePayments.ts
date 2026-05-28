@@ -42,9 +42,11 @@ export function useProcessWalletPayment() {
       const result = data as {
         success?: boolean;
         error?: string;
+        partial?: boolean;
         amount_charged?: number;
         new_balance?: number;
         owner_id?: string;
+        shortfall?: number;
       };
       if (result?.success === false) {
         throw new Error(result.error || "Wallet payment failed.");

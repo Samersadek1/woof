@@ -29,7 +29,7 @@ export function deriveInvoiceStatusAfterRecalc(
     return currentStatus === "overdue" ? "overdue" : "partially_paid";
   }
   if (currentStatus === "paid" || currentStatus === "partially_paid") {
-    return currentStatus === "overdue" ? "overdue" : "outstanding";
+    return "outstanding";
   }
   return currentStatus;
 }

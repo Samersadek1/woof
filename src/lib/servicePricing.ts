@@ -1,4 +1,4 @@
-type PriceByKey = Map<string, number>;
+export type PriceByKey = Map<string, number>;
 
 function amountFor(map: PriceByKey, key: string): number {
   return map.get(key) ?? 0;

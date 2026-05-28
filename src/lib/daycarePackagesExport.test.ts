@@ -18,6 +18,7 @@ describe("daycarePackagesExportRows", () => {
       is_bonus: false,
       status: "active",
       units_remaining: 6,
+      is_expired: false,
       source_ref_id: null,
       redemption_group_id: null,
       pets: { name: "Paddy" },

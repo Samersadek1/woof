@@ -33,7 +33,7 @@ const SERVICE_GRANT_LABELS: Partial<Record<ServiceCode, string>> = {
 };
 
 export function serviceGrantLabel(serviceCode: ServiceCode): string {
-  return SERVICE_GRANT_LABELS[serviceCode] ?? serviceCode.replaceAll("_", " ");
+  return SERVICE_GRANT_LABELS[serviceCode] ?? serviceCode.replace(/_/g, " ");
 }
 
 export function formatCreditGrant(grant: Pick<PackageCreditGrant, "service_code" | "units" | "is_bonus">): string {

@@ -98,7 +98,7 @@ export function AddInvoiceLineItemDialog({
       data as Database["public"]["Functions"]["resolve_woof_service_rate"]["Returns"]
     )[0];
     if (resolved) {
-      setDescription(resolved.display_name ?? key);
+      setDescription(resolved.notes?.trim() || key);
       setUnitPrice(String(resolved.amount_aed));
       setCustomMode(false);
     }

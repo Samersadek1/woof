@@ -445,14 +445,6 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                   <span>
                     {session.pet_name} — {format(parseISO(session.session_date), "d MMM yyyy")}
                   </span>
-                  {session.draft_invoice_id && (
-                    <Link
-                      to={`/billing/invoices/${session.draft_invoice_id}`}
-                      className="text-xs text-orange-700 underline underline-offset-2"
-                    >
-                      View draft
-                    </Link>
-                  )}
                 </li>
               ))}
             </ul>

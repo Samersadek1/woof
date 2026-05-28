@@ -25,6 +25,7 @@ import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
 } from "@/lib/vatConfig";
+import { formatAed, roundAed, AED_DECIMAL_DIGITS } from "@/lib/money";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -153,7 +154,7 @@ export interface CancellationRefund {
 
 // ── Formatting helper ────────────────────────────────────────────────────────
 
-export { formatAed, roundAed, AED_DECIMAL_DIGITS } from "@/lib/money";
+export { formatAed, roundAed, AED_DECIMAL_DIGITS };
 
 function deriveBranchCodeFromInvoiceNumber(invoiceNumber: string | null): string | null {
   const normalized = invoiceNumber?.trim();
