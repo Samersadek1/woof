@@ -298,7 +298,7 @@ export function PurchasePackageDialog({
   const busy = isSubmitting || issueCustom.isPending;
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { resetForm(); onClose(); } }}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{isCustom ? "Custom daycare package" : "Purchase Package"}</DialogTitle>

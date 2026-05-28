@@ -423,15 +423,13 @@ export function DaycarePackagesTab() {
         </DialogContent>
       </Dialog>
 
-      {sellOwnerId && !sellOpen ? (
-        <PurchasePackageDialog
-          ownerId={sellOwnerId}
-          isOpen
-          allowCustomDaycare
-          onClose={() => setSellOwnerId(undefined)}
-          onSuccess={() => setSellOwnerId(undefined)}
-        />
-      ) : null}
+      <PurchasePackageDialog
+        ownerId={sellOwnerId ?? ""}
+        isOpen={!!sellOwnerId && !sellOpen}
+        allowCustomDaycare
+        onClose={() => setSellOwnerId(undefined)}
+        onSuccess={() => setSellOwnerId(undefined)}
+      />
     </div>
   );
 }
