@@ -12,6 +12,7 @@ import {
   type PackageWithDetails,
 } from "@/hooks/useDaycare";
 import { OwnerSearchPopover } from "@/components/billing/OwnerSearchPopover";
+import { PackageUsageDialog } from "@/components/daycare/PackageUsageDialog";
 import { PurchasePackageDialog } from "@/components/packages/PurchasePackageDialog";
 import { useOwner } from "@/hooks/useOwners";
 import { Card, CardContent } from "@/components/ui/card";
@@ -92,6 +93,7 @@ function packageMatchesSearch(pkg: PackageWithDetails, query: string): boolean {
 function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
   const [, setSearchParams] = useSearchParams();
   const revokePackage = useDeleteDaycarePackage();
+  const [detailOpen, setDetailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const remaining = pkg.total_days - pkg.days_used;
   const pct = Math.min(100, (pkg.days_used / Math.max(1, pkg.total_days)) * 100);
@@ -113,10 +115,15 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
   };
 
   return (
-    <Card className={`transition-shadow hover:shadow-md ${isExhausted ? "opacity-60" : ""}`}>
+    <>
+    <Card
+      className={`transition-shadow hover:shadow-md cursor-pointer ${isExhausted ? "opacity-60" : ""}`}
+      data-testid={`daycare-package-card-${pkg.id}`}
+      onClick={() => setDetailOpen(true)}
+    >
       <CardContent className="p-4 space-y-3">
         <div className="flex items-start justify-between gap-3">
-          <button type="button" className="space-y-1 min-w-0 text-left" onClick={openInPlanner}>
+          <div className="space-y-1 min-w-0 text-left">
             <p className="font-semibold truncate">
               {pkg.pets?.name ?? "Unknown pet"}
               <span className="font-normal text-muted-foreground"> — </span>
@@ -143,7 +150,7 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
                 </Badge>
               )}
             </div>
-          </button>
+          </div>
           <div className={`text-right shrink-0 ${creditColour(remaining)}`}>
             {remaining <= 3 && <AlertTriangle className="h-3.5 w-3.5 ml-auto mb-0.5" />}
             <p className="text-2xl font-bold tabular-nums leading-none">
@@ -165,7 +172,29 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
           </p>
         )}
         <div className="flex gap-2">
-          <Button type="button" variant="outline" size="sm" className="flex-1" onClick={openInPlanner}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            data-testid={`daycare-package-view-${pkg.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDetailOpen(true);
+            }}
+          >
+            View days used
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={(e) => {
+              e.stopPropagation();
+              openInPlanner();
+            }}
+          >
             Open in planner
           </Button>
           {canDelete ? (
@@ -175,7 +204,10 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
               size="sm"
               className="text-destructive hover:bg-destructive/10"
               data-testid={`daycare-package-delete-${pkg.id}`}
-              onClick={() => setDeleteOpen(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setDeleteOpen(true);
+              }}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -217,7 +249,15 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <PackageUsageDialog
+        pkg={pkg}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onOpenInPlanner={openInPlanner}
+      />
     </Card>
+    </>
   );
 }
 
