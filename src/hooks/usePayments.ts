@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { invoiceAmountDue } from "@/lib/vatConfig";
 import { invoicePaymentMethodToTransactionType, type ExternalPaymentMethod } from "@/lib/paymentMethod";
 import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
+import { revertInvoicePayment } from "@/lib/revertInvoicePayment";
 
 type PaymentMethod = ExternalPaymentMethod;
 
@@ -112,6 +113,35 @@ export function useRecordCashOrCardPayment() {
     },
     onSuccess: (data) => {
       invalidateBilling(qc, data.invoiceId, data.ownerId);
+    },
+  });
+}
+
+export function useRevertInvoicePayment() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      invoiceId,
+      performedBy,
+      reason,
+    }: {
+      invoiceId: string;
+      performedBy: string;
+      reason?: string;
+    }) => {
+      const result = await revertInvoicePayment(supabase, {
+        invoiceId,
+        performedBy,
+        reason,
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Could not revert payment.");
+      }
+      return result;
+    },
+    onSuccess: (data, vars) => {
+      invalidateBilling(qc, vars.invoiceId, data.ownerId);
     },
   });
 }

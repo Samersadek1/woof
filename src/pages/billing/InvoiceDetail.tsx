@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useInvoiceDetail } from "@/hooks/useInvoiceDetail";
 import { useLinkedDaycareSessionsForInvoice } from "@/hooks/useDaycare";
 import { useCancellationRefundPreview } from "@/hooks/useCancellationRefund";
-import { useProcessWalletPayment, useRecordCashOrCardPayment } from "@/hooks/usePayments";
+import { useProcessWalletPayment, useRecordCashOrCardPayment, useRevertInvoicePayment } from "@/hooks/usePayments";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
+import { canRevertInvoicePayment, walletRefundFromPayments } from "@/lib/revertInvoicePayment";
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700 border-slate-300",
@@ -59,10 +60,13 @@ export default function InvoiceDetailPage() {
   const { data, isLoading, refetch } = useInvoiceDetail(id);
   const walletPay = useProcessWalletPayment();
   const cashCardPay = useRecordCashOrCardPayment();
+  const revertPayment = useRevertInvoicePayment();
 
   const [walletOpen, setWalletOpen] = useState(false);
   const [cashCardOpen, setCashCardOpen] = useState<"cash" | "card" | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const [revertReason, setRevertReason] = useState("");
   const [serviceStart, setServiceStart] = useState("");
   const [refundAmount, setRefundAmount] = useState("0");
   const [refundNote, setRefundNote] = useState("");
@@ -123,6 +127,16 @@ export default function InvoiceDetailPage() {
       outstanding,
     };
   }, [data]);
+
+  const showRevertPayment = useMemo(() => {
+    if (!data?.invoice) return false;
+    return canRevertInvoicePayment(data.invoice, data.payments);
+  }, [data]);
+
+  const walletRevertAmount = useMemo(() => {
+    if (!data?.payments) return 0;
+    return walletRefundFromPayments(data.payments);
+  }, [data?.payments]);
 
   if (isLoading) {
     return (
@@ -258,6 +272,28 @@ export default function InvoiceDetailPage() {
     toast.success("Invoice cancelled and refund recorded.");
     setCancelOpen(false);
     refetch();
+  };
+
+  const doRevertPayment = async () => {
+    if (!performedBy.trim()) return toast.error("Staff name is required.");
+    try {
+      const result = await revertPayment.mutateAsync({
+        invoiceId: inv.id,
+        performedBy: performedBy.trim(),
+        reason: revertReason.trim() || undefined,
+      });
+      if (result.walletRefunded && result.walletRefunded > 0) {
+        toast.success(`Payment reverted — AED ${result.walletRefunded.toFixed(2)} returned to wallet.`);
+      } else {
+        toast.success("Payment reverted.");
+      }
+      setRevertOpen(false);
+      setRevertReason("");
+      setPerformedBy("");
+      refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Could not revert payment.");
+    }
   };
 
   return (
@@ -436,6 +472,20 @@ export default function InvoiceDetailPage() {
             {status === "paid" && (
               <>
                 <Button variant="outline" onClick={() => window.print()}>Print receipt</Button>
+                {showRevertPayment && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                    data-testid="invoice-detail-revert-payment-btn"
+                    onClick={() => {
+                      setRevertReason("");
+                      setRevertOpen(true);
+                    }}
+                  >
+                    Revert payment
+                  </Button>
+                )}
                 <Button variant="destructive" onClick={doVoid}>Void</Button>
               </>
             )}
@@ -510,6 +560,55 @@ export default function InvoiceDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelOpen(false)}>Cancel</Button>
             <Button onClick={doCancelRefund}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={revertOpen} onOpenChange={setRevertOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revert payment</DialogTitle>
+            <DialogDescription>
+              This marks the invoice unpaid again and credits the owner wallet when the payment came from wallet.
+              Original payment rows stay on the invoice for audit. Only available within the last 2 weeks.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <div className="rounded-md border p-3 space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Amount paid</span>
+                <span>{aed(computed.amountPaid)}</span>
+              </div>
+              {walletRevertAmount > 0 && (
+                <p className="text-xs text-muted-foreground pt-1">
+                  Wallet balance will be credited by {aed(walletRevertAmount)}.
+                </p>
+              )}
+            </div>
+            <Label>Reason (optional)</Label>
+            <Textarea
+              value={revertReason}
+              onChange={(e) => setRevertReason(e.target.value)}
+              placeholder="e.g. recorded against wrong invoice"
+            />
+            <Label>Processed by</Label>
+            <Input
+              value={performedBy}
+              onChange={(e) => setPerformedBy(e.target.value)}
+              placeholder="Staff name"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevertOpen(false)}>Cancel</Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={doRevertPayment}
+              disabled={revertPayment.isPending}
+              data-testid="invoice-detail-revert-payment-confirm"
+            >
+              {revertPayment.isPending ? "Reverting..." : "Revert payment"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
