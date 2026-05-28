@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { invalidateServiceRatesQueries } from "@/lib/billingQueryKeys";
 import {
   type GroomingPackage,
   type PetSize,
@@ -98,9 +99,6 @@ export function useUpdateGroomingRate() {
         : await supabase.from("service_rates").insert(payload);
       if (error) throw error;
     },
-    onSuccess: () =>
-      qc.invalidateQueries({
-        queryKey: ["grooming-rates"],
-      }),
+    onSuccess: () => invalidateServiceRatesQueries(qc),
   });
 }

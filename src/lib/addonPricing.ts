@@ -21,6 +21,13 @@ export function groomingServiceToPricingKey(service: string): string | undefined
   return GROOMING_SERVICE_TO_SERVICE_CODE[service];
 }
 
+/** Maps invoice/boarding legacy pricing_key values to canonical service_code for RPC resolution. */
+export function legacyPricingKeyToServiceCode(
+  key: string,
+): Database["public"]["Enums"]["service_code"] | undefined {
+  return LEGACY_KEY_TO_SERVICE_CODE[key];
+}
+
 const LEGACY_KEY_TO_SERVICE_CODE: Record<
   string,
   Database["public"]["Enums"]["service_code"]
