@@ -18,6 +18,7 @@ import {
   useRooms,
   useCreateBooking,
   useUpdateBooking,
+  useUndoCheckOut,
   isAssessmentRequiredError,
 } from "@/hooks/useBookings";
 import type {
@@ -1116,6 +1117,7 @@ function BoardingBookingDetailSheets({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const updateBooking = useUpdateBooking();
+  const undoCheckOut = useUndoCheckOut();
   const { data: rooms = [] } = useRooms();
   const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
   const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
@@ -1395,6 +1397,23 @@ function BoardingBookingDetailSheets({
                         View Belongings
                       </Button>
                     </div>
+                  )}
+
+                  {booking.status === "checked_out" && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      disabled={undoCheckOut.isPending}
+                      onClick={() =>
+                        undoCheckOut.mutate(booking.id, {
+                          onSuccess: () => toast.success("Checkout reversed — booking is checked in again"),
+                          onError: (err) => toast.error(err.message),
+                        })
+                      }
+                    >
+                      {undoCheckOut.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Undo Checkout
+                    </Button>
                   )}
 
                   {(booking.status === "confirmed" || booking.status === "enquiry") && (

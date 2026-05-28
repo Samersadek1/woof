@@ -605,3 +605,27 @@ export function useCheckOut() {
     },
   });
 }
+
+export function useUndoCheckOut() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (bookingId: string) => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .update({
+          status: "checked_in",
+          actual_check_out_at: null,
+        })
+        .eq("id", bookingId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as Booking;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["bookings"] });
+    },
+  });
+}
