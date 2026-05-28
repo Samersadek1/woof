@@ -1,0 +1,25 @@
+tracker_id,pet_name,credit_id,pet_id,auth_total,auth_used,auth_remaining,db_units_total,db_units_consumed,db_remaining,session_count,verdict
+PKG-84539,Lotus,30a99fab-a83a-4d5f-a360-61b352d38781,31d18899-4867-4524-bfdc-35069e33436e,30,13,17,30,13,17,30,sessions_mismatch
+PKG-84539,Mei Mei,9230cbf2-f060-41e2-a75f-c9e7d1be6b89,bbc628cd-394a-4bcd-84c1-4f34d5047de8,30,13,17,30,13,17,30,sessions_mismatch
+PKG-84539,Rocky,c08d8078-50d3-47f2-9666-73d9aeb5d995,02389f3b-03e2-4385-a95d-cf515d946653,30,13,17,30,13,17,30,sessions_mismatch
+PKG-86058,Lotus,bb7b8233-45b8-44c3-b721-e534d3bb4da3,31d18899-4867-4524-bfdc-35069e33436e,30,13,17,30,13,17,30,sessions_mismatch
+PKG-86058,Mei Mei,8ac2402c-8618-493a-a8aa-86f1ec238aee,bbc628cd-394a-4bcd-84c1-4f34d5047de8,30,13,17,30,13,17,30,sessions_mismatch
+PKG-86058,Rocky,8b2d8d3d-6025-489b-b120-536acfbf147d,02389f3b-03e2-4385-a95d-cf515d946653,30,13,17,30,13,17,30,sessions_mismatch
+PKG-87705,Lotus,ef98bf21-2831-48b9-baeb-07749043d45c,31d18899-4867-4524-bfdc-35069e33436e,30,12,18,30,12,18,30,sessions_mismatch
+PKG-87705,Mei Mei,f3a86f6d-9707-4c8b-b938-6c41889e2d5c,bbc628cd-394a-4bcd-84c1-4f34d5047de8,30,12,18,30,12,18,30,sessions_mismatch
+PKG-87705,Rocky,b6325b17-0e39-4288-8315-5574489b8e3f,02389f3b-03e2-4385-a95d-cf515d946653,30,12,18,30,12,18,30,sessions_mismatch
+PKG-89021,Lotus,ce5f08fc-8191-41a5-ac66-e1eb9fd9eca4,31d18899-4867-4524-bfdc-35069e33436e,30,14,16,30,14,16,30,sessions_mismatch
+PKG-89021,Mei Mei,72ef379f-8e28-41a2-ad95-b7122f98b4f0,bbc628cd-394a-4bcd-84c1-4f34d5047de8,30,14,16,30,14,16,30,sessions_mismatch
+PKG-89021,Rocky,16c74058-952d-4fa6-91f9-172c54c67a6a,02389f3b-03e2-4385-a95d-cf515d946653,30,14,16,30,14,16,30,sessions_mismatch
+PKG-90398,Lotus,fa2a79fa-bff1-4779-b177-1348d19f573f,31d18899-4867-4524-bfdc-35069e33436e,30,30,0,30,30,0,30,match
+PKG-90398,Mei Mei,be176ed0-3df5-4a07-ac79-418dda4e0cb2,bbc628cd-394a-4bcd-84c1-4f34d5047de8,30,30,0,30,30,0,30,match
+PKG-90398,Rocky,b4334220-3726-4b08-bb67-845173a45c25,02389f3b-03e2-4385-a95d-cf515d946653,30,30,0,30,30,0,30,match
+PKG-91175,Lotus,6d5a4089-7128-4199-894d-22a0fc0425ea,31d18899-4867-4524-bfdc-35069e33436e,30,12,18,30,12,18,30,sessions_mismatch
+PKG-91175,Mei Mei,8cc798bb-5316-4e6e-9fca-25266334ef1d,bbc628cd-394a-4bcd-84c1-4f34d5047de8,30,12,18,30,12,18,30,sessions_mismatch
+PKG-91175,Rocky,2a7ba8bd-635f-40aa-b966-865fdfe279e9,02389f3b-03e2-4385-a95d-cf515d946653,30,12,18,30,12,18,30,sessions_mismatch
+PKG-92359,Lotus,3e47b687-b2bf-4c06-8437-49c7018a13c5,31d18899-4867-4524-bfdc-35069e33436e,30,30,0,30,30,0,30,match
+PKG-92359,Mei Mei,d7d16d9b-b788-49d0-878b-693cd6d4dfda,bbc628cd-394a-4bcd-84c1-4f34d5047de8,30,30,0,30,30,0,30,match
+PKG-92359,Rocky,654d31a2-e957-4565-9cb4-ebd832d61902,02389f3b-03e2-4385-a95d-cf515d946653,30,30,0,30,30,0,30,match
+PKG-Invoice-Lotus-Meimei-Rocky-Kronfol-Tax-Invoice-Lotus-Meimei-Rocky-Kronfol-May-23-2026-packages-upaid-xlsx,Lotus,7c29d7af-59b1-4f11-90ef-cca31b1fcf31,31d18899-4867-4524-bfdc-35069e33436e,30,0,30,30,0,30,1,sessions_mismatch
+PKG-Invoice-Lotus-Meimei-Rocky-Kronfol-Tax-Invoice-Lotus-Meimei-Rocky-Kronfol-May-23-2026-packages-upaid-xlsx,Mei Mei,f7b407ea-84c2-40f3-9ddd-2f223fa0848d,bbc628cd-394a-4bcd-84c1-4f34d5047de8,30,0,30,30,0,30,1,sessions_mismatch
+PKG-Invoice-Lotus-Meimei-Rocky-Kronfol-Tax-Invoice-Lotus-Meimei-Rocky-Kronfol-May-23-2026-packages-upaid-xlsx,Rocky,b00c1546-6046-4bfa-b1aa-87a8d56cf053,02389f3b-03e2-4385-a95d-cf515d946653,30,0,30,30,0,30,1,sessions_mismatch
