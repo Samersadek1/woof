@@ -1,0 +1,69 @@
+tracker,client,n_pets,credits_found,after_count,db_used,used_match,after_remaining,db_remaining,remaining_match,verdict
+PKG-Invoice-Lotus-Meimei-Rocky-Kronfol-Tax-Invoice-Lotus-Meimei-Rocky-Kronfol-May-23-2026-packages-upaid-xlsx,"Lotus, Meimei & Rocky Kronfol",3,3,0,3,N,90,27,N,db_ahead
+PKG-92359,"Lotus, Meimei & Rocky Kronfol",3,3,90,30,N,0,0,Y,db_behind
+PKG-92933,Parker & Teddy LI,2,2,14,14,Y,46,46,Y,db_matches
+PKG-91469,Shadow & Whisky Co,2,2,8,8,Y,6,6,Y,db_matches
+PKG-87301,Bob Hand,1,1,31,30,N,0,0,Y,db_behind
+PKG-90640,Parker & Teddy LI,2,2,60,60,Y,0,0,Y,db_matches
+PKG-90931,Cheeku & Chotu Yadav,2,2,14,14,Y,0,0,Y,db_matches
+PKG-91309,Abby & Bailey Menon,2,2,14,14,Y,0,0,Y,db_matches
+PKG-90398,Meimei & Rocky Kronfol,3,3,90,30,N,0,0,Y,db_behind
+PKG-89639,Fenti & Tuesdee W.,2,2,14,14,Y,0,0,Y,db_matches
+PKG-88066,Parker & Teddy LI,2,2,60,60,Y,0,0,Y,db_matches
+PKG-88592-88796,Buddy & Sable Nelson,2,2,62,30,N,0,30,N,db_behind
+PKG-88079,Fenti & Tuesdee Watson,2,2,14,14,Y,0,0,Y,db_matches
+PKG-87747,Gigi & Scarlett Khosla,2,2,8,8,Y,6,6,Y,db_matches
+PKG-84866,Sky & Luna Orlando,2,2,14,14,Y,0,0,Y,db_matches
+PKG-87800,Abby & Bailey Menon,2,2,6,6,Y,0,0,Y,db_matches
+PKG-89135,Jack & Javier Oliviera,2,2,6,6,Y,0,0,Y,db_matches
+PKG-92236,"Alfie, Finley, & Rumi F",3,3,18,54,N,0,0,Y,db_ahead
+PKG-93168,"Alfie, Finley, & Rumi F",3,3,18,21,N,0,33,N,db_ahead
+PKG-91175,"Lotus, Meimei, & Rocky Kronfol",3,3,36,30,N,54,0,N,db_ahead
+PKG-83836,Baxter & Winnie S,2,2,14,6,N,0,6,N,db_behind
+PKG-90839,Fenti & Tuesdee Watson,2,2,14,14,Y,0,0,Y,db_matches
+PKG-91549,Misha & Riko Menon,2,2,14,6,N,0,6,N,db_behind
+PKG-88404,Cheeku & Chotu Yadav,2,2,14,14,Y,0,0,Y,db_matches
+PKG-89659,Buddy & Sable Nelson,2,2,62,30,N,0,30,N,db_behind
+PKG-87647,Alfie & Henry Hellewell,2,2,64,32,N,0,28,N,db_behind
+PKG-85591,Rocco & Leo Hoelmann,2,2,14,14,Y,0,0,Y,db_matches
+PKG-93326,Alfie & Henry Hellewell,2,2,6,6,Y,54,54,Y,db_matches
+PKG-93219-93263,Buddy & Sable Nelson,2,2,16,16,Y,44,44,Y,db_matches
+PKG-91073,Luna & Rocky Azmi,2,2,28,24,N,32,6,N,db_ahead
+PKG-91924,Buddy & Sable Nelson,2,2,62,30,N,0,30,N,db_behind
+PKG-87705,"Lotus, Meimei, & Rocky Kronfol",3,3,36,30,N,54,0,N,db_ahead
+PKG-87380,"Alfie, Finley, & Rumi Farha",3,3,18,54,N,0,0,Y,db_ahead
+PKG-87582-87609,Buddy & Sable Nelson,2,2,64,32,N,0,28,N,db_behind
+PKG-85132-85771,Buddy & Sable Nelson,2,2,64,32,N,0,28,N,db_behind
+PKG-82436,Bob Hand,1,1,31,30,N,0,0,Y,db_behind
+PKG-82431,Tino Lueck,1,1,34,30,N,0,0,Y,db_behind
+PKG-85160,Rusty Bostock,1,1,31,30,N,0,0,Y,db_behind
+PKG-86324,Fenti & Tuesdee Watson,2,2,14,14,Y,0,0,Y,db_matches
+PKG-85078,Gigi & Scarlett Khosla,2,2,14,14,Y,0,0,Y,db_matches
+PKG-86540-86607,Buddy & Sable Nelson,2,2,60,60,Y,0,0,Y,db_matches
+PKG-85435,Lilly Farha,1,1,6,12,N,0,0,Y,db_ahead
+PKG-91164,Alfie & Henry Hellewell,2,2,64,32,N,0,28,N,db_behind
+PKG-85929,Parker & Teddy Li,2,2,60,60,Y,0,0,Y,db_matches
+PKG-85162,Alfie & Henry Hellewell,2,2,60,60,Y,0,0,Y,db_matches
+PKG-84252,Jack & Javier Oliviera,2,2,30,30,Y,30,0,N,db_ahead
+PKG-83921,Parker & Teddy Li,2,2,60,60,Y,0,0,Y,db_matches
+PKG-84539,"Lotus, Meimei & Rocky Kronfol",3,3,39,30,N,51,0,N,db_ahead
+PKG-84477,Ace & Skye Walker,2,2,26,12,N,0,12,N,db_behind
+PKG-82915,Leo & Rocco Hoellmann,2,2,14,14,Y,0,0,Y,db_matches
+PKG-84023-84044,Buddy & Sable Nelson,2,2,60,60,Y,0,0,Y,db_matches
+PKG-84170,Fenti & Tuesdee Watson,2,2,14,14,Y,0,0,Y,db_matches
+PKG-87216,Abby & Bailey Menon,2,2,6,6,Y,0,0,Y,db_matches
+PKG-83480,Cocoa & Hugo Hood,2,2,6,6,Y,0,0,Y,db_matches
+PKG-84520,Cheeku & Chotu Yadav,2,2,14,14,Y,0,0,Y,db_matches
+PKG-85166,Shadow & Whisky Co,2,2,14,14,Y,0,0,Y,db_matches
+PKG-87387,Luna Kudsi,1,1,7,6,N,0,0,Y,db_behind
+PKG-71574,Luna Kudsi,1,1,7,6,N,0,0,Y,db_behind
+PKG-73143,Luna Kudsi,1,1,7,6,N,0,0,Y,db_behind
+PKG-70619,Ace & Skye Walker,2,2,28,14,N,0,10,N,db_behind
+PKG-80346,Cocoa Hugo Hood,2,2,6,6,Y,0,0,Y,db_matches
+PKG-75701-75751,Buddy & Sable Nelson,2,2,60,60,Y,0,0,Y,db_matches
+PKG-78408-78517,Buddy & Sable Nelson,2,2,102,60,N,0,0,Y,db_behind
+PKG-82825-82952,Buddy & Sable Nelson,2,2,62,60,N,0,0,Y,db_behind
+PKG-81007,Buddy Nelson,1,1,31,30,N,0,0,Y,db_behind
+PKG-86058,"Meimei, Rocky, & Lotus Kronfol",3,3,39,30,N,51,0,N,db_ahead
+PKG-89021,"Lotus, Meimei, & Rocky Kronfol",3,3,42,30,N,48,0,N,db_ahead
+PKG-90695-90717,Buddy & Sable Nelson,2,2,62,30,N,0,30,N,db_behind
