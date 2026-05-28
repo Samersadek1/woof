@@ -68,7 +68,7 @@ INSERT INTO service_credits (
   'daycare_half_day',
   12,
   10,
-  NULL,
+  '2099-12-31',
   'package_purchase',
   'c15d6e7b-7904-4285-8912-a9c3be8dc8b6',
   '3f2465c8-6092-4dab-b904-cf08174cbb8a',
