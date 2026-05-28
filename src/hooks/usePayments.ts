@@ -64,7 +64,7 @@ export function useRecordCashOrCardPayment() {
     mutationFn: async ({ invoiceId, method, performedBy, note }: CashCardPaymentArgs) => {
       const { data: invoice, error: invoiceErr } = await supabase
         .from("invoices")
-        .select("id, owner_id, total, total_aed, vat_aed")
+        .select("id, owner_id, total, total_aed, vat_aed, service_type, notes")
         .eq("id", invoiceId)
         .single();
       if (invoiceErr) throw invoiceErr;
@@ -80,6 +80,8 @@ export function useRecordCashOrCardPayment() {
         total: invoice.total,
         total_aed: invoice.total_aed,
         vat_aed: invoice.vat_aed,
+        service_type: invoice.service_type,
+        notes: invoice.notes,
       });
       const txType = invoicePaymentMethodToTransactionType(method);
 

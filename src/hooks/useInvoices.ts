@@ -99,6 +99,7 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
           total: row.total,
           total_aed: row.total_aed,
           vat_aed: row.vat_aed,
+          service_type: row.service_type,
         }).grandTotal;
         return {
           id: row.id,

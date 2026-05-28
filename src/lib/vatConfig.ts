@@ -5,6 +5,9 @@ export const VAT_RATE = 0.05 as const;
 
 export const VAT_PERCENT_LABEL = `${VAT_RATE * 100}%`;
 
+/** Catalog prices for these services are VAT-inclusive (amount charged = gross). */
+export const GROSS_INCLUSIVE_SERVICE_TYPES = ["package", "daycare"] as const;
+
 /** User-facing label for invoice lines, e.g. "VAT (5%)". */
 export function vatLineLabel(): string {
   return `VAT (${VAT_PERCENT_LABEL})`;
@@ -37,37 +40,71 @@ export function grandTotalFromNet(netAfterDiscount: number): number {
   return roundMoney2(net + vatAmountFromNet(net));
 }
 
+export function isGrossInclusiveServiceType(serviceType: string | null | undefined): boolean {
+  return (
+    serviceType != null &&
+    (GROSS_INCLUSIVE_SERVICE_TYPES as readonly string[]).includes(serviceType)
+  );
+}
+
+export function isLegacyDaycarePackageInvoice(notes: string | null | undefined): boolean {
+  return (notes ?? "").includes("Legacy daycare package purchase");
+}
+
 export type InvoiceVatInput = {
   total: number;
   total_aed: number | null;
-  /** When set (incl. 0), `total` / `total_aed` is the gross amount incl. VAT. When null, stored total is ex-VAT (legacy). */
+  /**
+   * When set (incl. 0), `total` / `total_aed` is gross incl. VAT.
+   * When null, legacy boarding may be ex-VAT; package/daycare still treated as gross via `service_type` / `notes`.
+   */
   vat_aed?: number | null;
+  service_type?: string | null;
+  notes?: string | null;
 };
+
+function storedInvoiceAmount(inv: InvoiceVatInput): number {
+  const totalBase = inv.total ?? 0;
+  const totalAedBase = inv.total_aed;
+  if (totalAedBase != null && Number(totalAedBase) === 0 && Number(totalBase) > 0) {
+    return totalBase;
+  }
+  return totalAedBase ?? totalBase;
+}
+
+/** Whether a null `vat_aed` row should still be read as VAT-inclusive gross. */
+export function treatsStoredTotalAsGrossInclusive(inv: InvoiceVatInput): boolean {
+  if (inv.vat_aed != null) return true;
+  if (isGrossInclusiveServiceType(inv.service_type)) return true;
+  if (isLegacyDaycarePackageInvoice(inv.notes)) return true;
+  return false;
+}
 
 /**
  * Normalises stored invoice amounts for display and payment.
- * - Legacy: `vat_aed` is null → `total_aed` is ex-VAT; VAT is computed at {@link VAT_RATE}.
- * - Current: `vat_aed` is set → `total_aed` is gross; net ex-VAT = gross − vat_aed.
+ * - Current: `vat_aed` set → `total_aed` is gross; net = gross − vat_aed.
+ * - Package / daycare (and legacy daycare package notes): prices are VAT-inclusive even when `vat_aed` is null.
+ * - Other legacy: `vat_aed` null → `total_aed` is ex-VAT; VAT added at {@link VAT_RATE} for grand total.
  */
 export function invoiceDisplayTotals(inv: InvoiceVatInput): {
   netExVat: number;
   vat: number;
   grandTotal: number;
 } {
-  const totalBase = inv.total ?? 0;
-  const totalAedBase = inv.total_aed;
-  // Hygiene fallback for historical rows where *_aed columns were persisted as 0
-  // while total held the real amount.
-  const stored =
-    totalAedBase != null && Number(totalAedBase) === 0 && Number(totalBase) > 0
-      ? totalBase
-      : totalAedBase ?? totalBase;
+  const stored = storedInvoiceAmount(inv);
   const vatStored = inv.vat_aed;
 
   if (vatStored != null) {
     const gross = roundMoney2(stored);
     const vat = roundMoney2(vatStored);
     const net = roundMoney2(Math.max(0, gross - vat));
+    return { netExVat: net, vat, grandTotal: gross };
+  }
+
+  if (treatsStoredTotalAsGrossInclusive(inv)) {
+    const gross = roundMoney2(Math.max(0, stored));
+    const vat = vatAmountFromGrossInclusive(gross);
+    const net = roundMoney2(gross - vat);
     return { netExVat: net, vat, grandTotal: gross };
   }
 

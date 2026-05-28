@@ -97,7 +97,7 @@ export interface InvoiceWithItems {
   subtotal_aed: number;
   discount_pct: number;
   discount_aed: number;
-  /** Stored invoice total: gross incl. VAT when vat_aed is set; legacy ex-VAT when vat_aed is null. */
+  /** Stored total is gross incl. VAT for package/daycare; see vatConfig for display/charge rules. */
   total: number;
   total_aed: number;
   vat_aed: number | null;
@@ -819,7 +819,7 @@ export function useProcessPayment() {
         // Fallback: client-side wallet deduction (used before process_wallet_payment RPC is deployed)
         const { data: inv, error: invErr } = await supabase
           .from("invoices")
-          .select("owner_id, total, total_aed, vat_aed")
+          .select("owner_id, total, total_aed, vat_aed, service_type, notes")
           .eq("id", input.invoiceId)
           .single();
         if (invErr) throw invErr;
@@ -835,6 +835,8 @@ export function useProcessPayment() {
           total: inv.total,
           total_aed: inv.total_aed,
           vat_aed: inv.vat_aed,
+          service_type: inv.service_type,
+          notes: inv.notes,
         });
         const currentBalance = ownerRow.wallet_balance ?? 0;
 
@@ -875,7 +877,7 @@ export function useProcessPayment() {
       // Card or cash payment
       const { data: invoice, error: fetchErr } = await supabase
         .from("invoices")
-        .select("owner_id, total, total_aed, vat_aed")
+        .select("owner_id, total, total_aed, vat_aed, service_type, notes")
         .eq("id", input.invoiceId)
         .single();
       if (fetchErr) throw fetchErr;
@@ -884,6 +886,8 @@ export function useProcessPayment() {
         total: invoice.total,
         total_aed: invoice.total_aed,
         vat_aed: invoice.vat_aed,
+        service_type: invoice.service_type,
+        notes: invoice.notes,
       });
 
       const paidAt = new Date().toISOString();
@@ -960,7 +964,7 @@ export function useVoidInvoice() {
     ): Promise<{ success: boolean; refundAed: number }> => {
       const { data: invoice, error: fetchErr } = await supabase
         .from("invoices")
-        .select("owner_id, total, total_aed, vat_aed")
+        .select("owner_id, total, total_aed, vat_aed, service_type, notes")
         .eq("id", input.invoiceId)
         .single();
       if (fetchErr) throw fetchErr;
@@ -993,6 +997,8 @@ export function useVoidInvoice() {
           total: invoice.total,
           total_aed: invoice.total_aed,
           vat_aed: invoice.vat_aed,
+          service_type: invoice.service_type,
+          notes: invoice.notes,
         }),
         adjusted_amount: input.refundAmount,
         reason: input.reason,
@@ -1097,7 +1103,7 @@ export function useOwnerStatement(ownerId: string) {
       if (error) {
         const { data: rows, error: qErr } = await supabase
           .from("invoices")
-          .select("id, invoice_number, status, total, total_aed, vat_aed, amount_paid, created_at, due_date, booking_id")
+          .select("id, invoice_number, status, total, total_aed, vat_aed, service_type, notes, amount_paid, created_at, due_date, booking_id")
           .eq("owner_id", ownerId)
           .order("created_at", { ascending: false });
         if (qErr) throw qErr;
@@ -1110,6 +1116,8 @@ export function useOwnerStatement(ownerId: string) {
             total: r.total,
             total_aed: r.total_aed,
             vat_aed: r.vat_aed,
+            service_type: r.service_type,
+            notes: r.notes,
           }).grandTotal,
           amount_paid: Number(r.amount_paid ?? 0),
           created_at: r.created_at,

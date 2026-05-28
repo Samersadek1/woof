@@ -304,6 +304,8 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
             total: payDialogInvoice.total,
             total_aed: payDialogInvoice.total_aed,
             vat_aed: payDialogInvoice.vat_aed,
+            service_type: payDialogInvoice.service_type,
+            notes: payDialogInvoice.notes,
           })
         : null,
     [payDialogInvoice],
@@ -316,6 +318,8 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
             total: viewInvoice.total,
             total_aed: viewInvoice.total_aed,
             vat_aed: viewInvoice.vat_aed,
+            service_type: viewInvoice.service_type,
+            notes: viewInvoice.notes,
           })
         : null,
     [viewInvoice],
@@ -488,6 +492,8 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                             total: inv.total,
                             total_aed: inv.total_aed,
                             vat_aed: inv.vat_aed,
+                            service_type: inv.service_type,
+                            notes: inv.notes,
                           }).grandTotal,
                         )}
                       </TableCell>

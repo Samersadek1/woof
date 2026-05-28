@@ -278,6 +278,8 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
     total: invoice.total,
     total_aed: invoice.total_aed,
     vat_aed: invoice.vat_aed,
+    service_type: invoice.service_type,
+    notes: invoice.notes,
   });
 
   const handlePay = async () => {
@@ -381,6 +383,8 @@ function VoidDialog({ open, invoice, ownerId, onClose }: { open: boolean; invoic
                 total: invoice.total,
                 total_aed: invoice.total_aed,
                 vat_aed: invoice.vat_aed,
+                service_type: invoice.service_type,
+                notes: invoice.notes,
               }).grandTotal,
             )}{" "}
             incl. VAT
@@ -456,6 +460,8 @@ function InvoiceDetailDialog({
     total: invoice.total,
     total_aed: invoice.total_aed,
     vat_aed: invoice.vat_aed,
+    service_type: invoice.service_type,
+    notes: invoice.notes,
   });
 
   const sb = INVOICE_STATUS_BADGE[invoice.status] ?? INVOICE_STATUS_BADGE.draft;
@@ -913,6 +919,8 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                             total: inv.total,
                             total_aed: inv.total_aed,
                             vat_aed: inv.vat_aed,
+                            service_type: inv.service_type,
+                            notes: inv.notes,
                           }).grandTotal,
                         )}
                       </TableCell>

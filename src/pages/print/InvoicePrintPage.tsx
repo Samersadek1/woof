@@ -22,6 +22,7 @@ type InvoiceRow = {
   amount_paid: number;
   payment_method: string | null;
   notes: string | null;
+  service_type: string | null;
   owner_id: string;
   booking_id: string | null;
   owners: {
@@ -69,7 +70,7 @@ async function fetchInvoicePrintable(invoiceId: string) {
     .select(
       `
       id, invoice_number, status, issue_date, due_date, subtotal_aed, subtotal,
-      discount_aed, discount_amount, total_aed, total, vat_aed, amount_paid, payment_method, notes, owner_id, booking_id,
+      discount_aed, discount_amount, total_aed, total, vat_aed, amount_paid, payment_method, notes, service_type, owner_id, booking_id,
       owners(first_name, last_name, phone, address, email),
       bookings(booking_ref, check_in_date, check_out_date),
       line_items:invoice_line_items(id, description, quantity, unit_price, total_price, sort_order)
@@ -130,6 +131,8 @@ export default function InvoicePrintPage() {
         total: invoice.total,
         total_aed: invoice.total_aed,
         vat_aed: invoice.vat_aed,
+        service_type: invoice.service_type,
+        notes: invoice.notes,
       })
     : { netExVat: 0, vat: 0, grandTotal: 0 };
   const netAfterDiscount = money.netExVat;

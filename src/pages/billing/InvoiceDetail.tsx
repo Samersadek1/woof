@@ -100,6 +100,8 @@ export default function InvoiceDetailPage() {
           total: invoice.total,
           total_aed: invoice.total_aed,
           vat_aed: invoice.vat_aed,
+          service_type: invoice.service_type,
+          notes: invoice.notes,
         })
       : { netExVat: 0, vat: 0, grandTotal: 0 };
     const amountPaid = (data?.payments ?? []).reduce((sum, p) => sum + Math.max(0, p.amount), 0);
