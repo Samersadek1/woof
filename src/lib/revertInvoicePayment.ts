@@ -1,0 +1,170 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { differenceInDays, parseISO } from "date-fns";
+import type { Database } from "@/integrations/supabase/types";
+import { deriveInvoiceStatusAfterRecalc } from "@/lib/boardingInvoiceLineUtils";
+import { roundAed } from "@/lib/money";
+import { invoiceAmountDue } from "@/lib/vatConfig";
+
+export const REVERT_PAYMENT_WINDOW_DAYS = 14;
+
+const PAYMENT_TRANSACTION_TYPES = new Set([
+  "deduction",
+  "card_payment",
+  "cash_payment",
+  "bank_transfer_payment",
+]);
+
+export type RevertInvoicePaymentResult = {
+  success: boolean;
+  error?: string;
+  walletRefunded?: number;
+  ownerId?: string;
+};
+
+type PaymentRow = Pick<
+  Database["public"]["Tables"]["wallet_transactions"]["Row"],
+  "id" | "transaction_type" | "amount"
+>;
+
+export function canRevertInvoicePayment(
+  invoice: { status: string; paid_at: string | null },
+  payments: Array<{ created_at: string; transaction_type?: string }>,
+  now: Date = new Date(),
+): boolean {
+  if (invoice.status !== "paid") return false;
+
+  const paymentRows = payments.filter(
+    (p) => !p.transaction_type || PAYMENT_TRANSACTION_TYPES.has(p.transaction_type),
+  );
+
+  const paidAt =
+    invoice.paid_at ??
+    [...paymentRows].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )[0]?.created_at;
+
+  if (!paidAt) return false;
+
+  return differenceInDays(now, parseISO(paidAt)) <= REVERT_PAYMENT_WINDOW_DAYS;
+}
+
+export function walletRefundFromPayments(payments: PaymentRow[]): number {
+  return roundAed(
+    payments
+      .filter((p) => p.transaction_type === "deduction" && p.amount < 0)
+      .reduce((sum, p) => sum + Math.abs(p.amount), 0),
+  );
+}
+
+/**
+ * Undo a recent paid invoice: reset invoice first, then credit wallet if needed.
+ * Original payment rows are kept for audit; a matching refund row is added for wallet pays.
+ */
+export async function revertInvoicePayment(
+  supabase: SupabaseClient<Database>,
+  params: { invoiceId: string; performedBy: string; reason?: string },
+): Promise<RevertInvoicePaymentResult> {
+  const { invoiceId, performedBy, reason } = params;
+
+  const { data: invoice, error: invErr } = await supabase
+    .from("invoices")
+    .select(
+      "id, owner_id, total, total_aed, vat_aed, service_type, notes, amount_paid, status, paid_at",
+    )
+    .eq("id", invoiceId)
+    .single();
+  if (invErr) return { success: false, error: invErr.message };
+
+  const { data: paymentsRaw, error: payErr } = await supabase
+    .from("wallet_transactions")
+    .select("id, transaction_type, amount, created_at")
+    .eq("invoice_id", invoiceId)
+    .order("created_at", { ascending: false });
+  if (payErr) return { success: false, error: payErr.message };
+
+  const payments = (paymentsRaw ?? []).filter((p) =>
+    PAYMENT_TRANSACTION_TYPES.has(p.transaction_type),
+  );
+
+  if (!canRevertInvoicePayment(invoice, paymentsRaw ?? [])) {
+    return {
+      success: false,
+      error: `Only invoices marked paid within the last ${REVERT_PAYMENT_WINDOW_DAYS} days can be reverted.`,
+    };
+  }
+
+  const ownerId = invoice.owner_id;
+  const walletRefund = walletRefundFromPayments(payments);
+
+  const grandTotal = invoiceAmountDue({
+    total: invoice.total,
+    total_aed: invoice.total_aed,
+    vat_aed: invoice.vat_aed,
+    service_type: invoice.service_type,
+    notes: invoice.notes,
+  });
+  const newStatus = deriveInvoiceStatusAfterRecalc(invoice.status, 0, grandTotal);
+
+  const { error: invUpdateErr } = await supabase
+    .from("invoices")
+    .update({
+      status: newStatus as Database["public"]["Enums"]["invoice_status"],
+      payment_method: null,
+      paid_at: null,
+      amount_paid: 0,
+    })
+    .eq("id", invoiceId);
+  if (invUpdateErr) return { success: false, error: invUpdateErr.message, ownerId };
+
+  if (walletRefund > 0) {
+    const { data: owner, error: ownerErr } = await supabase
+      .from("owners")
+      .select("wallet_balance")
+      .eq("id", ownerId)
+      .single();
+    if (ownerErr) {
+      return {
+        success: false,
+        error: `${ownerErr.message}. Invoice was reset to unpaid — credit the wallet manually if needed.`,
+        ownerId,
+      };
+    }
+
+    const newBalance = roundAed((owner.wallet_balance ?? 0) + walletRefund);
+
+    const { error: ownerUpdateErr } = await supabase
+      .from("owners")
+      .update({ wallet_balance: newBalance })
+      .eq("id", ownerId);
+    if (ownerUpdateErr) {
+      return {
+        success: false,
+        error: `${ownerUpdateErr.message}. Invoice was reset to unpaid — credit the wallet manually if needed.`,
+        ownerId,
+      };
+    }
+
+    const note = reason?.trim()
+      ? `Payment reverted — ${reason.trim()}`
+      : "Payment reverted";
+
+    const { error: refundErr } = await supabase.from("wallet_transactions").insert({
+      owner_id: ownerId,
+      invoice_id: invoiceId,
+      transaction_type: "refund",
+      amount: walletRefund,
+      balance_after: newBalance,
+      performed_by: performedBy.trim(),
+      notes: note,
+    });
+    if (refundErr) {
+      return {
+        success: false,
+        error: `${refundErr.message}. Invoice was reset to unpaid — credit the wallet manually if needed.`,
+        ownerId,
+      };
+    }
+  }
+
+  return { success: true, walletRefunded: walletRefund, ownerId };
+}
