@@ -168,7 +168,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   let discountPct = 0;
   let discountAed = 0;
   if (!skipMemberDiscount && subtotal > 0) {
-    const { data: ownerRow } = await supabase
+    const { data: ownerRow } = await getSupabase()
       .from("owners")
       .select("extra_discount_pct")
       .eq("id", ownerId)

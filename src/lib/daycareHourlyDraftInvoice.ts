@@ -14,6 +14,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { recalculateInvoiceTotals } from "@/lib/invoiceRecalc";
 import { composeNotesWithHourlyDraft } from "@/lib/daycareSessionMeta";
 import {
@@ -23,6 +24,8 @@ import {
 
 /** service_type value written on placeholder lines so checkout can find and replace them. */
 export const HOURLY_PLACEHOLDER_SERVICE_TYPE = "daycare_hourly_placeholder";
+
+type InvoiceLineInsert = Database["public"]["Tables"]["invoice_line_items"]["Insert"];
 
 export type HourlyDraftSession = {
   id: string;
@@ -68,7 +71,11 @@ async function findExistingHourlyDraft(
   return data?.[0]?.id ?? null;
 }
 
-function buildPlaceholderLine(petName: string, invoiceId: string, sortOrder: number) {
+function buildPlaceholderLine(
+  petName: string,
+  invoiceId: string,
+  sortOrder: number,
+): InvoiceLineInsert {
   return {
     invoice_id: invoiceId,
     description: `Daycare hourly — ${petName} (hours pending)`,
@@ -86,8 +93,8 @@ function buildTransportLines(
   transport: HourlyDraftTransport,
   invoiceId: string,
   startSortOrder: number,
-) {
-  const lines: object[] = [];
+): InvoiceLineInsert[] {
+  const lines: InvoiceLineInsert[] = [];
   let sort = startSortOrder;
   if (transport.skip || (!transport.pickupUsed && !transport.dropoffUsed)) return lines;
 
