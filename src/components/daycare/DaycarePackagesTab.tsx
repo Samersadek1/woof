@@ -4,6 +4,7 @@ import { format, parseISO } from "date-fns";
 import { AlertTriangle, Download, Loader2, Package, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { exportDaycarePackagesToExcel } from "@/lib/daycarePackagesExport";
+import { daycarePackagePetDisplayTitle } from "@/lib/daycareSharedPool";
 import { serviceGrantLabel } from "@/lib/packageCatalog";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import {
@@ -146,12 +147,22 @@ function PackageCard({ pkg }: { pkg: PackageWithDetails }) {
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1 min-w-0 text-left">
             <p className="font-semibold truncate">
-              {pkg.pets?.name ?? "Unknown pet"}
+              {daycarePackagePetDisplayTitle({
+                is_shared_pool: pkg.is_shared_pool,
+                shared_pool_pets_label: pkg.shared_pool_pets_label,
+                anchor_pet_name: pkg.pets?.name ?? null,
+                pet_name: pkg.pets?.name ?? null,
+              })}
               <span className="font-normal text-muted-foreground"> — </span>
               {pkg.owners
                 ? ownerDisplayName(pkg.owners.first_name, pkg.owners.last_name)
                 : "Unknown owner"}
             </p>
+            {pkg.is_shared_pool ? (
+              <p className="text-xs text-muted-foreground">
+                Household shared pool · {pkg.days_used}/{pkg.total_days} days used (any dog)
+              </p>
+            ) : null}
             {pkg.package_name ? (
               <p className="text-xs text-muted-foreground truncate">{pkg.package_name}</p>
             ) : (

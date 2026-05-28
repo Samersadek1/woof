@@ -880,7 +880,13 @@ const OwnerProfilePage = () => {
           );
         }),
       );
-      return rows.flat() as ActiveCreditRow[];
+      const flat = rows.flat() as ActiveCreditRow[];
+      const seen = new Set<string>();
+      return flat.filter((row) => {
+        if (seen.has(row.credit_id)) return false;
+        seen.add(row.credit_id);
+        return true;
+      });
     },
   });
 
