@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getServiceRoleClient } from "../helpers/supabaseTestClient";
 
+/** Requires `20260528120000_peak_periods_calendar_dates` applied (calendar start_date/end_date rows). */
 describe("is_peak_date", () => {
   async function isPeak(date: string) {
     const supabase = getServiceRoleClient();

@@ -1,3 +1,4 @@
+Initialising login role...
 export type Json =
   | string
   | number
@@ -1590,34 +1591,40 @@ export type Database = {
       peak_periods: {
         Row: {
           created_at: string
+          end_date: string | null
           end_day: number
           end_month: number
           id: string
           is_active: boolean
           label: string
           notes: string | null
+          start_date: string | null
           start_day: number
           start_month: number
         }
         Insert: {
           created_at?: string
+          end_date?: string | null
           end_day: number
           end_month: number
           id?: string
           is_active?: boolean
           label: string
           notes?: string | null
+          start_date?: string | null
           start_day: number
           start_month: number
         }
         Update: {
           created_at?: string
+          end_date?: string | null
           end_day?: number
           end_month?: number
           id?: string
           is_active?: boolean
           label?: string
           notes?: string | null
+          start_date?: string | null
           start_day?: number
           start_month?: number
         }
@@ -2723,20 +2730,34 @@ export type Database = {
         Args: { p_booking_id: string }
         Returns: number
       }
-      consume_service_credit: {
-        Args: {
-          p_allow_expired?: boolean
-          p_consumed_for_ref_id?: string
-          p_consumed_for_ref_type?: string
-          p_credit_id: string
-          p_units?: number
-        }
-        Returns: {
-          credit_id: string
-          new_status: string
-          units_remaining: number
-        }[]
-      }
+      consume_service_credit:
+        | {
+            Args: {
+              p_consumed_for_ref_id?: string
+              p_consumed_for_ref_type?: string
+              p_credit_id: string
+              p_units?: number
+            }
+            Returns: {
+              credit_id: string
+              new_status: string
+              units_remaining: number
+            }[]
+          }
+        | {
+            Args: {
+              p_allow_expired?: boolean
+              p_consumed_for_ref_id?: string
+              p_consumed_for_ref_type?: string
+              p_credit_id: string
+              p_units?: number
+            }
+            Returns: {
+              credit_id: string
+              new_status: string
+              units_remaining: number
+            }[]
+          }
       create_assessment_booking: {
         Args: {
           p_notes?: string
@@ -2752,6 +2773,7 @@ export type Database = {
         }[]
       }
       create_room_type: { Args: { p_label: string }; Returns: string }
+      deactivate_peak_period: { Args: { p_id: string }; Returns: undefined }
       do_legacy_import_atomic: { Args: { p_payload: Json }; Returns: Json }
       flag_overdue_invoices: { Args: never; Returns: number }
       generate_booking_ref: { Args: never; Returns: string }
@@ -2880,6 +2902,16 @@ export type Database = {
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      upsert_peak_period: {
+        Args: {
+          p_end_date?: string
+          p_id?: string
+          p_label?: string
+          p_notes?: string
+          p_start_date?: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       addon_type:
@@ -3042,8 +3074,8 @@ export type Database = {
         | "adjustment"
         | "card_payment"
         | "cash_payment"
-        | "bank_transfer_payment"
         | "manual_topup"
+        | "bank_transfer_payment"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -3345,8 +3377,8 @@ export const Constants = {
         "adjustment",
         "card_payment",
         "cash_payment",
-        "bank_transfer_payment",
         "manual_topup",
+        "bank_transfer_payment",
       ],
     },
   },

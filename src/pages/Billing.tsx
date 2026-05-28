@@ -37,6 +37,7 @@ import {
 } from "@/lib/paymentMethod";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
+import { BoardingPeakPeriodsEditor } from "@/components/billing/BoardingPeakPeriodsEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1035,6 +1036,23 @@ function PricingTab() {
         .sort((a, b) => a.key.localeCompare(b.key)),
     [allRows],
   );
+
+  const boardingNightSeasonRows = useMemo(() => {
+    const isBoardingNight = (key: string) => key.startsWith("boarding_night:");
+    const seasonOf = (key: string) => {
+      const part = key.split(":")[3];
+      return part && part !== "*" ? part : null;
+    };
+    const nightRows = boardingRateRows.filter((r) => isBoardingNight(r.key));
+    const peak = nightRows.find((r) => seasonOf(r.key) === "peak");
+    const offPeak = nightRows.find((r) => seasonOf(r.key) === "off_peak");
+    const other = nightRows.filter((r) => {
+      const s = seasonOf(r.key);
+      return s !== "peak" && s !== "off_peak";
+    });
+    const nonNight = boardingRateRows.filter((r) => !isBoardingNight(r.key));
+    return { peak, offPeak, other, nonNight };
+  }, [boardingRateRows]);
   const groomingRateCardRows = useMemo(
     () =>
       (allRows ?? [])
@@ -1502,7 +1520,7 @@ function PricingTab() {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Boarding Rates</CardTitle>
           <p className="text-xs text-muted-foreground font-normal pt-1">
-            Live boarding pricing keys used by room pricing resolver (including off-peak keys).
+            Peak and off-peak night rates apply per billed night based on the peak calendar below.
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -1522,30 +1540,89 @@ function PricingTab() {
                   </TableCell>
                 </TableRow>
               ) : (
-                boardingRateRows.map((row) => (
-                  <TableRow key={row.key}>
-                    <TableCell className="text-sm">{row.label || row.key}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{row.key}</TableCell>
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.001"
-                        className="w-[140px] ml-auto text-right h-8 text-sm"
-                        defaultValue={row.amount_aed}
-                        onBlur={(e) => saveCanonicalKey(row.key, e.target.value, {
-                          label: row.label || row.key,
-                          category: row.category,
-                        })}
-                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                        disabled={saving === `key:${row.key}`}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))
+                <>
+                  {boardingNightSeasonRows.peak ? (
+                    <TableRow key={boardingNightSeasonRows.peak.key}>
+                      <TableCell className="text-sm font-medium">Boarding — Peak (per night)</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {boardingNightSeasonRows.peak.key}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          className="w-[140px] ml-auto text-right h-8 text-sm"
+                          defaultValue={boardingNightSeasonRows.peak.amount_aed}
+                          onBlur={(e) =>
+                            saveCanonicalKey(boardingNightSeasonRows.peak!.key, e.target.value, {
+                              label: boardingNightSeasonRows.peak!.label || "Boarding (per night)",
+                              category: boardingNightSeasonRows.peak!.category,
+                            })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                          disabled={saving === `key:${boardingNightSeasonRows.peak.key}`}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                  {boardingNightSeasonRows.offPeak ? (
+                    <TableRow key={boardingNightSeasonRows.offPeak.key}>
+                      <TableCell className="text-sm font-medium">Boarding — Off-peak (per night)</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {boardingNightSeasonRows.offPeak.key}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          className="w-[140px] ml-auto text-right h-8 text-sm"
+                          defaultValue={boardingNightSeasonRows.offPeak.amount_aed}
+                          onBlur={(e) =>
+                            saveCanonicalKey(boardingNightSeasonRows.offPeak!.key, e.target.value, {
+                              label: boardingNightSeasonRows.offPeak!.label || "Boarding (per night)",
+                              category: boardingNightSeasonRows.offPeak!.category,
+                            })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                          disabled={saving === `key:${boardingNightSeasonRows.offPeak.key}`}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                  {[...boardingNightSeasonRows.other, ...boardingNightSeasonRows.nonNight].map((row) => (
+                    <TableRow key={row.key}>
+                      <TableCell className="text-sm">{row.label || row.key}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{row.key}</TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          className="w-[140px] ml-auto text-right h-8 text-sm"
+                          defaultValue={row.amount_aed}
+                          onBlur={(e) => saveCanonicalKey(row.key, e.target.value, {
+                            label: row.label || row.key,
+                            category: row.category,
+                          })}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                          disabled={saving === `key:${row.key}`}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </>
               )}
             </TableBody>
           </Table>
+          <BoardingPeakPeriodsEditor />
         </CardContent>
       </Card>
 
