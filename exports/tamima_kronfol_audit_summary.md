@@ -30,4 +30,5 @@
 ## Actions
 
 1. **Credits (Phase 2):** Run [`sql/fix-tamima-kronfol-credits-from-authority.sql`](../sql/fix-tamima-kronfol-credits-from-authority.sql) — expected **no unit changes** on current live DB; stamps invoice guard notes.
-2. **Sessions (Phase 3):** See [`tamima_kronfol_sessions_plan.md`](tamima_kronfol_sessions_plan.md) — separate approval before re-linking or trimming `daycare_sessions`.
+2. **Superseded packages (2026-05-28):** Applied [`sql/fix-tamima-kronfol-deactivate-superseded-packages.sql`](../sql/fix-tamima-kronfol-deactivate-superseded-packages.sql) — 21 older credits → `depleted`; only May 2026 package remains active per dog (30 days each).
+3. **Sessions (Phase 3):** See [`tamima_kronfol_sessions_plan.md`](tamima_kronfol_sessions_plan.md) — separate approval before re-linking historical sessions on depleted credits.
