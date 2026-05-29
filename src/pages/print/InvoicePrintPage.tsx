@@ -143,7 +143,7 @@ export default function InvoicePrintPage() {
   const wm = invoice ? watermark(invoice.status) : null;
 
   return (
-    <PrintLayout>
+    <PrintLayout imageUrls={["/woof-logo.png"]}>
       {isLoading ? <p className="print-sans text-sm">Loading invoice...</p> : null}
       {error ? (
         <p className="print-sans text-sm text-red-700">
@@ -164,12 +164,19 @@ export default function InvoicePrintPage() {
 
           <header className="relative z-[1] mb-4 border-b border-black pb-2">
             <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="print-label text-xl font-bold">woof</p>
-                <p className="print-sans text-xs">
-                  Dubai · TRN: TBD · +971 00 000 0000
-                </p>
-                <p className="print-sans text-xs">hello@woof.ae</p>
+              <div className="flex items-start gap-3">
+                <img
+                  src="/woof-logo.png"
+                  alt="woof"
+                  className="h-14 w-14 shrink-0 print-keep-color"
+                />
+                <div>
+                  <p className="print-label text-xl font-bold">WOOF PETS SERVICES LLC</p>
+                  <p className="print-sans text-xs">
+                    Dubai · TRN: 104486686900003 · +971 00 000 0000
+                  </p>
+                  <p className="print-sans text-xs">hello@woof.ae</p>
+                </div>
               </div>
               <div className="print-sans text-right text-xs">
                 <p>Invoice: {invoice.invoice_number ?? invoice.id.slice(0, 8)}</p>
@@ -341,7 +348,7 @@ export default function InvoicePrintPage() {
           <footer className="relative z-[1] border-t border-black pt-2 print-sans text-[11px]">
             <p>Thank you for choosing woof.</p>
             {outstanding > 0 ? <p>Payment terms: payable upon receipt.</p> : null}
-            <p>VAT registration: TBD · www.woof.ae</p>
+            <p>TRN: 104486686900003 · www.woof.ae</p>
           </footer>
         </article>
       ) : null}

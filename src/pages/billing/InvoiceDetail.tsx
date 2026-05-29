@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
@@ -94,6 +94,11 @@ export default function InvoiceDetailPage() {
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [walletCreditPromptMethod, setWalletCreditPromptMethod] =
     useState<ExternalPaymentMethod | null>(null);
+
+  const handlePrint = useCallback(() => {
+    if (!id) return;
+    window.open(`/print/invoice/${id}`, "_blank", "noopener,noreferrer");
+  }, [id]);
 
   const refundPreview = useCancellationRefundPreview(
     data?.invoice?.owner_id,
@@ -215,10 +220,6 @@ export default function InvoiceDetailPage() {
     if (error) return toast.error(error.message);
     toast.success("Invoice voided.");
     refetch();
-  };
-
-  const handlePrint = () => {
-    window.open(`/print/invoice/${inv.id}`, "_blank", "noopener,noreferrer");
   };
 
   const doRecordExternal = async () => {
