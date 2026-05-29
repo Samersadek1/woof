@@ -34,7 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { invoiceDisplayTotals, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
+import { invoiceDisplayTotals, invoiceTotalDisplayedDiscount, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
@@ -119,11 +119,11 @@ export default function InvoiceDetailPage() {
     const lineSubtotal = lines.reduce((sum, l) => sum + l.unit_price * l.quantity, 0);
     const lineTotal = lines.reduce((sum, l) => sum + (l.total_price ?? l.line_total ?? 0), 0);
     const lineDiscount = Math.max(0, lineSubtotal - lineTotal);
-    const adjustmentDiscount = adjustments.reduce(
-      (sum, a) => sum + Math.abs(a.adjusted_amount ?? 0),
-      0,
-    );
-    const totalDiscount = lineDiscount + adjustmentDiscount + (invoice?.discount_amount ?? 0);
+    const totalDiscount = invoiceTotalDisplayedDiscount({
+      lineDiscount,
+      discount_amount: invoice?.discount_amount ?? 0,
+      adjustments,
+    });
     const money = invoice
       ? invoiceDisplayTotals({
           total: invoice.total,

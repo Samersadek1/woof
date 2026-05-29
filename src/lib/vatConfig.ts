@@ -125,3 +125,50 @@ export function invoiceDiscountPercent(inv: InvoiceDiscountInput): number {
   if (subtotalStored <= 0 || discountStored <= 0) return 0;
   return roundMoney2((discountStored / subtotalStored) * 100);
 }
+
+type InvoiceAdjustmentAmount = { adjusted_amount: number | null };
+
+/**
+ * Invoice-level discount for display: `discount_amount` is authoritative when set
+ * (e.g. double-occupancy RPC rolls billing adjustments into it). Only sum
+ * billing_adjustments when the header discount is zero.
+ */
+export function invoiceInvoiceLevelDiscount(params: {
+  discount_amount: number;
+  adjustments?: InvoiceAdjustmentAmount[];
+}): number {
+  const header = Math.max(0, params.discount_amount ?? 0);
+  if (header > 0) return header;
+  return roundMoney2(
+    (params.adjustments ?? []).reduce(
+      (sum, a) => sum + Math.abs(a.adjusted_amount ?? 0),
+      0,
+    ),
+  );
+}
+
+/** Total discount to show on invoice UI (line-item discounts + invoice-level). */
+export function invoiceTotalDisplayedDiscount(params: {
+  lineDiscount?: number;
+  discount_amount: number;
+  adjustments?: InvoiceAdjustmentAmount[];
+}): number {
+  const line = Math.max(0, params.lineDiscount ?? 0);
+  const invoiceLevel = invoiceInvoiceLevelDiscount(params);
+  return roundMoney2(line + invoiceLevel);
+}
+
+/**
+ * Adjustments already rolled into `discount_amount` should not appear again on print.
+ */
+export function invoiceAdjustmentsForDisplay<T extends InvoiceAdjustmentAmount>(
+  discount_amount: number,
+  adjustments: T[],
+): T[] {
+  if (discount_amount <= 0) return adjustments;
+  const sum = roundMoney2(
+    adjustments.reduce((s, a) => s + Math.abs(a.adjusted_amount ?? 0), 0),
+  );
+  if (Math.abs(sum - roundMoney2(discount_amount)) < 0.02) return [];
+  return adjustments;
+}

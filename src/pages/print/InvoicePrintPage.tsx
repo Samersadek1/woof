@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PrintLayout } from "@/components/print/PrintLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { ownerDisplayName } from "@/lib/bookingUtils";
-import { invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { invoiceAdjustmentsForDisplay, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
 
 type InvoiceRow = {
   id: string;
@@ -120,6 +120,9 @@ export default function InvoicePrintPage() {
   const invoice = data?.invoice;
   const payments = data?.payments ?? [];
   const adjustments = data?.adjustments ?? [];
+  const displayAdjustments = invoice
+    ? invoiceAdjustmentsForDisplay(invoice.discount_amount ?? 0, adjustments)
+    : adjustments;
 
   const subtotal = invoice?.subtotal ?? 0;
   const discount = invoice?.discount_amount ?? 0;
@@ -235,7 +238,7 @@ export default function InvoicePrintPage() {
             </table>
           </section>
 
-          {adjustments.length > 0 ? (
+          {displayAdjustments.length > 0 ? (
             <section className="relative z-[1] mb-4">
               <p className="print-label mb-1 text-[11px] font-semibold uppercase">Adjustments</p>
               <table className="w-full border-collapse border border-black print-sans text-[11px]">
@@ -247,7 +250,7 @@ export default function InvoicePrintPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {adjustments.map((adjustment) => (
+                  {displayAdjustments.map((adjustment) => (
                     <tr key={adjustment.id}>
                       <td className="border border-black px-2 py-1 capitalize">
                         {adjustment.adjustment_type.replace(/_/g, " ")}

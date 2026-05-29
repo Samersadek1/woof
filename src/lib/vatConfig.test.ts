@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  invoiceAdjustmentsForDisplay,
   invoiceAmountDue,
   invoiceDisplayTotals,
   invoiceDiscountPercent,
+  invoiceTotalDisplayedDiscount,
   treatsStoredTotalAsGrossInclusive,
   vatAmountFromGrossInclusive,
 } from "./vatConfig";
@@ -79,5 +81,27 @@ describe("vatConfig", () => {
 
   it("computes discount percent from subtotal and discount_amount", () => {
     expect(invoiceDiscountPercent({ subtotal: 1020, discount_amount: 153 })).toBe(15);
+  });
+
+  it("does not double-count billing adjustments when discount_amount is set", () => {
+    const adjustments = [{ adjusted_amount: -153 }];
+    expect(
+      invoiceTotalDisplayedDiscount({
+        discount_amount: 153,
+        adjustments,
+      }),
+    ).toBe(153);
+    expect(invoiceAdjustmentsForDisplay(153, adjustments)).toEqual([]);
+  });
+
+  it("falls back to adjustment sum when discount_amount is zero", () => {
+    const adjustments = [{ adjusted_amount: -50 }];
+    expect(
+      invoiceTotalDisplayedDiscount({
+        discount_amount: 0,
+        adjustments,
+      }),
+    ).toBe(50);
+    expect(invoiceAdjustmentsForDisplay(0, adjustments)).toEqual(adjustments);
   });
 });
