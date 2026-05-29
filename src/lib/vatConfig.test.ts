@@ -5,6 +5,7 @@ import {
   invoiceAmountDue,
   invoiceDisplayTotals,
   invoiceDiscountPercent,
+  invoiceResolvedAmounts,
   invoiceTotalDisplayedDiscount,
   treatsStoredTotalAsGrossInclusive,
   vatAmountFromGrossInclusive,
@@ -103,5 +104,19 @@ describe("vatConfig", () => {
       }),
     ).toBe(50);
     expect(invoiceAdjustmentsForDisplay(0, adjustments)).toEqual(adjustments);
+  });
+
+  it("resolves gross total when adjustments were not synced to the invoice header", () => {
+    const resolved = invoiceResolvedAmounts({
+      subtotal: 1297.5,
+      discount_amount: 0,
+      total: 1297.5,
+      vat_aed: 61.79,
+      service_type: "boarding",
+      adjustments: [{ adjusted_amount: 118.13 }],
+    });
+    expect(resolved.totalDiscount).toBe(118.13);
+    expect(resolved.grossTotal).toBe(1179.37);
+    expect(resolved.display.grandTotal).toBe(1179.37);
   });
 });

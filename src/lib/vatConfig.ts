@@ -129,22 +129,24 @@ export function invoiceDiscountPercent(inv: InvoiceDiscountInput): number {
 type InvoiceAdjustmentAmount = { adjusted_amount: number | null };
 
 /**
- * Invoice-level discount for display: `discount_amount` is authoritative when set
- * (e.g. double-occupancy RPC rolls billing adjustments into it). Only sum
- * billing_adjustments when the header discount is zero.
+ * Invoice-level discount for display: `discount_amount` is authoritative when it
+ * already covers billing adjustments; otherwise sum adjustments (e.g. manual
+ * discount added before header sync).
  */
 export function invoiceInvoiceLevelDiscount(params: {
   discount_amount: number;
   adjustments?: InvoiceAdjustmentAmount[];
 }): number {
   const header = Math.max(0, params.discount_amount ?? 0);
-  if (header > 0) return header;
-  return roundMoney2(
+  const adjustmentSum = roundMoney2(
     (params.adjustments ?? []).reduce(
       (sum, a) => sum + Math.abs(a.adjusted_amount ?? 0),
       0,
     ),
   );
+  if (adjustmentSum <= 0) return header;
+  if (header >= adjustmentSum) return header;
+  return adjustmentSum;
 }
 
 /** Total discount to show on invoice UI (line-item discounts + invoice-level). */
@@ -156,6 +158,44 @@ export function invoiceTotalDisplayedDiscount(params: {
   const line = Math.max(0, params.lineDiscount ?? 0);
   const invoiceLevel = invoiceInvoiceLevelDiscount(params);
   return roundMoney2(line + invoiceLevel);
+}
+
+export type InvoiceResolvedAmountsInput = InvoiceVatInput & {
+  subtotal: number;
+  discount_amount: number;
+  lineDiscount?: number;
+  adjustments?: InvoiceAdjustmentAmount[];
+};
+
+/**
+ * Resolves gross/discount for display and payment when billing_adjustments exist
+ * but the invoice header was not synced (legacy add-adjustment path).
+ */
+export function invoiceResolvedAmounts(inv: InvoiceResolvedAmountsInput): {
+  totalDiscount: number;
+  grossTotal: number;
+  display: ReturnType<typeof invoiceDisplayTotals>;
+} {
+  const totalDiscount = invoiceTotalDisplayedDiscount({
+    lineDiscount: inv.lineDiscount,
+    discount_amount: inv.discount_amount,
+    adjustments: inv.adjustments,
+  });
+  const calculatedGross = roundMoney2(Math.max(0, inv.subtotal - totalDiscount));
+  const storedGross = roundMoney2(Math.max(0, inv.total));
+  const hasUnsyncedAdjustments =
+    (inv.adjustments?.length ?? 0) > 0 &&
+    Math.abs(storedGross - calculatedGross) > 0.02;
+  const grossTotal = hasUnsyncedAdjustments ? calculatedGross : storedGross;
+  const display = invoiceDisplayTotals({
+    total: grossTotal,
+    vat_aed: hasUnsyncedAdjustments
+      ? vatAmountFromGrossInclusive(grossTotal)
+      : inv.vat_aed,
+    service_type: inv.service_type,
+    notes: inv.notes,
+  });
+  return { totalDiscount, grossTotal, display };
 }
 
 /**

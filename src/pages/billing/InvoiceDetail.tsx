@@ -34,7 +34,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { invoiceDisplayTotals, invoiceTotalDisplayedDiscount, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
+import { invoiceResolvedAmounts, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
+import { applyInvoiceDiscountAdjustment, isDiscountAdjustmentType } from "@/lib/invoiceRecalc";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
@@ -119,30 +120,33 @@ export default function InvoiceDetailPage() {
     const lineSubtotal = lines.reduce((sum, l) => sum + l.unit_price * l.quantity, 0);
     const lineTotal = lines.reduce((sum, l) => sum + (l.total_price ?? l.line_total ?? 0), 0);
     const lineDiscount = Math.max(0, lineSubtotal - lineTotal);
-    const totalDiscount = invoiceTotalDisplayedDiscount({
-      lineDiscount,
-      discount_amount: invoice?.discount_amount ?? 0,
-      adjustments,
-    });
-    const money = invoice
-      ? invoiceDisplayTotals({
+    const resolved = invoice
+      ? invoiceResolvedAmounts({
+          subtotal: lineSubtotal,
+          discount_amount: invoice.discount_amount ?? 0,
           total: invoice.total,
           vat_aed: invoice.vat_aed,
           service_type: invoice.service_type,
           notes: invoice.notes,
+          lineDiscount,
+          adjustments,
         })
-      : { netExVat: 0, vat: 0, grandTotal: 0 };
+      : {
+          totalDiscount: 0,
+          grossTotal: 0,
+          display: { netExVat: 0, vat: 0, grandTotal: 0 },
+        };
     // invoice.amount_paid is maintained by both wallet and cash/card payment flows.
     // Summing wallet_transactions directly doesn't work because wallet deductions
     // are stored as negative amounts (Math.max(0, amount) would skip them).
     const amountPaid = roundMoney2(Math.max(0, invoice?.amount_paid ?? 0));
-    const outstanding = Math.max(0, money.grandTotal - amountPaid);
+    const outstanding = Math.max(0, resolved.display.grandTotal - amountPaid);
     return {
       lineSubtotal,
-      totalDiscount,
-      netExVat: money.netExVat,
-      vat: money.vat,
-      grandTotal: money.grandTotal,
+      totalDiscount: resolved.totalDiscount,
+      netExVat: resolved.display.netExVat,
+      vat: resolved.display.vat,
+      grandTotal: resolved.display.grandTotal,
       amountPaid,
       outstanding,
     };
@@ -281,6 +285,15 @@ export default function InvoiceDetailPage() {
       approved_by: adjustApprover.trim(),
     });
     if (error) return toast.error(error.message);
+    if (isDiscountAdjustmentType(adjustType)) {
+      try {
+        await applyInvoiceDiscountAdjustment(inv.id, amount);
+      } catch (syncErr) {
+        return toast.error(
+          syncErr instanceof Error ? syncErr.message : "Adjustment saved but invoice totals failed to update.",
+        );
+      }
+    }
     toast.success("Adjustment added.");
     setAdjustOpen(false);
     setAdjustAmount("");

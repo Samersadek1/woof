@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PrintLayout } from "@/components/print/PrintLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { ownerDisplayName } from "@/lib/bookingUtils";
-import { invoiceAdjustmentsForDisplay, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { invoiceAdjustmentsForDisplay, invoiceResolvedAmounts, vatLineLabel } from "@/lib/vatConfig";
 
 type InvoiceRow = {
   id: string;
@@ -125,18 +125,33 @@ export default function InvoicePrintPage() {
     : adjustments;
 
   const subtotal = invoice?.subtotal ?? 0;
-  const discount = invoice?.discount_amount ?? 0;
-  const money = invoice
-    ? invoiceDisplayTotals({
+  const lineDiscount = invoice
+    ? invoice.line_items.reduce((sum, line) => {
+        const lineBase = line.unit_price * line.quantity;
+        const lineTotal = line.total_price ?? lineBase;
+        return sum + Math.max(0, lineBase - lineTotal);
+      }, 0)
+    : 0;
+  const resolved = invoice
+    ? invoiceResolvedAmounts({
+        subtotal,
+        discount_amount: invoice.discount_amount ?? 0,
         total: invoice.total,
         vat_aed: invoice.vat_aed,
         service_type: invoice.service_type,
         notes: invoice.notes,
+        lineDiscount,
+        adjustments,
       })
-    : { netExVat: 0, vat: 0, grandTotal: 0 };
-  const netAfterDiscount = money.netExVat;
-  const vat = money.vat;
-  const grandTotal = money.grandTotal;
+    : {
+        totalDiscount: 0,
+        grossTotal: 0,
+        display: { netExVat: 0, vat: 0, grandTotal: 0 },
+      };
+  const discount = resolved.totalDiscount;
+  const netAfterDiscount = resolved.display.netExVat;
+  const vat = resolved.display.vat;
+  const grandTotal = resolved.display.grandTotal;
   const paidAmount = invoice?.amount_paid ?? 0;
   const outstanding = Math.max(grandTotal - paidAmount, 0);
   const wm = invoice ? watermark(invoice.status) : null;
