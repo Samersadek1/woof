@@ -27,19 +27,17 @@ import {
   useOwnerStatement,
   useBillingAdjustments,
   useFinaliseInvoice,
-  useProcessPayment,
-  useVoidInvoice,
   formatAed,
   type InvoiceWithItems,
   type InvoiceStatus,
 } from "@/hooks/useBilling";
-import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
-import { INVOICE_PAYMENT_METHOD_OPTIONS, type PaymentMethod } from "@/lib/paymentMethod";
-import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
-import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
+import { invoiceDisplayTotals } from "@/lib/vatConfig";
+import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
+import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import { usePendingHourlyDaycareForOwner } from "@/hooks/useDaycare";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -102,12 +100,8 @@ import {
   BedDouble,
   ExternalLink,
   FileText,
-  CreditCard,
-  Ban,
   CheckCircle2,
   Receipt,
-  Eye,
-  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
@@ -284,45 +278,23 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
     useInvoicesForOwner(ownerId);
   const { adjustments, isLoading: adjLoading } = useBillingAdjustments(ownerId);
   const finalise = useFinaliseInvoice();
-  const processPayment = useProcessPayment();
-  const voidInvoice = useVoidInvoice();
 
-  const [payDialogInvoice, setPayDialogInvoice] = useState<InvoiceWithItems | null>(null);
-  const [payMethod, setPayMethod] = useState<PaymentMethod>("wallet");
-  const [payStaff, setPayStaff] = useState("");
-  const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
-  const [addLineOpen, setAddLineOpen] = useState(false);
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [consolidateOpen, setConsolidateOpen] = useState(false);
   const topUp = useTopUpWallet();
   const overdueCount = invoices.filter((inv) => inv.status === "overdue").length;
 
-  const payDialogTotals = useMemo(
-    () =>
-      payDialogInvoice
-        ? invoiceDisplayTotals({
-            total: payDialogInvoice.total,
-            total_aed: payDialogInvoice.total_aed,
-            vat_aed: payDialogInvoice.vat_aed,
-            service_type: payDialogInvoice.service_type,
-            notes: payDialogInvoice.notes,
-          })
-        : null,
-    [payDialogInvoice],
-  );
+  const openInvoiceDetail = (invoiceId: string) => {
+    navigate(
+      `/billing/invoices/${invoiceId}?returnTo=${encodeURIComponent(`/customers/${ownerId}`)}`,
+    );
+  };
 
-  const viewInvoiceTotals = useMemo(
-    () =>
-      viewInvoice
-        ? invoiceDisplayTotals({
-            total: viewInvoice.total,
-            total_aed: viewInvoice.total_aed,
-            vat_aed: viewInvoice.vat_aed,
-            service_type: viewInvoice.service_type,
-            notes: viewInvoice.notes,
-          })
-        : null,
-    [viewInvoice],
+  const consolidatableCount = useMemo(
+    () => invoices.filter((inv) => canConsolidateInvoiceStatus(inv.status)).length,
+    [invoices],
   );
 
   const handleFinalise = (inv: InvoiceWithItems) => {
@@ -330,38 +302,6 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
       onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} finalised`),
       onError: (err) => toast.error(err.message),
     });
-  };
-
-  const handlePay = async () => {
-    if (!payDialogInvoice || !payStaff.trim()) {
-      toast.error("Enter staff name");
-      return;
-    }
-    try {
-      await processPayment.mutateAsync({
-        invoiceId: payDialogInvoice.id,
-        method: payMethod,
-        staffName: payStaff.trim(),
-      });
-      setPayDialogInvoice(null);
-      const { data: freshInvoices } = await refetchInvoices();
-      if (viewInvoice) {
-        const fresh = freshInvoices?.find((i) => i.id === viewInvoice.id);
-        if (fresh) setViewInvoice(fresh);
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Payment failed.");
-    }
-  };
-
-  const handleVoid = (inv: InvoiceWithItems) => {
-    voidInvoice.mutate(
-      { invoiceId: inv.id, reason: "Voided from owner profile", refundAmount: 0, staffName: "admin" },
-      {
-        onSuccess: () => toast.success("Invoice voided"),
-        onError: (err) => toast.error(err.message),
-      },
-    );
   };
 
   return (
@@ -377,6 +317,16 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
           )}
         </h3>
         <div className="flex gap-2">
+          {selectedIds.length >= 2 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="owner-profile-consolidate-btn"
+              onClick={() => setConsolidateOpen(true)}
+            >
+              Consolidate selected ({selectedIds.length})
+            </Button>
+          )}
           <Button size="sm" variant="outline" onClick={() => setTopUpOpen(true)}>
             <Wallet className="mr-1.5 h-4 w-4" />
             Top up
@@ -452,7 +402,14 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
         </Card>
       )}
 
-      {/* Recent invoices */}
+      {consolidatableCount >= 2 && selectedIds.length === 0 && (
+        <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          {consolidatableCount} open invoices — tick the checkboxes below, then click{" "}
+          <span className="font-medium">Consolidate selected</span>.
+        </div>
+      )}
+
+      {/* Invoices */}
       <Card>
         <CardContent className="p-0">
           {invoicesLoading ? (
@@ -466,6 +423,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
+                  <TableHead className="w-10" />
                   <TableHead>Invoice</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Service</TableHead>
@@ -475,15 +433,34 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invoices.slice(0, 10).map((inv) => {
+                {invoices.map((inv) => {
                   const sb = INVOICE_STATUS_BADGE[inv.status] ?? INVOICE_STATUS_BADGE.draft;
                   const canFinalise = inv.status === "draft";
-                  const canPay = ["finalised", "issued", "outstanding", "overdue", "partially_paid"].includes(inv.status);
-                  const canVoid = !["voided", "cancelled", "paid"].includes(inv.status);
+                  const canSelect = canConsolidateInvoiceStatus(inv.status);
                   return (
                     <TableRow key={inv.id}>
                       <TableCell>
-                        <button type="button" className="text-sm font-medium text-primary hover:underline" onClick={() => setViewInvoice(inv)}>
+                        {canSelect ? (
+                          <Checkbox
+                            checked={selectedIds.includes(inv.id)}
+                            data-testid={`owner-profile-invoice-select-${inv.id}`}
+                            onCheckedChange={(checked) => {
+                              setSelectedIds((prev) =>
+                                checked
+                                  ? [...prev, inv.id]
+                                  : prev.filter((id) => id !== inv.id),
+                              );
+                            }}
+                          />
+                        ) : null}
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          type="button"
+                          className="text-sm font-medium text-primary hover:underline"
+                          data-testid={`owner-profile-invoice-link-${inv.id}`}
+                          onClick={() => openInvoiceDetail(inv.id)}
+                        >
                           {inv.invoice_number ?? inv.id.slice(0, 8)}
                         </button>
                       </TableCell>
@@ -503,22 +480,17 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => setViewInvoice(inv)} title="View">
-                            <Eye className="h-3.5 w-3.5" />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openInvoiceDetail(inv.id)}
+                            title="Open invoice"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
                           </Button>
                           {canFinalise && (
                             <Button size="sm" variant="ghost" disabled={finalise.isPending} onClick={() => handleFinalise(inv)} title="Finalise">
                               <CheckCircle2 className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                          {canPay && (
-                            <Button size="sm" variant="ghost" className="text-emerald-600" onClick={() => { setPayDialogInvoice(inv); setPayStaff(""); setPayMethod("wallet"); }} title="Pay">
-                              <CreditCard className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                          {canVoid && (
-                            <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleVoid(inv)} title="Void">
-                              <Ban className="h-3.5 w-3.5" />
                             </Button>
                           )}
                         </div>
@@ -565,233 +537,6 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
         </div>
       )}
 
-      {/* Pay dialog */}
-      {payDialogInvoice && (
-        <Dialog open={!!payDialogInvoice} onOpenChange={(o) => { if (!o) setPayDialogInvoice(null); }}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <CreditCard className="h-5 w-5" /> Process Payment
-              </DialogTitle>
-              <DialogDescription>
-                Invoice {payDialogInvoice.invoice_number ?? payDialogInvoice.id.slice(0, 8)} —{" "}
-                {payDialogTotals ? formatAed(payDialogTotals.grandTotal) : "—"} incl. VAT
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 mt-2">
-              {payDialogTotals ? (
-                <div className="rounded-md border p-3 text-sm space-y-1">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (before VAT)</span><span>{formatAed(payDialogTotals.netExVat)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{formatAed(payDialogTotals.vat)}</span></div>
-                  <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{formatAed(payDialogTotals.grandTotal)}</span></div>
-                </div>
-              ) : null}
-              <div className="space-y-2">
-                <Label>Payment method</Label>
-                <Select value={payMethod} onValueChange={(v) => setPayMethod(v as PaymentMethod)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {INVOICE_PAYMENT_METHOD_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Staff name <span className="text-destructive">*</span></Label>
-                <Input placeholder="Who is processing?" value={payStaff} onChange={(e) => setPayStaff(e.target.value)} />
-              </div>
-            </div>
-            <DialogFooter className="gap-2 pt-4">
-              <Button variant="outline" onClick={() => setPayDialogInvoice(null)} disabled={processPayment.isPending}>Cancel</Button>
-              <Button type="button" className="bg-emerald-600 hover:bg-emerald-700" disabled={processPayment.isPending} onClick={handlePay}>
-                {processPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Pay {payDialogTotals ? formatAed(payDialogTotals.grandTotal) : "—"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Invoice detail dialog */}
-      {viewInvoice && (
-        <Dialog open={!!viewInvoice} onOpenChange={(o) => { if (!o) setViewInvoice(null); }}>
-          <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Invoice {viewInvoice.invoice_number ?? viewInvoice.id.slice(0, 8)}
-              </DialogTitle>
-              <DialogDescription>
-                Created {format(parseISO(viewInvoice.created_at), "d MMM yyyy")}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div id="invoice-print-area">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>INVOICE</div>
-                  <p style={{ color: "#666", marginTop: 4 }}>{viewInvoice.invoice_number ?? viewInvoice.id.slice(0, 8)}</p>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <p style={{ color: "#666", fontSize: 13 }}>{format(parseISO(viewInvoice.created_at), "d MMMM yyyy")}</p>
-                  {viewInvoice.due_date && <p style={{ color: "#666", fontSize: 13 }}>Due: {viewInvoice.due_date}</p>}
-                  <Badge variant="outline" className={(INVOICE_STATUS_BADGE[viewInvoice.status] ?? INVOICE_STATUS_BADGE.draft).className}>
-                    {(INVOICE_STATUS_BADGE[viewInvoice.status] ?? INVOICE_STATUS_BADGE.draft).label}
-                  </Badge>
-                </div>
-              </div>
-
-              {viewInvoice.service_type && (
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
-                  Service: <span style={{ textTransform: "capitalize" }}>{viewInvoice.service_type.replace(/_/g, " ")}</span>
-                </p>
-              )}
-              {viewInvoice.booking_ref && (
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
-                  Booking: <span style={{ fontWeight: 500 }}>{viewInvoice.booking_ref}</span>
-                </p>
-              )}
-              {viewInvoice.booking_check_in && viewInvoice.booking_check_out && (
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
-                  Stay: {format(parseISO(viewInvoice.booking_check_in), "d MMM yyyy")} → {format(parseISO(viewInvoice.booking_check_out), "d MMM yyyy")}
-                </p>
-              )}
-
-              <Separator className="my-3" />
-
-              {(viewInvoice.line_items ?? []).length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40">
-                      <TableHead>Description</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Unit Price</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(viewInvoice.line_items ?? []).map((li) => (
-                      <TableRow key={li.id}>
-                        <TableCell className="text-sm">{li.description ?? li.pricing_key ?? "—"}</TableCell>
-                        <TableCell className="text-sm text-right">{li.quantity}</TableCell>
-                        <TableCell className="text-sm text-right">{formatAed(li.unit_price)}</TableCell>
-                        <TableCell className="text-sm text-right font-semibold">{formatAed(li.line_total)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-sm text-muted-foreground py-4">No line items</p>
-              )}
-
-              <Separator className="my-3" />
-
-              <div className="flex flex-col items-end gap-1 text-sm">
-                <div className="flex justify-between w-60">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatAed(viewInvoice.subtotal_aed)}</span>
-                </div>
-                {viewInvoice.discount_aed > 0 && (
-                  <div className="flex justify-between w-60">
-                    <span className="text-muted-foreground">
-                      Discount ({invoiceDiscountPercent({
-                        subtotal: viewInvoice.subtotal_aed,
-                        subtotal_aed: viewInvoice.subtotal_aed,
-                        discount_amount: viewInvoice.discount_aed,
-                        discount_aed: viewInvoice.discount_aed,
-                      })}%)
-                    </span>
-                    <span className="text-emerald-600">-{formatAed(viewInvoice.discount_aed)}</span>
-                  </div>
-                )}
-                {viewInvoiceTotals ? (
-                  <>
-                    <div className="flex justify-between w-60">
-                      <span className="text-muted-foreground">Subtotal (ex VAT)</span>
-                      <span>{formatAed(viewInvoiceTotals.netExVat)}</span>
-                    </div>
-                    <div className="flex justify-between w-60">
-                      <span className="text-muted-foreground">{vatLineLabel()}</span>
-                      <span>{formatAed(viewInvoiceTotals.vat)}</span>
-                    </div>
-                    <div className="flex justify-between w-60 font-bold text-lg border-t-2 border-foreground pt-2 mt-1">
-                      <span>Grand total (incl. VAT)</span>
-                      <span>{formatAed(viewInvoiceTotals.grandTotal)}</span>
-                    </div>
-                  </>
-                ) : null}
-              </div>
-
-              {viewInvoice.payment_method && (
-                <div className="flex justify-between w-60 ml-auto text-sm mt-1">
-                  <span className="text-muted-foreground">Payment method</span>
-                  <span className="capitalize">{viewInvoice.payment_method}</span>
-                </div>
-              )}
-
-              {viewInvoice.paid_at && (
-                <p className="mt-4 text-sm text-emerald-600 flex items-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4" />
-                  Paid on {format(parseISO(viewInvoice.paid_at), "d MMM yyyy")} via {viewInvoice.payment_method ?? "—"}
-                </p>
-              )}
-              {viewInvoice.voided_at && (
-                <p className="mt-4 text-sm text-destructive flex items-center gap-1.5">
-                  <Ban className="h-4 w-4" />
-                  Voided on {format(parseISO(viewInvoice.voided_at), "d MMM yyyy")}
-                  {viewInvoice.voided_reason ? ` — ${viewInvoice.voided_reason}` : ""}
-                </p>
-              )}
-            </div>
-
-            <DialogFooter className="gap-2 pt-4 flex-wrap">
-              {viewInvoice && canEditInvoiceLineItems(viewInvoice.status) && (
-                <Button variant="secondary" onClick={() => setAddLineOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add line item
-                </Button>
-              )}
-              <Button variant="outline" onClick={() => setViewInvoice(null)}>Close</Button>
-              <Button onClick={() => {
-                const el = document.getElementById("invoice-print-area");
-                if (!el) return;
-                const w = window.open("", "_blank");
-                if (!w) return;
-                w.document.write(`<!DOCTYPE html><html><head><title>Invoice</title><style>
-                  * { margin:0; padding:0; box-sizing:border-box; }
-                  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; padding:40px; color:#111; font-size:14px; }
-                  table { width:100%; border-collapse:collapse; } th,td { padding:8px 12px; text-align:left; border-bottom:1px solid #eee; }
-                  th { background:#f5f5f5; font-size:12px; text-transform:uppercase; color:#666; }
-                  .footer { margin-top:40px; color:#999; font-size:12px; text-align:center; }
-                  @media print { body { padding:20px; } }
-                </style></head><body>${el.innerHTML}<div class="footer">Generated ${format(new Date(), "d MMM yyyy, HH:mm")}</div></body></html>`);
-                w.document.close(); w.focus(); w.print();
-              }}>
-                <Printer className="mr-2 h-4 w-4" /> Print
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {viewInvoice && (
-        <AddInvoiceLineItemDialog
-          open={addLineOpen}
-          onOpenChange={setAddLineOpen}
-          invoiceId={viewInvoice.id}
-          ownerId={ownerId}
-          serviceType={viewInvoice.service_type}
-          invoiceLabel={viewInvoice.invoice_number ?? undefined}
-          onAdded={() => {
-            void refetchInvoices().then(({ data }) => {
-              const fresh = data?.find((i) => i.id === viewInvoice.id);
-              if (fresh) setViewInvoice(fresh);
-            });
-          }}
-        />
-      )}
-
       <Dialog open={topUpOpen} onOpenChange={setTopUpOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -826,6 +571,17 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConsolidateInvoicesDialog
+        open={consolidateOpen}
+        onOpenChange={setConsolidateOpen}
+        ownerId={ownerId}
+        invoiceIds={selectedIds}
+        onSuccess={() => {
+          setSelectedIds([]);
+          void refetchInvoices();
+        }}
+      />
     </section>
   );
 }

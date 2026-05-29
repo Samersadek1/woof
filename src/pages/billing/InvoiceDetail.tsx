@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
 import { useInvoiceDetail } from "@/hooks/useInvoiceDetail";
@@ -37,7 +37,9 @@ import { toast } from "sonner";
 import { invoiceDisplayTotals, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
+import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
 import { canRevertInvoicePayment, walletRefundFromPayments } from "@/lib/revertInvoicePayment";
 
@@ -59,7 +61,11 @@ function aed(v: number) {
 
 export default function InvoiceDetailPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { id } = useParams<{ id: string }>();
+  const returnTo = searchParams.get("returnTo");
+  const backHref = returnTo?.startsWith("/") ? returnTo : "/billing/invoices";
+  const backLabel = backHref.startsWith("/customers/") ? "Back to customer profile" : "Back to invoices";
   const { data, isLoading, refetch } = useInvoiceDetail(id);
   const walletPay = useProcessWalletPayment();
   const externalPay = useRecordExternalPayment();
@@ -86,6 +92,8 @@ export default function InvoiceDetailPage() {
   const [adjustApprover, setAdjustApprover] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [addLineOpen, setAddLineOpen] = useState(false);
+  const [walletCreditPromptMethod, setWalletCreditPromptMethod] =
+    useState<ExternalPaymentMethod | null>(null);
 
   const refundPreview = useCancellationRefundPreview(
     data?.invoice?.owner_id,
@@ -172,6 +180,20 @@ export default function InvoiceDetailPage() {
   const inv = data.invoice;
   const ownerName = `${inv.owners?.first_name ?? ""} ${inv.owners?.last_name ?? ""}`.trim() || "—";
   const status = inv.status;
+  const walletBalance = ownerWalletCredit(inv.owners?.wallet_balance);
+
+  const beginExternalPay = (method: ExternalPaymentMethod) => {
+    setExternalPayOpen(method);
+    setPayAmount(computed.outstanding.toFixed(2));
+  };
+
+  const openExternalPay = (method: ExternalPaymentMethod) => {
+    if (ownerHasWalletCredit(inv.owners?.wallet_balance)) {
+      setWalletCreditPromptMethod(method);
+      return;
+    }
+    beginExternalPay(method);
+  };
 
   const doFinalise = async () => {
     const { error } = await supabase.from("invoices").update({ status: "finalised" }).eq("id", inv.id);
@@ -197,11 +219,6 @@ export default function InvoiceDetailPage() {
 
   const handlePrint = () => {
     window.open(`/print/invoice/${inv.id}`, "_blank", "noopener,noreferrer");
-  };
-
-  const openExternalPay = (method: ExternalPaymentMethod) => {
-    setExternalPayOpen(method);
-    setPayAmount(computed.outstanding.toFixed(2));
   };
 
   const doRecordExternal = async () => {
@@ -329,7 +346,7 @@ export default function InvoiceDetailPage() {
     <>
       <TopBar title="Invoice Detail" />
       <main className="flex-1 overflow-auto p-8 space-y-6">
-        <Button variant="ghost" onClick={() => navigate("/billing/invoices")}>Back to invoices</Button>
+        <Button variant="ghost" onClick={() => navigate(backHref)}>{backLabel}</Button>
 
         <Card>
           <CardContent className="p-5 grid gap-3 md:grid-cols-2">
@@ -704,7 +721,7 @@ export default function InvoiceDetailPage() {
         invoiceNumberDisplay={inv.invoice_number?.trim() || inv.id.slice(0, 8)}
         ownerName={ownerName}
         totalAmount={computed.grandTotal}
-        onDeleted={() => navigate("/billing/invoices")}
+        onDeleted={() => navigate(backHref)}
       />
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
@@ -743,6 +760,29 @@ export default function InvoiceDetailPage() {
           onAdded={() => void refetch()}
         />
       )}
+
+      <WalletCreditExternalPaymentDialog
+        open={!!walletCreditPromptMethod}
+        onOpenChange={(open) => {
+          if (!open) setWalletCreditPromptMethod(null);
+        }}
+        walletBalance={walletBalance}
+        outstanding={computed.outstanding}
+        externalMethod={walletCreditPromptMethod}
+        onUseWallet={() => {
+          const method = walletCreditPromptMethod;
+          setWalletCreditPromptMethod(null);
+          if (method) setExternalPayOpen(null);
+          setPayAmount(computed.outstanding.toFixed(2));
+          setWalletOpen(true);
+        }}
+        onContinueExternal={() => {
+          if (!walletCreditPromptMethod) return;
+          const method = walletCreditPromptMethod;
+          setWalletCreditPromptMethod(null);
+          beginExternalPay(method);
+        }}
+      />
     </>
   );
 }

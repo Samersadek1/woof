@@ -33,7 +33,11 @@ import {
   WALLET_TOPUP_PAYMENT_METHOD_OPTIONS,
 } from "@/lib/paymentMethod";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
-import { useConsolidateInvoices } from "@/hooks/usePayments";
+import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
+import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
+import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
+import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
+import { useOwner } from "@/hooks/useOwners";
 import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { InvoiceDeletionLogPanel } from "@/components/billing/InvoiceDeletionLogPanel";
@@ -223,17 +227,22 @@ function WalletModal({ open, mode, ownerId, onClose }: WalletModalProps) {
 
 function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: InvoiceWithItems | null; onClose: () => void }) {
   const processPayment = useProcessPayment();
+  const { data: owner } = useOwner(invoice?.owner_id ?? "");
   const [method, setMethod] = useState<BillingPaymentMethod>("wallet");
   const [staffName, setStaffName] = useState("");
   const [amountAed, setAmountAed] = useState("");
+  const [walletCreditPromptOpen, setWalletCreditPromptOpen] = useState(false);
 
   useEffect(() => {
     if (!open || !invoice) return;
     setMethod("wallet");
     setAmountAed("");
+    setWalletCreditPromptOpen(false);
   }, [open, invoice?.id]);
 
   if (!invoice) return null;
+
+  const walletBalance = ownerWalletCredit(owner?.wallet_balance);
 
   const pay = invoiceDisplayTotals({
     total: invoice.total,
@@ -244,13 +253,14 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
   });
   const outstanding = Math.max(0, pay.grandTotal - (invoice.amount_paid ?? 0));
 
-  const handlePay = async () => {
+  const submitPayment = async (paymentMethod: BillingPaymentMethod = method) => {
     if (!staffName.trim()) { toast.error("Enter staff name"); return; }
-    const parsedAmount = method === "wallet" ? undefined : parseFloat(amountAed || String(outstanding));
+    const parsedAmount =
+      paymentMethod === "wallet" ? undefined : parseFloat(amountAed || String(outstanding));
     try {
       await processPayment.mutateAsync({
         invoiceId: invoice.id,
-        method,
+        method: paymentMethod,
         staffName: staffName.trim(),
         amountAed: parsedAmount,
       });
@@ -260,7 +270,17 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
     }
   };
 
+  const handlePay = () => {
+    if (!staffName.trim()) { toast.error("Enter staff name"); return; }
+    if (method !== "wallet" && ownerHasWalletCredit(owner?.wallet_balance)) {
+      setWalletCreditPromptOpen(true);
+      return;
+    }
+    void submitPayment();
+  };
+
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -300,6 +320,11 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
               />
             </div>
           )}
+          {method !== "wallet" && ownerHasWalletCredit(owner?.wallet_balance) && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Owner has {formatAed(walletBalance)} wallet credit — prefer wallet unless they paid externally.
+            </div>
+          )}
           <StaffNameSelect value={staffName} onChange={setStaffName} label="Staff name" />
         </div>
         <DialogFooter className="gap-2 pt-4">
@@ -311,6 +336,23 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <WalletCreditExternalPaymentDialog
+      open={walletCreditPromptOpen}
+      onOpenChange={setWalletCreditPromptOpen}
+      walletBalance={walletBalance}
+      outstanding={outstanding}
+      externalMethod={method === "wallet" ? null : method}
+      onUseWallet={() => {
+        setWalletCreditPromptOpen(false);
+        setMethod("wallet");
+      }}
+      onContinueExternal={() => {
+        setWalletCreditPromptOpen(false);
+        void submitPayment(method);
+      }}
+    />
+    </>
   );
 }
 
@@ -784,18 +826,21 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const finalise = useFinaliseInvoice();
-  const consolidate = useConsolidateInvoices();
   const [payInvoice, setPayInvoice] = useState<InvoiceWithItems | null>(null);
   const [voidInvoice, setVoidInvoice] = useState<InvoiceWithItems | null>(null);
   const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [consolidateStaff, setConsolidateStaff] = useState("");
   const [consolidateOpen, setConsolidateOpen] = useState(false);
 
   const filters = statusFilter !== "all" ? { status: statusFilter as InvoiceStatus } : undefined;
   const { data: invoices = [], isLoading, refetch: refetchInvoices } = useInvoicesForOwner(ownerId, filters);
 
   const statement = useOwnerStatement(ownerId);
+
+  const consolidatableCount = useMemo(
+    () => invoices.filter((inv) => canConsolidateInvoiceStatus(inv.status)).length,
+    [invoices],
+  );
 
   const handleFinalise = (inv: InvoiceWithItems) => {
     finalise.mutate(inv.id, {
@@ -835,6 +880,12 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
       )}
 
       {/* Filter + actions bar */}
+      {consolidatableCount >= 2 && selectedIds.length === 0 && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          {consolidatableCount} open invoices — tick the checkboxes below, then click{" "}
+          <span className="font-medium">Consolidate selected</span>.
+        </div>
+      )}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[180px]"><SelectValue placeholder="All statuses" /></SelectTrigger>
@@ -853,7 +904,12 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
         </Select>
 
         {selectedIds.length >= 2 && (
-          <Button size="sm" variant="secondary" onClick={() => setConsolidateOpen(true)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="billing-owner-consolidate-btn"
+            onClick={() => setConsolidateOpen(true)}
+          >
             Consolidate selected ({selectedIds.length})
           </Button>
         )}
@@ -895,7 +951,7 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                   const canFinalise = inv.status === "draft";
                   const canPay = ["finalised", "issued", "outstanding", "overdue", "partially_paid"].includes(inv.status);
                   const canVoid = !["cancelled", "voided", "paid"].includes(inv.status);
-                  const canSelect = canPay || inv.status === "draft" || inv.status === "finalised";
+                  const canSelect = canConsolidateInvoiceStatus(inv.status);
                   return (
                     <TableRow key={inv.id}>
                       <TableCell>
@@ -988,45 +1044,16 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
         }}
       />
 
-      <Dialog open={consolidateOpen} onOpenChange={setConsolidateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Consolidate {selectedIds.length} invoices</DialogTitle>
-            <DialogDescription>
-              Creates one new finalised invoice and voids the selected sources.
-            </DialogDescription>
-          </DialogHeader>
-          <StaffNameSelect value={consolidateStaff} onChange={setConsolidateStaff} label="Processed by" />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConsolidateOpen(false)}>Cancel</Button>
-            <Button
-              disabled={consolidate.isPending}
-              onClick={async () => {
-                if (!consolidateStaff.trim()) {
-                  toast.error("Staff name is required.");
-                  return;
-                }
-                try {
-                  const newId = await consolidate.mutateAsync({
-                    ownerId,
-                    invoiceIds: selectedIds,
-                    performedBy: consolidateStaff.trim(),
-                  });
-                  toast.success("Invoices consolidated.");
-                  setSelectedIds([]);
-                  setConsolidateOpen(false);
-                  refetchInvoices();
-                  navigate(`/billing/invoices/${newId}`);
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Consolidation failed.");
-                }
-              }}
-            >
-              {consolidate.isPending ? "Consolidating…" : "Consolidate"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConsolidateInvoicesDialog
+        open={consolidateOpen}
+        onOpenChange={setConsolidateOpen}
+        ownerId={ownerId}
+        invoiceIds={selectedIds}
+        onSuccess={() => {
+          setSelectedIds([]);
+          refetchInvoices();
+        }}
+      />
     </>
   );
 }
@@ -1040,7 +1067,11 @@ const BillingPage = () => {
 
   const { data: owner, isLoading: ownerLoading } = useOwner(selectedOwnerId ?? "");
 
-  const handleSelect = (id: string, label: string) => { setSelectedOwnerId(id); setSelectedLabel(label); };
+  const handleSelect = (id: string, label: string) => {
+    setSelectedOwnerId(id);
+    setSelectedLabel(label);
+    setActiveTab("invoices");
+  };
   const handleClear = () => { setSelectedOwnerId(null); setSelectedLabel(null); };
 
   return (
@@ -1074,7 +1105,7 @@ const BillingPage = () => {
             activeTab={activeTab}
             onTabChange={setActiveTab}
             showInvoicesTab
-            invoicesListLabel="Open invoices list"
+            invoicesListLabel="Browse all invoices"
             walletContent={<WalletTab ownerId={selectedOwnerId} owner={owner} />}
             invoicesContent={
               <InvoicesTab

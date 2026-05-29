@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { OwnerSearchPopover } from "@/components/billing/OwnerSearchPopover";
+import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { useInvoices, useInvoiceKpis } from "@/hooks/useInvoices";
-import { ownerDisplayName } from "@/lib/bookingUtils";
+import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import type { Database } from "@/integrations/supabase/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -96,6 +98,8 @@ export default function InvoiceListPage() {
   const [ownerId, setOwnerId] = useState<string | undefined>(undefined);
   const [ownerLabel, setOwnerLabel] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<InvoiceSummary | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [consolidateOpen, setConsolidateOpen] = useState(false);
   const { data: invoices = [], isLoading } = useInvoices({
     ownerId,
     status,
@@ -104,6 +108,15 @@ export default function InvoiceListPage() {
     serviceType,
   });
   const kpis = useInvoiceKpis(invoices);
+
+  const consolidatableInvoices = useMemo(
+    () => invoices.filter((inv) => canConsolidateInvoiceStatus(inv.status)),
+    [invoices],
+  );
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [ownerId]);
 
   const serviceTypes = useMemo(() => {
     const set = new Set<string>();
@@ -246,6 +259,24 @@ export default function InvoiceListPage() {
           </CardContent>
         </Card>
 
+        {ownerId && consolidatableInvoices.length >= 2 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            <span>
+              <span className="font-medium">{ownerLabel || "This owner"}</span> has{" "}
+              {consolidatableInvoices.length} open invoices — select rows below, then consolidate.
+            </span>
+            {selectedIds.length >= 2 && (
+              <Button
+                size="sm"
+                data-testid="billing-invoice-list-consolidate-btn"
+                onClick={() => setConsolidateOpen(true)}
+              >
+                Consolidate selected ({selectedIds.length})
+              </Button>
+            )}
+          </div>
+        )}
+
         <Card>
           <CardContent className="p-0">
             {isLoading ? (
@@ -254,6 +285,7 @@ export default function InvoiceListPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
+                    {ownerId ? <TableHead className="w-10" /> : null}
                     <TableHead>Invoice #</TableHead>
                     <TableHead>Owner</TableHead>
                     <TableHead>Branch</TableHead>
@@ -269,10 +301,11 @@ export default function InvoiceListPage() {
                 <TableBody>
                   {invoices.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">No invoices found.</TableCell>
+                      <TableCell colSpan={ownerId ? 11 : 10} className="h-24 text-center text-muted-foreground">No invoices found.</TableCell>
                     </TableRow>
                   ) : (
                     invoices.map((inv) => {
+                      const canSelect = !!ownerId && canConsolidateInvoiceStatus(inv.status);
                       const waUrl = showOverdueWhatsAppReminder(inv)
                         ? buildOverdueInvoiceWhatsAppUrl({
                             phone: inv.owner_phone,
@@ -287,6 +320,23 @@ export default function InvoiceListPage() {
                         className="cursor-pointer hover:bg-muted/40"
                         onClick={() => navigate(`/billing/invoices/${inv.id}`)}
                       >
+                        {ownerId ? (
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            {canSelect ? (
+                              <Checkbox
+                                checked={selectedIds.includes(inv.id)}
+                                data-testid={`billing-invoice-list-select-${inv.id}`}
+                                onCheckedChange={(checked) => {
+                                  setSelectedIds((prev) =>
+                                    checked
+                                      ? [...prev, inv.id]
+                                      : prev.filter((id) => id !== inv.id),
+                                  );
+                                }}
+                              />
+                            ) : null}
+                          </TableCell>
+                        ) : null}
                         <TableCell className="font-mono text-xs">{inv.invoice_number ?? inv.id.slice(0, 8)}</TableCell>
                         <TableCell>{inv.owner_name}</TableCell>
                         <TableCell>{renderBranchCode(inv.branch_code)}</TableCell>
@@ -358,6 +408,16 @@ export default function InvoiceListPage() {
           invoiceNumberDisplay={deleteTarget.invoice_number?.trim() || deleteTarget.id.slice(0, 8)}
           ownerName={deleteTarget.owner_name}
           totalAmount={deleteTarget.total_aed}
+        />
+      ) : null}
+
+      {ownerId && selectedIds.length >= 2 ? (
+        <ConsolidateInvoicesDialog
+          open={consolidateOpen}
+          onOpenChange={setConsolidateOpen}
+          ownerId={ownerId}
+          invoiceIds={selectedIds}
+          onSuccess={() => setSelectedIds([])}
         />
       ) : null}
     </>
