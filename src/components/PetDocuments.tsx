@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Upload, Trash2, FileText, Loader2, ImageOff } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 interface StorageFile {
   name: string;
@@ -37,6 +38,17 @@ interface StorageFile {
 
 const BUCKET = "pet-photos";
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ACCEPTED_TYPES = /^image\/|application\/pdf$/;
+const ACCEPTED_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|pdf)$/i;
+
+function isAcceptedFile(file: File): boolean {
+  if (ACCEPTED_TYPES.test(file.type)) return true;
+  return ACCEPTED_EXT.test(file.name);
+}
+
+function acceptedFiles(files: FileList | File[]): File[] {
+  return Array.from(files).filter(isAcceptedFile);
+}
 
 function passportFolder(petId: string) {
   return `passports/${petId}`;
@@ -69,6 +81,7 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [deletingName, setDeletingName] = useState<string | null>(null);
 
   const queryKey = ["pet-documents", petId];
@@ -78,9 +91,14 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
     queryFn: () => listFiles(petId),
   });
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files ?? []);
-    if (!selected.length) return;
+  const uploadFiles = async (raw: FileList | File[] | null) => {
+    const selected = acceptedFiles(raw ?? []);
+    if (!selected.length) {
+      if (raw?.length) {
+        toast.error("Only images and PDFs can be uploaded.");
+      }
+      return;
+    }
 
     setUploading(true);
     let successCount = 0;
@@ -117,6 +135,30 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
     }
   };
 
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void uploadFiles(e.target.files);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    if (uploading) return;
+    void uploadFiles(e.dataTransfer.files);
+  };
+
   const handleDelete = async (fileName: string) => {
     setDeletingName(fileName);
     const path = `${passportFolder(petId)}/${fileName}`;
@@ -132,7 +174,16 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
   };
 
   return (
-    <div className="space-y-4">
+    <div
+      className={cn(
+        "space-y-4 rounded-lg transition-colors",
+        isDragOver && "ring-2 ring-primary ring-offset-2 bg-primary/5"
+      )}
+      data-testid="pet-passport-dropzone"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Upload button */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
@@ -177,7 +228,11 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
           ))}
         </div>
       ) : files && files.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground text-center">
+            Drop more images or PDFs anywhere in this area
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {files.map((file) => (
             <div
               key={file.name}
@@ -252,12 +307,18 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
               </AlertDialog>
             </div>
           ))}
+          </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-dashed p-8 text-center">
+        <div
+          className={cn(
+            "rounded-lg border border-dashed p-8 text-center transition-colors",
+            isDragOver && "border-primary bg-primary/5"
+          )}
+        >
           <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
           <p className="text-sm text-muted-foreground">
-            Upload passport photos or vaccination booklet images
+            Drop passport photos or vaccination booklet images here, or choose files
           </p>
           <Button
             type="button"
