@@ -4,6 +4,8 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
+import { useDebounce } from "@/hooks/useDebounce";
+import { mergeGroomingBookingLinkHits, type GroomingBookingLinkHit } from "@/lib/groomingBookingLinkSearch";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
@@ -427,36 +429,36 @@ export function useMarkNoShow() {
   });
 }
 
-export type BookingLinkRow = {
-  id: string;
-  booking_ref: string | null;
-  owner_id: string;
-  check_in_date: string;
-  check_out_date: string;
-  status: string;
-  owners: { first_name: string; last_name: string } | null;
-};
+export type BookingLinkRow = GroomingBookingLinkHit;
 
-/** Search boarding stays by booking ref or owner name / phone for linking to a groom. */
+const GROOMING_BOOKING_LINK_SELECT =
+  "id, booking_ref, owner_id, check_in_date, check_out_date, status, owners(first_name, last_name, phone), booking_pets(pet_id, pets(name))";
+
+/** Search stays by booking ref, owner name/phone, or pet name for grooming link. */
 export function useBookingsForGroomingLink(searchTerm: string) {
-  const q = searchTerm.trim();
+  const q = useDebounce(searchTerm.trim(), 300);
   return useQuery({
     queryKey: ["grooming", "bookingLink", q] as const,
     enabled: q.length >= 2,
     queryFn: async () => {
       const pat = `%${q}%`;
       const orOwners = `first_name.ilike.${pat},last_name.ilike.${pat},phone.ilike.${pat}`;
+      let merged: GroomingBookingLinkHit[] = [];
+
+      const pushRows = (rows: GroomingBookingLinkHit[] | null | undefined) => {
+        merged = mergeGroomingBookingLinkHits(merged, rows);
+      };
 
       const { data: byRef, error: e1 } = await supabase
         .from("bookings")
-        .select(
-          "id, booking_ref, owner_id, check_in_date, check_out_date, status, owners(first_name, last_name)",
-        )
+        .select(GROOMING_BOOKING_LINK_SELECT)
         .ilike("booking_ref", pat)
         .neq("status", "cancelled")
-        .limit(15);
+        .order("check_in_date", { ascending: false })
+        .limit(12);
 
       if (e1) throw e1;
+      pushRows((byRef ?? []) as GroomingBookingLinkHit[]);
 
       const { data: ownerRows, error: e2 } = await supabase
         .from("owners")
@@ -466,30 +468,53 @@ export function useBookingsForGroomingLink(searchTerm: string) {
 
       if (e2) throw e2;
 
-      const merged: BookingLinkRow[] = [...((byRef ?? []) as BookingLinkRow[])];
-      const seen = new Set(merged.map((b) => b.id));
-
       const ownerIds = ownerRows?.map((o) => o.id) ?? [];
       if (ownerIds.length) {
         const { data: byOwner, error: e3 } = await supabase
           .from("bookings")
-          .select(
-            "id, booking_ref, owner_id, check_in_date, check_out_date, status, owners(first_name, last_name)",
-          )
+          .select(GROOMING_BOOKING_LINK_SELECT)
           .in("owner_id", ownerIds)
           .neq("status", "cancelled")
-          .order("check_out_date", { ascending: false })
-          .limit(15);
+          .order("check_in_date", { ascending: false })
+          .limit(12);
 
         if (e3) throw e3;
-        for (const b of (byOwner ?? []) as BookingLinkRow[]) {
-          if (!seen.has(b.id)) {
-            seen.add(b.id);
-            merged.push(b);
-          }
+        pushRows((byOwner ?? []) as GroomingBookingLinkHit[]);
+      }
+
+      const { data: petRows, error: e4 } = await supabase
+        .from("pets")
+        .select("id")
+        .ilike("name", pat)
+        .limit(20);
+
+      if (e4) throw e4;
+
+      const petIds = petRows?.map((p) => p.id) ?? [];
+      if (petIds.length) {
+        const { data: bpRows, error: e5 } = await supabase
+          .from("booking_pets")
+          .select("booking_id")
+          .in("pet_id", petIds);
+
+        if (e5) throw e5;
+
+        const bookingIds = [...new Set((bpRows ?? []).map((r) => r.booking_id))];
+        if (bookingIds.length) {
+          const { data: byPet, error: e6 } = await supabase
+            .from("bookings")
+            .select(GROOMING_BOOKING_LINK_SELECT)
+            .in("id", bookingIds)
+            .neq("status", "cancelled")
+            .order("check_in_date", { ascending: false })
+            .limit(12);
+
+          if (e6) throw e6;
+          pushRows((byPet ?? []) as GroomingBookingLinkHit[]);
         }
       }
 
+      merged.sort((a, b) => b.check_in_date.localeCompare(a.check_in_date));
       return merged.slice(0, 20);
     },
   });

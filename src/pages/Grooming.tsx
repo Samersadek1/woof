@@ -1,8 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import {
-  addMinutes,
   addDays,
   format,
   parse,
@@ -11,29 +9,19 @@ import {
 } from "date-fns";
 import TopBar from "@/components/dashboard/TopBar";
 import { useAuth } from "@/contexts/AuthContext";
-import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
-import { groomingServiceToPricingKey } from "@/lib/addonPricing";
-import { useOwner } from "@/hooks/useOwners";
-import { OwnerClientSearch } from "@/components/OwnerClientSearch";
-import { usePets } from "@/hooks/usePets";
-import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
+import { ownerDisplayName } from "@/lib/bookingUtils";
 import {
   useGroomingAppointments,
   useGroomingHistoryList,
   useGroomingGlobalSearch,
-  useCreateGroomingAppointment,
   useDeleteGroomingAppointment,
   useUpdateGroomingAppointment,
   useGroomingStatusTransition,
   useInvoiceForGroomingAppointment,
-  useBookingsForGroomingLink,
   useGroomingDayInvoices,
   sumGroomingInvoicePaidAed,
   sumGroomingInvoicePendingAed,
-  useLastGroomingDateByPetIds,
   type GroomingAppointmentWithJoins,
-  type BookingLinkRow,
 } from "@/hooks/useGrooming";
 import { useProcessPayment, formatAed } from "@/hooks/useBilling";
 import {
@@ -49,11 +37,7 @@ import {
   vatLineLabel,
 } from "@/lib/vatConfig";
 import {
-  GROOMING_PAYMENT_METHOD_NONE,
-  GROOMING_PAYMENT_METHOD_OPTIONS,
   groomingPaymentMethodLabel,
-  parseGroomingPaymentMethodSelectValue,
-  type GroomingPaymentMethod,
 } from "@/lib/groomingPaymentMethod";
 import {
   AlertDialog,
@@ -87,23 +71,39 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
 import { DogSizeField } from "@/components/DogSizeField";
 import { parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
-import type { DogSizeFormValue } from "@/lib/dogSizeForm";
 import {
-  largestDogSizeFormValue,
-  petSizeToDogSizeFormValue,
-} from "@/lib/dogSizeForm";
-import {
-  clampMattingFeeAed,
-  clampHeavyDogFeeAed,
   groomingPricingCheckboxToDbService,
   isGroomingPricingCheckbox,
   resolvePrimaryGroomingCheckbox,
 } from "@/lib/groomingNewAppointmentPricing";
-import { useGroomingManualFeeBounds } from "@/hooks/useGroomingManualFeeBounds";
-import { useNewGroomingAppointmentPrice } from "@/hooks/useNewGroomingAppointmentPrice";
-import { PetSafetyNotesBanner } from "@/components/grooming/PetSafetyNotesBanner";
 import { VisitNotesField } from "@/components/grooming/VisitNotesField";
-import { fetchCheckboxBasePriceAed } from "@/lib/groomingNewAppointmentRates";
+import { GroomingStationCalendar } from "@/components/grooming/GroomingStationCalendar";
+import { BlockStationDialog } from "@/components/grooming/BlockStationDialog";
+import { GroomingConflictOverrideDialog } from "@/components/grooming/GroomingConflictOverrideDialog";
+import {
+  GroomingNewAppointmentSheet,
+  type GroomingSlotPrefill,
+} from "@/components/grooming/GroomingNewAppointmentSheet";
+import {
+  GROOMING_SERVICE_CHECKBOX_OPTIONS,
+  estimatedPickupFromStartAndDuration,
+  serviceTokenMatchesSavedOption,
+  type GroomingServiceCheckbox,
+} from "@/lib/groomingServiceForm";
+import {
+  useGroomingStations,
+  useGroomingStationBlocks,
+  useCreateGroomingStationBlock,
+  useDeleteGroomingStationBlock,
+  useLogGroomingScheduleOverrides,
+  type GroomingStationBlockRow,
+} from "@/hooks/useGroomingStations";
+import {
+  findGroomingScheduleConflicts,
+  maxDurationMinutesForTimeInput,
+  validateGroomingScheduleTime,
+  type GroomingScheduleConflict,
+} from "@/lib/groomingCalendarModel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -113,9 +113,7 @@ import {
   SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Calendar } from "@/components/ui/calendar";
 import {
   Popover,
@@ -165,47 +163,6 @@ const SERVICE_BADGE: Record<GroomingService, string> = {
   pawdicure: "bg-pink-100 text-pink-800 border-pink-200",
 };
 
-type GroomingServiceCheckbox =
-  | "full_groom"
-  | "deshedding"
-  | "bath_only"
-  | "full_bath_full"
-  | "fur_brushing"
-  | "teeth_brushing"
-  | "nail_clip"
-  | "blow_dry"
-  | "ear_cleaning"
-  | "pawdicure"
-  | "paw_wash"
-  | "malaseb_bath"
-  | "matting_fee"
-  | "heavy_dog_fee";
-
-const DISCOUNT_QUICK_PCTS = [5, 10, 15, 20, 25, 30, 50, 100] as const;
-
-const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
-  value: GroomingServiceCheckbox;
-  label: string;
-  mapsTo: GroomingService;
-  /** Optional AED range for staff-entered add-on amounts */
-  manualPriceRange?: { min: number; max: number; default: number };
-}> = [
-  { value: "full_groom", label: "Full groom", mapsTo: "full_groom" },
-  { value: "deshedding", label: "Deshedding", mapsTo: "deshedding" },
-  { value: "bath_only", label: "Bath only", mapsTo: "full_bath" },
-  { value: "full_bath_full", label: "Full bath", mapsTo: "full_bath" },
-  { value: "fur_brushing", label: "Fur brushing", mapsTo: "brushing" },
-  { value: "teeth_brushing", label: "Teeth brushing", mapsTo: "brushing" },
-  { value: "nail_clip", label: "Nail clip", mapsTo: "nail_clip" },
-  { value: "blow_dry", label: "Blow dry", mapsTo: "full_bath" },
-  { value: "ear_cleaning", label: "Ear cleaning", mapsTo: "brushing" },
-  { value: "pawdicure", label: "Pawdicure", mapsTo: "pawdicure" },
-  { value: "paw_wash", label: "Paw wash", mapsTo: "pawdicure" },
-  { value: "malaseb_bath", label: "Malaseb bath", mapsTo: "full_bath" },
-  { value: "matting_fee", label: "Matting fee", mapsTo: "brushing" },
-  { value: "heavy_dog_fee", label: "Heavy dog fee", mapsTo: "brushing" },
-];
-
 function parseGroomingMeta(
   notes: string | null | undefined,
 ): { services: string[]; groomingDate: string | null; estimatedPickup: string | null } {
@@ -237,16 +194,6 @@ function parseGroomingMeta(
   return { services, groomingDate, estimatedPickup };
 }
 
-/** Matches saved `Services:` tokens like `Matting fee (AED 80)` to a checkbox/filter label. */
-function serviceTokenMatchesSavedOption(savedToken: string, optionLabel: string): boolean {
-  const t = savedToken.trim().toLowerCase();
-  const l = optionLabel.toLowerCase();
-  if (t === l) return true;
-  if (t.startsWith(`${l} (`)) return true;
-  if (t.startsWith(`${l} —`) || t.startsWith(`${l} -`)) return true;
-  return false;
-}
-
 function chipMatchesServiceFilter(label: string, filter: string): boolean {
   if (filter === "all") return true;
   const fl = filter.toLowerCase().trim();
@@ -255,53 +202,6 @@ function chipMatchesServiceFilter(label: string, filter: string): boolean {
   if (ll.startsWith(`${fl} (`)) return true;
   if (ll.startsWith(`${fl} —`) || ll.startsWith(`${fl} -`)) return true;
   return false;
-}
-
-const PET_NOTE_SAFETY_KEYWORDS = [
-  "aggressive",
-  "reactive",
-  "anxious",
-  "medical",
-  "medication",
-  "nervous",
-  "bite",
-] as const;
-
-function petProfileTextForSafetyScan(pet: {
-  grooming_notes?: string | null;
-  other_notes?: string | null;
-  special_alerts?: unknown;
-}): string {
-  const parts: string[] = [];
-  if (pet.grooming_notes?.trim()) parts.push(pet.grooming_notes.trim());
-  if (pet.other_notes?.trim()) parts.push(pet.other_notes.trim());
-  if (pet.special_alerts != null) {
-    try {
-      parts.push(
-        typeof pet.special_alerts === "string"
-          ? pet.special_alerts
-          : JSON.stringify(pet.special_alerts),
-      );
-    } catch {
-      parts.push(String(pet.special_alerts));
-    }
-  }
-  return parts.join("\n\n");
-}
-
-function petSafetyKeywordHit(fullText: string): boolean {
-  if (!fullText.trim()) return false;
-  const lower = fullText.toLowerCase();
-  return PET_NOTE_SAFETY_KEYWORDS.some((k) => lower.includes(k));
-}
-
-function formatLastGroomedDisplayLine(isoDate: string | undefined): string {
-  if (!isoDate) return "Last groomed: No record found";
-  try {
-    return `Last groomed: ${format(parseISO(isoDate), "d MMM yyyy")}`;
-  } catch {
-    return "Last groomed: No record found";
-  }
 }
 
 function eodAppointmentStatusBucket(status: string): "completed" | "pending" | "cancelled" {
@@ -331,20 +231,6 @@ function userVisitNotesFromStored(notes: string | null): string {
     .filter((l) => !metaPrefixes.some((p) => l.toLowerCase().trimStart().startsWith(p)))
     .join("\n")
     .trim();
-}
-
-function estimatedPickupFromStartAndDuration(timeValue: string, durationMinutes: number): string {
-  if (!/^\d{2}:\d{2}$/.test(timeValue)) return "—";
-  const safeMinutes =
-    Number.isFinite(durationMinutes) && durationMinutes > 0
-      ? durationMinutes
-      : 0;
-  try {
-    const start = parse(`${timeValue}:00`, "HH:mm:ss", new Date(2000, 0, 1));
-    return format(addMinutes(start, safeMinutes), "h:mm a");
-  } catch {
-    return "—";
-  }
 }
 
 function workflowUndoTarget(raw: string): string | null {
@@ -595,6 +481,12 @@ const GroomingPage = () => {
   const [groomingTab, setGroomingTab] = useState("day");
   const { data: dayAppointments = [], isLoading: dayLoading } =
     useGroomingAppointments(dateStr);
+  const { data: groomingStations = [], isLoading: stationsLoading, isError: stationsError } =
+    useGroomingStations();
+  const { data: stationBlocks = [] } = useGroomingStationBlocks(dateStr);
+  const createStationBlock = useCreateGroomingStationBlock();
+  const deleteStationBlock = useDeleteGroomingStationBlock();
+  const logScheduleOverrides = useLogGroomingScheduleOverrides();
   const [historySearch, setHistorySearch] = useState("");
   const historySearchActive = historySearch.trim().length >= 2;
   const { data: historyAppointments = [], isFetching: historyListFetching } =
@@ -602,50 +494,18 @@ const GroomingPage = () => {
   const { data: searchResults = [], isFetching: searchFetching } =
     useGroomingGlobalSearch(historySearch);
 
-  const createAppt = useCreateGroomingAppointment();
-
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [ownerId, setOwnerId] = useState<string | null>(null);
-  const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
-  const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
-  const [useCreditByPet, setUseCreditByPet] = useState<Record<string, boolean>>({});
-  const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
-    "full_groom",
-  ]);
-  const { data: manualFeeBounds } = useGroomingManualFeeBounds(sheetOpen);
-  const mattingDefault =
-    manualFeeBounds && manualFeeBounds.mattingMin > 0
-      ? String(manualFeeBounds.mattingMin)
-      : "";
-  const heavyDefault =
-    manualFeeBounds && manualFeeBounds.heavyMin > 0
-      ? String(manualFeeBounds.heavyMin)
-      : "";
-  const [mattingFeeAed, setMattingFeeAed] = useState("");
-  const [heavyDogFeeAed, setHeavyDogFeeAed] = useState("");
-  const [dogSize, setDogSize] = useState<DogSizeFormValue | null>(null);
-  const dogSizeManualRef = useRef(false);
-  const [apptDate, setApptDate] = useState<Date>(new Date());
-  const [groomingDate, setGroomingDate] = useState<Date>(new Date());
-  const [apptTime, setApptTime] = useState("10:00");
-  const [durationMin, setDurationMin] = useState(60);
-  const estPickupTimeLabel = useMemo(
-    () => estimatedPickupFromStartAndDuration(apptTime, durationMin),
-    [apptTime, durationMin],
-  );
-  const [groomerName, setGroomerName] = useState("");
-  const [showPreferredGroomerHint, setShowPreferredGroomerHint] = useState(false);
-  const lastPrefilledOwnerIdForGroomer = useRef<string | null>(null);
-  const [price, setPrice] = useState("");
-  /** Empty or 0% = no discount; quick buttons and manual input share this value */
-  const [discountPct, setDiscountPct] = useState("");
-  const discountAutoFromMemberRef = useRef(true);
-  const prevOwnerIdForMemberDiscountRef = useRef<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<GroomingPaymentMethod | null>(null);
-  const [visitNotes, setVisitNotes] = useState("");
-  const [linkBoarding, setLinkBoarding] = useState(false);
-  const [bookingSearch, setBookingSearch] = useState("");
-  const [bookingId, setBookingId] = useState<string | null>(null);
+  const [slotPrefill, setSlotPrefill] = useState<GroomingSlotPrefill | null>(null);
+  const [dayViewLayout, setDayViewLayout] = useState<"calendar" | "list">("calendar");
+  const [blockDialog, setBlockDialog] = useState<{
+    stationId: string;
+    stationName: string;
+    defaultStart?: string;
+    defaultEnd?: string;
+  } | null>(null);
+  const [unblockTarget, setUnblockTarget] = useState<GroomingStationBlockRow | null>(null);
+  const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
+  const [pendingConflicts, setPendingConflicts] = useState<GroomingScheduleConflict[]>([]);
   const [serviceFilter, setServiceFilter] = useState<string>("all");
   const [serviceSearch, setServiceSearch] = useState("");
   const [eodReportOpen, setEodReportOpen] = useState(false);
@@ -672,53 +532,16 @@ const GroomingPage = () => {
   const [editGroomingDate, setEditGroomingDate] = useState<Date>(new Date());
   const [editApptTime, setEditApptTime] = useState("10:00");
   const [editDurationMin, setEditDurationMin] = useState(60);
+  const [editStationId, setEditStationId] = useState<string | null>(null);
   const [editGroomerName, setEditGroomerName] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editVisitNotes, setEditVisitNotes] = useState("");
 
-  const { data: pets = [] } = usePets(ownerId ?? "");
   const eodApptIds = useMemo(() => dayAppointments.map((a) => a.id), [dayAppointments]);
   const { data: eodInvoices = [], isFetching: eodInvoicesLoading } = useGroomingDayInvoices(
     eodApptIds,
     { enabled: eodReportOpen },
   );
-  const { data: ownerForGroomingPref } = useOwner(ownerId ?? "");
-  const { data: bookingHits = [] } = useBookingsForGroomingLink(
-    linkBoarding ? bookingSearch : "",
-  );
-
-  useEffect(() => {
-    if (ownerId !== prevOwnerIdForMemberDiscountRef.current) {
-      discountAutoFromMemberRef.current = true;
-      prevOwnerIdForMemberDiscountRef.current = ownerId;
-    }
-  }, [ownerId]);
-
-  useEffect(() => {
-    if (!sheetOpen || !ownerId || ownerForGroomingPref?.id !== ownerId) return;
-    if (!discountAutoFromMemberRef.current) return;
-    const pct = 0;
-    setDiscountPct(pct > 0 ? String(pct) : "");
-  }, [sheetOpen, ownerId, ownerForGroomingPref]);
-
-  useEffect(() => {
-    if (!ownerId) {
-      setGroomerName("");
-      setShowPreferredGroomerHint(false);
-      lastPrefilledOwnerIdForGroomer.current = null;
-    }
-  }, [ownerId]);
-
-  useEffect(() => {
-    if (!sheetOpen || !ownerId) return;
-    if (!ownerForGroomingPref || ownerForGroomingPref.id !== ownerId) return;
-    if (lastPrefilledOwnerIdForGroomer.current === ownerId) return;
-
-    const pref = ownerForGroomingPref.preferred_groomer?.trim() ?? "";
-    setGroomerName(pref);
-    setShowPreferredGroomerHint(!!pref);
-    lastPrefilledOwnerIdForGroomer.current = ownerId;
-  }, [sheetOpen, ownerId, ownerForGroomingPref]);
 
   const { data: panelInvoice } = useInvoiceForGroomingAppointment(actionAppt?.id ?? null);
   const { data: payInvoice, isLoading: payInvoiceLoading } =
@@ -734,50 +557,6 @@ const GroomingPage = () => {
         : null,
     [payInvoice],
   );
-
-  const petsIdFingerprint = useMemo(
-    () =>
-      pets
-        .map((p) => p.id)
-        .sort()
-        .join(","),
-    [pets],
-  );
-
-  const selectedPetsOrdered = useMemo(
-    () => pets.filter((p) => selectedPetIds.includes(p.id)),
-    [pets, selectedPetIds],
-  );
-
-  const effectivePetCoat = useMemo(() => {
-    return selectedPetsOrdered[0]?.coat_type ?? null;
-  }, [selectedPetsOrdered]);
-
-  useEffect(() => {
-    if (!sheetOpen || dogSizeManualRef.current || selectedPetsOrdered.length === 0) return;
-    const fromPets = selectedPetsOrdered
-      .map((pet) => petSizeToDogSizeFormValue(pet.size))
-      .filter((size): size is DogSizeFormValue => size != null);
-    const derived = largestDogSizeFormValue(fromPets);
-    if (derived) setDogSize(derived);
-  }, [sheetOpen, selectedPetsOrdered]);
-
-  const petIdsForLastGroom = useMemo(() => {
-    if (selectedPetIds.length > 0) return selectedPetIds;
-    if (sheetOpen && pets.length === 1) return [pets[0].id];
-    return [];
-  }, [selectedPetIds, sheetOpen, pets]);
-
-  const { data: lastGroomDateByPet } = useLastGroomingDateByPetIds(petIdsForLastGroom, {
-    enabled: sheetOpen && petIdsForLastGroom.length > 0,
-  });
-  const lastGroomMap = lastGroomDateByPet ?? new Map<string, string>();
-
-  const petsForSafetyScan = useMemo(() => {
-    if (selectedPetsOrdered.length > 0) return selectedPetsOrdered;
-    if (ownerId && pets.length === 1) return pets;
-    return [];
-  }, [selectedPetsOrdered, ownerId, pets]);
 
   const eodStatusCounts = useMemo(() => {
     let completed = 0;
@@ -795,200 +574,53 @@ const GroomingPage = () => {
   const eodPaidTotal = useMemo(() => sumGroomingInvoicePaidAed(eodInvoices), [eodInvoices]);
   const eodPendingTotal = useMemo(() => sumGroomingInvoicePendingAed(eodInvoices), [eodInvoices]);
 
-  /** Single-pet owners: keep the only pet selected automatically (same UX as before). */
-  useEffect(() => {
-    if (!sheetOpen || !ownerId) return;
-    if (pets.length === 1) {
-      setSelectedPetIds([pets[0].id]);
-    }
-  }, [sheetOpen, ownerId, pets, petsIdFingerprint, pets.length]);
-
-  const newApptManualAddonAed = useMemo(() => {
-    const out: { matting_fee?: number; heavy_dog_fee?: number } = {};
-    if (selectedServices.includes("matting_fee")) {
-      const raw = parseFloat(mattingFeeAed);
-      const fallback = manualFeeBounds?.mattingMin ?? 0;
-      out.matting_fee = clampMattingFeeAed(
-        Number.isFinite(raw) ? raw : fallback,
-        manualFeeBounds,
-      );
-    }
-    if (selectedServices.includes("heavy_dog_fee")) {
-      const raw = parseFloat(heavyDogFeeAed);
-      const fallback = manualFeeBounds?.heavyMin ?? 0;
-      out.heavy_dog_fee = clampHeavyDogFeeAed(
-        Number.isFinite(raw) ? raw : fallback,
-        manualFeeBounds,
-      );
-    }
-    return Object.keys(out).length ? out : null;
-  }, [selectedServices, mattingFeeAed, heavyDogFeeAed, manualFeeBounds]);
-
-  const { data: newApptComputedOriginalAed, isFetching: newApptPriceFetching } = useNewGroomingAppointmentPrice({
-    selectedServices,
-    dogSize,
-    manualAddons: newApptManualAddonAed,
-    petCoat: effectivePetCoat,
-    bookingDate: format(apptDate, "yyyy-MM-dd"),
-    enabled: sheetOpen,
-  });
-
-  const { data: servicePriceHints = {} } = useQuery({
-    queryKey: [
-      "grooming-checkbox-prices",
-      dogSize,
-      effectivePetCoat,
-      format(apptDate, "yyyy-MM-dd"),
-    ],
-    enabled: sheetOpen && dogSize != null,
-    queryFn: async () => {
-      const baseOptions = GROOMING_SERVICE_CHECKBOX_OPTIONS.filter((o) =>
-        ["full_groom", "deshedding", "bath_only", "full_bath_full"].includes(o.value),
-      );
-      const entries = await Promise.all(
-        baseOptions.map(async (option) => {
-          const amount = await fetchCheckboxBasePriceAed(
-            option.value,
-            dogSize!,
-            effectivePetCoat,
-            format(apptDate, "yyyy-MM-dd"),
-          );
-          return [option.value, amount] as const;
-        }),
-      );
-      return Object.fromEntries(entries) as Partial<
-        Record<GroomingServiceCheckbox, number | null>
-      >;
-    },
-  });
-
-  const newApptPriceManualRef = useRef(false);
-
-  useEffect(() => {
-    newApptPriceManualRef.current = false;
-  }, [selectedServices, dogSize, effectivePetCoat]);
-
-  const isComplimentaryPayment = paymentMethod === "complimentary";
-  const selectedPrimaryServiceCode = useMemo(() => {
-    const primaryCb = resolvePrimaryGroomingCheckbox(
-      selectedServices.filter(isGroomingPricingCheckbox),
-    );
-    const primaryService = primaryCb ? groomingPricingCheckboxToDbService(primaryCb) : null;
-    return (primaryService ? groomingServiceToPricingKey(primaryService) : null) as
-      | Database["public"]["Enums"]["service_code"]
-      | null;
-  }, [selectedServices]);
-
-  const { data: groomingCreditsByPet = {} } = useQuery<Record<string, {
-    credit_id: string;
-    package_name: string;
-    units_remaining: number;
-    expires_at: string;
-  } | null>>({
-    queryKey: [
-      "grooming_credits",
-      selectedPrimaryServiceCode,
-      selectedPetsOrdered.map((p) => p.id).join(","),
-    ],
-    enabled: !!selectedPrimaryServiceCode && selectedPetsOrdered.length > 0,
-    queryFn: async () => {
-      const entries = await Promise.all(
-        selectedPetsOrdered.map(async (pet) => {
-          const { data, error } = await supabase.rpc("list_active_credits_for_pet", {
-            p_pet_id: pet.id,
-            p_service_code: selectedPrimaryServiceCode,
-          });
-          if (error) throw error;
-          const first = (data ?? [])[0] as
-            | { credit_id: string; package_name: string; units_remaining: number; expires_at: string }
-            | undefined;
-          return [pet.id, first ?? null] as const;
-        }),
-      );
-      return Object.fromEntries(entries);
-    },
-  });
-
-  useEffect(() => {
-    setUseCreditByPet((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const pet of selectedPetsOrdered) {
-        if (groomingCreditsByPet[pet.id] && next[pet.id] === undefined) {
-          next[pet.id] = true;
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [selectedPetsOrdered, groomingCreditsByPet]);
-
-  useEffect(() => {
-    if (!sheetOpen) return;
-    if (isComplimentaryPayment) {
-      setPrice("0");
-      return;
-    }
-    if (newApptPriceManualRef.current) return;
-    if (newApptComputedOriginalAed == null) {
-      setPrice("");
-      return;
-    }
-    setPrice(String(newApptComputedOriginalAed));
-  }, [sheetOpen, isComplimentaryPayment, newApptComputedOriginalAed]);
-
-  const normalizedDiscountPct = useMemo(() => {
-    const trimmed = discountPct.trim();
-    if (trimmed === "") return 0;
-    const parsed = Number.parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) return 0;
-    return Math.min(100, Math.max(0, parsed));
-  }, [discountPct]);
-
-  const newApptOriginalAed = useMemo(() => {
-    const n = Number.parseFloat(price);
-    if (!Number.isFinite(n) || n < 0) return null;
-    return n;
-  }, [price]);
-
-  const newApptFinalAed = useMemo(() => {
-    if (isComplimentaryPayment) return 0;
-    if (newApptOriginalAed == null) return null;
-    return Number((newApptOriginalAed * (1 - normalizedDiscountPct / 100)).toFixed(2));
-  }, [isComplimentaryPayment, newApptOriginalAed, normalizedDiscountPct]);
-
-  const newApptSaveAed = useMemo(() => {
-    if (newApptOriginalAed == null || normalizedDiscountPct <= 0 || newApptFinalAed == null) {
-      return null;
-    }
-    return Number((newApptOriginalAed - newApptFinalAed).toFixed(2));
-  }, [newApptOriginalAed, newApptFinalAed, normalizedDiscountPct]);
-
   const openNewSheet = () => {
-    setApptDate(day);
-    setGroomingDate(day);
-    setApptTime("10:00");
-    setDurationMin(60);
-    setSelectedServices(["full_groom"]);
-    setMattingFeeAed(mattingDefault);
-    setHeavyDogFeeAed(heavyDefault);
-    dogSizeManualRef.current = false;
-    setDogSize(null);
-    setGroomerName("");
-    setShowPreferredGroomerHint(false);
-    lastPrefilledOwnerIdForGroomer.current = null;
-    newApptPriceManualRef.current = false;
-    setPrice("");
-    setDiscountPct("");
-    setPaymentMethod(null);
-    setVisitNotes("");
-    setOwnerId(null);
-    setOwnerLabel(null);
-    setSelectedPetIds([]);
-    setLinkBoarding(false);
-    setBookingSearch("");
-    setBookingId(null);
+    setSlotPrefill(null);
     setSheetOpen(true);
+  };
+
+  const openNewSheetFromSlot = (slotStationId: string, timeHHMM: string) => {
+    setSlotPrefill({ stationId: slotStationId, time: timeHHMM });
+    setSheetOpen(true);
+  };
+
+  const scheduleConflictSourceAppointments = useMemo(
+    () =>
+      dayAppointments.filter(
+        (a) => normalizeGroomingWorkflowStatus(a.status) !== "cancelled",
+      ),
+    [dayAppointments],
+  );
+
+  const checkScheduleConflicts = (
+    args: {
+      stationId: string | null;
+      appointmentDate: string;
+      appointmentTime: string;
+      durationMinutes: number;
+      excludeAppointmentId?: string;
+    },
+  ) =>
+    findGroomingScheduleConflicts({
+      ...args,
+      appointments: scheduleConflictSourceAppointments,
+      blocks: stationBlocks,
+    });
+
+  const persistScheduleOverrides = async (
+    appointmentId: string,
+    conflicts: GroomingScheduleConflict[],
+    reason: string,
+  ) => {
+    if (conflicts.length === 0) return;
+    await logScheduleOverrides.mutateAsync(
+      conflicts.map((c) => ({
+        appointment_id: appointmentId,
+        conflict_type: c.conflictType,
+        conflicted_with_id: c.conflictedWithId,
+        reason,
+      })),
+    );
   };
 
   useEffect(() => {
@@ -999,10 +631,16 @@ const GroomingPage = () => {
     setEditGroomingDate(gd ? parseISO(gd) : parseISO(editAppt.appointment_date));
     setEditApptTime(appointmentTimeToInputValue(editAppt.appointment_time));
     setEditDurationMin(editAppt.duration_minutes ?? 60);
+    setEditStationId(editAppt.station_id ?? null);
     setEditGroomerName(editAppt.grooming_notes ?? "");
     setEditPrice(editAppt.price != null ? String(editAppt.price) : "");
     setEditVisitNotes(userVisitNotesFromStored(editAppt.notes));
   }, [editAppt]);
+
+  useEffect(() => {
+    const max = maxDurationMinutesForTimeInput(editApptTime);
+    if (max > 0 && editDurationMin > max) setEditDurationMin(max);
+  }, [editApptTime, editDurationMin]);
 
   const timeToDb = (t: string) => {
     const parts = t.split(":");
@@ -1011,13 +649,7 @@ const GroomingPage = () => {
     return `${h.padStart(2, "0")}:${m.padStart(2, "0")}:00`;
   };
 
-  const togglePetSelected = (id: string) => {
-    setSelectedPetIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  };
-
-  const handleSaveEdit = () => {
+  const performSaveEdit = async (overrideReason?: string) => {
     if (!editAppt || updateAppt.isPending) return;
     if (editSelectedServices.length === 0) {
       toast.error("Select at least one service.");
@@ -1025,6 +657,11 @@ const GroomingPage = () => {
     }
     if (!/^\d{2}:\d{2}$/.test(editApptTime)) {
       toast.error("Enter a valid appointment time.");
+      return;
+    }
+    const scheduleErr = validateGroomingScheduleTime(editApptTime, editDurationMin);
+    if (scheduleErr) {
+      toast.error(scheduleErr);
       return;
     }
     const primaryCb = resolvePrimaryGroomingCheckbox(
@@ -1054,22 +691,46 @@ const GroomingPage = () => {
     ].filter(Boolean);
     const composedNotes = [editVisitNotes.trim(), ...metaNotes].filter(Boolean).join("\n");
 
+    const conflicts = checkScheduleConflicts({
+      stationId: editStationId,
+      appointmentDate: format(editApptDate, "yyyy-MM-dd"),
+      appointmentTime: editApptTime,
+      durationMinutes: editDurationMin,
+      excludeAppointmentId: editAppt.id,
+    });
+    if (conflicts.length > 0 && !overrideReason) {
+      setPendingConflicts(conflicts);
+      setConflictDialogOpen(true);
+      return;
+    }
+
     updateAppt.mutate(
       {
         id: editAppt.id,
         appointment_date: format(editApptDate, "yyyy-MM-dd"),
         appointment_time: timeToDb(editApptTime),
         duration_minutes: editDurationMin,
+        station_id: editStationId,
         service: primaryService,
         grooming_notes: editGroomerName.trim() || null,
         price: finalPrice,
         notes: composedNotes || null,
       },
       {
-        onSuccess: () => {
+        onSuccess: async (data) => {
+          if (overrideReason && conflicts.length > 0) {
+            try {
+              await persistScheduleOverrides(data.id, conflicts, overrideReason);
+            } catch (e) {
+              toast.error(
+                e instanceof Error ? e.message : "Saved, but override audit log failed.",
+              );
+            }
+          }
           toast.success("Appointment updated.");
           setEditAppt(null);
           setActionAppt(null);
+          setConflictDialogOpen(false);
         },
         onError: (e) =>
           toast.error(e instanceof Error ? e.message : "Could not save changes."),
@@ -1077,186 +738,8 @@ const GroomingPage = () => {
     );
   };
 
-  const handleCreate = async () => {
-    if (createAppt.isPending) return;
-    if (!ownerId) {
-      toast.error("Select an owner.");
-      return;
-    }
-    const petIdsToBook = pets
-      .filter((p) => selectedPetIds.includes(p.id))
-      .map((p) => p.id);
-    if (petIdsToBook.length === 0) {
-      toast.error(
-        pets.length > 1
-          ? "Select at least one pet."
-          : "No pet available for this owner.",
-      );
-      return;
-    }
-    if (linkBoarding && !bookingId) {
-      toast.error("Select a boarding booking to link, or turn off the link.");
-      return;
-    }
-    if (!/^\d{2}:\d{2}$/.test(apptTime)) {
-      toast.error("Enter a valid appointment time.");
-      return;
-    }
-    if (selectedServices.length === 0) {
-      toast.error("Select at least one service.");
-      return;
-    }
-    if (!dogSize) {
-      toast.error("Select dog size so pricing can load from the rate card.");
-      return;
-    }
-
-    const primaryCb = resolvePrimaryGroomingCheckbox(
-      selectedServices.filter(isGroomingPricingCheckbox),
-    );
-    const primaryService = primaryCb ? groomingPricingCheckboxToDbService(primaryCb) : null;
-    if (!primaryService) {
-      toast.error("Could not resolve a valid service. Please reselect services.");
-      return;
-    }
-
-    const priceNum = parseFloat(price);
-    const serviceRate = newApptComputedOriginalAed ?? 0;
-    const baseForCharge = Number.isFinite(priceNum) && priceNum >= 0 ? priceNum : null;
-    const fallbackBase =
-      typeof serviceRate === "number" && serviceRate >= 0 ? serviceRate : null;
-    const basePrice = baseForCharge ?? fallbackBase;
-    const finalPrice = isComplimentaryPayment
-      ? 0
-      : basePrice != null
-        ? Number((basePrice * (1 - normalizedDiscountPct / 100)).toFixed(2))
-        : NaN;
-    if (!isComplimentaryPayment && (Number.isNaN(finalPrice) || finalPrice < 0)) {
-      toast.error("Price is not loaded yet. Wait a moment or enter it manually.");
-      return;
-    }
-
-    const selectedServiceLabels = selectedServices
-      .map((svc) => {
-        const opt = GROOMING_SERVICE_CHECKBOX_OPTIONS.find((o) => o.value === svc);
-        if (!opt) return svc;
-        if (svc === "matting_fee") {
-          const raw = parseFloat(mattingFeeAed);
-          const v = clampMattingFeeAed(
-            Number.isFinite(raw) ? raw : (manualFeeBounds?.mattingMin ?? 0),
-            manualFeeBounds,
-          );
-          return `${opt.label} (AED ${v})`;
-        }
-        if (svc === "heavy_dog_fee") {
-          const raw = parseFloat(heavyDogFeeAed);
-          const v = clampHeavyDogFeeAed(
-            Number.isFinite(raw) ? raw : (manualFeeBounds?.heavyMin ?? 0),
-            manualFeeBounds,
-          );
-          return `${opt.label} (AED ${v})`;
-        }
-        return opt.label;
-      })
-      .join(", ");
-    const originalForNote =
-      baseForCharge != null ? baseForCharge.toFixed(2) : String(serviceRate ?? "0");
-    const metaNotes = [
-      selectedServiceLabels ? `Services: ${selectedServiceLabels}` : null,
-      `Grooming date: ${format(groomingDate, "yyyy-MM-dd")}`,
-      `Estimated pickup: ${estPickupTimeLabel}`,
-      normalizedDiscountPct > 0
-        ? `Discount: ${normalizedDiscountPct}% (original AED ${originalForNote})`
-        : null,
-    ].filter(Boolean);
-    const composedNotes = [visitNotes.trim(), ...metaNotes]
-      .filter(Boolean)
-      .join("\n");
-
-    const insertBase = {
-      appointment_date: format(apptDate, "yyyy-MM-dd"),
-      appointment_time: timeToDb(apptTime),
-      duration_minutes: durationMin,
-      service: primaryService,
-      owner_id: ownerId,
-      groomer_id: null,
-      grooming_notes: groomerName.trim() || null,
-      price: finalPrice,
-      notes: composedNotes || null,
-      booking_id: linkBoarding ? bookingId : null,
-      payment_method: paymentMethod ?? null,
-      dog_size: dogSize,
-    };
-
-    try {
-      const createdRows = [];
-      const consumedCreditByPet: Record<string, { package_name: string }> = {};
-      for (const pid of petIdsToBook) {
-        const appt = await createAppt.mutateAsync({
-          ...insertBase,
-          pet_id: pid,
-        });
-        createdRows.push(appt);
-        const credit = groomingCreditsByPet[pid];
-        const useCredit = (useCreditByPet[pid] ?? false) && !!credit;
-        if (useCredit && credit) {
-          const { error } = await supabase.rpc("consume_service_credit", {
-            p_credit_id: credit.credit_id,
-            p_units: 1,
-            p_consumed_for_ref_id: appt.id,
-            p_consumed_for_ref_type: "grooming_appointment",
-          });
-          if (error) throw error;
-          consumedCreditByPet[pid] = { package_name: credit.package_name ?? "package credit" };
-        }
-      }
-
-      toast.success(
-        createdRows.length === 1
-          ? "Appointment created."
-          : `${createdRows.length} appointments created.`,
-      );
-      setSheetOpen(false);
-
-      const svcLabel = selectedServiceLabels || labelForGroomingService(primaryService);
-      createServiceInvoice({
-        ownerId: ownerId!,
-        serviceType: "grooming",
-        referenceId: createdRows[0].id,
-        checkInDate: format(apptDate, "yyyy-MM-dd"),
-        notes: paymentMethod
-          ? `Payment method: ${groomingPaymentMethodLabel(paymentMethod)}`
-          : undefined,
-        lineItems: createdRows.map((appt) => {
-          const petName =
-            pets.find((p) => p.id === appt.pet_id)?.name ?? "Pet";
-          const consumed = consumedCreditByPet[appt.pet_id];
-          return {
-            description: consumed
-              ? `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")} (covered by ${consumed.package_name})`
-              : `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")}`,
-            quantity: 1,
-            unitPrice: consumed ? 0 : finalPrice,
-            serviceType: "grooming",
-            preserveUnitPrice: true,
-          };
-        }),
-      })
-        .then(() => {
-          toast.success("Draft invoice created");
-        })
-        .catch((err) => {
-          console.error("Auto-invoice failed:", err);
-        });
-    } catch (e) {
-      const msg =
-        e instanceof Error
-          ? e.message
-          : typeof e === "object" && e !== null && "message" in e
-            ? String((e as { message: string }).message)
-            : "Could not create.";
-      toast.error(msg);
-    }
+  const handleSaveEdit = () => {
+    void performSaveEdit();
   };
 
   const handleDeleteGroomingAppt = () => {
@@ -1317,6 +800,12 @@ const GroomingPage = () => {
         .filter((a) => serviceMatches(a, serviceFilter, serviceSearch)),
     [dayAppointments, serviceFilter, serviceSearch],
   );
+  const hiddenByFilterCount = useMemo(() => {
+    const active = dayAppointments.filter(
+      (a) => normalizeGroomingWorkflowStatus(a.status) !== "cancelled",
+    );
+    return active.length - filteredDayAppointments.length;
+  }, [dayAppointments, filteredDayAppointments.length]);
   const filteredHistory = useMemo(
     () =>
       sortedHistory.filter((a) =>
@@ -1539,33 +1028,95 @@ const GroomingPage = () => {
           </div>
 
           <TabsContent value="day" className="space-y-4">
-            {dayLoading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-32 w-full" />
-                <Skeleton className="h-32 w-full" />
-              </div>
-            ) : filteredDayAppointments.length === 0 ? (
-              <p className="text-center text-muted-foreground py-16">
-                No grooming appointments match the selected service filters for{" "}
-                {format(day, "EEEE, d MMMM yyyy")}.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {filteredDayAppointments.map((a) => (
-                  <AppointmentCard
-                    key={a.id}
-                    a={a}
-                    onOpenActions={setActionAppt}
-                    onPrint={(appointmentId) =>
-                      window.open(
-                        `/print/grooming-card/${appointmentId}`,
-                        "_blank",
-                        "noopener,noreferrer",
-                      )
-                    }
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={dayViewLayout === "calendar" ? "default" : "outline"}
+                onClick={() => setDayViewLayout("calendar")}
+              >
+                Calendar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={dayViewLayout === "list" ? "default" : "outline"}
+                onClick={() => setDayViewLayout("list")}
+              >
+                List
+              </Button>
+            </div>
+
+            {dayViewLayout === "calendar" && (
+              <>
+                {dayLoading || stationsLoading ? (
+                  <Skeleton className="h-[480px] w-full" />
+                ) : (
+                  <GroomingStationCalendar
+                    stations={groomingStations}
+                    blocks={stationBlocks}
+                    appointments={filteredDayAppointments}
+                    hiddenByFilterCount={hiddenByFilterCount}
+                    stationsUnavailable={stationsError}
+                    onEmptySlotClick={openNewSheetFromSlot}
+                    onAppointmentClick={setActionAppt}
+                    onBlockClick={setUnblockTarget}
+                    onRequestBlockStation={(id, slotTime) => {
+                      const station = groomingStations.find((s) => s.id === id);
+                      if (!station) return;
+                      const endMinutes = slotTime
+                        ? maxDurationMinutesForTimeInput(slotTime)
+                        : 60;
+                      const endHour = slotTime
+                        ? (() => {
+                            const [h, m] = slotTime.split(":").map(Number);
+                            const total = h * 60 + m + Math.min(60, endMinutes);
+                            return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+                          })()
+                        : "17:00";
+                      setBlockDialog({
+                        stationId: id,
+                        stationName: station.name,
+                        defaultStart: slotTime ?? "09:00",
+                        defaultEnd: endHour,
+                      });
+                    }}
                   />
-                ))}
-              </div>
+                )}
+              </>
+            )}
+
+            {dayViewLayout === "list" && (
+              <>
+                {dayLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-32 w-full" />
+                    <Skeleton className="h-32 w-full" />
+                  </div>
+                ) : filteredDayAppointments.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-16">
+                    No grooming appointments match the selected service filters for{" "}
+                    {format(day, "EEEE, d MMMM yyyy")}.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredDayAppointments.map((a) => (
+                      <AppointmentCard
+                        key={a.id}
+                        a={a}
+                        onOpenActions={setActionAppt}
+                        onPrint={(appointmentId) =>
+                          window.open(
+                            `/print/grooming-card/${appointmentId}`,
+                            "_blank",
+                            "noopener,noreferrer",
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
@@ -2238,6 +1789,25 @@ const GroomingPage = () => {
                       onChange={(e) => setEditApptTime(e.target.value)}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Station</Label>
+                    <Select
+                      value={editStationId ?? "__none__"}
+                      onValueChange={(v) => setEditStationId(v === "__none__" ? null : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select station" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Unassigned</SelectItem>
+                        {groomingStations.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
@@ -2296,606 +1866,95 @@ const GroomingPage = () => {
         </SheetContent>
       </Sheet>
 
-      <Sheet
+      <GroomingNewAppointmentSheet
         open={sheetOpen}
-        onOpenChange={(open) => {
-          setSheetOpen(open);
-          if (!open) {
-            lastPrefilledOwnerIdForGroomer.current = null;
-            setShowPreferredGroomerHint(false);
-          }
+        onOpenChange={setSheetOpen}
+        defaultDay={day}
+        slotPrefill={slotPrefill}
+        groomingStations={groomingStations}
+        stationBlocks={stationBlocks}
+        dayAppointments={dayAppointments}
+      />
+
+      <BlockStationDialog
+        open={!!blockDialog}
+        onOpenChange={(open) => !open && setBlockDialog(null)}
+        stationName={blockDialog?.stationName ?? ""}
+        blockDate={dateStr}
+        defaultStartTime={blockDialog?.defaultStart}
+        defaultEndTime={blockDialog?.defaultEnd}
+        isPending={createStationBlock.isPending}
+        onSubmit={({ isFullDay, startTime, endTime, reason }) => {
+          if (!blockDialog) return;
+          createStationBlock.mutate(
+            {
+              station_id: blockDialog.stationId,
+              block_date: dateStr,
+              is_full_day: isFullDay,
+              start_time: isFullDay ? null : `${startTime}:00`,
+              end_time: isFullDay ? null : `${endTime}:00`,
+              reason,
+            },
+            {
+              onSuccess: () => {
+                toast.success("Station blocked.");
+                setBlockDialog(null);
+              },
+              onError: (e) =>
+                toast.error(e instanceof Error ? e.message : "Could not block station."),
+            },
+          );
         }}
+      />
+
+      <GroomingConflictOverrideDialog
+        open={conflictDialogOpen}
+        onOpenChange={setConflictDialogOpen}
+        conflicts={pendingConflicts}
+        isPending={updateAppt.isPending || logScheduleOverrides.isPending}
+        onConfirm={(reason) => {
+          void performSaveEdit(reason);
+        }}
+      />
+
+      <AlertDialog
+        open={!!unblockTarget}
+        onOpenChange={(open) => !open && setUnblockTarget(null)}
       >
-        <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>New appointment</SheetTitle>
-            <SheetDescription>
-              Book a grooming slot and optional boarding link.
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="mt-6 space-y-8">
-            <section className="space-y-4">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Client &amp; pet
-              </h3>
-              <div className="space-y-2">
-                <Label>Owner</Label>
-                <OwnerClientSearch
-                  selectedId={ownerId}
-                  selectedLabel={ownerLabel}
-                  onSelect={(id, label) => {
-                    setOwnerId(id);
-                    setOwnerLabel(label);
-                    setSelectedPetIds([]);
-                  }}
-                  onClear={() => {
-                    setOwnerId(null);
-                    setOwnerLabel(null);
-                    setSelectedPetIds([]);
-                  }}
-                />
-                {ownerForGroomingPref && ownerForGroomingPref.id === ownerId ? null : null}
-              </div>
-              {ownerId && pets.length === 0 && (
-                <p className="text-sm text-muted-foreground">Loading pets…</p>
-              )}
-              {pets.length > 1 && (
-                <div className="space-y-2">
-                  <Label>Pets</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Select one or more pets for this appointment.
-                  </p>
-                  <div className="rounded-lg border divide-y max-h-52 overflow-y-auto">
-                    {pets.map((p) => (
-                      <label
-                        key={p.id}
-                        htmlFor={`groom-pet-${p.id}`}
-                        className="flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/50"
-                      >
-                        <Checkbox
-                          id={`groom-pet-${p.id}`}
-                          checked={selectedPetIds.includes(p.id)}
-                          onCheckedChange={() => togglePetSelected(p.id)}
-                        />
-                        <span className="text-sm font-medium flex-1 min-w-0">{p.name}</span>
-                        {petHasSpecialAlerts(parsePetSpecialAlerts(p.special_alerts)) ? (
-                          <Badge
-                            variant="outline"
-                            className="border-orange-400 bg-orange-50 text-orange-900 text-[10px] shrink-0"
-                          >
-                            Alert
-                          </Badge>
-                        ) : null}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {pets.length === 1 && (
-                <div className="space-y-2">
-                  <Label>Pet</Label>
-                  <p className="text-sm font-medium">{pets[0].name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatLastGroomedDisplayLine(lastGroomMap.get(pets[0].id))}
-                  </p>
-                  <PetSpecialAlertsBanner specialAlerts={pets[0].special_alerts} />
-                </div>
-              )}
-              {petsForSafetyScan.map((pet) => {
-                const scan = petProfileTextForSafetyScan(pet);
-                if (!petSafetyKeywordHit(scan)) return null;
-                return (
-                  <PetSafetyNotesBanner
-                    key={`kw-safety-${pet.id}`}
-                    petLabel={pets.length > 1 ? pet.name : undefined}
-                    notesText={scan}
-                  />
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unblock station?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {unblockTarget?.reason
+                ? `Remove block: ${unblockTarget.reason}`
+                : "Remove this station block?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!unblockTarget) return;
+                deleteStationBlock.mutate(
+                  { id: unblockTarget.id, blockDate: unblockTarget.block_date },
+                  {
+                    onSuccess: () => {
+                      toast.success("Station unblocked.");
+                      setUnblockTarget(null);
+                    },
+                    onError: (e) =>
+                      toast.error(
+                        e instanceof Error ? e.message : "Could not unblock station.",
+                      ),
+                  },
                 );
-              })}
-              {selectedPetsOrdered.length > 0 && (
-                <div className="space-y-3">
-                  {selectedPetsOrdered.map((pet) => (
-                    <Card key={pet.id} className="border bg-muted/10">
-                      <CardContent className="space-y-1 p-3 text-sm pt-4">
-                        <p className="font-semibold border-b pb-2 mb-2">{pet.name}</p>
-                        {pets.length > 1 ? (
-                          <p className="text-xs text-muted-foreground -mt-1 mb-2">
-                            {formatLastGroomedDisplayLine(lastGroomMap.get(pet.id))}
-                          </p>
-                        ) : null}
-                        {groomingCreditsByPet[pet.id] ? (
-                          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 space-y-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs text-emerald-900">
-                                Available: {groomingCreditsByPet[pet.id]?.units_remaining} credit(s), exp{" "}
-                                {groomingCreditsByPet[pet.id]?.expires_at}
-                              </p>
-                              <label className="flex items-center gap-2 text-xs font-medium text-emerald-900">
-                                <Switch
-                                  checked={useCreditByPet[pet.id] ?? true}
-                                  onCheckedChange={(checked) =>
-                                    setUseCreditByPet((prev) => ({ ...prev, [pet.id]: checked }))
-                                  }
-                                />
-                                Use credit
-                              </label>
-                            </div>
-                            <p className="text-[11px] text-emerald-800">
-                              When enabled, invoice line is recorded as covered by package credit.
-                            </p>
-                          </div>
-                        ) : null}
-                        <PetSpecialAlertsBanner specialAlerts={pet.special_alerts} />
-                        <p>
-                          <span className="text-muted-foreground">Breed: </span>
-                          {pet.breed ?? "—"}
-                        </p>
-                        <p>
-                          <span className="text-muted-foreground">Weight: </span>
-                          {pet.weight_kg != null ? `${pet.weight_kg} kg` : "—"}
-                        </p>
-                        <p>
-                          <span className="text-muted-foreground">Coat / colour: </span>
-                          {pet.colour ?? "—"}
-                        </p>
-                        <p>
-                          <span className="text-muted-foreground">Grooming notes: </span>
-                          {pet.grooming_notes ?? "—"}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-4">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Appointment details
-              </h3>
-              <div className="space-y-2">
-                <Label>Service</Label>
-                <div className="grid grid-cols-2 gap-2 rounded-lg border p-3">
-                  {GROOMING_SERVICE_CHECKBOX_OPTIONS.map((o) => {
-                    const checked = selectedServices.includes(o.value);
-                    const r =
-                      o.value === "matting_fee" &&
-                      manualFeeBounds &&
-                      manualFeeBounds.mattingMax > manualFeeBounds.mattingMin
-                        ? {
-                            min: manualFeeBounds.mattingMin,
-                            max: manualFeeBounds.mattingMax,
-                            default: manualFeeBounds.mattingMin,
-                          }
-                        : o.value === "heavy_dog_fee" &&
-                            manualFeeBounds &&
-                            manualFeeBounds.heavyMax > manualFeeBounds.heavyMin
-                          ? {
-                              min: manualFeeBounds.heavyMin,
-                              max: manualFeeBounds.heavyMax,
-                              default: manualFeeBounds.heavyMin,
-                            }
-                          : undefined;
-                    return (
-                      <label
-                        key={o.value}
-                        className={cn(
-                          "flex gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60",
-                          r ? "col-span-2 flex-col sm:flex-row sm:items-center" : "items-center",
-                        )}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              const shouldCheck = e.target.checked;
-                              if (shouldCheck && r) {
-                                if (o.value === "matting_fee") {
-                                  setMattingFeeAed(String(r.default));
-                                }
-                                if (o.value === "heavy_dog_fee") {
-                                  setHeavyDogFeeAed(String(r.default));
-                                }
-                              }
-                              setSelectedServices((prev) => {
-                                if (shouldCheck) {
-                                  if (prev.includes(o.value)) return prev;
-                                  return [...prev, o.value];
-                                }
-                                return prev.filter((v) => v !== o.value);
-                              });
-                            }}
-                          />
-                          <span className="flex min-w-0 flex-col">
-                            <span>{o.label}</span>
-                            {dogSize &&
-                            ["full_groom", "deshedding", "bath_only", "full_bath_full"].includes(
-                              o.value,
-                            ) ? (
-                              <span className="text-[11px] text-muted-foreground tabular-nums">
-                                {servicePriceHints[o.value] == null
-                                  ? "Rate not configured"
-                                  : `from AED ${servicePriceHints[o.value]!.toFixed(2)}`}
-                              </span>
-                            ) : null}
-                          </span>
-                        </span>
-                        {r && checked ? (
-                          <div className="flex shrink-0 items-center gap-1.5 pl-6 sm:pl-0">
-                            <span className="text-xs text-muted-foreground">AED</span>
-                            <Input
-                              type="number"
-                              inputMode="decimal"
-                              min={r.min}
-                              max={r.max}
-                              step={1}
-                              className="h-8 w-[5.5rem] text-right text-sm"
-                              value={o.value === "matting_fee" ? mattingFeeAed : heavyDogFeeAed}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                if (o.value === "matting_fee") setMattingFeeAed(next);
-                                else setHeavyDogFeeAed(next);
-                              }}
-                            />
-                          </div>
-                        ) : null}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <DogSizeField
-                name="grooming-new-appt-dog-size"
-                value={dogSize}
-                onChange={(value) => {
-                  dogSizeManualRef.current = true;
-                  setDogSize(value);
-                }}
-              />
-              {!dogSize ? (
-                <p className="text-xs text-amber-700">
-                  Select dog size (or choose a pet with size on file) to load live rates from Billing.
-                </p>
-              ) : null}
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>Appointment Date</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !apptDate && "text-muted-foreground",
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {format(apptDate, "d MMM yyyy")}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={apptDate}
-                        onSelect={(d) => d && setApptDate(d)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <div className="space-y-2">
-                  <Label>Grooming Date</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !groomingDate && "text-muted-foreground",
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {format(groomingDate, "d MMM yyyy")}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={groomingDate}
-                        onSelect={(d) => d && setGroomingDate(d)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <div className="space-y-2">
-                  <Label>Time</Label>
-                  <Input
-                    type="time"
-                    value={apptTime}
-                    onChange={(e) => setApptTime(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>Duration (minutes)</Label>
-                  <Input
-                    type="number"
-                    min={15}
-                    step={5}
-                    value={durationMin}
-                    onChange={(e) =>
-                      setDurationMin(parseInt(e.target.value, 10) || 60)
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Est. pickup time</Label>
-                  <Input
-                    readOnly
-                    value={estPickupTimeLabel}
-                    className="bg-muted/40 font-medium tabular-nums"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Price (AED) - Original</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Fills from service and dog size (add-ons included). You can still edit the amount.
-                  </p>
-                  {dogSize && !newApptPriceFetching && newApptComputedOriginalAed == null ? (
-                    <p className="text-xs text-amber-700">
-                      No matching rate in Billing for this service/size combination. Enter price manually or
-                      update the Grooming (v2) grid.
-                    </p>
-                  ) : null}
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={price}
-                    disabled={isComplimentaryPayment}
-                    onChange={(e) => {
-                      newApptPriceManualRef.current = true;
-                      setPrice(e.target.value);
-                    }}
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-              <div
-                className={cn(
-                  "space-y-3 rounded-lg border p-3",
-                  isComplimentaryPayment && "pointer-events-none opacity-50",
-                )}
-              >
-                <Label>Discount</Label>
-                <p className="text-xs text-muted-foreground">
-                  Choose a preset or enter a custom percentage. Leave empty or 0 for no discount.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {DISCOUNT_QUICK_PCTS.map((pct) => {
-                    const active =
-                      discountPct.trim() !== "" &&
-                      Number.parseFloat(discountPct) === pct;
-                    return (
-                      <Button
-                        key={pct}
-                        type="button"
-                        size="sm"
-                        variant={active ? "default" : "outline"}
-                        className="min-w-[3.25rem]"
-                        onClick={() => {
-                          discountAutoFromMemberRef.current = false;
-                          setDiscountPct(String(pct));
-                        }}
-                      >
-                        {pct}%
-                      </Button>
-                    );
-                  })}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="discount-pct-manual">Custom discount (%)</Label>
-                  <Input
-                    id="discount-pct-manual"
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.5}
-                    placeholder="0"
-                    value={discountPct}
-                    onChange={(e) => {
-                      discountAutoFromMemberRef.current = false;
-                      setDiscountPct(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Final price (AED)</Label>
-                  <Input
-                    readOnly
-                    className="font-medium tabular-nums"
-                    value={
-                      newApptFinalAed != null ? newApptFinalAed.toFixed(2) : "—"
-                    }
-                  />
-                  {newApptSaveAed != null && newApptSaveAed > 0 ? (
-                    <p className="text-sm font-medium text-emerald-700">
-                      You save: {newApptSaveAed % 1 === 0 ? newApptSaveAed.toFixed(0) : newApptSaveAed.toFixed(2)} AED
-                    </p>
-                  ) : normalizedDiscountPct <= 0 && newApptOriginalAed != null ? (
-                    <p className="text-xs text-muted-foreground">
-                      Final price matches the original price above.
-                    </p>
-                  ) : null}
-                  {newApptFinalAed != null ? (
-                    <div className="space-y-1 pt-1 text-sm">
-                      <div className="flex justify-between gap-3">
-                        <span className="text-muted-foreground">{vatLineLabel()}</span>
-                        <span className="tabular-nums font-medium">
-                          {vatAmountFromGrossInclusive(newApptFinalAed).toFixed(2)} AED
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-3 font-bold">
-                        <span>Total incl. VAT</span>
-                        <span className="tabular-nums">
-                          {Math.max(0, newApptFinalAed).toFixed(2)} AED
-                        </span>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Payment method (optional)</Label>
-                <Select
-                  value={paymentMethod ?? GROOMING_PAYMENT_METHOD_NONE}
-                  onValueChange={(v) =>
-                    setPaymentMethod(parseGroomingPaymentMethodSelectValue(v))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Not specified" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={GROOMING_PAYMENT_METHOD_NONE}>
-                      Not specified
-                    </SelectItem>
-                    {GROOMING_PAYMENT_METHOD_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Optional. When set, stored on the appointment and copied to the draft invoice.
-                </p>
-                {isComplimentaryPayment ? (
-                  <p className="text-sm font-medium text-emerald-700">
-                    This service is complimentary
-                  </p>
-                ) : null}
-              </div>
-              <div className="space-y-2">
-                <Label>Groomer</Label>
-                <Input
-                  value={groomerName}
-                  onChange={(e) => {
-                    setGroomerName(e.target.value);
-                    setShowPreferredGroomerHint(false);
-                  }}
-                  placeholder="Groomer name"
-                />
-                {showPreferredGroomerHint ? (
-                  <p className="text-xs text-muted-foreground">
-                    Preferred groomer from client profile
-                  </p>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="space-y-4">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Notes
-              </h3>
-              <div className="space-y-2">
-                <Label>Notes</Label>
-                <Textarea
-                  value={visitNotes}
-                  onChange={(e) => setVisitNotes(e.target.value)}
-                  placeholder="What will be done / special instructions…"
-                  rows={3}
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                <Label htmlFor="link-boarding" className="cursor-pointer">
-                  Linked to boarding stay
-                </Label>
-                <Switch
-                  id="link-boarding"
-                  checked={linkBoarding}
-                  onCheckedChange={(v) => {
-                    setLinkBoarding(v);
-                    if (!v) {
-                      setBookingId(null);
-                      setBookingSearch("");
-                    }
-                  }}
-                />
-              </div>
-              {linkBoarding && (
-                <div className="space-y-2">
-                  <Label>Find booking (ref or owner)</Label>
-                  <Input
-                    value={bookingSearch}
-                    onChange={(e) => {
-                      setBookingSearch(e.target.value);
-                      setBookingId(null);
-                    }}
-                    placeholder="Search booking ref or owner…"
-                  />
-                  {bookingSearch.trim().length >= 2 && (
-                    <ul className="max-h-40 overflow-y-auto rounded-md border text-sm divide-y">
-                      {bookingHits.map((b: BookingLinkRow) => (
-                        <li key={b.id}>
-                          <button
-                            type="button"
-                            className={cn(
-                              "w-full px-3 py-2 text-left hover:bg-muted/60",
-                              bookingId === b.id && "bg-muted",
-                            )}
-                            onClick={() => setBookingId(b.id)}
-                          >
-                            <span className="font-mono text-xs">
-                              {b.booking_ref ?? b.id.slice(0, 8)}
-                            </span>
-                            <span className="block text-muted-foreground text-xs">
-                              {b.owners
-                                ? ownerDisplayName(b.owners.first_name, b.owners.last_name)
-                                : "—"}{" "}
-                              · {format(parseISO(b.check_in_date), "d MMM")} –{" "}
-                              {format(parseISO(b.check_out_date), "d MMM")}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {bookingId && (
-                    <p className="text-xs text-emerald-700">Booking linked.</p>
-                  )}
-                </div>
-              )}
-            </section>
-          </div>
-
-          <SheetFooter className="mt-8 gap-2 sm:gap-0">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setSheetOpen(false)}
+              }}
             >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleCreate}
-              disabled={createAppt.isPending}
-            >
-              {createAppt.isPending && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Save appointment
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+              Unblock
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };

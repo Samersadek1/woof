@@ -960,6 +960,7 @@ export type Database = {
           pet_id: string
           price: number | null
           service: Database["public"]["Enums"]["grooming_service"]
+          station_id: string | null
           status: string
           visit_notes: string | null
         }
@@ -982,6 +983,7 @@ export type Database = {
           pet_id: string
           price?: number | null
           service: Database["public"]["Enums"]["grooming_service"]
+          station_id?: string | null
           status?: string
           visit_notes?: string | null
         }
@@ -1004,6 +1006,7 @@ export type Database = {
           pet_id?: string
           price?: number | null
           service?: Database["public"]["Enums"]["grooming_service"]
+          station_id?: string | null
           status?: string
           visit_notes?: string | null
         }
@@ -1036,7 +1039,134 @@ export type Database = {
             referencedRelation: "pets"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "grooming_appointments_station_id_fkey"
+            columns: ["station_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_stations"
+            referencedColumns: ["id"]
+          },
         ]
+      }
+      grooming_schedule_overrides: {
+        Row: {
+          appointment_id: string
+          conflict_type: string
+          conflicted_with_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          reason: string
+        }
+        Insert: {
+          appointment_id: string
+          conflict_type: string
+          conflicted_with_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          reason: string
+        }
+        Update: {
+          appointment_id?: string
+          conflict_type?: string
+          conflicted_with_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grooming_schedule_overrides_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "grooming_schedule_overrides_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      grooming_station_blocks: {
+        Row: {
+          block_date: string
+          created_at: string
+          created_by: string | null
+          end_time: string | null
+          id: string
+          is_full_day: boolean
+          reason: string
+          start_time: string | null
+          station_id: string
+        }
+        Insert: {
+          block_date: string
+          created_at?: string
+          created_by?: string | null
+          end_time?: string | null
+          id?: string
+          is_full_day?: boolean
+          reason?: string
+          start_time?: string | null
+          station_id: string
+        }
+        Update: {
+          block_date?: string
+          created_at?: string
+          created_by?: string | null
+          end_time?: string | null
+          id?: string
+          is_full_day?: boolean
+          reason?: string
+          start_time?: string | null
+          station_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grooming_station_blocks_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "grooming_station_blocks_station_id_fkey"
+            columns: ["station_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_stations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      grooming_stations: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
       }
       grooming_status_events: {
         Row: {
