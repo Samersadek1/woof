@@ -716,11 +716,11 @@ function PlannerTab() {
   const dropoffsUsed = sessions?.filter((s) => s.dropoff_used).length ?? 0;
   const daycarePriceMap = useMemo(() => buildPriceMap(pricingRows), [pricingRows]);
   const singleDayPetIds = useMemo(
-    () => selectedPetIds.filter((id) => (billingChoiceByPet[id] ?? "single") === "single"),
+    () => selectedPetIds.filter((id) => (billingChoiceByPet[id] ?? "hourly") === "single"),
     [selectedPetIds, billingChoiceByPet],
   );
   const hourlyPetIds = useMemo(
-    () => selectedPetIds.filter((id) => (billingChoiceByPet[id] ?? "single") === "hourly"),
+    () => selectedPetIds.filter((id) => (billingChoiceByPet[id] ?? "hourly") === "hourly"),
     [selectedPetIds, billingChoiceByPet],
   );
   const singleDayCount = singleDayPetIds.length;
@@ -816,7 +816,7 @@ function PlannerTab() {
         } else if (usable.length > 0) {
           next[petId] = usable[0].id;
         } else {
-          next[petId] = "single";
+          next[petId] = "hourly";
         }
       }
       return next;
@@ -907,7 +907,7 @@ function PlannerTab() {
     for (const petId of selectedPetIds) {
       const pet = pets?.find((p) => p.id === petId);
       const petName = pet?.name ?? "Pet";
-      const choice = billingChoiceByPet[petId] ?? "single";
+      const choice = billingChoiceByPet[petId] ?? "hourly";
       const isHourlyBilling = choice === "hourly";
       const chosenPackageId = choice === "single" || isHourlyBilling ? null : choice;
       const chosenCredit = chosenPackageId ? packages?.find((pkg) => pkg.id === chosenPackageId) : null;
@@ -1356,7 +1356,7 @@ function PlannerTab() {
                             <div className="pl-6 max-w-md space-y-1">
                               <Label className="text-xs uppercase tracking-wide text-muted-foreground">Billing path</Label>
                               <Select
-                                value={billingChoiceByPet[pet.id] ?? (usablePackages[0]?.id ?? "single")}
+                                value={billingChoiceByPet[pet.id] ?? (usablePackages[0]?.id ?? "hourly")}
                                 onValueChange={(value) => {
                                   setBillingChoiceByPet((prev) => ({ ...prev, [pet.id]: value }));
                                 }}
@@ -1368,8 +1368,8 @@ function PlannerTab() {
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="single">Single day (invoice now)</SelectItem>
                                   <SelectItem value="hourly">Hourly (invoice at checkout)</SelectItem>
+                                  <SelectItem value="single">Single day (invoice now)</SelectItem>
                                   {usablePackages.map((pkg) => (
                                     <SelectItem key={pkg.id} value={pkg.id}>
                                       {daycarePackageCreditLabel(pkg)}
@@ -1616,8 +1616,8 @@ function PlannerTab() {
                   onChange={(e) => setCheckInDraft((prev) => ({ ...prev, remark: e.target.value }))}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Single-day billing creates a finalized invoice immediately. Hourly billing is invoiced later from
-                  Operations. Package credits are recorded without a charge line.
+                  Hourly billing is invoiced later from Operations. Single-day billing creates a finalized invoice
+                  immediately. Package credits are recorded without a charge line.
                 </p>
               </div>
 
