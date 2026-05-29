@@ -19,7 +19,6 @@ import {
   useCreateBooking,
   useUpdateBooking,
   useUndoCheckOut,
-  useUndoCheckIn,
   isAssessmentRequiredError,
   BOOKING_DETAIL_SELECT,
 } from "@/hooks/useBookings";
@@ -40,6 +39,7 @@ import { RepriceBoardingInvoicesButton } from "@/components/boarding/RepriceBoar
 import { BoardingBookingInvoiceLink } from "@/components/boarding/BoardingBookingInvoiceLink";
 import { BoardingBookingSearch } from "@/components/boarding/BoardingBookingSearch";
 import { CancelBookingDialog } from "@/components/boarding/CancelBookingDialog";
+import { UndoCheckInDialog } from "@/components/boarding/UndoCheckInDialog";
 import { BoardingOwnerSearchField } from "@/components/boarding/BoardingOwnerSearchField";
 import { boardingBookingMatchesSearch } from "@/lib/boardingBookingSearch";
 import type { BoardingBookingSearchHit } from "@/hooks/useBookings";
@@ -1059,7 +1059,6 @@ function BoardingBookingDetailSheets({
   const queryClient = useQueryClient();
   const updateBooking = useUpdateBooking();
   const undoCheckOut = useUndoCheckOut();
-  const undoCheckIn = useUndoCheckIn();
   const { data: rooms = [] } = useRooms();
   const [checkInSheetOpen, setCheckInSheetOpen] = useState(false);
   const [checkOutSheetOpen, setCheckOutSheetOpen] = useState(false);
@@ -1396,36 +1395,14 @@ function BoardingBookingDetailSheets({
             booking={booking}
             onCancelled={() => onBookingChange(null)}
           />
-          <Dialog open={undoCheckInOpen} onOpenChange={setUndoCheckInOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Undo check-in?</DialogTitle>
-                <DialogDescription>
-                  Reverts this stay to confirmed. The booking, room assignment, and invoice stay as they are.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setUndoCheckInOpen(false)}>
-                  Keep checked in
-                </Button>
-                <Button
-                  onClick={() =>
-                    undoCheckIn.mutate(booking.id, {
-                      onSuccess: () => {
-                        toast.success("Check-in undone — booking is confirmed again.");
-                        onBookingChange({ ...booking, status: "confirmed", actual_check_in_at: null });
-                        setUndoCheckInOpen(false);
-                      },
-                      onError: (err) => toast.error(err.message),
-                    })
-                  }
-                  disabled={undoCheckIn.isPending}
-                >
-                  {undoCheckIn.isPending ? "Reverting…" : "Undo check-in"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          {undoCheckInOpen && (
+            <UndoCheckInDialog
+              open={undoCheckInOpen}
+              onOpenChange={setUndoCheckInOpen}
+              booking={booking}
+              onUndone={onBookingChange}
+            />
+          )}
         </>
       )}
 
