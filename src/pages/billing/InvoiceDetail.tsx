@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
@@ -70,6 +70,11 @@ export default function InvoiceDetailPage() {
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustApprover, setAdjustApprover] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const handlePrint = useCallback(() => {
+    if (!id) return;
+    window.open(`/print/invoice/${id}`, "_blank", "noopener,noreferrer");
+  }, [id]);
 
   const refundPreview = useCancellationRefundPreview(
     data?.invoice?.owner_id,
@@ -409,9 +414,11 @@ export default function InvoiceDetailPage() {
             )}
             {status === "paid" && (
               <>
-                <Button variant="outline" onClick={() => window.print()}>Print receipt</Button>
                 <Button variant="destructive" onClick={doVoid}>Void</Button>
               </>
+            )}
+            {status !== "voided" && (
+              <Button variant="outline" onClick={handlePrint}>Print receipt</Button>
             )}
             {status === "voided" && <p className="text-sm text-muted-foreground">Voided invoice is read-only.</p>}
             <Button type="button" variant="destructive" onClick={() => setDeleteOpen(true)}>
