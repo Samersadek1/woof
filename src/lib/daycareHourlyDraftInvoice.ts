@@ -172,12 +172,11 @@ export async function findOrCreateHourlyDraft(
         status: "draft",
         issue_date: sessionDate,
         subtotal: netExVat,
-        subtotal_aed: netExVat,
+        
         discount_pct: 0,
-        discount_aed: 0,
+        
         discount_amount: 0,
         total: grossTotal,
-        total_aed: grossTotal,
         vat_aed: vatAed,
         due_date: dueDate,
       })

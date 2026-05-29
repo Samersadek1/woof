@@ -77,7 +77,6 @@ function rowHref(ownerId: string, petId: string | null) {
 
 type InvSumRow = {
   total: number;
-  total_aed: number | null;
   vat_aed: number | null;
   service_type: string | null;
   notes?: string | null;
@@ -87,7 +86,6 @@ type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
 function invoiceGrand(r: InvSumRow) {
   return invoiceDisplayTotals({
     total: r.total,
-    total_aed: r.total_aed,
     vat_aed: r.vat_aed,
     service_type: r.service_type,
     notes: r.notes,
@@ -103,13 +101,13 @@ async function sumPaidFinalWindow(
   const [paidRes, finRes] = await Promise.all([
     supabase
       .from("invoices")
-      .select("total, total_aed, vat_aed, service_type, notes")
+      .select("total, vat_aed, service_type, notes")
       .eq("status", "paid")
       .gte("paid_at", paidStart.toISOString())
       .lte("paid_at", paidEnd.toISOString()),
     supabase
       .from("invoices")
-      .select("total, total_aed, vat_aed, service_type, notes")
+      .select("total, vat_aed, service_type, notes")
       .eq("status", "finalised")
       .gte("issue_date", issueStartStr)
       .lte("issue_date", issueEndStr),
@@ -217,13 +215,13 @@ async function loadDashboardInsights(now: Date): Promise<DashboardInsights> {
       .lte("session_date", fmt(monthEnd)),
     supabase
       .from("invoices")
-      .select("owner_id, total, total_aed, vat_aed, service_type, notes")
+      .select("owner_id, total, vat_aed, service_type, notes")
       .eq("status", "paid")
       .gte("paid_at", monthStart.toISOString())
       .lte("paid_at", monthEnd.toISOString()),
     supabase
       .from("invoices")
-      .select("owner_id, total, total_aed, vat_aed, service_type, notes")
+      .select("owner_id, total, vat_aed, service_type, notes")
       .eq("status", "finalised")
       .gte("issue_date", fmt(monthStart))
       .lte("issue_date", fmt(monthEnd)),
@@ -401,7 +399,7 @@ const DashboardPage = () => {
       ];
       const { data, error } = await supabase
         .from("invoices")
-        .select("id, owner_id, total, total_aed, vat_aed, service_type, notes, amount_paid, due_date, status, owners(first_name, last_name)")
+        .select("id, owner_id, total, vat_aed, service_type, notes, amount_paid, due_date, status, owners(first_name, last_name)")
         .eq("due_date", asOf)
         .in("status", UNPAID)
         .order("created_at", { ascending: false });
@@ -411,7 +409,6 @@ const DashboardPage = () => {
       for (const inv of data ?? []) {
         const grand = invoiceDisplayTotals({
           total: inv.total,
-          total_aed: inv.total_aed,
           vat_aed: inv.vat_aed,
           service_type: inv.service_type,
           notes: inv.notes,

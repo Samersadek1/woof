@@ -728,8 +728,7 @@ const GroomingPage = () => {
     () =>
       payInvoice
         ? invoiceDisplayTotals({
-            total: payInvoice.total ?? payInvoice.total_aed ?? 0,
-            total_aed: payInvoice.total_aed,
+            total: payInvoice.total ?? 0,
             vat_aed: payInvoice.vat_aed,
           })
         : null,

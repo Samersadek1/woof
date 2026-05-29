@@ -123,11 +123,10 @@ export default function InvoiceDetailPage() {
       (sum, a) => sum + Math.abs(a.adjusted_amount ?? 0),
       0,
     );
-    const totalDiscount = lineDiscount + adjustmentDiscount + (invoice?.discount_aed ?? 0);
+    const totalDiscount = lineDiscount + adjustmentDiscount + (invoice?.discount_amount ?? 0);
     const money = invoice
       ? invoiceDisplayTotals({
           total: invoice.total,
-          total_aed: invoice.total_aed,
           vat_aed: invoice.vat_aed,
           service_type: invoice.service_type,
           notes: invoice.notes,
@@ -276,7 +275,7 @@ export default function InvoiceDetailPage() {
       owner_id: inv.owner_id,
       invoice_id: inv.id,
       adjustment_type: adjustType,
-      original_amount: inv.total_aed ?? inv.total,
+      original_amount: inv.total ?? inv.total,
       adjusted_amount: amount,
       reason: adjustReason.trim(),
       approved_by: adjustApprover.trim(),

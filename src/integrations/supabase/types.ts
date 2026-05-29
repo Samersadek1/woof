@@ -1201,7 +1201,6 @@ export type Database = {
           amount_paid: number
           booking_id: string | null
           created_at: string
-          discount_aed: number | null
           discount_amount: number
           discount_pct: number
           due_date: string | null
@@ -1216,9 +1215,7 @@ export type Database = {
           service_type: string | null
           status: Database["public"]["Enums"]["invoice_status"]
           subtotal: number
-          subtotal_aed: number | null
           total: number
-          total_aed: number | null
           updated_at: string
           vat_aed: number | null
           voided_at: string | null
@@ -1228,7 +1225,6 @@ export type Database = {
           amount_paid?: number
           booking_id?: string | null
           created_at?: string
-          discount_aed?: number | null
           discount_amount?: number
           discount_pct?: number
           due_date?: string | null
@@ -1243,9 +1239,7 @@ export type Database = {
           service_type?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal?: number
-          subtotal_aed?: number | null
           total?: number
-          total_aed?: number | null
           updated_at?: string
           vat_aed?: number | null
           voided_at?: string | null
@@ -1255,7 +1249,6 @@ export type Database = {
           amount_paid?: number
           booking_id?: string | null
           created_at?: string
-          discount_aed?: number | null
           discount_amount?: number
           discount_pct?: number
           due_date?: string | null
@@ -1270,9 +1263,7 @@ export type Database = {
           service_type?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal?: number
-          subtotal_aed?: number | null
           total?: number
-          total_aed?: number | null
           updated_at?: string
           vat_aed?: number | null
           voided_at?: string | null
@@ -2795,7 +2786,7 @@ export type Database = {
           invoice_number: string
           service_type: string
           status: string
-          total_aed: number
+          total: number
         }[]
       }
       is_boarding_import_placeholder_room: {

@@ -199,11 +199,12 @@ describe("double occupancy discount RPCs", () => {
 
       const { data: invoiceAfter } = await supabase
         .from("invoices")
-        .select("discount_amount, total")
+        .select("discount_amount, total, vat_aed")
         .eq("id", invoice.id)
         .single();
       expect(invoiceAfter?.discount_amount).toBe(30);
       expect(invoiceAfter?.total).toBe(170);
+      expect(invoiceAfter?.vat_aed).toBeCloseTo(8.1, 1);
     });
   });
 
@@ -278,9 +279,8 @@ describe("double occupancy discount RPCs", () => {
         .select("total, discount_amount")
         .eq("id", invoice.id)
         .single();
-      // Current RPC removes the adjustment row but does not recompute invoice totals in this branch.
-      expect(invoiceAfter?.discount_amount).toBe(30);
-      expect(invoiceAfter?.total).toBe(170);
+      expect(invoiceAfter?.discount_amount).toBe(0);
+      expect(invoiceAfter?.total).toBe(200);
     });
   });
 

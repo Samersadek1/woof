@@ -193,12 +193,11 @@ export default function CreateInvoicePage() {
         due_date: dueDate,
         notes: notes.trim() || null,
         subtotal,
-        subtotal_aed: subtotal,
+        
         discount_amount: lineDiscount + adjustmentTotal,
-        discount_aed: lineDiscount + adjustmentTotal,
+        
         discount_pct: subtotal > 0 ? ((lineDiscount + adjustmentTotal) / subtotal) * 100 : 0,
         total: invoiceGross,
-        total_aed: invoiceGross,
         vat_aed: vatAed,
       };
       const { data: inv, error: invErr } = await supabase

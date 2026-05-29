@@ -49,7 +49,7 @@ export default function OwnerStatementPage() {
   }, [statement]);
 
   const lifetimeSpend = useMemo(
-    () => statement.filter((r) => r.status === "paid").reduce((sum, r) => sum + r.total_aed, 0),
+    () => statement.filter((r) => r.status === "paid").reduce((sum, r) => sum + r.total, 0),
     [statement],
   );
 
@@ -123,7 +123,7 @@ export default function OwnerStatementPage() {
                         <p className="text-xs text-muted-foreground">Due {r.due_date ? format(new Date(`${r.due_date}T00:00:00`), "d MMM yyyy") : "—"}</p>
                       </div>
                       <div className="text-right">
-                        <p className="font-semibold tabular-nums">{aed(r.total_aed)}</p>
+                        <p className="font-semibold tabular-nums">{aed(r.total)}</p>
                         {r.days_overdue > 0 && <p className="text-xs text-red-600">Overdue {r.days_overdue}d</p>}
                       </div>
                     </div>
@@ -151,7 +151,7 @@ export default function OwnerStatementPage() {
                             </Badge>
                           ) : null}
                         </span>
-                        <span className="tabular-nums">{aed(r.total_aed)}</span>
+                        <span className="tabular-nums">{aed(r.total)}</span>
                       </div>
                     ))}
                   </div>

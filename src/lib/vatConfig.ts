@@ -53,9 +53,8 @@ export function isLegacyDaycarePackageInvoice(notes: string | null | undefined):
 
 export type InvoiceVatInput = {
   total: number;
-  total_aed: number | null;
   /**
-   * When set (incl. 0), `total` / `total_aed` is gross incl. VAT.
+   * When set (incl. 0), `total` is gross incl. VAT.
    * When null, legacy boarding may be ex-VAT; package/daycare still treated as gross via `service_type` / `notes`.
    */
   vat_aed?: number | null;
@@ -64,12 +63,7 @@ export type InvoiceVatInput = {
 };
 
 function storedInvoiceAmount(inv: InvoiceVatInput): number {
-  const totalBase = inv.total ?? 0;
-  const totalAedBase = inv.total_aed;
-  if (totalAedBase != null && Number(totalAedBase) === 0 && Number(totalBase) > 0) {
-    return totalBase;
-  }
-  return totalAedBase ?? totalBase;
+  return roundMoney2(Math.max(0, inv.total ?? 0));
 }
 
 /** Whether a null `vat_aed` row should still be read as VAT-inclusive gross. */
@@ -82,9 +76,9 @@ export function treatsStoredTotalAsGrossInclusive(inv: InvoiceVatInput): boolean
 
 /**
  * Normalises stored invoice amounts for display and payment.
- * - Current: `vat_aed` set → `total_aed` is gross; net = gross − vat_aed.
+ * - Current: `vat_aed` set → `total` is gross; net = gross − vat_aed.
  * - Package / daycare (and legacy daycare package notes): prices are VAT-inclusive even when `vat_aed` is null.
- * - Other legacy: `vat_aed` null → `total_aed` is ex-VAT; VAT added at {@link VAT_RATE} for grand total.
+ * - Other legacy: `vat_aed` null → `total` is ex-VAT; VAT added at {@link VAT_RATE} for grand total.
  */
 export function invoiceDisplayTotals(inv: InvoiceVatInput): {
   netExVat: number;
@@ -121,21 +115,13 @@ export function invoiceAmountDue(inv: InvoiceVatInput): number {
 
 export type InvoiceDiscountInput = {
   subtotal: number;
-  subtotal_aed: number | null;
   discount_amount: number;
-  discount_aed: number | null;
 };
 
 /** Computes the effective discount percentage from stored amounts. */
 export function invoiceDiscountPercent(inv: InvoiceDiscountInput): number {
-  const subtotalStored =
-    inv.subtotal_aed != null && Number(inv.subtotal_aed) === 0 && Number(inv.subtotal) > 0
-      ? inv.subtotal
-      : inv.subtotal_aed ?? inv.subtotal ?? 0;
-  const discountStored =
-    inv.discount_aed != null && Number(inv.discount_aed) === 0 && Number(inv.discount_amount) > 0
-      ? inv.discount_amount
-      : inv.discount_aed ?? inv.discount_amount ?? 0;
+  const subtotalStored = inv.subtotal ?? 0;
+  const discountStored = inv.discount_amount ?? 0;
   if (subtotalStored <= 0 || discountStored <= 0) return 0;
   return roundMoney2((discountStored / subtotalStored) * 100);
 }

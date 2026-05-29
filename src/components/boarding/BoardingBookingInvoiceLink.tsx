@@ -26,7 +26,7 @@ export function BoardingBookingInvoiceLink({ bookingId, bookingRef }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("invoices")
-        .select("id, status, total_aed, total")
+        .select("id, status, total")
         .eq("booking_id", bookingId)
         .neq("status", "voided")
         .order("created_at", { ascending: false })
@@ -64,7 +64,7 @@ export function BoardingBookingInvoiceLink({ bookingId, bookingRef }: Props) {
   }
 
   if (invoice) {
-    const total = invoice.total_aed ?? invoice.total ?? 0;
+    const total = invoice.total ?? 0;
     return (
       <Button
         type="button"

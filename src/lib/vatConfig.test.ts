@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   invoiceAmountDue,
   invoiceDisplayTotals,
+  invoiceDiscountPercent,
   treatsStoredTotalAsGrossInclusive,
   vatAmountFromGrossInclusive,
 } from "./vatConfig";
@@ -18,7 +19,6 @@ describe("vatConfig", () => {
     const vat = vatAmountFromGrossInclusive(gross);
     const view = invoiceDisplayTotals({
       total: gross,
-      total_aed: gross,
       vat_aed: vat,
       service_type: "daycare",
     });
@@ -31,7 +31,6 @@ describe("vatConfig", () => {
     const gross = 2441.5;
     const view = invoiceDisplayTotals({
       total: gross,
-      total_aed: gross,
       vat_aed: null,
       service_type: "package",
     });
@@ -39,7 +38,6 @@ describe("vatConfig", () => {
     expect(view.vat).toBe(116.26);
     expect(invoiceAmountDue({
       total: gross,
-      total_aed: gross,
       vat_aed: null,
       service_type: "package",
     })).toBe(2441.5);
@@ -49,13 +47,12 @@ describe("vatConfig", () => {
     const net = 100;
     const view = invoiceDisplayTotals({
       total: net,
-      total_aed: net,
       vat_aed: null,
       service_type: "boarding",
     });
     expect(view.grandTotal).toBe(105);
     expect(view.vat).toBe(5);
-    expect(treatsStoredTotalAsGrossInclusive({ total: net, total_aed: net, service_type: "boarding" })).toBe(
+    expect(treatsStoredTotalAsGrossInclusive({ total: net, service_type: "boarding" })).toBe(
       false,
     );
   });
@@ -64,9 +61,23 @@ describe("vatConfig", () => {
     expect(
       treatsStoredTotalAsGrossInclusive({
         total: 1058.4,
-        total_aed: 1058.4,
         notes: "Legacy daycare package purchase | tracker=PKG-92525",
       }),
     ).toBe(true);
+  });
+
+  it("uses post-discount total for grand total after double occupancy", () => {
+    const view = invoiceDisplayTotals({
+      total: 867,
+      vat_aed: 41.29,
+      service_type: "boarding",
+    });
+    expect(view.grandTotal).toBe(867);
+    expect(view.vat).toBe(41.29);
+    expect(view.netExVat).toBe(825.71);
+  });
+
+  it("computes discount percent from subtotal and discount_amount", () => {
+    expect(invoiceDiscountPercent({ subtotal: 1020, discount_amount: 153 })).toBe(15);
   });
 });

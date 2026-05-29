@@ -133,7 +133,7 @@ export function CompleteHourlyBillingDialog({
       const discountAed = roundAed(invoiceSubtotal * pct / 100);
       return {
         discount_pct: pct,
-        discount_aed: discountAed,
+        
         final_aed: invoiceSubtotal - discountAed,
       };
     },
@@ -264,7 +264,7 @@ export function CompleteHourlyBillingDialog({
               .from("invoices")
               .update({
                 discount_pct: ownerDiscountPct,
-                discount_aed: discountAed,
+                
                 discount_amount: discountAed,
               })
               .eq("id", draftInvoiceId);

@@ -1727,7 +1727,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
     queryFn: async () => {
       return {
         discount_pct: 0,
-        discount_aed: 0,
+        
         final_aed: dogBookingEstimateTotal,
       };
     },

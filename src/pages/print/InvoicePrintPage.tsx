@@ -12,11 +12,8 @@ type InvoiceRow = {
   status: string;
   issue_date: string;
   due_date: string | null;
-  subtotal_aed: number | null;
   subtotal: number;
-  discount_aed: number | null;
   discount_amount: number;
-  total_aed: number | null;
   total: number;
   vat_aed: number | null;
   amount_paid: number;
@@ -69,8 +66,8 @@ async function fetchInvoicePrintable(invoiceId: string) {
     .from("invoices")
     .select(
       `
-      id, invoice_number, status, issue_date, due_date, subtotal_aed, subtotal,
-      discount_aed, discount_amount, total_aed, total, vat_aed, amount_paid, payment_method, notes, service_type, owner_id, booking_id,
+      id, invoice_number, status, issue_date, due_date, subtotal,
+      discount_amount, total, vat_aed, amount_paid, payment_method, notes, service_type, owner_id, booking_id,
       owners(first_name, last_name, phone, address, email),
       bookings(booking_ref, check_in_date, check_out_date),
       line_items:invoice_line_items(id, description, quantity, unit_price, total_price, sort_order)
@@ -124,12 +121,11 @@ export default function InvoicePrintPage() {
   const payments = data?.payments ?? [];
   const adjustments = data?.adjustments ?? [];
 
-  const subtotal = invoice ? invoice.subtotal_aed ?? invoice.subtotal : 0;
-  const discount = invoice ? invoice.discount_aed ?? invoice.discount_amount ?? 0 : 0;
+  const subtotal = invoice?.subtotal ?? 0;
+  const discount = invoice?.discount_amount ?? 0;
   const money = invoice
     ? invoiceDisplayTotals({
         total: invoice.total,
-        total_aed: invoice.total_aed,
         vat_aed: invoice.vat_aed,
         service_type: invoice.service_type,
         notes: invoice.notes,

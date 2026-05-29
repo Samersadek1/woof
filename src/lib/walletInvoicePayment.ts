@@ -36,7 +36,7 @@ export async function payInvoiceFromWallet(
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
     .select(
-      "id, owner_id, total, total_aed, vat_aed, service_type, notes, amount_paid, status",
+      "id, owner_id, total, vat_aed, service_type, notes, amount_paid, status",
     )
     .eq("id", invoiceId)
     .single();
@@ -45,7 +45,6 @@ export async function payInvoiceFromWallet(
   const ownerId = invoice.owner_id;
   const grandTotal = invoiceAmountDue({
     total: invoice.total,
-    total_aed: invoice.total_aed,
     vat_aed: invoice.vat_aed,
     service_type: invoice.service_type,
     notes: invoice.notes,

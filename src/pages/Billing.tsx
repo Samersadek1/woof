@@ -246,7 +246,6 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
 
   const pay = invoiceDisplayTotals({
     total: invoice.total,
-    total_aed: invoice.total_aed,
     vat_aed: invoice.vat_aed,
     service_type: invoice.service_type,
     notes: invoice.notes,
@@ -400,7 +399,6 @@ function VoidDialog({ open, invoice, ownerId, onClose }: { open: boolean; invoic
             {formatAed(
               invoiceDisplayTotals({
                 total: invoice.total,
-                total_aed: invoice.total_aed,
                 vat_aed: invoice.vat_aed,
                 service_type: invoice.service_type,
                 notes: invoice.notes,
@@ -478,7 +476,6 @@ function InvoiceDetailDialog({
 
   const view = invoiceDisplayTotals({
     total: invoice.total,
-    total_aed: invoice.total_aed,
     vat_aed: invoice.vat_aed,
     service_type: invoice.service_type,
     notes: invoice.notes,
@@ -555,19 +552,17 @@ function InvoiceDetailDialog({
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
             <div style={{ display: "flex", justifyContent: "space-between", width: 240 }}>
               <span style={{ color: "#666" }}>Subtotal</span>
-              <span>{formatAed(invoice.subtotal_aed)}</span>
+              <span>{formatAed(invoice.subtotal)}</span>
             </div>
-            {invoice.discount_aed > 0 && (
+            {invoice.discount_amount > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between", width: 240 }}>
                 <span style={{ color: "#666" }}>
                   Discount ({invoiceDiscountPercent({
-                    subtotal: invoice.subtotal_aed,
-                    subtotal_aed: invoice.subtotal_aed,
-                    discount_amount: invoice.discount_aed,
-                    discount_aed: invoice.discount_aed,
+                    subtotal: invoice.subtotal,
+                    discount_amount: invoice.discount_amount,
                   })}%)
                 </span>
-                <span style={{ color: "#16a34a" }}>-{formatAed(invoice.discount_aed)}</span>
+                <span style={{ color: "#16a34a" }}>-{formatAed(invoice.discount_amount)}</span>
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "space-between", width: 240 }}>
@@ -989,7 +984,6 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                         {formatAed(
                           invoiceDisplayTotals({
                             total: inv.total,
-                            total_aed: inv.total_aed,
                             vat_aed: inv.vat_aed,
                             service_type: inv.service_type,
                             notes: inv.notes,

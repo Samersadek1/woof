@@ -50,10 +50,10 @@ function lineRowToServiceItem(row: LineRow): BoardingInvoiceLineItem {
 
 function totalsFromLineItems(
   lineItems: BoardingInvoiceLineItem[],
-  discountAed: number,
+  discountAmount: number,
 ): { subtotal: number; grossTotal: number; vatAed: number } {
   const subtotal = lineItems.reduce((s, li) => s + li.unitPrice * Math.max(1, li.quantity), 0);
-  const grossTotal = Math.max(0, roundAed(subtotal - discountAed));
+  const grossTotal = Math.max(0, roundAed(subtotal - discountAmount));
   const vatAed = vatAmountFromGrossInclusive(grossTotal);
   return { subtotal: roundAed(subtotal), grossTotal, vatAed };
 }
@@ -172,12 +172,11 @@ export async function syncBoardingBookingInvoice(
   });
 
   const merged: BoardingInvoiceLineItem[] = [...nightLines, ...preserved.map(lineRowToServiceItem)];
-  const discountAed = roundAed(invoice.discount_aed ?? invoice.discount_amount ?? 0);
-  const { subtotal, grossTotal, vatAed } = totalsFromLineItems(merged, discountAed);
+  const discountAmount = roundAed(invoice.discount_amount ?? 0);
+  const { subtotal, grossTotal, vatAed } = totalsFromLineItems(merged, discountAmount);
   const amountPaid = await effectiveAmountPaid(invoice);
   const { grandTotal } = invoiceDisplayTotals({
     total: grossTotal,
-    total_aed: grossTotal,
     vat_aed: vatAed,
   });
   const outstanding = roundAed(Math.max(0, grandTotal - amountPaid));
@@ -207,9 +206,7 @@ export async function syncBoardingBookingInvoice(
 
   const updatePayload: Database["public"]["Tables"]["invoices"]["Update"] = {
     subtotal,
-    subtotal_aed: subtotal,
     total: grossTotal,
-    total_aed: grossTotal,
     vat_aed: vatAed,
     due_date: invoiceDueDateAtCheckIn(booking.check_in_date),
     status: status as Database["public"]["Enums"]["invoice_status"],
@@ -242,25 +239,12 @@ export async function syncBoardingBookingInvoice(
     .single();
   if (refreshErr) throw refreshErr;
 
-  // apply_double_occupancy_discount updates `total` to the post-discount gross but leaves
-  // `total_aed` at the pre-discount value. Sync them so invoiceDisplayTotals reads correctly.
-  const refreshedGrossTotal = roundAed(refreshedInvoice.total ?? grossTotal);
-  const refreshedVatAed = vatAmountFromGrossInclusive(refreshedGrossTotal);
-
-  const { error: syncTotalsErr } = await getSupabase()
-    .from("invoices")
-    .update({
-      total_aed: refreshedGrossTotal,
-      vat_aed: refreshedVatAed,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", invoice.id);
-  if (syncTotalsErr) throw syncTotalsErr;
-  const { grandTotal: refreshedGrandTotal } = invoiceDisplayTotals({
-    total: refreshedGrossTotal,
-    total_aed: refreshedGrossTotal,
-    vat_aed: refreshedVatAed,
-  });
+  const refreshedGrandTotal = invoiceDisplayTotals({
+    total: roundAed(refreshedInvoice.total ?? grossTotal),
+    vat_aed: refreshedInvoice.vat_aed,
+    service_type: refreshedInvoice.service_type,
+    notes: refreshedInvoice.notes,
+  }).grandTotal;
   const refreshedOutstanding = roundAed(Math.max(0, refreshedGrandTotal - amountPaid));
   const refreshedStatus = deriveInvoiceStatusAfterRecalc(
     refreshedInvoice.status,

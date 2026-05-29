@@ -20,13 +20,13 @@ export function canEditInvoiceLineItems(status: string): boolean {
 
 function totalsFromLines(
   lines: Pick<LineRow, "quantity" | "unit_price">[],
-  discountAed: number,
+  discountAmount: number,
 ): { subtotal: number; grossTotal: number; vatAed: number } {
   const subtotal = lines.reduce(
     (s, li) => s + li.unit_price * Math.max(1, li.quantity),
     0,
   );
-  const grossTotal = Math.max(0, roundAed(subtotal - discountAed));
+  const grossTotal = Math.max(0, roundAed(subtotal - discountAmount));
   const vatAed = vatAmountFromGrossInclusive(grossTotal);
   return { subtotal: roundAed(subtotal), grossTotal, vatAed };
 }
@@ -47,7 +47,7 @@ async function effectiveAmountPaid(invoice: InvoiceRow): Promise<number> {
   return roundAed(Math.max(stored, fromTx));
 }
 
-/** Recompute invoice header totals from line items; preserves discount_aed. */
+/** Recompute invoice header totals from line items; preserves discount_amount. */
 export async function recalculateInvoiceTotals(invoiceId: string): Promise<void> {
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
@@ -62,21 +62,18 @@ export async function recalculateInvoiceTotals(invoiceId: string): Promise<void>
     .eq("invoice_id", invoiceId);
   if (linesErr) throw linesErr;
 
-  const discountAed = roundAed(invoice.discount_aed ?? invoice.discount_amount ?? 0);
-  const { subtotal, grossTotal, vatAed } = totalsFromLines(lines ?? [], discountAed);
+  const discountAmount = roundAed(invoice.discount_amount ?? 0);
+  const { subtotal, grossTotal, vatAed } = totalsFromLines(lines ?? [], discountAmount);
   const amountPaid = await effectiveAmountPaid(invoice);
   const { grandTotal } = invoiceDisplayTotals({
     total: grossTotal,
-    total_aed: grossTotal,
     vat_aed: vatAed,
   });
   const status = deriveInvoiceStatusAfterRecalc(invoice.status, amountPaid, grandTotal);
 
   const updatePayload: Database["public"]["Tables"]["invoices"]["Update"] = {
     subtotal,
-    subtotal_aed: subtotal,
     total: grossTotal,
-    total_aed: grossTotal,
     vat_aed: vatAed,
     status: status as Database["public"]["Enums"]["invoice_status"],
     amount_paid: amountPaid,

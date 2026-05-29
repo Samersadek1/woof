@@ -765,7 +765,7 @@ function PlannerTab() {
     queryFn: async () => {
       return {
         discount_pct: 0,
-        discount_aed: 0,
+        
         final_aed: immediateInvoiceSubtotalPreview,
       };
     },

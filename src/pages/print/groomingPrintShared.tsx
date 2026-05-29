@@ -172,7 +172,7 @@ async function enrichGroomingRows(rows: GroomingPrintRow[]): Promise<{
         .order("appointment_date", { ascending: false }),
       supabase
         .from("invoices")
-        .select("service_id, total_aed, total, vat_aed")
+        .select("service_id, total, vat_aed")
         .eq("service_type", "grooming")
         .in("service_id", appointmentIds),
     ]);
@@ -190,7 +190,6 @@ async function enrichGroomingRows(rows: GroomingPrintRow[]): Promise<{
     if (!inv.service_id) continue;
     amountByAppointmentId[inv.service_id] = invoiceDisplayTotals({
       total: inv.total,
-      total_aed: inv.total_aed,
       vat_aed: inv.vat_aed,
     });
   }

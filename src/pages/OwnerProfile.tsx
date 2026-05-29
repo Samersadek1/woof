@@ -471,7 +471,6 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                         {formatAed(
                           invoiceDisplayTotals({
                             total: inv.total,
-                            total_aed: inv.total_aed,
                             vat_aed: inv.vat_aed,
                             service_type: inv.service_type,
                             notes: inv.notes,

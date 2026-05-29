@@ -91,12 +91,11 @@ export interface InvoiceWithItems {
   service_type: string | null;
   service_id: string | null;
   status: InvoiceStatus;
-  subtotal_aed: number;
+  subtotal: number;
   discount_pct: number;
-  discount_aed: number;
+  discount_amount: number;
   /** Stored total is gross incl. VAT for package/daycare; see vatConfig for display/charge rules. */
   total: number;
-  total_aed: number;
   vat_aed: number | null;
   payment_method: PaymentMethod | null;
   paid_at: string | null;
@@ -116,7 +115,7 @@ export interface StatementRow {
   invoice_number: string | null;
   service_type: string | null;
   status: string;
-  total_aed: number;
+  total: number;
   amount_paid?: number;
   created_at: string;
   due_date: string | null;
@@ -124,7 +123,7 @@ export interface StatementRow {
 }
 
 function statementBalanceDue(row: StatementRow): number {
-  return Math.max(0, row.total_aed - (row.amount_paid ?? 0));
+  return Math.max(0, row.total - (row.amount_paid ?? 0));
 }
 
 export interface BillingAdjustment {
@@ -479,12 +478,11 @@ export function useCreateInvoice() {
           service_type: input.serviceType,
           status: "draft" as const,
           subtotal: normalizedSubtotal,
-          subtotal_aed: normalizedSubtotal,
+          
           discount_pct: normalizedDiscountPct,
-          discount_aed: normalizedDiscountAed,
+          
           discount_amount: normalizedDiscountAed,
           total: grossTotal,
-          total_aed: grossTotal,
           vat_aed: vatAed,
           due_date: dueDate,
           notes: input.notes ?? null,
@@ -675,7 +673,7 @@ export function useVoidInvoice() {
     ): Promise<{ success: boolean; refundAed: number }> => {
       const { data: invoice, error: fetchErr } = await supabase
         .from("invoices")
-        .select("owner_id, total, total_aed, vat_aed, service_type, notes")
+        .select("owner_id, total, vat_aed, service_type, notes")
         .eq("id", input.invoiceId)
         .single();
       if (fetchErr) throw fetchErr;
@@ -706,7 +704,6 @@ export function useVoidInvoice() {
         adjustment_type: "cancellation_refund",
         original_amount: invoiceAmountDue({
           total: invoice.total,
-          total_aed: invoice.total_aed,
           vat_aed: invoice.vat_aed,
           service_type: invoice.service_type,
           notes: invoice.notes,
@@ -814,7 +811,7 @@ export function useOwnerStatement(ownerId: string) {
       if (error) {
         const { data: rows, error: qErr } = await supabase
           .from("invoices")
-          .select("id, invoice_number, status, total, total_aed, vat_aed, service_type, notes, amount_paid, created_at, due_date, booking_id")
+          .select("id, invoice_number, status, total, vat_aed, service_type, notes, amount_paid, created_at, due_date, booking_id")
           .eq("owner_id", ownerId)
           .order("created_at", { ascending: false });
         if (qErr) throw qErr;
@@ -823,9 +820,8 @@ export function useOwnerStatement(ownerId: string) {
           invoice_number: r.invoice_number,
           service_type: null as string | null,
           status: r.status,
-          total_aed: invoiceDisplayTotals({
+          total: invoiceDisplayTotals({
             total: r.total,
-            total_aed: r.total_aed,
             vat_aed: r.vat_aed,
             service_type: r.service_type,
             notes: r.notes,
@@ -1021,18 +1017,6 @@ export function useInvoicesForOwner(
         const raw = inv as Record<string, unknown>;
         const lineItems = (raw.line_items as RawLineItem[] | null) ?? [];
         const booking = raw.bookings as RawBooking;
-        const subtotalAedResolved =
-          Number(inv.subtotal_aed ?? 0) === 0 && Number(inv.subtotal ?? 0) > 0
-            ? inv.subtotal
-            : (inv.subtotal_aed ?? inv.subtotal ?? 0);
-        const discountAedResolved =
-          Number(inv.discount_aed ?? 0) === 0 && Number(inv.discount_amount ?? 0) > 0
-            ? inv.discount_amount
-            : (inv.discount_aed ?? inv.discount_amount ?? 0);
-        const totalAedResolved =
-          Number(inv.total_aed ?? 0) === 0 && Number(inv.total ?? 0) > 0
-            ? inv.total
-            : (inv.total_aed ?? inv.total ?? 0);
 
         return {
           id: inv.id,
@@ -1042,11 +1026,10 @@ export function useInvoicesForOwner(
           service_type: inv.service_type ?? null,
           service_id: inv.booking_id,
           status: inv.status as InvoiceStatus,
-          subtotal_aed: subtotalAedResolved,
+          subtotal: inv.subtotal ?? 0,
           discount_pct: inv.discount_pct,
-          discount_aed: discountAedResolved,
-          total: inv.total,
-          total_aed: totalAedResolved,
+          discount_amount: inv.discount_amount ?? 0,
+          total: inv.total ?? 0,
           vat_aed: inv.vat_aed ?? null,
           payment_method: inv.payment_method as PaymentMethod | null,
           paid_at: inv.paid_at ?? (inv.status === "paid" ? inv.updated_at : null),

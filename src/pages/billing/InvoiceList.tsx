@@ -311,7 +311,7 @@ export default function InvoiceListPage() {
                             phone: inv.owner_phone,
                             ownerName: inv.owner_name,
                             invoiceNumberDisplay: inv.invoice_number?.trim() || inv.id.slice(0, 8),
-                            amountAed: inv.total_aed,
+                            amountAed: inv.total,
                           })
                         : null;
                       return (
@@ -346,7 +346,7 @@ export default function InvoiceListPage() {
                             {inv.status.replace(/_/g, " ")}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums font-semibold">{formatAed(inv.total_aed)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-semibold">{formatAed(inv.total)}</TableCell>
                         <TableCell>{inv.due_date ? format(new Date(`${inv.due_date}T00:00:00`), "d MMM yyyy") : "—"}</TableCell>
                         <TableCell className="text-right tabular-nums">
                           {inv.days_overdue > 0 ? <span className="text-red-600">{inv.days_overdue}d</span> : "0d"}
@@ -407,7 +407,7 @@ export default function InvoiceListPage() {
           invoiceUuid={deleteTarget.id}
           invoiceNumberDisplay={deleteTarget.invoice_number?.trim() || deleteTarget.id.slice(0, 8)}
           ownerName={deleteTarget.owner_name}
-          totalAmount={deleteTarget.total_aed}
+          totalAmount={deleteTarget.total}
         />
       ) : null}
 
