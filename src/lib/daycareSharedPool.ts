@@ -21,11 +21,12 @@ export function parseSharedPoolFromInvoiceNotes(notes: string | null | undefined
 
 export function isSharedHouseholdDaycarePool(args: {
   invoiceNotes?: string | null;
+  /** Retained for call-site compatibility; pet count alone never implies a shared pool. */
   purchasePetCount?: number | null;
 }): boolean {
-  const parsed = parseSharedPoolFromInvoiceNotes(args.invoiceNotes ?? null);
-  if (parsed.isSharedPool) return true;
-  return (args.purchasePetCount ?? 1) >= 2;
+  // Only the explicit invoice marker makes a package a shared household pool.
+  // Multi-pet purchases default to per-dog credits with their own day caps.
+  return parseSharedPoolFromInvoiceNotes(args.invoiceNotes ?? null).isSharedPool;
 }
 
 export function sharedPoolPetLabel(petNames: string[] | null | undefined): string | null {

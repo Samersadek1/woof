@@ -16,9 +16,19 @@ describe("daycareSharedPool", () => {
     expect(sharedPoolPetLabel(parsed.petNames)).toBe("Lotus, Mei Mei, Rocky");
   });
 
-  it("treats multi-pet purchase groups as shared household pools", () => {
+  it("does not treat multi-pet purchase groups as shared pools without the marker", () => {
     expect(
       isSharedHouseholdDaycarePool({
+        purchasePetCount: 3,
+      }),
+    ).toBe(false);
+  });
+
+  it("treats packages with the shared pool marker as shared household pools", () => {
+    expect(
+      isSharedHouseholdDaycarePool({
+        invoiceNotes:
+          "tracker=PKG-92359 | shared_pool_30_combined | pets=Lotus,Mei Mei,Rocky | authority:x",
         purchasePetCount: 3,
       }),
     ).toBe(true);
