@@ -37,7 +37,7 @@ interface StorageFile {
 }
 
 const BUCKET = "pet-photos";
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const ACCEPTED_TYPES = /^image\/|application\/pdf$/;
 const ACCEPTED_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|pdf)$/i;
 
@@ -105,7 +105,7 @@ export function PetDocuments({ petId }: PetDocumentsProps) {
 
     for (const file of selected) {
       if (file.size > MAX_UPLOAD_BYTES) {
-        toast.error(`${file.name} is too large (max 10 MB).`);
+        toast.error(`${file.name} is too large (max 50 MB).`);
         continue;
       }
       const safeName = `${Date.now()}_${file.name.replace(/\s+/g, "_")}`;
