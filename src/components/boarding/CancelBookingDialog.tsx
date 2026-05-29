@@ -8,7 +8,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -106,11 +105,11 @@ export function CancelBookingDialog({ open, onOpenChange, booking, onCancelled }
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Cancel booking</DialogTitle>
-          <DialogDescription>
+          <p className="text-sm text-muted-foreground">
             {isCheckedIn
               ? "This dog is currently checked in. Cancelling ends the stay and cannot be undone from this screen."
               : "The booking will be marked cancelled. This does not delete invoice history."}
-          </DialogDescription>
+          </p>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="space-y-2">

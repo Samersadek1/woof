@@ -1387,100 +1387,103 @@ function BoardingBookingDetailSheets({
         </SheetContent>
       </Sheet>
 
-      {booking && (
-        <>
-          <CancelBookingDialog
-            open={cancelOpen}
-            onOpenChange={setCancelOpen}
-            booking={booking}
-            onCancelled={() => onBookingChange(null)}
-          />
-          {undoCheckInOpen && (
-            <UndoCheckInDialog
-              open={undoCheckInOpen}
-              onOpenChange={setUndoCheckInOpen}
-              booking={booking}
-              onUndone={onBookingChange}
-            />
-          )}
-        </>
+      {booking && cancelOpen && (
+        <CancelBookingDialog
+          open={cancelOpen}
+          onOpenChange={setCancelOpen}
+          booking={booking}
+          onCancelled={() => onBookingChange(null)}
+        />
       )}
 
-      {booking && (
-        <>
-          <ChangeRoomDialog
-            open={changeRoomOpen}
-            onOpenChange={setChangeRoomOpen}
-            booking={booking}
-            assignmentSlices={sortedAssignmentSlices(
+      {booking && undoCheckInOpen && (
+        <UndoCheckInDialog
+          open={undoCheckInOpen}
+          onOpenChange={setUndoCheckInOpen}
+          booking={booking}
+          onUndone={onBookingChange}
+        />
+      )}
+
+      {booking && changeRoomOpen && (
+        <ChangeRoomDialog
+          open={changeRoomOpen}
+          onOpenChange={setChangeRoomOpen}
+          booking={booking}
+          assignmentSlices={sortedAssignmentSlices(
+            assignmentsForBooking.map((a) => ({
+              start_date: a.start_date,
+              end_date: a.end_date,
+              rooms: a.rooms,
+            })),
+          )}
+          facilityRooms={assignableDogRooms}
+          defaultEffectiveDate={detailContext?.asOfDate}
+          onMoved={() => {
+            queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
+          }}
+        />
+      )}
+
+      {booking && checkInSheetOpen && (
+        <CheckInSheet
+          open={checkInSheetOpen}
+          onOpenChange={(o) => {
+            if (!o) {
+              setCheckInSheetOpen(false);
+              setBelongingsReadOnly(false);
+            }
+          }}
+          bookingId={booking.id}
+          ownerName={`${booking.owners?.first_name ?? ""} ${booking.owners?.last_name ?? ""}`.trim()}
+          petNames={booking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
+          roomName={roomLabelForBooking(
+            booking,
+            sortedAssignmentSlices(
               assignmentsForBooking.map((a) => ({
                 start_date: a.start_date,
                 end_date: a.end_date,
                 rooms: a.rooms,
               })),
-            )}
-            facilityRooms={assignableDogRooms}
-            defaultEffectiveDate={detailContext?.asOfDate}
-            onMoved={() => {
-              queryClient.invalidateQueries({ queryKey: ["bookings"] });
-              queryClient.invalidateQueries({ queryKey: ["booking_room_assignments"] });
-            }}
-          />
-          <CheckInSheet
-            open={checkInSheetOpen}
-            onOpenChange={(o) => {
-              if (!o) {
-                setCheckInSheetOpen(false);
-                setBelongingsReadOnly(false);
-              }
-            }}
-            bookingId={booking.id}
-            ownerName={`${booking.owners?.first_name ?? ""} ${booking.owners?.last_name ?? ""}`.trim()}
-            petNames={booking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
-            roomName={roomLabelForBooking(
-              booking,
-              sortedAssignmentSlices(
-                assignmentsForBooking.map((a) => ({
-                  start_date: a.start_date,
-                  end_date: a.end_date,
-                  rooms: a.rooms,
-                })),
-              ),
-              {
-                asOfDate: detailContext?.asOfDate ?? booking.check_in_date,
-              },
-            )}
-            bookedCheckInDate={booking.check_in_date}
-            bookedCheckOutDate={booking.check_out_date}
-            readOnly={belongingsReadOnly}
-            onFinished={handleBelongingsFlowFinished}
-          />
-          <CheckOutSheet
-            open={checkOutSheetOpen}
-            onOpenChange={(o) => {
-              if (!o) setCheckOutSheetOpen(false);
-            }}
-            bookingId={booking.id}
-            ownerName={`${booking.owners?.first_name ?? ""} ${booking.owners?.last_name ?? ""}`.trim()}
-            petNames={booking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
-            roomName={roomLabelForBooking(
-              booking,
-              sortedAssignmentSlices(
-                assignmentsForBooking.map((a) => ({
-                  start_date: a.start_date,
-                  end_date: a.end_date,
-                  rooms: a.rooms,
-                })),
-              ),
-              {
-                asOfDate: detailContext?.asOfDate ?? booking.check_out_date,
-              },
-            )}
-            checkInDate={booking.check_in_date}
-            checkOutDate={booking.check_out_date}
-            onFinished={handleBelongingsFlowFinished}
-          />
-        </>
+            ),
+            {
+              asOfDate: detailContext?.asOfDate ?? booking.check_in_date,
+            },
+          )}
+          bookedCheckInDate={booking.check_in_date}
+          bookedCheckOutDate={booking.check_out_date}
+          readOnly={belongingsReadOnly}
+          onFinished={handleBelongingsFlowFinished}
+        />
+      )}
+
+      {booking && checkOutSheetOpen && (
+        <CheckOutSheet
+          open={checkOutSheetOpen}
+          onOpenChange={(o) => {
+            if (!o) setCheckOutSheetOpen(false);
+          }}
+          bookingId={booking.id}
+          ownerName={`${booking.owners?.first_name ?? ""} ${booking.owners?.last_name ?? ""}`.trim()}
+          petNames={booking.booking_pets.map((bp) => bp.pets?.name).filter(Boolean).join(", ")}
+          roomName={roomLabelForBooking(
+            booking,
+            sortedAssignmentSlices(
+              assignmentsForBooking.map((a) => ({
+                start_date: a.start_date,
+                end_date: a.end_date,
+                rooms: a.rooms,
+              })),
+            ),
+            {
+              asOfDate: detailContext?.asOfDate ?? booking.check_out_date,
+            },
+          )}
+          checkInDate={booking.check_in_date}
+          checkOutDate={booking.check_out_date}
+          onFinished={handleBelongingsFlowFinished}
+        />
       )}
     </>
   );

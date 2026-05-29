@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -26,9 +25,9 @@ export function UndoCheckInDialog({ open, onOpenChange, booking, onUndone }: Pro
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Undo check-in?</DialogTitle>
-          <DialogDescription>
+          <p className="text-sm text-muted-foreground">
             Reverts this stay to confirmed. The booking, room assignment, and invoice stay as they are.
-          </DialogDescription>
+          </p>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
