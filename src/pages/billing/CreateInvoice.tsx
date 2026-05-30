@@ -15,6 +15,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { InvoiceAdjustmentAmountInput } from "@/components/billing/InvoiceAdjustmentAmountInput";
+import {
+  discountReasonWithMode,
+  type InvoiceDiscountMode,
+  isPercentDiscountAdjustmentType,
+  resolveAdjustmentDiscountAmount,
+} from "@/lib/invoiceAdjustmentDiscount";
 import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
@@ -41,9 +48,20 @@ type AdjustmentDraft = {
   id: string;
   adjustment_type: string;
   amount: number;
+  discountMode: InvoiceDiscountMode;
   reason: string;
   approved_by: string;
 };
+
+function resolvedAdjustmentAmount(adjustment: AdjustmentDraft, subtotal: number): number {
+  return resolveAdjustmentDiscountAmount(
+    isPercentDiscountAdjustmentType(adjustment.adjustment_type)
+      ? adjustment.discountMode
+      : "flat",
+    adjustment.amount,
+    subtotal,
+  );
+}
 
 function aed(v: number) {
   return `AED ${v.toLocaleString("en-AE", {
@@ -170,7 +188,10 @@ export default function CreateInvoicePage() {
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
   const lineDiscount = lines.reduce((s, l) => s + l.discount, 0);
   const lineTotal = lines.reduce((s, l) => s + l.total, 0);
-  const adjustmentTotal = adjustments.reduce((s, a) => s + Math.max(0, a.amount), 0);
+  const adjustmentTotal = adjustments.reduce(
+    (s, a) => s + resolvedAdjustmentAmount(a, subtotal),
+    0,
+  );
   const invoiceGross = Math.max(0, lineTotal - adjustmentTotal);
   const vatAed = vatAmountFromGrossInclusive(invoiceGross);
   const netExVat = netFromGrossInclusive(invoiceGross);
@@ -227,8 +248,12 @@ export default function CreateInvoicePage() {
           invoice_id: inv.id,
           adjustment_type: a.adjustment_type,
           original_amount: subtotal,
-          adjusted_amount: a.amount,
-          reason: a.reason,
+          adjusted_amount: resolvedAdjustmentAmount(a, subtotal),
+          reason: discountReasonWithMode(
+            a.reason,
+            isPercentDiscountAdjustmentType(a.adjustment_type) ? a.discountMode : "flat",
+            a.amount,
+          ),
           approved_by: a.approved_by,
         }));
         const { error: adjErr } = await supabase.from("billing_adjustments").insert(adjRows);
@@ -374,6 +399,7 @@ export default function CreateInvoicePage() {
                       id: crypto.randomUUID(),
                       adjustment_type: "discount_override",
                       amount: 0,
+                      discountMode: "percent",
                       reason: "",
                       approved_by: "",
                     },
@@ -395,9 +421,28 @@ export default function CreateInvoicePage() {
                   <option value="fee_waived">Fee waived</option>
                   <option value="adjustment">Adjustment</option>
                 </select>
-                <Input type="number" min="0" step="0.01" value={a.amount} onChange={(e) => setAdjustments((prev) => prev.map((x) => x.id === a.id ? { ...x, amount: Number(e.target.value) || 0 } : x))} />
-                <Input placeholder="Reason" value={a.reason} onChange={(e) => setAdjustments((prev) => prev.map((x) => x.id === a.id ? { ...x, reason: e.target.value } : x))} />
-                <Input placeholder="Approved by" value={a.approved_by} onChange={(e) => setAdjustments((prev) => prev.map((x) => x.id === a.id ? { ...x, approved_by: e.target.value } : x))} />
+                <div className="md:col-span-3 grid gap-3 md:grid-cols-3">
+                  <InvoiceAdjustmentAmountInput
+                    adjustmentType={a.adjustment_type}
+                    subtotal={subtotal}
+                    mode={a.discountMode}
+                    onModeChange={(discountMode) =>
+                      setAdjustments((prev) =>
+                        prev.map((x) => (x.id === a.id ? { ...x, discountMode } : x)),
+                      )
+                    }
+                    value={a.amount ? String(a.amount) : ""}
+                    onValueChange={(raw) =>
+                      setAdjustments((prev) =>
+                        prev.map((x) =>
+                          x.id === a.id ? { ...x, amount: Number(raw) || 0 } : x,
+                        ),
+                      )
+                    }
+                  />
+                  <Input placeholder="Reason" value={a.reason} onChange={(e) => setAdjustments((prev) => prev.map((x) => x.id === a.id ? { ...x, reason: e.target.value } : x))} />
+                  <Input placeholder="Approved by" value={a.approved_by} onChange={(e) => setAdjustments((prev) => prev.map((x) => x.id === a.id ? { ...x, approved_by: e.target.value } : x))} />
+                </div>
               </div>
             ))}
           </CardContent>

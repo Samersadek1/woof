@@ -35,6 +35,13 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { invoiceResolvedAmounts, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
+import { InvoiceAdjustmentAmountInput } from "@/components/billing/InvoiceAdjustmentAmountInput";
+import {
+  discountReasonWithMode,
+  type InvoiceDiscountMode,
+  isPercentDiscountAdjustmentType,
+  resolveAdjustmentDiscountAmount,
+} from "@/lib/invoiceAdjustmentDiscount";
 import { applyInvoiceDiscountAdjustment, isDiscountAdjustmentType } from "@/lib/invoiceRecalc";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
@@ -88,6 +95,7 @@ export default function InvoiceDetailPage() {
   const [performedBy, setPerformedBy] = useState("");
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustType, setAdjustType] = useState("discount_override");
+  const [adjustDiscountMode, setAdjustDiscountMode] = useState<InvoiceDiscountMode>("percent");
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustApprover, setAdjustApprover] = useState("");
@@ -273,15 +281,30 @@ export default function InvoiceDetailPage() {
     if (!adjustAmount || !adjustReason.trim() || !adjustApprover.trim()) {
       return toast.error("Fill amount, reason, and approver.");
     }
-    const amount = Math.abs(parseFloat(adjustAmount));
-    if (!amount || Number.isNaN(amount)) return toast.error("Invalid adjustment amount.");
+    const entered = Math.abs(parseFloat(adjustAmount));
+    if (!entered || Number.isNaN(entered)) return toast.error("Invalid adjustment amount.");
+    if (isPercentDiscountAdjustmentType(adjustType) && adjustDiscountMode === "percent" && entered > 100) {
+      return toast.error("Discount percentage cannot exceed 100%.");
+    }
+    const subtotal = computed.lineSubtotal;
+    const amount = resolveAdjustmentDiscountAmount(
+      isPercentDiscountAdjustmentType(adjustType) ? adjustDiscountMode : "flat",
+      entered,
+      subtotal,
+    );
+    if (!amount) return toast.error("Discount must be greater than zero.");
+    const reason = discountReasonWithMode(
+      adjustReason.trim(),
+      isPercentDiscountAdjustmentType(adjustType) ? adjustDiscountMode : "flat",
+      entered,
+    );
     const { error } = await supabase.from("billing_adjustments").insert({
       owner_id: inv.owner_id,
       invoice_id: inv.id,
       adjustment_type: adjustType,
       original_amount: inv.total ?? inv.total,
       adjusted_amount: amount,
-      reason: adjustReason.trim(),
+      reason,
       approved_by: adjustApprover.trim(),
     });
     if (error) return toast.error(error.message);
@@ -297,6 +320,7 @@ export default function InvoiceDetailPage() {
     toast.success("Adjustment added.");
     setAdjustOpen(false);
     setAdjustAmount("");
+    setAdjustDiscountMode("percent");
     setAdjustReason("");
     setAdjustApprover("");
     refetch();
@@ -748,8 +772,14 @@ export default function InvoiceDetailPage() {
               <option value="fee_waived">Fee waived</option>
               <option value="adjustment">Adjustment</option>
             </select>
-            <Label>Amount</Label>
-            <Input type="number" min="0" step="0.01" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} />
+            <InvoiceAdjustmentAmountInput
+              adjustmentType={adjustType}
+              subtotal={computed.lineSubtotal}
+              mode={adjustDiscountMode}
+              onModeChange={setAdjustDiscountMode}
+              value={adjustAmount}
+              onValueChange={setAdjustAmount}
+            />
             <Label>Reason</Label>
             <Textarea value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
             <Label>Approved by</Label>
