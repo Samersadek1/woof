@@ -4,7 +4,17 @@ type RoomLike = Pick<
   Database["public"]["Tables"]["rooms"]["Row"],
   "room_number" | "display_name"
 > &
-  Partial<Pick<Database["public"]["Tables"]["rooms"]["Row"], "id" | "room_type">>;
+  Partial<
+    Pick<Database["public"]["Tables"]["rooms"]["Row"], "id" | "room_type" | "zone">
+  >;
+
+/** Zones that get their own section header on the boarding calendar (not parsed from name). */
+export const BOARDING_ZONE_SECTIONS = new Set([
+  "Daycare 1",
+  "Daycare 2",
+  "Daycare Spaces",
+  "Overflow",
+]);
 
 /** Legacy / import rows that must not appear in boarding room pickers or calendars. */
 const EXCLUDED_ROOM_CODES = new Set(["F100", "D100"]);
@@ -44,6 +54,10 @@ export function getRoomSectionParts(room: RoomLike): {
   label: string;
 } {
   const label = roomNameForSectionParse(room);
+  const zone = room.zone?.trim();
+  if (zone && BOARDING_ZONE_SECTIONS.has(zone)) {
+    return { section: zone, roomNumber: label, label };
+  }
   const { section, roomNumber } = parseRoomSectionAndNumber(label);
   return { section, roomNumber, label };
 }
@@ -97,6 +111,10 @@ export function buildRoomsBySection<T extends RoomLike>(rooms: T[]): {
 
 export function formatRoomSectionLabel(room: RoomLike): string {
   const { section, roomNumber, label } = getRoomSectionParts(room);
+  const zone = room.zone?.trim();
+  if (zone && BOARDING_ZONE_SECTIONS.has(zone)) {
+    return label || roomNumber || (room.room_number ?? "—");
+  }
   if (section && roomNumber) return `${section} ${roomNumber}`;
   return label || (room.room_number ?? "—");
 }

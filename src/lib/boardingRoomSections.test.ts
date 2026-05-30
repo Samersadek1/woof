@@ -41,6 +41,30 @@ describe("boardingRoomSections", () => {
     ).toBe("Dcare2b 2");
   });
 
+  it("groups daycare zones by zone field, not A/B/C prefix", () => {
+    expect(
+      getRoomSectionParts({
+        room_number: "A1",
+        display_name: "A1",
+        zone: "Daycare 2",
+      }),
+    ).toMatchObject({ section: "Daycare 2", roomNumber: "A1", label: "A1" });
+    expect(
+      formatRoomSectionLabel({
+        room_number: "A1",
+        display_name: "A1",
+        zone: "Daycare 2",
+      }),
+    ).toBe("A1");
+    expect(
+      getRoomSectionParts({
+        room_number: "Daycare 1-2",
+        display_name: "Daycare 1-2",
+        zone: "Daycare 1",
+      }).section,
+    ).toBe("Daycare 1");
+  });
+
   it("formats boarding picker labels without capacity", () => {
     expect(
       formatBoardingRoomPickerLabel({

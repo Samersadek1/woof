@@ -10,7 +10,29 @@ import type { RoomSizeClass } from "@/lib/boardingCapacity";
 import { requiredClassLabel } from "@/lib/boardingCapacity";
 import { cn } from "@/lib/utils";
 
-const ZONE_ORDER = ["A", "B", "C", "D", "Grooming", "Daycare", "Overflow"];
+const ZONE_ORDER = [
+  "A",
+  "B",
+  "C",
+  "D",
+  "Grooming",
+  "Daycare 1",
+  "Daycare 2",
+  "Daycare Spaces",
+] as const;
+
+const OVERFLOW_ZONE = "Overflow";
+
+function compareKennelMapZones(a: string, b: string): number {
+  if (a === OVERFLOW_ZONE) return 1;
+  if (b === OVERFLOW_ZONE) return -1;
+  const ia = ZONE_ORDER.indexOf(a as (typeof ZONE_ORDER)[number]);
+  const ib = ZONE_ORDER.indexOf(b as (typeof ZONE_ORDER)[number]);
+  if (ia >= 0 && ib >= 0) return ia - ib;
+  if (ia >= 0) return -1;
+  if (ib >= 0) return 1;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
 
 type Props = {
   rooms: KennelMapRoom[];
@@ -67,14 +89,7 @@ export function ZoneGrid({
     for (const list of map.values()) {
       list.sort((a, b) => roomLabel(a).localeCompare(roomLabel(b), undefined, { numeric: true }));
     }
-    const keys = Array.from(map.keys()).sort((a, b) => {
-      const ia = ZONE_ORDER.indexOf(a);
-      const ib = ZONE_ORDER.indexOf(b);
-      if (ia >= 0 && ib >= 0) return ia - ib;
-      if (ia >= 0) return -1;
-      if (ib >= 0) return 1;
-      return a.localeCompare(b);
-    });
+    const keys = Array.from(map.keys()).sort(compareKennelMapZones);
     return keys.map((zone) => ({
       zone,
       rooms: map.get(zone)!,
