@@ -55,11 +55,11 @@ export function isExcludedBoardingRoom(room: RoomLike): boolean {
   return EXCLUDED_ROOM_CODES.has(normalized);
 }
 
-/** Vitest/Playwright rooms (TEST_* prefix) — hide from staff room admin lists. */
+/** Vitest/Playwright rooms (TEST_* scope prefix) — hide from staff room admin lists. */
 export function isQaTestRoom(room: RoomLike): boolean {
   const num = (room.room_number ?? "").trim();
   const display = (room.display_name ?? "").trim();
-  return /^TEST_/i.test(num) || /^TEST_/i.test(display);
+  return /TEST_/i.test(num) || /TEST_/i.test(display);
 }
 
 export function sortRoomsBySectionNumber(

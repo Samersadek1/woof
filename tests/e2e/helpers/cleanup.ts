@@ -49,5 +49,6 @@ export async function cleanupTestData(scopePrefix: string) {
     .select("id")
     .or(`display_name.ilike.${scopePrefix}%,room_number.ilike.${scopePrefix}%`);
   const roomIds = (rooms ?? []).map((row) => row.id as string);
+  await deleteWhereIn("booking_room_assignments", "room_id", roomIds);
   await deleteWhereIn("rooms", "id", roomIds);
 }

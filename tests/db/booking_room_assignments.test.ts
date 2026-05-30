@@ -325,6 +325,7 @@ describe("booking_room_assignments", () => {
         roomId: null,
         notes: `${scope.scopeId}_multi_segment_calendar_query`,
       });
+      scope.registerResource("bookings", booking.id);
 
       const { error: linkPetError } = await supabase
         .from("booking_pets")

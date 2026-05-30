@@ -48,20 +48,32 @@ export async function createTestPet(
   return data;
 }
 
+function scopedRoomNumber(scope: Scope, roomNumber: string): string {
+  const trimmed = roomNumber.trim();
+  const scopePrefix = scope.scopeId.toUpperCase();
+  if (trimmed.toUpperCase().startsWith(`${scopePrefix}_`) || trimmed.toUpperCase() === scopePrefix) {
+    return trimmed;
+  }
+  return `${scope.scopeId}_${trimmed}`;
+}
+
 export async function createTestRoom(
   scope: Scope,
   overrides: Partial<Database["public"]["Tables"]["rooms"]["Insert"]> = {},
 ) {
   const supabase = getServiceRoleClient();
+  const displayName = overrides.display_name ?? `${scope.scopeId}_Room`;
+  const roomNumber = scopedRoomNumber(scope, overrides.room_number ?? "room");
   const payload: Database["public"]["Tables"]["rooms"]["Insert"] = {
-    display_name: `${scope.scopeId}_Room`,
-    room_number: `${scope.scopeId.slice(-6)}`,
     room_type: "kennels",
     wing: "back_kennels",
     capacity_type: "multiple",
     max_pets: 99,
     is_active: true,
     ...overrides,
+    display_name: displayName,
+    room_number: roomNumber,
+    name: overrides.name ?? displayName,
   };
 
   const { data, error } = await supabase.from("rooms").insert(payload).select("*").single();

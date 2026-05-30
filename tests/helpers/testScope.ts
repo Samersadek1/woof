@@ -56,6 +56,14 @@ export function createTestScope() {
     const supabase = getServiceRoleClient();
     const bookingIds = getTableSet(resourceMap, "bookings");
     const invoiceIds = getTableSet(resourceMap, "invoices");
+    const roomIds = getTableSet(resourceMap, "rooms");
+
+    if (bookingIds.size > 0) {
+      await supabase.from("booking_room_assignments").delete().in("booking_id", [...bookingIds]);
+    }
+    if (roomIds.size > 0) {
+      await supabase.from("booking_room_assignments").delete().in("room_id", [...roomIds]);
+    }
 
     await safeDelete("booking_addons", getTableSet(resourceMap, "booking_addons"));
     await safeDelete("booking_items", getTableSet(resourceMap, "booking_items"));
@@ -74,7 +82,6 @@ export function createTestScope() {
     await safeDelete("bookings", bookingIds);
     await safeDelete("pets", getTableSet(resourceMap, "pets"));
     await safeDelete("owners", getTableSet(resourceMap, "owners"));
-    await safeDelete("rooms", getTableSet(resourceMap, "rooms"));
 
     const { data: scopedOwners } = await supabase
       .from("owners")
@@ -121,6 +128,18 @@ export function createTestScope() {
       await supabase.from("purchase_groups").delete().in("owner_id", ownerIds);
       await supabase.from("billing_adjustments").delete().in("owner_id", ownerIds);
       await supabase.from("owners").delete().in("id", ownerIds);
+    }
+
+    await safeDelete("rooms", roomIds);
+
+    const { data: scopedRooms } = await supabase
+      .from("rooms")
+      .select("id")
+      .or(`display_name.ilike.${scopeId}%,room_number.ilike.${scopeId}%`);
+    const scopedRoomIds = (scopedRooms ?? []).map((row) => row.id);
+    if (scopedRoomIds.length > 0) {
+      await supabase.from("booking_room_assignments").delete().in("room_id", scopedRoomIds);
+      await supabase.from("rooms").delete().in("id", scopedRoomIds);
     }
   }
 
