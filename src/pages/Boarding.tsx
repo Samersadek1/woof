@@ -136,6 +136,9 @@ import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKenne
 import { ChangeRoomDialog } from "@/components/boarding/ChangeRoomDialog";
 import { EditBoardingStayDates } from "@/components/boarding/EditBoardingStayDates";
 import { DayShufflePanel } from "@/components/boarding/DayShufflePanel";
+import { KennelMapPage } from "@/components/boarding/KennelMapPage";
+import { useAuth } from "@/contexts/AuthContext";
+import { BoardingNewBookingCapacity } from "@/components/boarding/BoardingNewBookingCapacity";
 import { BoardingTransportRateHint } from "@/components/boarding/BoardingTransportRateHint";
 import { useMoveBoardingRoom } from "@/hooks/useMoveBoardingRoom";
 import {
@@ -1532,6 +1535,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
   const [form, setForm] = useState<NewBookingForm>({ ...BLANK_FORM });
   const [roomPickerOpen, setRoomPickerOpen] = useState(false);
   const [roomSearch, setRoomSearch] = useState("");
+  const [showAllEligibleRooms, setShowAllEligibleRooms] = useState(false);
 
   const [ownerSearchResetKey, setOwnerSearchResetKey] = useState(0);
   const handleOwnerIdChange = useCallback((id: string) => {
@@ -2422,6 +2426,25 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
               </div>
             )}
 
+            {form.check_in_date && form.check_out_date && form.pet_ids.length > 0 && (
+              <BoardingNewBookingCapacity
+                checkIn={form.check_in_date}
+                checkOut={form.check_out_date}
+                pets={form.pet_ids.map((id) => {
+                  const p = dogBoardingPets.find((pet) => pet.id === id);
+                  return {
+                    id,
+                    size: p?.size ?? null,
+                    room_restriction: (p as { room_restriction?: string | null })?.room_restriction ?? null,
+                  };
+                })}
+                selectedRoomId={form.room_id}
+                onSelectRoom={(roomId) => setForm((f) => ({ ...f, room_id: roomId }))}
+                showAllRooms={showAllEligibleRooms}
+                onShowAllRoomsChange={setShowAllEligibleRooms}
+              />
+            )}
+
             {/* Room (optional) */}
             <div className="space-y-2">
               <Label>Room <span className="text-muted-foreground font-normal">(optional)</span></Label>
@@ -3161,11 +3184,12 @@ function BoardingOperationsList({
 
 function BoardingHubPage() {
   const navigate = useNavigate();
+  const { session } = useAuth();
   const today = useMemo(() => new Date(), []);
   const [searchParams] = useSearchParams();
   const todayStr = toDateStr(today);
 
-  const [viewMode, setViewMode] = useState<"calendar" | "list" | "shuffle">("calendar");
+  const [viewMode, setViewMode] = useState<"calendar" | "list" | "shuffle" | "map">("calendar");
 
   const [windowStart, setWindowStart] = useState(() =>
     startOfWeek(today, { weekStartsOn: 1 }),
@@ -3548,6 +3572,14 @@ function BoardingHubPage() {
             >
               Day shuffle
             </button>
+            <button
+              type="button"
+              data-testid="boarding-map-tab"
+              className={`px-3 py-1.5 transition-colors ${viewMode === "map" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
+              onClick={() => setViewMode("map")}
+            >
+              Kennel map
+            </button>
           </div>
           {viewMode === "calendar" && (
             <>
@@ -3651,6 +3683,11 @@ function BoardingHubPage() {
             suppressToolbar
             bookingSearchQuery={bookingSearchFilter}
             onOpenBookingDetail={openBookingDetail}
+          />
+        ) : viewMode === "map" ? (
+          <KennelMapPage
+            initialDate={normalizedDate ?? todayStr}
+            staffLabel={session?.user?.email ?? "staff"}
           />
         ) : viewMode === "shuffle" ? (
           <DayShufflePanel initialDate={normalizedDate ?? todayStr} />

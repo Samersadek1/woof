@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _bra_backup: {
@@ -388,6 +363,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "billing_adjustments_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
+          },
+          {
             foreignKeyName: "billing_adjustments_invoice_id_fkey"
             columns: ["invoice_id"]
             isOneToOne: false
@@ -399,6 +381,64 @@ export type Database = {
             columns: ["owner_id"]
             isOneToOne: false
             referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      boarding_assignment_overrides: {
+        Row: {
+          booking_id: string
+          created_at: string
+          end_date: string | null
+          id: string
+          overridden_by: string | null
+          reason: string
+          room_id: string | null
+          start_date: string | null
+          warnings: Json
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          end_date?: string | null
+          id?: string
+          overridden_by?: string | null
+          reason: string
+          room_id?: string | null
+          start_date?: string | null
+          warnings?: Json
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          end_date?: string | null
+          id?: string
+          overridden_by?: string | null
+          reason?: string
+          room_id?: string | null
+          start_date?: string | null
+          warnings?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "boarding_assignment_overrides_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "boarding_assignment_overrides_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
+          },
+          {
+            foreignKeyName: "boarding_assignment_overrides_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "rooms"
             referencedColumns: ["id"]
           },
         ]
@@ -451,6 +491,13 @@ export type Database = {
             referencedRelation: "bookings"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "booking_addons_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
+          },
         ]
       }
       booking_items: {
@@ -501,6 +548,13 @@ export type Database = {
             referencedRelation: "bookings"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "booking_items_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
+          },
         ]
       }
       booking_pets: {
@@ -535,6 +589,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bookings"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_pets_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
           },
           {
             foreignKeyName: "booking_pets_pet_id_fkey"
@@ -577,6 +638,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bookings"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_room_assignments_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
           },
           {
             foreignKeyName: "booking_room_assignments_room_id_fkey"
@@ -694,6 +762,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "bookings_extended_from_booking_id_fkey"
+            columns: ["extended_from_booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
+          },
+          {
             foreignKeyName: "bookings_owner_id_fkey"
             columns: ["owner_id"]
             isOneToOne: false
@@ -751,6 +826,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bookings"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_notes_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
           },
           {
             foreignKeyName: "daily_notes_pet_id_fkey"
@@ -932,6 +1014,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "feeding_schedules_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
+          },
+          {
             foreignKeyName: "feeding_schedules_pet_id_fkey"
             columns: ["pet_id"]
             isOneToOne: false
@@ -1019,6 +1108,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "grooming_appointments_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
+          },
+          {
             foreignKeyName: "grooming_appointments_groomer_id_fkey"
             columns: ["groomer_id"]
             isOneToOne: false
@@ -1044,6 +1140,44 @@ export type Database = {
             columns: ["station_id"]
             isOneToOne: false
             referencedRelation: "grooming_stations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      grooming_overrides: {
+        Row: {
+          appointment_id: string | null
+          created_at: string
+          id: string
+          job_date: string
+          overridden_by: string | null
+          reason: string
+          warnings: Json
+        }
+        Insert: {
+          appointment_id?: string | null
+          created_at?: string
+          id?: string
+          job_date: string
+          overridden_by?: string | null
+          reason: string
+          warnings?: Json
+        }
+        Update: {
+          appointment_id?: string | null
+          created_at?: string
+          id?: string
+          job_date?: string
+          overridden_by?: string | null
+          reason?: string
+          warnings?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grooming_overrides_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_appointments"
             referencedColumns: ["id"]
           },
         ]
@@ -1092,6 +1226,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      grooming_service_durations: {
+        Row: {
+          default_minutes: number
+          service: Database["public"]["Enums"]["grooming_service"]
+          size: string
+        }
+        Insert: {
+          default_minutes: number
+          service: Database["public"]["Enums"]["grooming_service"]
+          size: string
+        }
+        Update: {
+          default_minutes?: number
+          service?: Database["public"]["Enums"]["grooming_service"]
+          size?: string
+        }
+        Relationships: []
       }
       grooming_station_blocks: {
         Row: {
@@ -1231,6 +1383,48 @@ export type Database = {
             columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_consolidation_log: {
+        Row: {
+          consolidated_invoice_id: string
+          created_at: string
+          id: string
+          owner_id: string
+          performed_by: string
+          source_invoice_ids: string[]
+        }
+        Insert: {
+          consolidated_invoice_id: string
+          created_at?: string
+          id?: string
+          owner_id: string
+          performed_by: string
+          source_invoice_ids: string[]
+        }
+        Update: {
+          consolidated_invoice_id?: string
+          created_at?: string
+          id?: string
+          owner_id?: string
+          performed_by?: string
+          source_invoice_ids?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_consolidation_log_consolidated_invoice_id_fkey"
+            columns: ["consolidated_invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_consolidation_log_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
             referencedColumns: ["id"]
           },
         ]
@@ -1406,6 +1600,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bookings"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
           },
           {
             foreignKeyName: "invoices_owner_id_fkey"
@@ -1780,6 +1981,10 @@ export type Database = {
           other_notes: string | null
           owner_id: string
           photo_url: string | null
+          restriction_reason: string | null
+          restriction_set_at: string | null
+          restriction_set_by: string | null
+          room_restriction: Database["public"]["Enums"]["room_restriction_type"]
           size: Database["public"]["Enums"]["pet_size"] | null
           source_external_id: string | null
           spayed_neutered: boolean | null
@@ -1832,6 +2037,10 @@ export type Database = {
           other_notes?: string | null
           owner_id: string
           photo_url?: string | null
+          restriction_reason?: string | null
+          restriction_set_at?: string | null
+          restriction_set_by?: string | null
+          room_restriction?: Database["public"]["Enums"]["room_restriction_type"]
           size?: Database["public"]["Enums"]["pet_size"] | null
           source_external_id?: string | null
           spayed_neutered?: boolean | null
@@ -1884,6 +2093,10 @@ export type Database = {
           other_notes?: string | null
           owner_id?: string
           photo_url?: string | null
+          restriction_reason?: string | null
+          restriction_set_at?: string | null
+          restriction_set_by?: string | null
+          room_restriction?: Database["public"]["Enums"]["room_restriction_type"]
           size?: Database["public"]["Enums"]["pet_size"] | null
           source_external_id?: string | null
           spayed_neutered?: boolean | null
@@ -2014,6 +2227,7 @@ export type Database = {
           pet_type: string | null
           room_number: string
           room_type: Database["public"]["Enums"]["room_type"]
+          size_class: Database["public"]["Enums"]["room_size_class"] | null
           source_external_id: string | null
           street_name: string | null
           wing: Database["public"]["Enums"]["room_wing"]
@@ -2038,6 +2252,7 @@ export type Database = {
           pet_type?: string | null
           room_number: string
           room_type: Database["public"]["Enums"]["room_type"]
+          size_class?: Database["public"]["Enums"]["room_size_class"] | null
           source_external_id?: string | null
           street_name?: string | null
           wing: Database["public"]["Enums"]["room_wing"]
@@ -2062,6 +2277,7 @@ export type Database = {
           pet_type?: string | null
           room_number?: string
           room_type?: Database["public"]["Enums"]["room_type"]
+          size_class?: Database["public"]["Enums"]["room_size_class"] | null
           source_external_id?: string | null
           street_name?: string | null
           wing?: Database["public"]["Enums"]["room_wing"]
@@ -2321,6 +2537,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bookings"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stay_medications_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
           },
           {
             foreignKeyName: "stay_medications_pet_id_fkey"
@@ -2784,6 +3007,15 @@ export type Database = {
         }
         Relationships: []
       }
+      woof_v_booking_required_class: {
+        Row: {
+          booking_id: string | null
+          has_restriction: boolean | null
+          pet_count: number | null
+          required_class: Database["public"]["Enums"]["room_size_class"] | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       _agent_owner_for_phone: { Args: { p_phone: string }; Returns: string }
@@ -2832,6 +3064,39 @@ export type Database = {
         Args: { p_as_of: string }
         Returns: Json
       }
+      calculate_cancellation_refund:
+        | {
+            Args: {
+              p_invoice_id: string
+              p_owner_id: string
+              p_service_start: string
+            }
+            Returns: {
+              hours_notice: number
+              override_active: boolean
+              policy_label: string
+              refund_aed: number
+              refund_pct: number
+            }[]
+          }
+        | {
+            Args: {
+              p_invoice_id: string
+              p_owner_id: string
+              p_service_start: string
+            }
+            Returns: {
+              hours_notice: number
+              override_active: boolean
+              policy_label: string
+              refund_aed: number
+              refund_pct: number
+            }[]
+          }
+      calculate_double_occupancy_discount: {
+        Args: { p_booking_id: string }
+        Returns: number
+      }
       consolidate_owner_invoices: {
         Args: {
           p_invoice_ids: string[]
@@ -2839,24 +3104,6 @@ export type Database = {
           p_performed_by: string
         }
         Returns: string
-      }
-      calculate_cancellation_refund: {
-        Args: {
-          p_invoice_id: string
-          p_owner_id: string
-          p_service_start: string
-        }
-        Returns: {
-          hours_notice: number
-          override_active: boolean
-          policy_label: string
-          refund_aed: number
-          refund_pct: number
-        }[]
-      }
-      calculate_double_occupancy_discount: {
-        Args: { p_booking_id: string }
-        Returns: number
       }
       consume_service_credit:
         | {
@@ -2932,26 +3179,46 @@ export type Database = {
         Returns: boolean
       }
       is_peak_date: { Args: { p_date: string }; Returns: boolean }
-      issue_custom_daycare_package: {
-        Args: {
-          p_amount_aed?: number
-          p_issue_date?: string
-          p_label?: string
-          p_owner_id: string
-          p_payment_method?: Database["public"]["Enums"]["payment_method"]
-          p_pet_ids: string[]
-          p_service_code?: Database["public"]["Enums"]["service_code"]
-          p_units: number
-          p_validity_months?: number
-        }
-        Returns: {
-          credits_granted: number
-          discount_applied_aed: number
-          invoice_id: string
-          purchase_group_id: string
-          total_amount_aed: number
-        }[]
-      }
+      issue_custom_daycare_package:
+        | {
+            Args: {
+              p_amount_aed?: number
+              p_label?: string
+              p_owner_id: string
+              p_payment_method?: Database["public"]["Enums"]["payment_method"]
+              p_pet_ids: string[]
+              p_service_code?: Database["public"]["Enums"]["service_code"]
+              p_units: number
+              p_validity_months?: number
+            }
+            Returns: {
+              credits_granted: number
+              discount_applied_aed: number
+              invoice_id: string
+              purchase_group_id: string
+              total_amount_aed: number
+            }[]
+          }
+        | {
+            Args: {
+              p_amount_aed?: number
+              p_issue_date?: string
+              p_label?: string
+              p_owner_id: string
+              p_payment_method?: Database["public"]["Enums"]["payment_method"]
+              p_pet_ids: string[]
+              p_service_code?: Database["public"]["Enums"]["service_code"]
+              p_units: number
+              p_validity_months?: number
+            }
+            Returns: {
+              credits_granted: number
+              discount_applied_aed: number
+              invoice_id: string
+              purchase_group_id: string
+              total_amount_aed: number
+            }[]
+          }
       list_active_credits_for_pet: {
         Args: {
           p_pet_id: string
@@ -2979,25 +3246,41 @@ export type Database = {
         Returns: Json
       }
       process_wallet_payment: {
-        Args: { p_invoice_id: string; p_performed_by: string }
+        Args: { p_invoice_id: string; p_performed_by?: string }
         Returns: Json
       }
-      purchase_package: {
-        Args: {
-          p_issue_date?: string
-          p_owner_id: string
-          p_package_code: string
-          p_payment_method?: Database["public"]["Enums"]["payment_method"]
-          p_pet_ids: string[]
-        }
-        Returns: {
-          credits_granted: number
-          discount_applied_aed: number
-          invoice_id: string
-          purchase_group_id: string
-          total_amount_aed: number
-        }[]
-      }
+      purchase_package:
+        | {
+            Args: {
+              p_owner_id: string
+              p_package_code: string
+              p_payment_method?: Database["public"]["Enums"]["payment_method"]
+              p_pet_ids: string[]
+            }
+            Returns: {
+              credits_granted: number
+              discount_applied_aed: number
+              invoice_id: string
+              purchase_group_id: string
+              total_amount_aed: number
+            }[]
+          }
+        | {
+            Args: {
+              p_issue_date?: string
+              p_owner_id: string
+              p_package_code: string
+              p_payment_method?: Database["public"]["Enums"]["payment_method"]
+              p_pet_ids: string[]
+            }
+            Returns: {
+              credits_granted: number
+              discount_applied_aed: number
+              invoice_id: string
+              purchase_group_id: string
+              total_amount_aed: number
+            }[]
+          }
       resolve_woof_service_rate: {
         Args: {
           p_booking_date?: string
@@ -3041,6 +3324,109 @@ export type Database = {
           p_start_date?: string
         }
         Returns: string
+      }
+      woof_backfill_room_size_class: { Args: never; Returns: undefined }
+      woof_boarding_night_capacity: {
+        Args: { p_date: string }
+        Returns: {
+          assigned: number
+          feasible: boolean
+          large_free: number
+          large_required: number
+          large_rooms: number
+          reason: string
+          standard_rooms: number
+          total_bookings: number
+          total_free: number
+          unassigned: number
+        }[]
+      }
+      woof_boarding_range_feasibility: {
+        Args: {
+          p_adding_class?: Database["public"]["Enums"]["room_size_class"]
+          p_check_in: string
+          p_check_out: string
+        }
+        Returns: {
+          feasible: boolean
+          large_free: number
+          reason: string
+          stay_date: string
+          total_free: number
+        }[]
+      }
+      woof_dog_room_load: { Args: { p_size: string }; Returns: number }
+      woof_grooming_day_capacity: {
+        Args: { p_date: string; p_day_end?: string; p_day_start?: string }
+        Returns: {
+          committed_minutes: number
+          feasible: boolean
+          floating_minutes: number
+          free_minutes: number
+          pinned_minutes: number
+          stations: number
+          total_minutes: number
+          window_minutes: number
+        }[]
+      }
+      woof_grooming_default_minutes: {
+        Args: {
+          p_service: Database["public"]["Enums"]["grooming_service"]
+          p_size: string
+        }
+        Returns: number
+      }
+      woof_grooming_station_load: {
+        Args: { p_date: string; p_day_end?: string; p_day_start?: string }
+        Returns: {
+          free_minutes: number
+          station_id: string
+          station_name: string
+          used_minutes: number
+          window_minutes: number
+        }[]
+      }
+      woof_is_boarding_capacity_room: {
+        Args: { p_room: Database["public"]["Tables"]["rooms"]["Row"] }
+        Returns: boolean
+      }
+      woof_required_class: {
+        Args: { p_force_large?: boolean; p_sizes: string[] }
+        Returns: Database["public"]["Enums"]["room_size_class"]
+      }
+      woof_suggest_boarding_room: {
+        Args: {
+          p_check_in: string
+          p_check_out: string
+          p_required_class: Database["public"]["Enums"]["room_size_class"]
+        }
+        Returns: {
+          is_overflow: boolean
+          room_id: string
+          room_label: string
+          size_class: Database["public"]["Enums"]["room_size_class"]
+        }[]
+      }
+      woof_validate_boarding_assignment: {
+        Args: {
+          p_booking_id: string
+          p_end: string
+          p_room_id: string
+          p_start: string
+        }
+        Returns: Json
+      }
+      woof_validate_grooming_appt: {
+        Args: {
+          p_appt_id?: string
+          p_date: string
+          p_day_end?: string
+          p_day_start?: string
+          p_duration: number
+          p_start: string
+          p_station_id: string
+        }
+        Returns: Json
       }
     }
     Enums: {
@@ -3095,10 +3481,17 @@ export type Database = {
         | "outstanding"
         | "overdue"
         | "voided"
-      payment_method: "wallet" | "card" | "cash" | "bank_transfer" | "payment_link"
+      payment_method:
+        | "wallet"
+        | "card"
+        | "cash"
+        | "bank_transfer"
+        | "payment_link"
       pet_gender: "male" | "female"
       pet_size: "small" | "medium" | "large"
       rate_season: "peak" | "off_peak"
+      room_restriction_type: "none" | "large_only"
+      room_size_class: "standard" | "large"
       room_type:
         | "presidential_super"
         | "presidential_standard"
@@ -3332,9 +3725,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       addon_type: [
@@ -3394,10 +3784,18 @@ export const Constants = {
         "overdue",
         "voided",
       ],
-      payment_method: ["wallet", "card", "cash", "bank_transfer", "payment_link"],
+      payment_method: [
+        "wallet",
+        "card",
+        "cash",
+        "bank_transfer",
+        "payment_link",
+      ],
       pet_gender: ["male", "female"],
       pet_size: ["small", "medium", "large"],
       rate_season: ["peak", "off_peak"],
+      room_restriction_type: ["none", "large_only"],
+      room_size_class: ["standard", "large"],
       room_type: [
         "presidential_super",
         "presidential_standard",

@@ -78,6 +78,7 @@ import {
 } from "@/lib/groomingNewAppointmentPricing";
 import { VisitNotesField } from "@/components/grooming/VisitNotesField";
 import { GroomingStationCalendar } from "@/components/grooming/GroomingStationCalendar";
+import { GroomingDayBoard } from "@/components/grooming/GroomingDayBoard";
 import { BlockStationDialog } from "@/components/grooming/BlockStationDialog";
 import { GroomingConflictOverrideDialog } from "@/components/grooming/GroomingConflictOverrideDialog";
 import {
@@ -496,7 +497,7 @@ const GroomingPage = () => {
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [slotPrefill, setSlotPrefill] = useState<GroomingSlotPrefill | null>(null);
-  const [dayViewLayout, setDayViewLayout] = useState<"calendar" | "list">("calendar");
+  const [dayViewLayout, setDayViewLayout] = useState<"calendar" | "list" | "board">("calendar");
   const [blockDialog, setBlockDialog] = useState<{
     stationId: string;
     stationName: string;
@@ -1045,7 +1046,24 @@ const GroomingPage = () => {
               >
                 List
               </Button>
+              <Button
+                type="button"
+                size="sm"
+                data-testid="grooming-day-board-tab"
+                variant={dayViewLayout === "board" ? "default" : "outline"}
+                onClick={() => setDayViewLayout("board")}
+              >
+                Capacity board
+              </Button>
             </div>
+
+            {dayViewLayout === "board" && (
+              <GroomingDayBoard
+                initialDate={dateStr}
+                staffLabel={session?.user?.email ?? "staff"}
+                onAppointmentClick={setActionAppt}
+              />
+            )}
 
             {dayViewLayout === "calendar" && (
               <>
