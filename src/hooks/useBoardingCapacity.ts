@@ -99,7 +99,7 @@ export function useKennelMap(date: string) {
           "room_id, booking_id, bookings(booking_ref, booking_pets(pets(name)))",
         )
         .lte("start_date", date)
-        .gte("end_date", date);
+        .gte("end_date", date); // inclusive end_date: last occupied night
       if (occErr) throw occErr;
 
       return {
@@ -255,7 +255,20 @@ export function useAssignBoardingRoom() {
   });
 }
 
-/** Assignment segment end = last occupied night (matches DB convention). */
+/**
+ * Assignment segment end = last occupied night (inclusive), matching live
+ * `booking_room_assignments` rows and `move_boarding_room` / calendar UI.
+ * Booking checkout date is exclusive (no overnight on check_out_date).
+ */
 export function assignmentEndFromCheckOut(checkOutExclusive: string): string {
   return lastNight(checkOutExclusive);
+}
+
+/** Inclusive segment: covers night when start <= night <= end. */
+export function assignmentCoversNight(
+  start: string,
+  endInclusive: string,
+  night: string,
+): boolean {
+  return start <= night && night <= endInclusive;
 }

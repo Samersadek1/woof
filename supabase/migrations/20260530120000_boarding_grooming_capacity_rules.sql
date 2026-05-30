@@ -1,6 +1,7 @@
 -- Boarding size-class capacity + grooming station-minute capacity (alert-only validate RPCs).
--- Assignment nights: start_date <= night <= end_date (end_date = last occupied night; matches move_boarding_room).
--- Stay nights: check_in_date <= night < check_out_date (checkout day not occupied).
+-- Assignment nights (inclusive end): start_date <= night <= end_date (end_date = last occupied night).
+-- Booking stay nights (half-open): check_in_date <= night < check_out_date (checkout day not occupied).
+-- See woof_assignment_covers_night() in 20260530150000_boarding_assignment_night_convention.sql.
 
 BEGIN;
 

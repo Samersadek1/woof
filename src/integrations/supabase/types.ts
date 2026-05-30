@@ -2231,6 +2231,7 @@ export type Database = {
           source_external_id: string | null
           street_name: string | null
           wing: Database["public"]["Enums"]["room_wing"]
+          zone: string | null
         }
         Insert: {
           cam_host?: string | null
@@ -2256,6 +2257,7 @@ export type Database = {
           source_external_id?: string | null
           street_name?: string | null
           wing: Database["public"]["Enums"]["room_wing"]
+          zone?: string | null
         }
         Update: {
           cam_host?: string | null
@@ -2281,6 +2283,7 @@ export type Database = {
           source_external_id?: string | null
           street_name?: string | null
           wing?: Database["public"]["Enums"]["room_wing"]
+          zone?: string | null
         }
         Relationships: []
       }
@@ -3325,6 +3328,10 @@ export type Database = {
         }
         Returns: string
       }
+      woof_assignment_covers_night: {
+        Args: { p_end: string; p_night: string; p_start: string }
+        Returns: boolean
+      }
       woof_backfill_room_size_class: { Args: never; Returns: undefined }
       woof_boarding_night_capacity: {
         Args: { p_date: string }
@@ -3354,6 +3361,15 @@ export type Database = {
           stay_date: string
           total_free: number
         }[]
+      }
+      woof_booking_night_overlaps_assignment: {
+        Args: {
+          p_check_in: string
+          p_check_out: string
+          p_seg_end: string
+          p_seg_start: string
+        }
+        Returns: boolean
       }
       woof_dog_room_load: { Args: { p_size: string }; Returns: number }
       woof_grooming_day_capacity: {
@@ -3405,6 +3421,23 @@ export type Database = {
           room_id: string
           room_label: string
           size_class: Database["public"]["Enums"]["room_size_class"]
+        }[]
+      }
+      woof_unassigned_boarding: {
+        Args: { p_date: string }
+        Returns: {
+          arrival: string
+          booking_id: string
+          booking_ref: string
+          check_in_date: string
+          check_out_date: string
+          do_not_move: boolean
+          dog_names: string
+          has_restriction: boolean
+          owner_id: string
+          owner_name: string
+          pet_count: number
+          required_class: Database["public"]["Enums"]["room_size_class"]
         }[]
       }
       woof_validate_boarding_assignment: {
