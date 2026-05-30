@@ -3372,6 +3372,20 @@ export type Database = {
         Returns: boolean
       }
       woof_dog_room_load: { Args: { p_size: string }; Returns: number }
+      woof_grooming_backlog: {
+        Args: { p_date: string }
+        Returns: {
+          appt_id: string
+          booking_ref: string
+          dog_name: string
+          duration_minutes: number
+          owner_id: string
+          pet_id: string
+          pet_size: string
+          service: Database["public"]["Enums"]["grooming_service"]
+          source_booking_id: string
+        }[]
+      }
       woof_grooming_day_capacity: {
         Args: { p_date: string; p_day_end?: string; p_day_start?: string }
         Returns: {

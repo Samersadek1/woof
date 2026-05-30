@@ -4,6 +4,7 @@ import type { Database } from "@/integrations/supabase/types";
 
 type GroomingRow = Database["public"]["Tables"]["grooming_appointments"]["Row"];
 type GroomingInsert = Database["public"]["Tables"]["grooming_appointments"]["Insert"];
+type GroomingService = Database["public"]["Enums"]["grooming_service"];
 
 export type GroomingDayCapacity = {
   stations: number;
@@ -24,6 +25,36 @@ export type GroomingStationLoad = {
   free_minutes: number;
 };
 
+export type GroomingBacklogRow = {
+  appt_id: string;
+  pet_id: string;
+  owner_id: string;
+  dog_name: string | null;
+  pet_size: string | null;
+  service: GroomingService;
+  duration_minutes: number;
+  source_booking_id: string | null;
+  booking_ref: string | null;
+};
+
+export type GroomingPinnedAppt = Pick<
+  GroomingRow,
+  | "id"
+  | "pet_id"
+  | "owner_id"
+  | "station_id"
+  | "groomer_id"
+  | "service"
+  | "appointment_date"
+  | "appointment_time"
+  | "duration_minutes"
+  | "status"
+  | "no_show"
+  | "booking_id"
+> & {
+  pets: { name: string; size: string | null } | null;
+};
+
 export type GroomingApptValidation = {
   ok: boolean;
   warnings: { code: string; msg: string }[];
@@ -35,28 +66,44 @@ export const groomingCapacityKeys = {
     ["groom-default", service, size] as const,
 };
 
-export function useGroomingDayBoard(date: string) {
+const PINNED_SELECT =
+  "id, pet_id, owner_id, station_id, groomer_id, service, appointment_date, appointment_time, duration_minutes, status, no_show, booking_id, pets(name, size)";
+
+export function useGroomingDay(date: string) {
   return useQuery({
     queryKey: groomingCapacityKeys.day(date),
     enabled: !!date,
     queryFn: async () => {
-      const [capRes, loadRes, apptsRes] = await Promise.all([
+      const [capRes, loadRes, pinnedRes, backlogRes] = await Promise.all([
         supabase.rpc("woof_grooming_day_capacity", { p_date: date }),
         supabase.rpc("woof_grooming_station_load", { p_date: date }),
-        supabase.from("grooming_appointments").select("*").eq("appointment_date", date),
+        supabase
+          .from("grooming_appointments")
+          .select(PINNED_SELECT)
+          .eq("appointment_date", date)
+          .not("appointment_time", "is", null)
+          .not("station_id", "is", null),
+        supabase.rpc("woof_grooming_backlog", { p_date: date }),
       ]);
       if (capRes.error) throw capRes.error;
       if (loadRes.error) throw loadRes.error;
-      if (apptsRes.error) throw apptsRes.error;
+      if (pinnedRes.error) throw pinnedRes.error;
+      if (backlogRes.error) throw backlogRes.error;
+
+      const pinned = (pinnedRes.data ?? []) as GroomingPinnedAppt[];
 
       return {
         capacity: (capRes.data?.[0] ?? null) as GroomingDayCapacity | null,
         stations: (loadRes.data ?? []) as GroomingStationLoad[],
-        appts: (apptsRes.data ?? []) as GroomingRow[],
+        pinned,
+        backlog: (backlogRes.data ?? []) as GroomingBacklogRow[],
       };
     },
   });
 }
+
+/** @deprecated Prefer `useGroomingDay` — same query. */
+export const useGroomingDayBoard = useGroomingDay;
 
 export function useGroomDefaultMinutes(service?: string, size?: string) {
   return useQuery({
@@ -64,7 +111,7 @@ export function useGroomDefaultMinutes(service?: string, size?: string) {
     queryKey: groomingCapacityKeys.defaultMinutes(service ?? "", size ?? ""),
     queryFn: async () => {
       const { data, error } = await supabase.rpc("woof_grooming_default_minutes", {
-        p_service: service as Database["public"]["Enums"]["grooming_service"],
+        p_service: service as GroomingService,
         p_size: size!,
       });
       if (error) throw error;
@@ -94,13 +141,14 @@ export function useScheduleGroomingAppt() {
 
   return useMutation({
     mutationFn: async (input: ScheduleGroomingApptInput) => {
+      const duration = input.duration_minutes ?? 45;
       const { data: validation, error: valErr } = await supabase.rpc(
         "woof_validate_grooming_appt",
         {
           p_date: input.appointment_date,
           p_station_id: input.station_id ?? null,
           p_start: input.appointment_time ?? null,
-          p_duration: input.duration_minutes,
+          p_duration: duration,
           p_appt_id: input.id ?? null,
         },
       );
@@ -122,11 +170,12 @@ export function useScheduleGroomingAppt() {
       }
 
       const { id, overrideReason: _r, staff: _s, ...row } = input;
+      const payload = { ...row, duration_minutes: duration };
       if (id) {
-        const { error } = await supabase.from("grooming_appointments").update(row).eq("id", id);
+        const { error } = await supabase.from("grooming_appointments").update(payload).eq("id", id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("grooming_appointments").insert(row);
+        const { error } = await supabase.from("grooming_appointments").insert(payload);
         if (error) throw error;
       }
     },

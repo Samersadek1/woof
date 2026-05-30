@@ -1061,7 +1061,10 @@ const GroomingPage = () => {
               <GroomingDayBoard
                 initialDate={dateStr}
                 staffLabel={session?.user?.email ?? "staff"}
-                onAppointmentClick={setActionAppt}
+                onAppointmentClick={(id) => {
+                  const found = dayAppointments.find((a) => a.id === id);
+                  if (found) setActionAppt(found);
+                }}
               />
             )}
 
