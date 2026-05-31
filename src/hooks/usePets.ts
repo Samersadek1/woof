@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import {
+  formatDeleteBlockedMessage,
+  getPetDeleteBlockers,
+} from "@/lib/customerDeleteBlockers";
 import { normalizePetDateOfBirth } from "@/lib/petProfileFields";
 
 type Pet = Database["public"]["Tables"]["pets"]["Row"];
@@ -114,33 +118,6 @@ export function useUpdatePet() {
   });
 }
 
-const PET_REFERENCE_CHECKS = [
-  { table: "booking_pets" as const, label: "boarding bookings" },
-  { table: "grooming_appointments" as const, label: "grooming appointments" },
-  { table: "service_credits" as const, label: "active service credits" },
-  { table: "daycare_sessions" as const, label: "daycare sessions" },
-  { table: "waiting_list" as const, label: "waiting list entries" },
-  { table: "feeding_schedules" as const, label: "feeding schedules" },
-  { table: "daily_notes" as const, label: "daily notes" },
-  { table: "stay_medications" as const, label: "stay medications" },
-];
-
-async function getPetDeleteBlockers(petId: string): Promise<string[]> {
-  const blockers: string[] = [];
-
-  for (const { table, label } of PET_REFERENCE_CHECKS) {
-    const { count, error } = await supabase
-      .from(table)
-      .select("*", { count: "exact", head: true })
-      .eq("pet_id", petId);
-
-    if (error) throw error;
-    if (count && count > 0) blockers.push(label);
-  }
-
-  return blockers;
-}
-
 export function useDeletePet() {
   const queryClient = useQueryClient();
 
@@ -148,9 +125,7 @@ export function useDeletePet() {
     mutationFn: async ({ id, ownerId }: { id: string; ownerId: string }) => {
       const blockers = await getPetDeleteBlockers(id);
       if (blockers.length > 0) {
-        throw new Error(
-          `This pet cannot be deleted because they have existing ${blockers.join(", ")}.`,
-        );
+        throw new Error(formatDeleteBlockedMessage(blockers));
       }
 
       const { error: vacError } = await supabase

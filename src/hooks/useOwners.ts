@@ -1,4 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  formatDeleteBlockedMessage,
+  getOwnerDeleteBlockers,
+} from "@/lib/customerDeleteBlockers";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -180,6 +184,11 @@ export function useDeleteOwner() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      const blockers = await getOwnerDeleteBlockers(id);
+      if (blockers.length > 0) {
+        throw new Error(formatDeleteBlockedMessage(blockers));
+      }
+
       // Delete all pets belonging to this owner first, then the owner row.
       // If the database has ON DELETE CASCADE configured this is a no-op
       // for pets, but we do it explicitly so the UI stays correct regardless.

@@ -1838,8 +1838,9 @@ const OwnerProfilePage = () => {
               <span className="font-medium text-foreground">
                 {ownerDisplayName(owner?.first_name ?? null, owner?.last_name ?? null)}
               </span>{" "}
-              and all their pet profiles from the database. This action cannot
-              be undone.
+              and all their pet profiles from the database. Customers with
+              bookings, invoices, wallet activity, or other service history
+              cannot be deleted. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
