@@ -45,9 +45,9 @@ import {
 import { applyInvoiceDiscountAdjustment, isDiscountAdjustmentType } from "@/lib/invoiceRecalc";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
+import { DeleteInvoiceLineItemDialog } from "@/components/billing/DeleteInvoiceLineItemDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
 import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
-import { useDeleteInvoiceLineItem } from "@/hooks/useDeleteInvoiceLineItem";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
 import { canRevertInvoicePayment, walletRefundFromPayments } from "@/lib/revertInvoicePayment";
@@ -80,7 +80,6 @@ export default function InvoiceDetailPage() {
   const externalPay = useRecordExternalPayment();
   const revertPayment = useRevertInvoicePayment();
   const updateAttribution = useUpdatePaymentAttribution();
-  const deleteLine = useDeleteInvoiceLineItem();
 
   const [walletOpen, setWalletOpen] = useState(false);
   const [externalPayOpen, setExternalPayOpen] = useState<ExternalPaymentMethod | null>(null);
@@ -103,6 +102,7 @@ export default function InvoiceDetailPage() {
   const [adjustApprover, setAdjustApprover] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [addLineOpen, setAddLineOpen] = useState(false);
+  const [deleteLineTarget, setDeleteLineTarget] = useState<{ id: string; description: string } | null>(null);
   const [walletCreditPromptMethod, setWalletCreditPromptMethod] =
     useState<ExternalPaymentMethod | null>(null);
 
@@ -472,16 +472,8 @@ export default function InvoiceDetailPage() {
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-destructive"
                           data-testid="invoice-detail-delete-line-btn"
-                          disabled={deleteLine.isPending}
                           aria-label={`Remove ${l.description}`}
-                          onClick={() => {
-                            if (!inv.owner_id) return;
-                            void deleteLine.mutateAsync({
-                              lineItemId: l.id,
-                              invoiceId: inv.id,
-                              ownerId: inv.owner_id,
-                            }).then(() => refetch());
-                          }}
+                          onClick={() => setDeleteLineTarget({ id: l.id, description: l.description })}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -826,6 +818,19 @@ export default function InvoiceDetailPage() {
           serviceType={inv.service_type}
           invoiceLabel={inv.invoice_number ?? undefined}
           onAdded={() => void refetch()}
+        />
+      )}
+
+      {inv?.owner_id && (
+        <DeleteInvoiceLineItemDialog
+          open={!!deleteLineTarget}
+          onOpenChange={(open) => {
+            if (!open) setDeleteLineTarget(null);
+          }}
+          lineItem={deleteLineTarget}
+          invoiceId={inv.id}
+          ownerId={inv.owner_id}
+          onDeleted={() => void refetch()}
         />
       )}
 

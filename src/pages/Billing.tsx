@@ -40,7 +40,7 @@ import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { useOwner } from "@/hooks/useOwners";
 import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
-import { useDeleteInvoiceLineItem } from "@/hooks/useDeleteInvoiceLineItem";
+import { DeleteInvoiceLineItemDialog } from "@/components/billing/DeleteInvoiceLineItemDialog";
 import { InvoiceDeletionLogPanel } from "@/components/billing/InvoiceDeletionLogPanel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -464,7 +464,7 @@ function InvoiceDetailDialog({
 }) {
   const navigate = useNavigate();
   const [addLineOpen, setAddLineOpen] = useState(false);
-  const deleteLine = useDeleteInvoiceLineItem();
+  const [deleteLineTarget, setDeleteLineTarget] = useState<{ id: string; description: string } | null>(null);
   const handlePrint = useCallback(() => {
     if (!invoice) return;
     window.open(
@@ -553,15 +553,13 @@ function InvoiceDetailDialog({
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-destructive"
                           data-testid="billing-delete-line-btn"
-                          disabled={deleteLine.isPending}
                           aria-label={`Remove ${li.description ?? li.pricing_key ?? "line item"}`}
-                          onClick={() => {
-                            void deleteLine.mutateAsync({
-                              lineItemId: li.id,
-                              invoiceId: invoice.id,
-                              ownerId,
-                            }).then(() => onInvoiceUpdated?.());
-                          }}
+                          onClick={() =>
+                            setDeleteLineTarget({
+                              id: li.id,
+                              description: li.description ?? li.pricing_key ?? "Line item",
+                            })
+                          }
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -655,6 +653,18 @@ function InvoiceDetailDialog({
         serviceType={invoice.service_type}
         invoiceLabel={invoice.invoice_number ?? undefined}
         onAdded={onInvoiceUpdated}
+      />
+    )}
+    {ownerId && invoice && (
+      <DeleteInvoiceLineItemDialog
+        open={!!deleteLineTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteLineTarget(null);
+        }}
+        lineItem={deleteLineTarget}
+        invoiceId={invoice.id}
+        ownerId={ownerId}
+        onDeleted={onInvoiceUpdated}
       />
     )}
     </>
