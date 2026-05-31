@@ -35,6 +35,10 @@ export function canEditInvoiceLineItems(status: string): boolean {
   return !["voided", "cancelled", "paid"].includes(status);
 }
 
+export function canDeleteInvoiceLineItems(status: string): boolean {
+  return status === "draft";
+}
+
 function totalsFromLines(
   lines: Pick<LineRow, "quantity" | "unit_price">[],
   discountAmount: number,

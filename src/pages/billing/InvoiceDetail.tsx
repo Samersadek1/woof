@@ -9,7 +9,7 @@ import { useCancellationRefundPreview } from "@/hooks/useCancellationRefund";
 import { useProcessWalletPayment, useRecordExternalPayment, useRevertInvoicePayment, useUpdatePaymentAttribution } from "@/hooks/usePayments";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { paymentMethodLabel, type ExternalPaymentMethod } from "@/lib/paymentMethod";
-import { Printer } from "lucide-react";
+import { Printer, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,8 @@ import { applyInvoiceDiscountAdjustment, isDiscountAdjustmentType } from "@/lib/
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
-import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import { useDeleteInvoiceLineItem } from "@/hooks/useDeleteInvoiceLineItem";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
 import { canRevertInvoicePayment, walletRefundFromPayments } from "@/lib/revertInvoicePayment";
@@ -79,6 +80,7 @@ export default function InvoiceDetailPage() {
   const externalPay = useRecordExternalPayment();
   const revertPayment = useRevertInvoicePayment();
   const updateAttribution = useUpdatePaymentAttribution();
+  const deleteLine = useDeleteInvoiceLineItem();
 
   const [walletOpen, setWalletOpen] = useState(false);
   const [externalPayOpen, setExternalPayOpen] = useState<ExternalPaymentMethod | null>(null);
@@ -448,10 +450,10 @@ export default function InvoiceDetailPage() {
 
         <Card><CardContent className="p-0">
           <Table>
-            <TableHeader><TableRow className="bg-muted/40"><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Unit</TableHead><TableHead className="text-right">Discount</TableHead><TableHead className="text-right">Line Total</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow className="bg-muted/40"><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Unit</TableHead><TableHead className="text-right">Discount</TableHead><TableHead className="text-right">Line Total</TableHead>{canDeleteInvoiceLineItems(status) && <TableHead className="w-12" />}</TableRow></TableHeader>
             <TableBody>
               {data.lines.length === 0 ? (
-                <TableRow><TableCell colSpan={5} className="h-16 text-center text-muted-foreground">No line items.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={canDeleteInvoiceLineItems(status) ? 6 : 5} className="h-16 text-center text-muted-foreground">No line items.</TableCell></TableRow>
               ) : data.lines.map((l) => {
                 const raw = l.unit_price * l.quantity;
                 const total = l.total_price ?? l.line_total ?? raw;
@@ -462,6 +464,29 @@ export default function InvoiceDetailPage() {
                     <TableCell className="text-right tabular-nums">{aed(l.unit_price)}</TableCell>
                     <TableCell className="text-right tabular-nums">{aed(Math.max(0, raw - total))}</TableCell>
                     <TableCell className="text-right tabular-nums font-semibold">{aed(total)}</TableCell>
+                    {canDeleteInvoiceLineItems(status) && (
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          data-testid="invoice-detail-delete-line-btn"
+                          disabled={deleteLine.isPending}
+                          aria-label={`Remove ${l.description}`}
+                          onClick={() => {
+                            if (!inv.owner_id) return;
+                            void deleteLine.mutateAsync({
+                              lineItemId: l.id,
+                              invoiceId: inv.id,
+                              ownerId: inv.owner_id,
+                            }).then(() => refetch());
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
               })}

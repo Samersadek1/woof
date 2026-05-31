@@ -38,8 +38,9 @@ import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCr
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { useOwner } from "@/hooks/useOwners";
-import { canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
+import { useDeleteInvoiceLineItem } from "@/hooks/useDeleteInvoiceLineItem";
 import { InvoiceDeletionLogPanel } from "@/components/billing/InvoiceDeletionLogPanel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -463,6 +464,7 @@ function InvoiceDetailDialog({
 }) {
   const navigate = useNavigate();
   const [addLineOpen, setAddLineOpen] = useState(false);
+  const deleteLine = useDeleteInvoiceLineItem();
   const handlePrint = useCallback(() => {
     if (!invoice) return;
     window.open(
@@ -483,6 +485,7 @@ function InvoiceDetailDialog({
 
   const sb = INVOICE_STATUS_BADGE[invoice.status] ?? INVOICE_STATUS_BADGE.draft;
   const lineItems = invoice.line_items ?? [];
+  const canDeleteLines = canDeleteInvoiceLineItems(invoice.status);
 
   return (
     <>
@@ -530,6 +533,9 @@ function InvoiceDetailDialog({
                   <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 12, color: "#666", borderBottom: "2px solid #e5e5e5" }}>Qty</th>
                   <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 12, color: "#666", borderBottom: "2px solid #e5e5e5" }}>Unit Price</th>
                   <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 12, color: "#666", borderBottom: "2px solid #e5e5e5" }}>Total</th>
+                  {canDeleteLines && (
+                    <th style={{ width: 40, padding: "8px 4px", borderBottom: "2px solid #e5e5e5" }} aria-label="Remove line" />
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -539,6 +545,28 @@ function InvoiceDetailDialog({
                     <td style={{ padding: "8px 12px", borderBottom: "1px solid #eee", textAlign: "right" }}>{li.quantity}</td>
                     <td style={{ padding: "8px 12px", borderBottom: "1px solid #eee", textAlign: "right" }}>{formatAed(li.unit_price)}</td>
                     <td style={{ padding: "8px 12px", borderBottom: "1px solid #eee", textAlign: "right", fontWeight: 600 }}>{formatAed(li.line_total)}</td>
+                    {canDeleteLines && ownerId && (
+                      <td style={{ padding: "4px", borderBottom: "1px solid #eee", textAlign: "right" }}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          data-testid="billing-delete-line-btn"
+                          disabled={deleteLine.isPending}
+                          aria-label={`Remove ${li.description ?? li.pricing_key ?? "line item"}`}
+                          onClick={() => {
+                            void deleteLine.mutateAsync({
+                              lineItemId: li.id,
+                              invoiceId: invoice.id,
+                              ownerId,
+                            }).then(() => onInvoiceUpdated?.());
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
