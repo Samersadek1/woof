@@ -264,6 +264,21 @@ export function assignmentEndFromCheckOut(checkOutExclusive: string): string {
   return lastNight(checkOutExclusive);
 }
 
+/**
+ * Kennel map assigns from the viewed night forward for in-house guests. Past
+ * nights are already over — re-checking them blocks rooms that are free tonight
+ * because other dogs occupied them on earlier nights of this stay.
+ */
+export function assignmentStartForKennelMap(
+  booking: Pick<UnassignedBoardingRow, "check_in_date" | "arrival">,
+  mapDate: string,
+): string {
+  if (booking.arrival === "here_now") {
+    return mapDate;
+  }
+  return booking.check_in_date;
+}
+
 /** Inclusive segment: covers night when start <= night <= end. */
 export function assignmentCoversNight(
   start: string,

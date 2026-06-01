@@ -8,6 +8,7 @@ import { UnassignedQueue } from "@/components/boarding/UnassignedQueue";
 import { ZoneGrid } from "@/components/boarding/ZoneGrid";
 import {
   assignmentEndFromCheckOut,
+  assignmentStartForKennelMap,
   BoardingAssignNeedsOverrideError,
   useAssignBoardingRoom,
   useBoardingNightCapacity,
@@ -42,8 +43,12 @@ export function KennelMapPage({ initialDate, staffLabel = "staff" }: Props) {
   const { data: queue = [], isLoading: queueLoading } = useUnassignedQueue(date);
   const assignRoom = useAssignBoardingRoom();
 
+  const assignmentStart = selected
+    ? assignmentStartForKennelMap(selected, date)
+    : undefined;
+
   const eligible = useEligibleRooms(
-    selected?.check_in_date,
+    assignmentStart,
     selected?.check_out_date,
     selected?.required_class,
   );
@@ -54,7 +59,7 @@ export function KennelMapPage({ initialDate, staffLabel = "staff" }: Props) {
     overrideReason?: string,
   ) => {
     const end = assignmentEndFromCheckOut(booking.check_out_date);
-    const start = booking.check_in_date;
+    const start = assignmentStartForKennelMap(booking, date);
     try {
       await assignRoom.mutateAsync({
         bookingId: booking.booking_id,
