@@ -9,7 +9,8 @@ export function PrintLayout({
   children: React.ReactNode;
   imageUrls?: Array<string | null | undefined>;
   /** `schedule` uses A4-friendly margins and table-focused print rules (grooming daily schedule). */
-  variant?: "cards" | "schedule";
+  /** `map` uses landscape A4 for kennel map printouts. */
+  variant?: "cards" | "schedule" | "map";
 }) {
   const [imagesReady, setImagesReady] = useState(false);
 
@@ -57,8 +58,8 @@ export function PrintLayout({
       <style>{`
         @media print {
           @page {
-            size: ${variant === "schedule" ? "A4" : "A5"};
-            margin: ${variant === "schedule" ? "12mm" : "10mm"};
+            size: ${variant === "map" ? "A4 landscape" : variant === "schedule" ? "A4" : "A5"};
+            margin: ${variant === "schedule" || variant === "map" ? "12mm" : "10mm"};
           }
           html, body { margin: 0 !important; padding: 0 !important; background: white !important; color: black !important; }
           .no-print { display: none !important; }
@@ -149,13 +150,17 @@ export function PrintLayout({
         <div className="no-print sticky top-0 z-10 border-b bg-white p-3 print-sans">
           <div
             className={`mx-auto flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between ${
-              variant === "schedule" ? "w-full max-w-none px-4" : "max-w-[900px]"
+              variant === "schedule" || variant === "map" ? "w-full max-w-none px-4" : "max-w-[900px]"
             }`}
           >
             <div className="flex flex-wrap items-center gap-2">
               {imagesReady ? (
                 <Button type="button" onClick={() => window.print()}>
-                  {variant === "schedule" ? "Print schedule" : "Print"}
+                  {variant === "schedule"
+                    ? "Print schedule"
+                    : variant === "map"
+                      ? "Print map"
+                      : "Print"}
                 </Button>
               ) : (
                 <Button type="button" disabled>
@@ -166,7 +171,7 @@ export function PrintLayout({
                 Back
               </Button>
             </div>
-            {variant === "schedule" ? (
+            {variant === "schedule" || variant === "map" ? (
               <p className="max-w-md text-xs text-muted-foreground">
                 In the print dialog, turn off{" "}
                 <span className="font-medium">Headers and footers</span> for a clean margin (browser
@@ -178,7 +183,7 @@ export function PrintLayout({
 
         <div
           className={`mx-auto p-6 print:max-w-none print:p-0 ${
-            variant === "schedule"
+            variant === "schedule" || variant === "map"
               ? "w-full max-w-none px-4 print:w-full print:px-0"
               : "max-w-[600px]"
           }`}

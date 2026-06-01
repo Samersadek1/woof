@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { addDays, format, parseISO, subDays } from "date-fns";
-import { ChevronLeft, ChevronRight, TriangleAlert } from "lucide-react";
+import { ChevronLeft, ChevronRight, Printer, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BoardingAssignmentOverrideDialog } from "@/components/boarding/BoardingAssignmentOverrideDialog";
@@ -156,9 +156,24 @@ export function KennelMapPage({ initialDate, staffLabel = "staff" }: Props) {
           </div>
         ) : null}
 
-        <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-          Placed this session · {placedSession}
-        </span>
+        <div className="ml-auto flex items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="boarding-kennel-map-print-btn"
+            onClick={() =>
+              window.open(`/print/kennel-map?date=${date}`, "_blank", "noopener,noreferrer")
+            }
+          >
+            <Printer className="mr-1.5 h-4 w-4" />
+            Print
+          </Button>
+
+          <span className="text-xs text-muted-foreground tabular-nums">
+            Placed this session · {placedSession}
+          </span>
+        </div>
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">

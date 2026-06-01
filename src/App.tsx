@@ -37,6 +37,7 @@ const VetsAdminPage = lazy(() => import("@/pages/VetsAdmin"));
 const DataIssuesAdminPage = lazy(() => import("@/pages/DataIssuesAdmin"));
 const KennelCardPrintPage = lazy(() => import("@/pages/print/KennelCardPrintPage"));
 const KennelCardsPrintPage = lazy(() => import("@/pages/print/KennelCardsPrintPage"));
+const KennelMapPrintPage = lazy(() => import("@/pages/print/KennelMapPrintPage"));
 const GroomingCardPrintPage = lazy(() => import("@/pages/print/GroomingCardPrintPage"));
 const GroomingCardsPrintPage = lazy(() => import("@/pages/print/GroomingCardsPrintPage"));
 const InvoicePrintPage = lazy(() => import("@/pages/print/InvoicePrintPage"));
@@ -106,6 +107,7 @@ const App = () => (
               <Route path="/auth/setup-password" element={<SetupPasswordPage />} />
               <Route path="/print/kennel-card/:bookingId" element={<ProtectedRoute><KennelCardPrintPage /></ProtectedRoute>} />
               <Route path="/print/kennel-cards" element={<ProtectedRoute><KennelCardsPrintPage /></ProtectedRoute>} />
+              <Route path="/print/kennel-map" element={<ProtectedRoute><KennelMapPrintPage /></ProtectedRoute>} />
               <Route path="/print/grooming-card/:bookingId" element={<ProtectedRoute><GroomingCardPrintPage /></ProtectedRoute>} />
               <Route path="/print/grooming-cards" element={<ProtectedRoute><GroomingCardsPrintPage /></ProtectedRoute>} />
               <Route path="/print/invoice/:invoiceId" element={<ProtectedRoute><InvoicePrintPage /></ProtectedRoute>} />

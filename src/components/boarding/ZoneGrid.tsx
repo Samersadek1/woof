@@ -8,31 +8,12 @@ import type {
 } from "@/hooks/useBoardingCapacity";
 import type { RoomSizeClass } from "@/lib/boardingCapacity";
 import { requiredClassLabel } from "@/lib/boardingCapacity";
+import {
+  groupKennelMapRoomsByZone,
+  kennelMapOccupantLabel,
+  kennelMapRoomLabel,
+} from "@/lib/kennelMapDisplay";
 import { cn } from "@/lib/utils";
-
-const ZONE_ORDER = [
-  "A",
-  "B",
-  "C",
-  "D",
-  "Grooming",
-  "Daycare 1",
-  "Daycare 2",
-  "Daycare Spaces",
-] as const;
-
-const OVERFLOW_ZONE = "Overflow";
-
-function compareKennelMapZones(a: string, b: string): number {
-  if (a === OVERFLOW_ZONE) return 1;
-  if (b === OVERFLOW_ZONE) return -1;
-  const ia = ZONE_ORDER.indexOf(a as (typeof ZONE_ORDER)[number]);
-  const ib = ZONE_ORDER.indexOf(b as (typeof ZONE_ORDER)[number]);
-  if (ia >= 0 && ib >= 0) return ia - ib;
-  if (ia >= 0) return -1;
-  if (ib >= 0) return 1;
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
-}
 
 type Props = {
   rooms: KennelMapRoom[];
@@ -42,20 +23,6 @@ type Props = {
   isLoading?: boolean;
   onRoomClick: (roomId: string, opts: { isEligible: boolean; isOverflow: boolean }) => void;
 };
-
-function roomLabel(room: KennelMapRoom): string {
-  return room.display_name?.trim() || room.name?.trim() || room.room_number;
-}
-
-function occupantLabel(row: KennelMapOccupancy): string {
-  const ref = row.bookings?.booking_ref;
-  const pets =
-    row.bookings?.booking_pets
-      ?.map((bp) => bp.pets?.name)
-      .filter(Boolean)
-      .join(", ") ?? "";
-  return pets || ref || "Occupied";
-}
 
 export function ZoneGrid({
   rooms,
@@ -79,23 +46,7 @@ export function ZoneGrid({
     return m;
   }, [eligible]);
 
-  const zones = useMemo(() => {
-    const map = new Map<string, KennelMapRoom[]>();
-    for (const room of rooms) {
-      const z = room.zone ?? "Other";
-      if (!map.has(z)) map.set(z, []);
-      map.get(z)!.push(room);
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) => roomLabel(a).localeCompare(roomLabel(b), undefined, { numeric: true }));
-    }
-    const keys = Array.from(map.keys()).sort(compareKennelMapZones);
-    return keys.map((zone) => ({
-      zone,
-      rooms: map.get(zone)!,
-      sizeClass: map.get(zone)![0]?.size_class ?? "standard",
-    }));
-  }, [rooms]);
+  const zones = useMemo(() => groupKennelMapRoomsByZone(rooms), [rooms]);
 
   if (isLoading) {
     return (
@@ -164,10 +115,10 @@ export function ZoneGrid({
                     })
                   }
                 >
-                  <div className="font-medium truncate">{roomLabel(room)}</div>
+                  <div className="font-medium truncate">{kennelMapRoomLabel(room)}</div>
                   {occupied ? (
                     <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                      {occupantLabel(occupied)}
+                      {kennelMapOccupantLabel(occupied)}
                     </div>
                   ) : isOverflow ? (
                     <Badge
