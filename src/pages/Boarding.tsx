@@ -150,6 +150,10 @@ import {
   validateBoardingDateRange,
 } from "@/lib/bookingUtils";
 import {
+  formatSyncBoardingInvoiceToast,
+  syncBoardingBookingInvoice,
+} from "@/lib/boardingInvoiceSync";
+import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
   vatLineLabel,
@@ -1059,6 +1063,7 @@ function AddPetToBookingDialog({
   booking: BookingWithDetails;
   onAdded: (addedPets: BookingWithDetails["booking_pets"]) => void;
 }) {
+  const queryClient = useQueryClient();
   const { data: ownerPets = [], isLoading } = usePets(booking.owner_id);
   const addPets = useAddPetsToBooking();
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
@@ -1087,17 +1092,14 @@ function AddPetToBookingDialog({
     addPets.mutate(
       { booking_id: booking.id, pet_ids: selectedPetIds },
       {
-        onSuccess: (added) => {
+        onSuccess: async (added) => {
           if (added.length === 0) {
             toast.info("Selected pets are already on this booking");
             onOpenChange(false);
             return;
           }
-          toast.success(
-            added.length === 1
-              ? "Pet added to booking"
-              : `${added.length} pets added to booking`,
-          );
+          const petLabel =
+            added.length === 1 ? "Pet added to booking" : `${added.length} pets added to booking`;
           const addedPets = added.map((petId) => {
             const pet = ownerPets.find((p) => p.id === petId);
             return {
@@ -1122,6 +1124,21 @@ function AddPetToBookingDialog({
           });
           onAdded(addedPets as BookingWithDetails["booking_pets"]);
           onOpenChange(false);
+
+          queryClient.invalidateQueries({ queryKey: ["invoices"] });
+          try {
+            const invoiceResult = await syncBoardingBookingInvoice(booking.id);
+            queryClient.invalidateQueries({ queryKey: ["invoice"] });
+            const invoiceDetail = formatSyncBoardingInvoiceToast(invoiceResult);
+            if (invoiceResult.kind === "skipped") {
+              toast.warning(`${petLabel}. ${invoiceDetail}`);
+            } else {
+              toast.success(`${petLabel}. ${invoiceDetail}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Invoice sync failed";
+            toast.warning(`${petLabel}, but invoice could not be refreshed: ${msg}`);
+          }
         },
         onError: (err) => toast.error(extractErrorMessage(err, "Could not add pet to booking")),
       },
