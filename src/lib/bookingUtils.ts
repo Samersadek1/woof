@@ -130,7 +130,7 @@ export interface CreateServiceInvoiceParams {
   referenceId: string;
   lineItems: ServiceInvoiceLineItem[];
   notes?: string | null;
-  invoiceStatus?: "draft" | "finalised";
+  invoiceStatus?: "draft" | "finalised" | "outstanding";
   /** When true, member/profile discount is not applied (full subtotal). */
   skipMemberDiscount?: boolean;
   /** Service check-in date (YYYY-MM-DD). Due date defaults to this. */

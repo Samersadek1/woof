@@ -1916,7 +1916,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
     queryFn: async () => {
       return {
         discount_pct: 0,
-        
+        discount_aed: 0,
         final_aed: dogBookingEstimateTotal,
       };
     },
@@ -3371,7 +3371,7 @@ function BoardingHubPage() {
   const navigate = useNavigate();
   const { session } = useAuth();
   const today = useMemo(() => new Date(), []);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const todayStr = toDateStr(today);
 
   const [viewMode, setViewMode] = useState<"calendar" | "list" | "shuffle" | "map">("calendar");

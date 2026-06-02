@@ -57,6 +57,8 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
       let q = supabase
         .from("invoices")
         .select(invoiceSelect)
+        // Wallet top-up receipts are receipt-only and never appear in invoice lists.
+        .or("receipt_only.is.null,receipt_only.eq.false")
         .order("created_at", { ascending: false });
       if (filters.ownerId) q = q.eq("owner_id", filters.ownerId);
       if (filters.status?.length) q = q.in("status", filters.status);

@@ -25,6 +25,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
+import { InvoiceAlertsPanel } from "@/components/billing/InvoiceAlertsPanel";
 import {
   AlertCircle,
   AlertTriangle,
@@ -558,6 +559,8 @@ const DashboardPage = () => {
             />
           </div>
         </div>
+
+        <InvoiceAlertsPanel className="mb-6" />
 
         {insightsLoading || !insights ? (
           <div className="mb-6 space-y-4">

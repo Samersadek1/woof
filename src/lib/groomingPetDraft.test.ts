@@ -12,7 +12,7 @@ describe("groomingPetDraft", () => {
     createDefaultPetDraft({
       petId: "pet-1",
       defaultDay: parseISO("2026-05-29"),
-      dogSizeFromPet: "medium",
+      dogSizeFromPet: "Medium",
       apptTime: "10:00",
       stationId: "station-1",
     });
@@ -32,7 +32,7 @@ describe("groomingPetDraft", () => {
   });
 
   it("buildInsertFromDraft returns per-pet insert payload", () => {
-    const draft = { ...baseDraft(), price: "120", dogSize: "medium" as const };
+    const draft = { ...baseDraft(), price: "120", dogSize: "Medium" as const };
     const result = buildInsertFromDraft({
       draft,
       ownerId: "owner-1",

@@ -245,3 +245,141 @@ export function blockTopPx(minutesFromStart: number, rowHeightPx: number): numbe
 export function blockHeightPx(durationMinutes: number, rowHeightPx: number): number {
   return (durationMinutes / GROOMING_SLOT_MINUTES) * rowHeightPx;
 }
+
+// ── Day calendar layout model ─────────────────────────────────────────────────
+
+export const GROOMING_CALENDAR_ROW_HEIGHT_PX = 24;
+
+export type GroomingCalendarColumn = { station: string; label: string };
+
+export function groomingCalendarColumnKey(col: GroomingCalendarColumn): string {
+  return col.station;
+}
+
+export function groomingBlockStatusClass(status: string | null | undefined): string {
+  switch ((status ?? "").toLowerCase()) {
+    case "completed":
+    case "picked_up":
+      return "bg-emerald-50 border-emerald-300 text-emerald-900";
+    case "in_progress":
+    case "grooming":
+      return "bg-blue-50 border-blue-300 text-blue-900";
+    case "checked_in":
+    case "ready":
+      return "bg-amber-50 border-amber-300 text-amber-900";
+    case "cancelled":
+      return "bg-slate-100 border-slate-300 text-slate-500 line-through";
+    case "no_show":
+      return "bg-red-50 border-red-300 text-red-900";
+    default:
+      return "bg-card border-border text-foreground";
+  }
+}
+
+type GroomingCalendarAppt = {
+  id: string;
+  appointment_time: string | null;
+  duration_minutes: number | null;
+  station_id?: string | null;
+};
+
+export type GroomingCalendarBlock<T> = {
+  columnKey: string;
+  appointment: T;
+  lane: number;
+  laneCount: number;
+  hasConflict: boolean;
+  topPx: number;
+  heightPx: number;
+};
+
+export type GroomingDayCalendarModel<T> = {
+  columns: GroomingCalendarColumn[];
+  unscheduledByColumn: Map<string, T[]>;
+  slotLabels: string[];
+  timedBlocks: GroomingCalendarBlock<T>[];
+  totalHeightPx: number;
+};
+
+/**
+ * Builds the day-grid layout model: station columns, slot labels, timed blocks
+ * with greedy lane packing for overlaps, and an unscheduled bucket per column.
+ */
+export function buildGroomingDayCalendarModel<T extends GroomingCalendarAppt>(input: {
+  appointments: T[];
+}): GroomingDayCalendarModel<T> {
+  const { appointments } = input;
+
+  const stationIds = new Set<string>();
+  for (const a of appointments) stationIds.add(a.station_id ?? UNASSIGNED_STATION_ID);
+  if (stationIds.size === 0) stationIds.add(UNASSIGNED_STATION_ID);
+  const columns: GroomingCalendarColumn[] = [...stationIds].sort().map((station) => ({
+    station,
+    label: station === UNASSIGNED_STATION_ID ? "Unassigned" : station,
+  }));
+
+  const slotLabels: string[] = [];
+  for (let i = 0; i < GROOMING_GRID_ROW_COUNT; i += 1) {
+    slotLabels.push(formatGridTimeLabel(GROOMING_GRID_START_MINUTES + i * GROOMING_SLOT_MINUTES));
+  }
+  const totalHeightPx = GROOMING_GRID_ROW_COUNT * GROOMING_CALENDAR_ROW_HEIGHT_PX;
+  const pxPerMinute = GROOMING_CALENDAR_ROW_HEIGHT_PX / GROOMING_SLOT_MINUTES;
+
+  const unscheduledByColumn = new Map<string, T[]>();
+  const timed: { appt: T; columnKey: string; start: number; end: number }[] = [];
+
+  for (const a of appointments) {
+    const columnKey = a.station_id ?? UNASSIGNED_STATION_ID;
+    const start = parseTimeToMinutes(a.appointment_time);
+    if (start == null) {
+      const list = unscheduledByColumn.get(columnKey) ?? [];
+      list.push(a);
+      unscheduledByColumn.set(columnKey, list);
+      continue;
+    }
+    timed.push({
+      appt: a,
+      columnKey,
+      start,
+      end: start + appointmentDurationMinutes(a.duration_minutes),
+    });
+  }
+
+  const timedBlocks: GroomingCalendarBlock<T>[] = [];
+  for (const col of columns) {
+    const colBlocks = timed
+      .filter((b) => b.columnKey === col.station)
+      .sort((a, b) => a.start - b.start);
+    const laneEnds: number[] = [];
+    const placed = colBlocks.map((b) => {
+      let lane = laneEnds.findIndex((end) => end <= b.start);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(b.end);
+      } else {
+        laneEnds[lane] = b.end;
+      }
+      return { ...b, lane };
+    });
+    const laneCount = Math.max(1, laneEnds.length);
+    for (const b of placed) {
+      const hasConflict = placed.some(
+        (o) => o !== b && o.start < b.end && b.start < o.end,
+      );
+      timedBlocks.push({
+        columnKey: col.station,
+        appointment: b.appt,
+        lane: b.lane,
+        laneCount,
+        hasConflict,
+        topPx: (b.start - GROOMING_GRID_START_MINUTES) * pxPerMinute,
+        heightPx: Math.max(
+          GROOMING_CALENDAR_ROW_HEIGHT_PX,
+          (b.end - b.start) * pxPerMinute,
+        ),
+      });
+    }
+  }
+
+  return { columns, unscheduledByColumn, slotLabels, timedBlocks, totalHeightPx };
+}

@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       _bra_backup: {
@@ -858,6 +883,7 @@ export type Database = {
           created_at: string
           dropoff_used: boolean
           id: string
+          invoice_id: string | null
           logged_by: string | null
           notes: string | null
           owner_id: string
@@ -875,6 +901,7 @@ export type Database = {
           created_at?: string
           dropoff_used?: boolean
           id?: string
+          invoice_id?: string | null
           logged_by?: string | null
           notes?: string | null
           owner_id: string
@@ -892,6 +919,7 @@ export type Database = {
           created_at?: string
           dropoff_used?: boolean
           id?: string
+          invoice_id?: string | null
           logged_by?: string | null
           notes?: string | null
           owner_id?: string
@@ -903,6 +931,13 @@ export type Database = {
           staff_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "daycare_sessions_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "daycare_sessions_owner_id_fkey"
             columns: ["owner_id"]
@@ -1042,10 +1077,12 @@ export type Database = {
           grooming_notes: string | null
           id: string
           in_progress_at: string | null
+          invoice_id: string | null
           no_show: boolean
           notes: string | null
           owner_id: string
           payment_method: string | null
+          payment_migrated: boolean | null
           pet_id: string
           price: number | null
           service: Database["public"]["Enums"]["grooming_service"]
@@ -1065,10 +1102,12 @@ export type Database = {
           grooming_notes?: string | null
           id?: string
           in_progress_at?: string | null
+          invoice_id?: string | null
           no_show?: boolean
           notes?: string | null
           owner_id: string
           payment_method?: string | null
+          payment_migrated?: boolean | null
           pet_id: string
           price?: number | null
           service: Database["public"]["Enums"]["grooming_service"]
@@ -1088,10 +1127,12 @@ export type Database = {
           grooming_notes?: string | null
           id?: string
           in_progress_at?: string | null
+          invoice_id?: string | null
           no_show?: boolean
           notes?: string | null
           owner_id?: string
           payment_method?: string | null
+          payment_migrated?: boolean | null
           pet_id?: string
           price?: number | null
           service?: Database["public"]["Enums"]["grooming_service"]
@@ -1119,6 +1160,13 @@ export type Database = {
             columns: ["groomer_id"]
             isOneToOne: false
             referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "grooming_appointments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
             referencedColumns: ["id"]
           },
           {
@@ -1387,6 +1435,47 @@ export type Database = {
           },
         ]
       }
+      invoice_amendments: {
+        Row: {
+          amended_at: string
+          amended_by: string
+          field_changed: string
+          id: string
+          invoice_id: string
+          new_value: string | null
+          old_value: string | null
+          reason: string
+        }
+        Insert: {
+          amended_at?: string
+          amended_by: string
+          field_changed: string
+          id?: string
+          invoice_id: string
+          new_value?: string | null
+          old_value?: string | null
+          reason: string
+        }
+        Update: {
+          amended_at?: string
+          amended_by?: string
+          field_changed?: string
+          id?: string
+          invoice_id?: string
+          new_value?: string | null
+          old_value?: string | null
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_amendments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_consolidation_log: {
         Row: {
           consolidated_invoice_id: string
@@ -1520,11 +1609,80 @@ export type Database = {
           },
         ]
       }
+      invoice_payments: {
+        Row: {
+          amount: number
+          closing_balance: number
+          created_at: string
+          id: string
+          invoice_id: string
+          notes: string | null
+          opening_balance: number
+          owner_id: string
+          payment_method: Database["public"]["Enums"]["payment_method"]
+          recorded_by: string
+          wallet_transaction_id: string | null
+        }
+        Insert: {
+          amount: number
+          closing_balance: number
+          created_at?: string
+          id?: string
+          invoice_id: string
+          notes?: string | null
+          opening_balance: number
+          owner_id: string
+          payment_method: Database["public"]["Enums"]["payment_method"]
+          recorded_by: string
+          wallet_transaction_id?: string | null
+        }
+        Update: {
+          amount?: number
+          closing_balance?: number
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          notes?: string | null
+          opening_balance?: number
+          owner_id?: string
+          payment_method?: Database["public"]["Enums"]["payment_method"]
+          recorded_by?: string
+          wallet_transaction_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_payments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_payments_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_payments_wallet_transaction_id_fkey"
+            columns: ["wallet_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "wallet_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoices: {
         Row: {
+          amendment_locked_at: string | null
           amount_paid: number
+          became_outstanding_at: string | null
+          became_outstanding_by: string | null
           booking_id: string | null
           created_at: string
+          deposit_bypass_reason: string | null
+          deposit_bypassed: boolean | null
           discount_amount: number
           discount_pct: number
           due_date: string | null
@@ -1532,9 +1690,11 @@ export type Database = {
           invoice_number: string | null
           issue_date: string
           notes: string | null
+          opening_balance: number | null
           owner_id: string
           paid_at: string | null
           payment_method: Database["public"]["Enums"]["payment_method"] | null
+          receipt_only: boolean | null
           service_id: string | null
           service_type: string | null
           status: Database["public"]["Enums"]["invoice_status"]
@@ -1543,12 +1703,18 @@ export type Database = {
           updated_at: string
           vat_aed: number | null
           voided_at: string | null
+          voided_by: string | null
           voided_reason: string | null
         }
         Insert: {
+          amendment_locked_at?: string | null
           amount_paid?: number
+          became_outstanding_at?: string | null
+          became_outstanding_by?: string | null
           booking_id?: string | null
           created_at?: string
+          deposit_bypass_reason?: string | null
+          deposit_bypassed?: boolean | null
           discount_amount?: number
           discount_pct?: number
           due_date?: string | null
@@ -1556,9 +1722,11 @@ export type Database = {
           invoice_number?: string | null
           issue_date?: string
           notes?: string | null
+          opening_balance?: number | null
           owner_id: string
           paid_at?: string | null
           payment_method?: Database["public"]["Enums"]["payment_method"] | null
+          receipt_only?: boolean | null
           service_id?: string | null
           service_type?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
@@ -1567,12 +1735,18 @@ export type Database = {
           updated_at?: string
           vat_aed?: number | null
           voided_at?: string | null
+          voided_by?: string | null
           voided_reason?: string | null
         }
         Update: {
+          amendment_locked_at?: string | null
           amount_paid?: number
+          became_outstanding_at?: string | null
+          became_outstanding_by?: string | null
           booking_id?: string | null
           created_at?: string
+          deposit_bypass_reason?: string | null
+          deposit_bypassed?: boolean | null
           discount_amount?: number
           discount_pct?: number
           due_date?: string | null
@@ -1580,9 +1754,11 @@ export type Database = {
           invoice_number?: string | null
           issue_date?: string
           notes?: string | null
+          opening_balance?: number | null
           owner_id?: string
           paid_at?: string | null
           payment_method?: Database["public"]["Enums"]["payment_method"] | null
+          receipt_only?: boolean | null
           service_id?: string | null
           service_type?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
@@ -1591,6 +1767,7 @@ export type Database = {
           updated_at?: string
           vat_aed?: number | null
           voided_at?: string | null
+          voided_by?: string | null
           voided_reason?: string | null
         }
         Relationships: [
@@ -2850,6 +3027,54 @@ export type Database = {
           },
         ]
       }
+      wallet_topup_receipts: {
+        Row: {
+          amount: number
+          id: string
+          issued_at: string
+          issued_by: string
+          notes: string | null
+          owner_id: string
+          receipt_number: string | null
+          wallet_transaction_id: string
+        }
+        Insert: {
+          amount: number
+          id?: string
+          issued_at?: string
+          issued_by: string
+          notes?: string | null
+          owner_id: string
+          receipt_number?: string | null
+          wallet_transaction_id: string
+        }
+        Update: {
+          amount?: number
+          id?: string
+          issued_at?: string
+          issued_by?: string
+          notes?: string | null
+          owner_id?: string
+          receipt_number?: string | null
+          wallet_transaction_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_topup_receipts_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_topup_receipts_wallet_transaction_id_fkey"
+            columns: ["wallet_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "wallet_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wallet_topup_requests: {
         Row: {
           amount_requested: number
@@ -3772,6 +3997,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       addon_type: [

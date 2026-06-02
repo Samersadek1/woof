@@ -24,6 +24,8 @@ import {
   type GroomingAppointmentWithJoins,
 } from "@/hooks/useGrooming";
 import { useProcessPayment, formatAed } from "@/hooks/useBilling";
+import { supabase } from "@/integrations/supabase/client";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import {
   normalizeGroomingWorkflowStatus,
   previousWorkflowStatus,
@@ -525,6 +527,20 @@ const GroomingPage = () => {
   const [deleteTarget, setDeleteTarget] = useState<GroomingAppointmentWithJoins | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [paymentStaffName, setPaymentStaffName] = useState("Front desk");
+  const [splitPayOpen, setSplitPayOpen] = useState(false);
+
+  // Mark a grooming appointment's payment as recorded through the new
+  // invoice_payments model so we can backfill/retire the legacy column.
+  const markGroomingPaymentMigrated = async (appointmentId: string) => {
+    const { error } = await supabase
+      .from("grooming_appointments")
+      .update({ payment_migrated: true })
+      .eq("id", appointmentId);
+    if (error) {
+      // Non-fatal: payment succeeded; flag can be re-applied on next payment.
+      console.warn("Could not set grooming payment_migrated", error.message);
+    }
+  };
 
   const [editSelectedServices, setEditSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
@@ -1640,6 +1656,7 @@ const GroomingPage = () => {
                           method: "cash",
                           staffName: paymentStaffName.trim() || "Front desk",
                         });
+                        await markGroomingPaymentMigrated(paymentAppt.id);
                         await statusTransition.mutateAsync({
                           id: paymentAppt.id,
                           toStatus: "paid",
@@ -1675,6 +1692,7 @@ const GroomingPage = () => {
                           method: "card",
                           staffName: paymentStaffName.trim() || "Front desk",
                         });
+                        await markGroomingPaymentMigrated(paymentAppt.id);
                         await statusTransition.mutateAsync({
                           id: paymentAppt.id,
                           toStatus: "paid",
@@ -1690,12 +1708,44 @@ const GroomingPage = () => {
                     )}
                     Mark paid (card)
                   </Button>
+                  {payInvoice.status !== "paid" ? (
+                    <Button
+                      variant="outline"
+                      disabled={processPayment.isPending || statusTransition.isPending}
+                      onClick={() => setSplitPayOpen(true)}
+                      data-testid="grooming-pay-split-btn"
+                    >
+                      Pay with account balance…
+                    </Button>
+                  ) : null}
                 </div>
               </>
             )}
           </div>
         </SheetContent>
       </Sheet>
+
+      {paymentAppt && payInvoice && payInvoiceTotals ? (
+        <PaymentSplitDialog
+          open={splitPayOpen}
+          onOpenChange={setSplitPayOpen}
+          invoiceId={payInvoice.id}
+          ownerId={paymentAppt.owner_id}
+          invoiceTotal={payInvoiceTotals.grandTotal}
+          defaultStaffName={paymentStaffName}
+          title="Collect grooming payment"
+          onSuccess={async () => {
+            if (!paymentAppt) return;
+            await markGroomingPaymentMigrated(paymentAppt.id);
+            await statusTransition.mutateAsync({
+              id: paymentAppt.id,
+              toStatus: "paid",
+            });
+            setSplitPayOpen(false);
+            setPaymentAppt(null);
+          }}
+        />
+      ) : null}
 
       <Sheet open={!!editAppt} onOpenChange={(o) => !o && setEditAppt(null)}>
         <SheetContent className="w-full sm:max-w-xl overflow-y-auto">

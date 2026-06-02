@@ -97,7 +97,10 @@ export interface InvoiceWithItems {
   /** Stored total is gross incl. VAT for package/daycare; see vatConfig for display/charge rules. */
   total: number;
   vat_aed: number | null;
+  // TODO: deprecate after invoice_payments migration
   payment_method: PaymentMethod | null;
+  // TODO: deprecate after invoice_payments migration
+  amount_paid?: number;
   paid_at: string | null;
   due_date: string | null;
   notes: string | null;
@@ -1003,6 +1006,8 @@ export function useInvoicesForOwner(
         .from("invoices")
         .select(invoiceSelect)
         .eq("owner_id", ownerId)
+        // Exclude wallet top-up receipts; they live in their own history tab.
+        .or("receipt_only.is.null,receipt_only.eq.false")
         .order("created_at", { ascending: false });
 
       if (filters?.status) q = q.eq("status", filters.status);
@@ -1032,6 +1037,8 @@ export function useInvoicesForOwner(
           total: inv.total ?? 0,
           vat_aed: inv.vat_aed ?? null,
           payment_method: inv.payment_method as PaymentMethod | null,
+          // TODO: deprecate after invoice_payments migration
+          amount_paid: Number((inv as Record<string, unknown>).amount_paid ?? 0),
           paid_at: inv.paid_at ?? (inv.status === "paid" ? inv.updated_at : null),
           due_date: inv.due_date,
           notes: inv.notes,

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { createTopupReceipt } from "@/services/invoiceService";
 
 type WalletTransaction = Database["public"]["Tables"]["wallet_transactions"]["Row"];
 type TransactionType = Database["public"]["Enums"]["transaction_type"];
@@ -26,7 +27,31 @@ export type WalletMutationPayload = {
   staff_id?: string | null;
   reference_id?: string | null;
   reference_type?: string | null;
+  /** Staff name that issued a top-up; recorded on the wallet_topup_receipt. */
+  issued_by?: string | null;
 };
+
+/**
+ * Wallet top-ups are receipt-only — they NEVER create an invoice. After a
+ * successful top-up we record a wallet_topup_receipt (best-effort; a receipt
+ * failure must not roll back the credited wallet balance).
+ */
+async function recordTopupReceiptBestEffort(
+  tx: WalletTransaction,
+  payload: WalletMutationPayload,
+): Promise<void> {
+  try {
+    await createTopupReceipt({
+      ownerId: payload.owner_id,
+      walletTransactionId: tx.id,
+      amount: Math.abs(payload.amount),
+      issuedBy: payload.issued_by ?? "reception",
+      notes: payload.notes ?? undefined,
+    });
+  } catch {
+    // Swallow — the top-up itself succeeded; the receipt is supplementary.
+  }
+}
 
 // ── Internal helper: fetch current balance, insert transaction, update owner ──
 
@@ -97,6 +122,27 @@ export function useWalletTransactions(ownerId: string) {
   });
 }
 
+// ── useWalletTopupReceipts ────────────────────────────────────────────────────
+
+export type WalletTopupReceipt =
+  Database["public"]["Tables"]["wallet_topup_receipts"]["Row"];
+
+export function useWalletTopupReceipts(ownerId: string) {
+  return useQuery({
+    queryKey: ["wallet-topup-receipts", ownerId],
+    enabled: !!ownerId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("wallet_topup_receipts")
+        .select("*")
+        .eq("owner_id", ownerId)
+        .order("issued_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as WalletTopupReceipt[];
+    },
+  });
+}
+
 // ── useTopUpWallet ────────────────────────────────────────────────────────────
 
 /** Credits the wallet. `amount` must be a positive number. */
@@ -106,7 +152,8 @@ export function useTopUpWallet() {
   return useMutation({
     mutationFn: (payload: WalletMutationPayload) =>
       applyTransaction(payload, "top_up", Math.abs(payload.amount)),
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      void recordTopupReceiptBestEffort(data, variables);
       queryClient.invalidateQueries({
         queryKey: walletQueryKeys.transactions(variables.owner_id),
       });
@@ -178,7 +225,8 @@ export function useManualTopUpWallet() {
   return useMutation({
     mutationFn: (payload: WalletMutationPayload) =>
       applyTransaction(payload, "manual_topup", Math.abs(payload.amount)),
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      void recordTopupReceiptBestEffort(data, variables);
       queryClient.invalidateQueries({
         queryKey: walletQueryKeys.transactions(variables.owner_id),
       });

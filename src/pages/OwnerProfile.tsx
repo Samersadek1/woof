@@ -16,7 +16,12 @@ import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { usePets, useCreatePet, useDeletePet, getVaccinationStatus } from "@/hooks/usePets";
 import { petVaccinationSummaryLine } from "@/lib/vaccinationsDisplay";
-import { useManualTopUpWallet, useTopUpWallet } from "@/hooks/useWallet";
+import {
+  useManualTopUpWallet,
+  useTopUpWallet,
+  useWalletTopupReceipts,
+} from "@/hooks/useWallet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PetWithVaccinations } from "@/hooks/usePets";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
@@ -101,6 +106,7 @@ import {
   ExternalLink,
   FileText,
   CheckCircle2,
+  Printer,
   Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -172,12 +178,12 @@ const BOOKING_STATUS_BADGE: Record<BookingStatus, string> = {
 const INVOICE_STATUS_BADGE: Record<string, { label: string; className: string }> = {
   draft: { label: "Draft", className: "bg-slate-100 text-slate-600 border-slate-200" },
   issued: { label: "Issued", className: "bg-blue-50 text-blue-700 border-blue-200" },
-  finalised: { label: "Finalised", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  finalised: { label: "Finalised", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   paid: { label: "Paid", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  partially_paid: { label: "Partial", className: "bg-amber-50 text-amber-700 border-amber-200" },
-  outstanding: { label: "Outstanding", className: "bg-orange-50 text-orange-700 border-orange-200" },
+  partially_paid: { label: "Partial", className: "bg-blue-50 text-blue-700 border-blue-200" },
+  outstanding: { label: "Outstanding", className: "bg-amber-50 text-amber-700 border-amber-200" },
   overdue: { label: "Overdue", className: "bg-red-50 text-red-700 border-red-200" },
-  voided: { label: "Voided", className: "bg-gray-100 text-gray-500 border-gray-200" },
+  voided: { label: "Voided", className: "bg-gray-100 text-gray-500 border-gray-200 line-through" },
   cancelled: { label: "Cancelled", className: "bg-gray-100 text-gray-500 border-gray-200" },
 };
 
@@ -276,6 +282,8 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
     usePendingHourlyDaycareForOwner(ownerId);
   const { data: invoices = [], isLoading: invoicesLoading, refetch: refetchInvoices } =
     useInvoicesForOwner(ownerId);
+  const { data: topupReceipts = [], isLoading: topupReceiptsLoading } =
+    useWalletTopupReceipts(ownerId);
   const { adjustments, isLoading: adjLoading } = useBillingAdjustments(ownerId);
   const finalise = useFinaliseInvoice();
 
@@ -409,7 +417,22 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
         </div>
       )}
 
-      {/* Invoices */}
+      {/* Invoices & wallet top-ups */}
+      <Tabs defaultValue="invoices">
+        <TabsList>
+          <TabsTrigger value="invoices" data-testid="owner-profile-invoices-tab">
+            Invoices
+          </TabsTrigger>
+          <TabsTrigger value="topups" data-testid="owner-profile-topups-tab">
+            Wallet top-ups
+            {topupReceipts.length > 0 ? (
+              <Badge variant="outline" className="ml-2">
+                {topupReceipts.length}
+              </Badge>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="invoices">
       <Card>
         <CardContent className="p-0">
           {invoicesLoading ? (
@@ -429,6 +452,8 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                   <TableHead>Service</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-right">Paid</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -437,6 +462,14 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                   const sb = INVOICE_STATUS_BADGE[inv.status] ?? INVOICE_STATUS_BADGE.draft;
                   const canFinalise = inv.status === "draft";
                   const canSelect = canConsolidateInvoiceStatus(inv.status);
+                  const grandTotal = invoiceDisplayTotals({
+                    total: inv.total,
+                    vat_aed: inv.vat_aed,
+                    service_type: inv.service_type,
+                    notes: inv.notes,
+                  }).grandTotal;
+                  const paidAmount = inv.amount_paid ?? 0;
+                  const closingBalance = Math.max(0, grandTotal - paidAmount);
                   return (
                     <TableRow key={inv.id}>
                       <TableCell>
@@ -468,14 +501,17 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                       <TableCell className="text-sm capitalize">{inv.service_type?.replace(/_/g, " ") ?? "—"}</TableCell>
                       <TableCell><Badge variant="outline" className={sb.className}>{sb.label}</Badge></TableCell>
                       <TableCell className="text-sm font-semibold tabular-nums text-right">
-                        {formatAed(
-                          invoiceDisplayTotals({
-                            total: inv.total,
-                            vat_aed: inv.vat_aed,
-                            service_type: inv.service_type,
-                            notes: inv.notes,
-                          }).grandTotal,
-                        )}
+                        {formatAed(grandTotal)}
+                      </TableCell>
+                      <TableCell className="text-sm tabular-nums text-right text-muted-foreground">
+                        {formatAed(paidAmount)}
+                      </TableCell>
+                      <TableCell
+                        className={`text-sm font-medium tabular-nums text-right ${
+                          closingBalance > 0 ? "text-red-700" : "text-emerald-700"
+                        }`}
+                      >
+                        {formatAed(closingBalance)}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -502,6 +538,70 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+        <TabsContent value="topups">
+          <Card>
+            <CardContent className="p-0">
+              {topupReceiptsLoading ? (
+                <div className="p-6 space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-10 w-full" />
+                  ))}
+                </div>
+              ) : topupReceipts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <Wallet className="h-7 w-7 mb-2 opacity-40" />
+                  <p className="text-sm">No wallet top-ups yet</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <TableHead>Receipt</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Issued by</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {topupReceipts.map((rcp) => (
+                      <TableRow key={rcp.id}>
+                        <TableCell className="text-sm font-medium">
+                          {rcp.receipt_number ?? rcp.id.slice(0, 8)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          {format(parseISO(rcp.issued_at), "d MMM yyyy")}
+                        </TableCell>
+                        <TableCell className="text-sm">{rcp.issued_by}</TableCell>
+                        <TableCell className="text-sm font-semibold tabular-nums text-right text-emerald-700">
+                          +{formatAed(rcp.amount)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="Print receipt"
+                            onClick={() =>
+                              window.open(
+                                `/print/topup-receipt/${rcp.id}`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              )
+                            }
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Recent adjustments */}
       {!adjLoading && adjustments.length > 0 && (

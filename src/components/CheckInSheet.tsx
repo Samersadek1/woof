@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Sheet,
   SheetContent,
@@ -10,9 +11,25 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Trash2, Camera, ImagePlus } from "lucide-react";
+import { AlertTriangle, Loader2, Trash2, Camera, ImagePlus } from "lucide-react";
 import { toast } from "sonner";
+import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
+import { useAccountBalance, accountBalanceQueryKey } from "@/hooks/useAccountBalance";
+import { formatAed } from "@/hooks/useBilling";
+import { recordExternalInvoicePayment } from "@/lib/recordExternalInvoicePayment";
+import { invoiceDisplayTotals } from "@/lib/vatConfig";
+import { WALLET_TOPUP_PAYMENT_METHOD_OPTIONS } from "@/lib/paymentMethod";
+import type { ExternalPaymentMethod } from "@/lib/paymentMethod";
 import {
   useBookingItems,
   useCreateBookingItem,
@@ -137,6 +154,132 @@ export function CheckInSheet({
   const uploadStaged = useUploadStagedItemPhoto();
   const checkIn = useCheckIn();
   const updateBooking = useUpdateBooking();
+  const queryClient = useQueryClient();
+
+  // Check-in payment: load the booking's owner + its current (non-voided) invoice.
+  const checkInBillingKey = ["checkin-billing", bookingId] as const;
+  const { data: checkInBilling } = useQuery({
+    queryKey: checkInBillingKey,
+    enabled: open && !readOnly && !!bookingId,
+    queryFn: async () => {
+      const { data: booking } = await supabase
+        .from("bookings")
+        .select("owner_id")
+        .eq("id", bookingId)
+        .maybeSingle();
+      const ownerId = (booking?.owner_id as string | undefined) ?? undefined;
+      const { data: inv } = await supabase
+        .from("invoices")
+        .select(
+          "id, total, vat_aed, service_type, notes, status, amount_paid, deposit_bypassed, deposit_bypass_reason",
+        )
+        .eq("booking_id", bookingId)
+        .neq("status", "voided")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return { ownerId, invoice: inv ?? null };
+    },
+  });
+  const billingOwnerId = checkInBilling?.ownerId;
+  const checkInInvoice = checkInBilling?.invoice ?? null;
+  const { data: account } = useAccountBalance(billingOwnerId);
+
+  const invoiceGrandTotal = checkInInvoice
+    ? invoiceDisplayTotals({
+        total: checkInInvoice.total,
+        vat_aed: checkInInvoice.vat_aed,
+        service_type: checkInInvoice.service_type,
+        notes: checkInInvoice.notes,
+      }).grandTotal
+    : 0;
+  const invoiceRemaining = Math.max(0, invoiceGrandTotal - (checkInInvoice?.amount_paid ?? 0));
+
+  const [payStaff, setPayStaff] = useState("");
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositMethod, setDepositMethod] = useState<ExternalPaymentMethod>("card");
+  const [bypassReason, setBypassReason] = useState("");
+  const [payFullOpen, setPayFullOpen] = useState(false);
+  const [payBusy, setPayBusy] = useState(false);
+
+  const refreshBilling = async () => {
+    await queryClient.invalidateQueries({ queryKey: checkInBillingKey });
+    if (billingOwnerId) {
+      await queryClient.invalidateQueries({
+        queryKey: accountBalanceQueryKey(billingOwnerId),
+      });
+    }
+    await queryClient.invalidateQueries({ queryKey: ["invoice-alerts"] });
+  };
+
+  const handleDeposit = async () => {
+    if (!checkInInvoice) {
+      toast.error("No invoice found for this booking");
+      return;
+    }
+    const amt = parseFloat(depositAmount);
+    if (!amt || amt <= 0) {
+      toast.error("Enter a deposit amount");
+      return;
+    }
+    if (!payStaff.trim()) {
+      toast.error("Enter staff name");
+      return;
+    }
+    setPayBusy(true);
+    try {
+      if (checkInInvoice.status === "draft") {
+        await supabase
+          .from("invoices")
+          .update({ status: "outstanding" })
+          .eq("id", checkInInvoice.id)
+          .eq("status", "draft");
+      }
+      const res = await recordExternalInvoicePayment(supabase, {
+        invoiceId: checkInInvoice.id,
+        method: depositMethod,
+        performedBy: payStaff.trim(),
+        amountAed: amt,
+        note: "Deposit at check-in",
+      });
+      if (!res.success) throw new Error(res.error || "Deposit failed");
+      toast.success("Deposit recorded");
+      setDepositAmount("");
+      await refreshBilling();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Deposit failed");
+    } finally {
+      setPayBusy(false);
+    }
+  };
+
+  const handleBypass = async () => {
+    if (!checkInInvoice) {
+      toast.error("No invoice found for this booking");
+      return;
+    }
+    if (!bypassReason.trim()) {
+      toast.error("A bypass reason is required");
+      return;
+    }
+    setPayBusy(true);
+    try {
+      const { error } = await supabase
+        .from("invoices")
+        .update({
+          deposit_bypassed: true,
+          deposit_bypass_reason: bypassReason.trim(),
+        })
+        .eq("id", checkInInvoice.id);
+      if (error) throw new Error(error.message);
+      toast.success("Deposit bypassed — logged for review");
+      await refreshBilling();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Bypass failed");
+    } finally {
+      setPayBusy(false);
+    }
+  };
 
   const [personal, setPersonal] = useState<DraftRow[]>([]);
   const [food, setFood] = useState<DraftRow[]>([]);
@@ -630,6 +773,131 @@ export function CheckInSheet({
               )
             ) : (
               <>
+                {checkInInvoice ? (
+                  <div
+                    className="space-y-3 rounded-lg border p-3"
+                    data-testid="checkin-payment-panel"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold">Payment at check-in</p>
+                      <span
+                        className={cn(
+                          "text-sm font-medium tabular-nums",
+                          (account?.accountBalance ?? 0) >= 0
+                            ? "text-emerald-700"
+                            : "text-red-700",
+                        )}
+                      >
+                        Account {(account?.accountBalance ?? 0) >= 0 ? "+" : ""}
+                        {formatAed(account?.accountBalance ?? 0)}
+                      </span>
+                    </div>
+
+                    {(account?.outstandingDebt ?? 0) > 0 ? (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900">
+                        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                        <span>
+                          Owner has {formatAed(account?.outstandingDebt ?? 0)} outstanding
+                          across their invoices.
+                        </span>
+                      </div>
+                    ) : null}
+
+                    {checkInInvoice.deposit_bypassed ? (
+                      <div className="rounded-md border border-orange-200 bg-orange-50/70 p-2 text-xs text-orange-900">
+                        Deposit bypassed
+                        {checkInInvoice.deposit_bypass_reason
+                          ? ` — ${checkInInvoice.deposit_bypass_reason}`
+                          : ""}
+                      </div>
+                    ) : null}
+
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Estimated total</span>
+                      <span className="tabular-nums">{formatAed(invoiceGrandTotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Remaining</span>
+                      <span className="tabular-nums">{formatAed(invoiceRemaining)}</span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Staff name</Label>
+                      <StaffNameSelect value={payStaff} onChange={setPayStaff} />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Deposit amount"
+                        value={depositAmount}
+                        onChange={(e) => setDepositAmount(e.target.value)}
+                        data-testid="checkin-deposit-amount"
+                      />
+                      <Select
+                        value={depositMethod}
+                        onValueChange={(v) => setDepositMethod(v as ExternalPaymentMethod)}
+                      >
+                        <SelectTrigger className="w-[130px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WALLET_TOPUP_PAYMENT_METHOD_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={payBusy}
+                        onClick={handleDeposit}
+                        data-testid="checkin-pay-deposit-btn"
+                      >
+                        Pay deposit
+                      </Button>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      disabled={payBusy || invoiceRemaining <= 0}
+                      onClick={() => setPayFullOpen(true)}
+                      data-testid="checkin-pay-full-btn"
+                    >
+                      Pay in full ({formatAed(invoiceRemaining)})
+                    </Button>
+
+                    <div className="space-y-1 border-t pt-2">
+                      <Label className="text-xs text-muted-foreground">
+                        Bypass deposit (reason required)
+                      </Label>
+                      <Textarea
+                        rows={2}
+                        placeholder="Reason for bypassing deposit"
+                        value={bypassReason}
+                        onChange={(e) => setBypassReason(e.target.value)}
+                        data-testid="checkin-bypass-reason"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="w-full text-orange-700"
+                        disabled={payBusy}
+                        onClick={handleBypass}
+                        data-testid="checkin-bypass-btn"
+                      >
+                        Bypass deposit
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="space-y-2">
                   <p className="text-sm font-semibold">Pet care details</p>
                   <p className="text-xs text-muted-foreground">Prefilled from profile and editable for this booking/check-in.</p>
@@ -862,6 +1130,22 @@ export function CheckInSheet({
           )}
         </div>
       </SheetContent>
+
+      {checkInInvoice && billingOwnerId ? (
+        <PaymentSplitDialog
+          open={payFullOpen}
+          onOpenChange={setPayFullOpen}
+          invoiceId={checkInInvoice.id}
+          ownerId={billingOwnerId}
+          invoiceTotal={invoiceRemaining}
+          ensureOutstanding={checkInInvoice.status === "draft"}
+          defaultStaffName={payStaff}
+          title="Pay in full at check-in"
+          onSuccess={() => {
+            void refreshBilling();
+          }}
+        />
+      ) : null}
     </Sheet>
   );
 }

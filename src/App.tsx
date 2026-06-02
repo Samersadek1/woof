@@ -41,6 +41,7 @@ const KennelMapPrintPage = lazy(() => import("@/pages/print/KennelMapPrintPage")
 const GroomingCardPrintPage = lazy(() => import("@/pages/print/GroomingCardPrintPage"));
 const GroomingCardsPrintPage = lazy(() => import("@/pages/print/GroomingCardsPrintPage"));
 const InvoicePrintPage = lazy(() => import("@/pages/print/InvoicePrintPage"));
+const TopupReceiptPrintPage = lazy(() => import("@/pages/print/TopupReceiptPrintPage"));
 const SetupPasswordPage = lazy(() => import("@/pages/SetupPasswordPage"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
@@ -111,6 +112,7 @@ const App = () => (
               <Route path="/print/grooming-card/:bookingId" element={<ProtectedRoute><GroomingCardPrintPage /></ProtectedRoute>} />
               <Route path="/print/grooming-cards" element={<ProtectedRoute><GroomingCardsPrintPage /></ProtectedRoute>} />
               <Route path="/print/invoice/:invoiceId" element={<ProtectedRoute><InvoicePrintPage /></ProtectedRoute>} />
+              <Route path="/print/topup-receipt/:receiptId" element={<ProtectedRoute><TopupReceiptPrintPage /></ProtectedRoute>} />
               {/* path="/" layout + relative child paths so <Outlet /> resolves (pathless parent + path="/" child breaks RR6 matching) */}
               <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
                 <Route index element={<DashboardPage />} />

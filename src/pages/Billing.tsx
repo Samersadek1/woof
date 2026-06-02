@@ -37,7 +37,6 @@ import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoi
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
-import { useOwner } from "@/hooks/useOwners";
 import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { DeleteInvoiceLineItemDialog } from "@/components/billing/DeleteInvoiceLineItemDialog";
@@ -173,7 +172,24 @@ function WalletModal({ open, mode, ownerId, onClose }: WalletModalProps) {
       ? `AED ${numAmount.toFixed(2)} added to wallet`
       : `AED ${numAmount.toFixed(2)} deducted from wallet`;
     mutation.mutate(payload, {
-      onSuccess: () => { toast.success(successMsg); handleClose(); },
+      onSuccess: (data) => {
+        if (mode === "topup" && data?.id) {
+          toast.success(successMsg, {
+            action: {
+              label: "Print receipt",
+              onClick: () =>
+                window.open(
+                  `/print/topup-receipt/${data.id}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                ),
+            },
+          });
+        } else {
+          toast.success(successMsg);
+        }
+        handleClose();
+      },
       onError: (err) => toast.error(err.message || "Transaction failed"),
     });
   };

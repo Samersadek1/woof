@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format } from "date-fns";
 import { Loader2 } from "lucide-react";
+import type { Database } from "@/integrations/supabase/types";
 import { OwnerClientSearch } from "@/components/OwnerClientSearch";
 import { GroomingBookingSearch } from "@/components/grooming/GroomingBookingSearch";
 import { GroomingPetDraftCard } from "@/components/grooming/GroomingPetDraftCard";
@@ -439,7 +440,9 @@ export function GroomingNewAppointmentSheet({
         if (useCredit) {
           const primaryService = draft ? draftPrimaryDbService(draft) : null;
           const serviceCode = primaryService
-            ? groomingServiceToPricingKey(primaryService)
+            ? (groomingServiceToPricingKey(primaryService) as
+                | Database["public"]["Enums"]["service_code"]
+                | undefined)
             : null;
           if (serviceCode) {
             const { data: credits, error: creditListErr } = await supabase.rpc(

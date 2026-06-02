@@ -84,8 +84,10 @@ export async function recordExternalInvoicePayment(
   const { error: payErr } = await supabase
     .from("invoices")
     .update({
-      status: newStatus,
+      status: newStatus as Database["public"]["Enums"]["invoice_status"],
+      // TODO: deprecate after invoice_payments migration
       payment_method: method,
+      // TODO: deprecate after invoice_payments migration
       amount_paid: newAmountPaid,
       paid_at: partial ? null : new Date().toISOString(),
     })
@@ -96,6 +98,31 @@ export async function recordExternalInvoicePayment(
       success: false,
       error: `Payment recorded but invoice update failed: ${payErr.message}`,
     };
+  }
+
+  // Dual-write to invoice_payments (new model). Best-effort: the legacy
+  // amount_paid update above already succeeded. closing_balance is the remaining
+  // invoice balance (total - amount_paid); wallet balance is unaffected by
+  // card/cash payments and is not represented here.
+  try {
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("opening_balance, total, amount_paid")
+      .eq("id", invoice.id)
+      .single();
+    const closingBalance = roundAed((inv?.total ?? 0) - (inv?.amount_paid ?? 0));
+    await supabase.from("invoice_payments").insert({
+      invoice_id: invoice.id,
+      owner_id: invoice.owner_id,
+      amount: roundAed(amount),
+      payment_method: method,
+      wallet_transaction_id: null,
+      opening_balance: roundAed(inv?.opening_balance ?? 0),
+      closing_balance: closingBalance,
+      recorded_by: performedBy.trim() || "system",
+    });
+  } catch {
+    // Best-effort dual-write.
   }
 
   return {

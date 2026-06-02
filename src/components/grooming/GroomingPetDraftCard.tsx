@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { CalendarIcon } from "lucide-react";
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 import { groomingServiceToPricingKey } from "@/lib/addonPricing";
 import { DogSizeField } from "@/components/DogSizeField";
 import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
@@ -244,7 +244,7 @@ export function GroomingPetDraftCard({
         </div>
       ) : null}
 
-      <PetSpecialAlertsBanner specialAlerts={pet.special_alerts} />
+      <PetSpecialAlertsBanner specialAlerts={pet.special_alerts as Json} />
       <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
         <p>
           <span className="text-muted-foreground">Breed: </span>

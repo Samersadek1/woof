@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { createServiceInvoice, removeUnpaidServiceInvoice } from "@/lib/bookingUtils";
 import { invoiceDueDateAtCheckIn, invoiceDueDateToday } from "@/lib/invoiceDueDate";
 import {
@@ -133,7 +134,7 @@ export function CompleteHourlyBillingDialog({
       const discountAed = roundAed(invoiceSubtotal * pct / 100);
       return {
         discount_pct: pct,
-        
+        discount_aed: discountAed,
         final_aed: invoiceSubtotal - discountAed,
       };
     },
@@ -147,6 +148,27 @@ export function CompleteHourlyBillingDialog({
   }, [invoiceSubtotal, skipInvoiceDiscount, discountPreviewLoading, discountPreview?.final_aed]);
 
   const canSubmit = rowPreviews.every((row) => row.subtotal.roundedHours > 0);
+
+  const [payOpen, setPayOpen] = useState(false);
+  const [payInvoice, setPayInvoice] = useState<{ id: string; total: number } | null>(null);
+
+  // After the invoice is generated as `outstanding`, open the wallet-first
+  // payment modal. The DB trigger flips it to finalised once fully paid.
+  const openPaymentForInvoice = async (invoiceId: string) => {
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("total, amount_paid")
+      .eq("id", invoiceId)
+      .maybeSingle();
+    const remaining = Math.max(0, (inv?.total ?? 0) - (inv?.amount_paid ?? 0));
+    if (remaining > 0) {
+      setPayInvoice({ id: invoiceId, total: remaining });
+      setPayOpen(true);
+    } else {
+      onOpenChange(false);
+      onSuccess?.();
+    }
+  };
 
   const handleGenerateInvoice = async () => {
     if (!canSubmit || sessions.length === 0) {
@@ -272,12 +294,13 @@ export function CompleteHourlyBillingDialog({
           }
         }
 
-        // 5. Recalculate totals (picks up discount_aed set above), then finalise.
+        // 5. Recalculate totals (picks up discount_aed set above), then flip the
+        //    draft to outstanding so payment can be collected via the split modal.
         await recalculateInvoiceTotals(draftInvoiceId);
         const { error: finaliseErr } = await supabase
           .from("invoices")
           .update({
-            status: "finalised",
+            status: "outstanding",
             due_date: invoiceDueDateAtCheckIn(checkInDate),
           })
           .eq("id", draftInvoiceId);
@@ -296,19 +319,24 @@ export function CompleteHourlyBillingDialog({
           }),
         );
 
+        // Link sessions to the invoice for traceability (new FK column).
+        await supabase
+          .from("daycare_sessions")
+          .update({ invoice_id: draftInvoiceId })
+          .in("id", sessions.map((s) => s.id));
+
         const failed = updateResults.filter((r) => r.error);
         if (failed.length > 0) {
           toast.error(
-            "Invoice finalised but some sessions could not be marked as billed. Check the invoice and re-run if needed.",
+            "Invoice generated but some sessions could not be marked as billed. Check the invoice and re-run if needed.",
           );
         } else {
-          toast.success("Hourly daycare invoice finalised");
+          toast.success("Hourly daycare invoice ready for payment");
         }
 
-        onOpenChange(false);
-        onSuccess?.();
+        await openPaymentForInvoice(draftInvoiceId);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Could not finalise invoice";
+        const message = error instanceof Error ? error.message : "Could not generate invoice";
         toast.error(message);
       } finally {
         setIsSubmitting(false);
@@ -324,7 +352,7 @@ export function CompleteHourlyBillingDialog({
         serviceType: "daycare",
         referenceId: sessions[0].id,
         lineItems: hourLineItems,
-        invoiceStatus: "finalised",
+        invoiceStatus: "outstanding",
         skipMemberDiscount: skipInvoiceDiscount,
         checkInDate,
       });
@@ -360,9 +388,13 @@ export function CompleteHourlyBillingDialog({
         );
       }
 
-      toast.success("Hourly daycare invoice generated");
-      onOpenChange(false);
-      onSuccess?.();
+      await supabase
+        .from("daycare_sessions")
+        .update({ invoice_id: invoiceId })
+        .in("id", sessions.map((s) => s.id));
+
+      toast.success("Hourly daycare invoice ready for payment");
+      await openPaymentForInvoice(invoiceId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not generate invoice";
       toast.error(message);
@@ -502,6 +534,24 @@ export function CompleteHourlyBillingDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {payInvoice ? (
+        <PaymentSplitDialog
+          open={payOpen}
+          onOpenChange={(v) => {
+            setPayOpen(v);
+            if (!v) {
+              onOpenChange(false);
+              onSuccess?.();
+            }
+          }}
+          invoiceId={payInvoice.id}
+          ownerId={ownerId}
+          invoiceTotal={payInvoice.total}
+          title="Collect daycare payment"
+          onSuccess={() => onSuccess?.()}
+        />
+      ) : null}
     </Dialog>
   );
 }

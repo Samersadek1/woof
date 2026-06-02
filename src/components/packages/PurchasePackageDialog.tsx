@@ -14,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { useIssueCustomDaycarePackage } from "@/hooks/useDaycare";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { PET_SIZE_COLUMNS, formatPackageIncludes } from "@/lib/packageCatalog";
 import { useGroomingPackageCatalog } from "@/hooks/useGroomingPackages";
 import {
@@ -85,6 +86,28 @@ export function PurchasePackageDialog({
     "daycare_full_day",
   );
   const [issueDate, setIssueDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const [payment, setPayment] = useState<{ invoiceId: string; total: number; ownerId: string } | null>(null);
+  const [payOpen, setPayOpen] = useState(false);
+
+  // After a package sale, the purchase RPC already creates an `issued` invoice
+  // linked to its purchase_group. For paid packages we flip it to `outstanding`
+  // and collect via the wallet-first split modal (trigger → finalised when fully
+  // paid). AED 0 / complimentary packages skip the payment step entirely.
+  const finishSale = async (invoiceId: string, total: number) => {
+    if (total > 0) {
+      await supabase
+        .from("invoices")
+        .update({ status: "outstanding" })
+        .eq("id", invoiceId)
+        .in("status", ["issued", "draft"]);
+      setPayment({ invoiceId, total, ownerId });
+      setPayOpen(true);
+    } else {
+      onSuccess?.(invoiceId);
+    }
+    resetForm();
+    onClose();
+  };
 
   const { data: packageDefs = [], isLoading: packageDefsLoading } = useQuery({
     queryKey: ["package_definitions", "active"],
@@ -236,7 +259,7 @@ export function PurchasePackageDialog({
         issue_date: issueDate,
       },
       {
-        onSuccess: (result) => {
+        onSuccess: async (result) => {
           if (!result?.invoice_id) {
             toast.error("Package issued but no result returned.");
             return;
@@ -250,9 +273,7 @@ export function PurchasePackageDialog({
           queryClient.invalidateQueries({ queryKey: ["service_credits"] });
           queryClient.invalidateQueries({ queryKey: ["owners"] });
           queryClient.invalidateQueries({ queryKey: ["pets", ownerId] });
-          onSuccess?.(result.invoice_id);
-          resetForm();
-          onClose();
+          await finishSale(result.invoice_id, total);
         },
         onError: (err) => toast.error(err.message || "Could not issue custom package."),
       },
@@ -289,19 +310,19 @@ export function PurchasePackageDialog({
       return;
     }
 
-    toast.success(`Package purchased. Invoice ${result.invoice_id.slice(0, 8)} · AED ${Number(result.total_amount_aed).toFixed(2)}`);
+    const purchaseTotal = Number(result.total_amount_aed);
+    toast.success(`Package purchased. Invoice ${result.invoice_id.slice(0, 8)} · AED ${purchaseTotal.toFixed(2)}`);
     queryClient.invalidateQueries({ queryKey: ["service_credits"] });
     queryClient.invalidateQueries({ queryKey: ["owners"] });
     queryClient.invalidateQueries({ queryKey: ["pets", ownerId] });
-    onSuccess?.(result.invoice_id);
-    resetForm();
-    onClose();
+    await finishSale(result.invoice_id, purchaseTotal);
   };
 
   const isCustom = allowCustomDaycare && saleMode === "custom";
   const busy = isSubmitting || issueCustom.isPending;
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { resetForm(); onClose(); } }}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
@@ -631,6 +652,25 @@ export function PurchasePackageDialog({
         </div>
       </DialogContent>
     </Dialog>
+
+      {payment ? (
+        <PaymentSplitDialog
+          open={payOpen}
+          onOpenChange={(v) => {
+            setPayOpen(v);
+            if (!v) {
+              onSuccess?.(payment.invoiceId);
+              setPayment(null);
+            }
+          }}
+          invoiceId={payment.invoiceId}
+          ownerId={payment.ownerId}
+          invoiceTotal={payment.total}
+          title="Collect package payment"
+          onSuccess={() => onSuccess?.(payment.invoiceId)}
+        />
+      ) : null}
+    </>
   );
 }
 

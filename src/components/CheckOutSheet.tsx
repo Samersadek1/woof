@@ -26,9 +26,16 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBookingItems, useUpdateBookingItem, type BookingItem } from "@/hooks/useBookingItems";
 import { useCheckOut, useUpdateBooking } from "@/hooks/useBookings";
 import { OVERVIEW_ITEM_DESCRIPTION } from "@/components/CheckInSheet";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
+import { useAccountBalance, accountBalanceQueryKey } from "@/hooks/useAccountBalance";
+import { formatAed } from "@/hooks/useBilling";
+import { invoiceDisplayTotals } from "@/lib/vatConfig";
+import { syncBoardingRoomAssignmentsAfterDateChange } from "@/lib/boardingRoomAssignmentSync";
+import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
 const THUMB = "h-[60px] w-[60px] rounded object-cover border border-border shrink-0 cursor-pointer";
@@ -72,6 +79,47 @@ export function CheckOutSheet({
   const updateItem = useUpdateBookingItem();
   const checkOut = useCheckOut();
   const updateBooking = useUpdateBooking();
+  const queryClient = useQueryClient();
+
+  const checkoutBillingKey = ["checkout-billing", bookingId] as const;
+  const { data: checkoutBilling } = useQuery({
+    queryKey: checkoutBillingKey,
+    enabled: open && !!bookingId,
+    queryFn: async () => {
+      const { data: booking } = await supabase
+        .from("bookings")
+        .select("owner_id")
+        .eq("id", bookingId)
+        .maybeSingle();
+      const ownerId = (booking?.owner_id as string | undefined) ?? undefined;
+      const { data: inv } = await supabase
+        .from("invoices")
+        .select("id, total, vat_aed, service_type, notes, status, amount_paid")
+        .eq("booking_id", bookingId)
+        .neq("status", "voided")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return { ownerId, invoice: inv ?? null };
+    },
+  });
+  const billingOwnerId = checkoutBilling?.ownerId;
+  const checkoutInvoice = checkoutBilling?.invoice ?? null;
+  const { data: account } = useAccountBalance(billingOwnerId);
+
+  const invoiceRemaining = checkoutInvoice
+    ? Math.max(
+        0,
+        invoiceDisplayTotals({
+          total: checkoutInvoice.total,
+          vat_aed: checkoutInvoice.vat_aed,
+          service_type: checkoutInvoice.service_type,
+          notes: checkoutInvoice.notes,
+        }).grandTotal - (checkoutInvoice.amount_paid ?? 0),
+      )
+    : 0;
+
+  const [payOpen, setPayOpen] = useState(false);
 
   const checklistItems = useMemo(
     () => allItems.filter((i) => i.description !== OVERVIEW_ITEM_DESCRIPTION),
@@ -180,6 +228,7 @@ export function CheckOutSheet({
       }
 
       const nowIso = new Date().toISOString();
+      const effectiveCheckOut = actualCheckOutDate;
       if (actualCheckOutDate !== checkOutDate) {
         await updateBooking.mutateAsync({
           id: bookingId,
@@ -191,6 +240,31 @@ export function CheckOutSheet({
         await checkOut.mutateAsync(bookingId);
       }
 
+      try {
+        const roomResult = await syncBoardingRoomAssignmentsAfterDateChange(
+          bookingId,
+          checkInDate,
+          effectiveCheckOut,
+        );
+        if (roomResult.trimmed > 0) {
+          toast.message("Kennel assignment adjusted to match checkout date.");
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Kennel assignment sync failed";
+        toast.warning(`Checked out, but kennel rows may need review: ${msg}`);
+      }
+
+      // Checkout is the trigger for boarding billing: flip a still-draft invoice
+      // to outstanding so the balance is collectable and surfaces in alerts.
+      if (checkoutInvoice && checkoutInvoice.status === "draft") {
+        await supabase
+          .from("invoices")
+          .update({ status: "outstanding" })
+          .eq("id", checkoutInvoice.id)
+          .eq("status", "draft");
+        await queryClient.invalidateQueries({ queryKey: checkoutBillingKey });
+      }
+
       const pet = firstPetName(petNames);
       const total = checklistItems.length;
       if (hasIssues) {
@@ -200,7 +274,14 @@ export function CheckOutSheet({
       } else {
         toast.success(`${pet} checked out · ${total} item${total !== 1 ? "s" : ""} returned`);
       }
-      close();
+
+      // If there is a balance to collect, open the wallet-first payment modal
+      // before closing; otherwise finish immediately.
+      if (checkoutInvoice && billingOwnerId && invoiceRemaining > 0) {
+        setPayOpen(true);
+      } else {
+        close();
+      }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Checkout failed");
     } finally {
@@ -358,6 +439,34 @@ export function CheckOutSheet({
                       placeholder="Who is confirming checkout?"
                     />
                   </div>
+
+                  {checkoutInvoice ? (
+                    <div className="rounded-md border p-3 text-sm space-y-1" data-testid="checkout-billing-summary">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Balance due</span>
+                        <span className="tabular-nums font-medium">{formatAed(invoiceRemaining)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Account balance</span>
+                        <span
+                          className={cn(
+                            "tabular-nums font-medium",
+                            (account?.accountBalance ?? 0) >= 0 ? "text-emerald-700" : "text-red-700",
+                          )}
+                        >
+                          {(account?.accountBalance ?? 0) >= 0 ? "+" : ""}
+                          {formatAed(account?.accountBalance ?? 0)}
+                        </span>
+                      </div>
+                      {invoiceRemaining > 0 ? (
+                        <p className="text-xs text-muted-foreground pt-1">
+                          You'll confirm payment after checkout.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-emerald-700 pt-1">Invoice already settled.</p>
+                      )}
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>
@@ -371,6 +480,31 @@ export function CheckOutSheet({
           </div>
         </SheetContent>
       </Sheet>
+
+      {checkoutInvoice && billingOwnerId ? (
+        <PaymentSplitDialog
+          open={payOpen}
+          onOpenChange={(v) => {
+            setPayOpen(v);
+            // Closing the payment dialog finishes the checkout flow whether or
+            // not payment was collected (staff may collect later).
+            if (!v) close();
+          }}
+          invoiceId={checkoutInvoice.id}
+          ownerId={billingOwnerId}
+          invoiceTotal={invoiceRemaining}
+          ensureOutstanding={checkoutInvoice.status === "draft"}
+          defaultStaffName={staffName}
+          title="Collect boarding payment"
+          onSuccess={() => {
+            if (billingOwnerId) {
+              void queryClient.invalidateQueries({
+                queryKey: accountBalanceQueryKey(billingOwnerId),
+              });
+            }
+          }}
+        />
+      ) : null}
 
       <Dialog open={!!lightbox} onOpenChange={() => setLightbox(null)}>
         <DialogContent className="max-w-3xl">

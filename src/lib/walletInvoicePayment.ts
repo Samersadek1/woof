@@ -14,6 +14,48 @@ export type WalletPaymentResult = {
   partial?: boolean;
 };
 
+/**
+ * Dual-write a wallet payment into the unified `invoice_payments` table (new
+ * model) alongside the legacy invoices.amount_paid update. The
+ * `trg_update_invoice_status_on_payment` trigger then recomputes status from the
+ * sum of invoice_payments. Best-effort: a failure here must not fail a payment
+ * that already debited the wallet.
+ *
+ * closing_balance = invoice.total - amount_paid (remaining invoice balance).
+ * Wallet-balance-after lives on wallet_transactions.balance_after, not here.
+ */
+async function dualWriteWalletPayment(
+  supabase: SupabaseClient<Database>,
+  params: {
+    invoiceId: string;
+    ownerId: string;
+    amount: number;
+    walletTransactionId: string | null;
+    performedBy: string;
+  },
+): Promise<void> {
+  try {
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("opening_balance, total, amount_paid")
+      .eq("id", params.invoiceId)
+      .single();
+    const closingBalance = roundAed((inv?.total ?? 0) - (inv?.amount_paid ?? 0));
+    await supabase.from("invoice_payments").insert({
+      invoice_id: params.invoiceId,
+      owner_id: params.ownerId,
+      amount: roundAed(params.amount),
+      payment_method: "wallet",
+      wallet_transaction_id: params.walletTransactionId,
+      opening_balance: roundAed(inv?.opening_balance ?? 0),
+      closing_balance: closingBalance,
+      recorded_by: params.performedBy || "system",
+    });
+  } catch {
+    // Best-effort dual-write; legacy amount_paid update already succeeded.
+  }
+}
+
 type RpcWalletResult = {
   success?: boolean;
   error?: string;
@@ -84,6 +126,13 @@ export async function payInvoiceFromWallet(
     if (!rpcErr && data) {
       const rpc = data as RpcWalletResult;
       if (rpc.success) {
+        await dualWriteWalletPayment(supabase, {
+          invoiceId,
+          ownerId,
+          amount: rpc.amount_charged ?? balanceDue,
+          walletTransactionId: null,
+          performedBy,
+        });
         return {
           success: true,
           amountCharged: rpc.amount_charged ?? balanceDue,
@@ -137,20 +186,34 @@ export async function payInvoiceFromWallet(
     return { success: false, error: invUpdateErr.message, ownerId };
   }
 
-  const { error: txErr } = await supabase.from("wallet_transactions").insert({
-    owner_id: ownerId,
-    transaction_type: "deduction",
-    amount: -chargeAmount,
-    balance_after: newWalletBalance,
-    invoice_id: invoiceId,
-    performed_by: performedBy,
-    notes: partial
-      ? "Partial invoice payment via wallet"
-      : "Invoice payment via wallet",
-  });
+  const { data: txRow, error: txErr } = await supabase
+    .from("wallet_transactions")
+    .insert({
+      owner_id: ownerId,
+      transaction_type: "deduction",
+      amount: -chargeAmount,
+      balance_after: newWalletBalance,
+      invoice_id: invoiceId,
+      reference_type: "invoice",
+      reference_id: invoiceId,
+      performed_by: performedBy,
+      notes: partial
+        ? "Partial invoice payment via wallet"
+        : "Invoice payment via wallet",
+    })
+    .select("id")
+    .single();
   if (txErr) {
     return { success: false, error: txErr.message, ownerId };
   }
+
+  await dualWriteWalletPayment(supabase, {
+    invoiceId,
+    ownerId,
+    amount: chargeAmount,
+    walletTransactionId: txRow?.id ?? null,
+    performedBy,
+  });
 
   return {
     success: true,
