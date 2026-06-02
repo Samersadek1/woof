@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { ExternalLink, FileText, Loader2 } from "lucide-react";
+import { ExternalLink, FileText, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -37,25 +37,27 @@ export function BoardingBookingInvoiceLink({ bookingId, bookingRef }: Props) {
     },
   });
 
-  const [creating, setCreating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
-  const createInvoice = async () => {
-    setCreating(true);
+  const runInvoiceSync = async (successPrefix?: string) => {
+    setSyncing(true);
     try {
       const result = await syncBoardingBookingInvoice(bookingId);
       await queryClient.invalidateQueries({ queryKey: ["invoice", "byBooking", bookingId] });
       await queryClient.invalidateQueries({ queryKey: ["invoices"] });
       await queryClient.invalidateQueries({ queryKey: ["boarding", "missing-invoices"] });
-      const msg = formatSyncBoardingInvoiceToast(result);
+      const detail = formatSyncBoardingInvoiceToast(result);
+      const msg = successPrefix ? `${successPrefix} ${detail}` : detail;
       if (result.kind === "skipped") {
         toast.warning(msg);
       } else {
         toast.success(msg);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create invoice");
+      const fallback = successPrefix ? "Could not refresh invoice" : "Could not create invoice";
+      toast.error(err instanceof Error ? err.message : fallback);
     } finally {
-      setCreating(false);
+      setSyncing(false);
     }
   };
 
@@ -66,17 +68,34 @@ export function BoardingBookingInvoiceLink({ bookingId, bookingRef }: Props) {
   if (invoice) {
     const total = invoice.total ?? 0;
     return (
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full"
-        data-testid="boarding-view-invoice-btn"
-        onClick={() => navigate(`/billing/invoices/${invoice.id}`)}
-      >
-        <FileText className="mr-2 h-4 w-4" />
-        View invoice ({formatAed(total)})
-        <ExternalLink className="ml-2 h-3.5 w-3.5 opacity-60" />
-      </Button>
+      <div className="space-y-2">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          data-testid="boarding-view-invoice-btn"
+          onClick={() => navigate(`/billing/invoices/${invoice.id}`)}
+        >
+          <FileText className="mr-2 h-4 w-4" />
+          View invoice ({formatAed(total)})
+          <ExternalLink className="ml-2 h-3.5 w-3.5 opacity-60" />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          data-testid="boarding-refresh-invoice-btn"
+          disabled={syncing}
+          onClick={() => void runInvoiceSync("Invoice refreshed.")}
+        >
+          {syncing ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-2 h-4 w-4" />
+          )}
+          Refresh invoice
+        </Button>
+      </div>
     );
   }
 
@@ -86,10 +105,10 @@ export function BoardingBookingInvoiceLink({ bookingId, bookingRef }: Props) {
       variant="outline"
       className="w-full"
       data-testid="boarding-create-invoice-btn"
-      disabled={creating}
-      onClick={() => void createInvoice()}
+      disabled={syncing}
+      onClick={() => void runInvoiceSync()}
     >
-      {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+      {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
       Create draft invoice
       {bookingRef ? (
         <span className="sr-only"> for {bookingRef}</span>
