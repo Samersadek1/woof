@@ -39,6 +39,10 @@ export function canDeleteInvoiceLineItems(status: string): boolean {
   return status === "draft";
 }
 
+export function canDeleteInvoiceAdjustments(status: string): boolean {
+  return !["voided", "cancelled", "paid"].includes(status);
+}
+
 function totalsFromLines(
   lines: Pick<LineRow, "quantity" | "unit_price">[],
   discountAmount: number,
@@ -136,6 +140,68 @@ function adjustmentDiscountTotal(adjustments: Pick<AdjustmentRow, "adjustment_ty
       .filter((row) => isDiscountAdjustment(row.adjustment_type))
       .reduce((sum, row) => sum + Math.abs(Number(row.adjusted_amount) || 0), 0),
   );
+}
+
+/** Sum discount adjustments, optionally excluding types recomputed elsewhere (e.g. double occupancy RPC). */
+export function invoiceAdjustmentDiscountTotal(
+  adjustments: Pick<AdjustmentRow, "adjustment_type" | "adjusted_amount">[],
+  options?: { excludeTypes?: string[] },
+): number {
+  const exclude = new Set(options?.excludeTypes ?? []);
+  return roundAed(
+    adjustments
+      .filter(
+        (row) => isDiscountAdjustment(row.adjustment_type) && !exclude.has(row.adjustment_type),
+      )
+      .reduce((sum, row) => sum + Math.abs(Number(row.adjusted_amount) || 0), 0),
+  );
+}
+
+/** Recompute invoice discount_amount from line-item discounts plus billing adjustments. */
+export async function syncInvoiceDiscountTotals(invoiceId: string): Promise<void> {
+  const { data: invoice, error: invErr } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .single();
+  if (invErr) throw invErr;
+
+  const [{ data: lines, error: linesErr }, { data: adjustments, error: adjErr }] =
+    await Promise.all([
+      supabase
+        .from("invoice_line_items")
+        .select("quantity, unit_price, total_price, line_total")
+        .eq("invoice_id", invoiceId),
+      supabase
+        .from("billing_adjustments")
+        .select("adjustment_type, adjusted_amount")
+        .eq("invoice_id", invoiceId),
+    ]);
+  if (linesErr) throw linesErr;
+  if (adjErr) throw adjErr;
+
+  const { lineSubtotal, lineDiscount } = lineAmounts(lines ?? []);
+  const discountAmount = roundAed(lineDiscount + adjustmentDiscountTotal(adjustments ?? []));
+  const grossTotal = Math.max(0, roundAed(lineSubtotal - discountAmount));
+  const vatAed = vatAmountFromGrossInclusive(grossTotal);
+  const amountPaid = await effectiveAmountPaid(invoice);
+  const { grandTotal } = invoiceDisplayTotals({ total: grossTotal, vat_aed: vatAed });
+  const status = deriveInvoiceStatusAfterRecalc(invoice.status, amountPaid, grandTotal);
+
+  const { error: updErr } = await supabase
+    .from("invoices")
+    .update({
+      subtotal: lineSubtotal,
+      discount_amount: discountAmount,
+      discount_pct: lineSubtotal > 0 ? roundAed((discountAmount / lineSubtotal) * 100) : 0,
+      total: grossTotal,
+      vat_aed: vatAed,
+      status: status as Database["public"]["Enums"]["invoice_status"],
+      amount_paid: amountPaid,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", invoiceId);
+  if (updErr) throw updErr;
 }
 
 /** After adding a discount adjustment, sync invoice header totals. */

@@ -44,18 +44,28 @@ import {
 } from "@/lib/invoiceAdjustmentDiscount";
 import { applyInvoiceDiscountAdjustment, isDiscountAdjustmentType } from "@/lib/invoiceRecalc";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
+import { InvoiceLedgerCard } from "@/components/billing/InvoiceLedgerCard";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { DeleteInvoiceLineItemDialog } from "@/components/billing/DeleteInvoiceLineItemDialog";
+import {
+  DeleteInvoiceAdjustmentDialog,
+  type DeleteInvoiceAdjustmentTarget,
+} from "@/components/billing/DeleteInvoiceAdjustmentDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
-import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import {
+  canDeleteInvoiceAdjustments,
+  canDeleteInvoiceLineItems,
+  canEditInvoiceLineItems,
+} from "@/lib/invoiceRecalc";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
 import { canRevertInvoicePayment, walletRefundFromPayments } from "@/lib/revertInvoicePayment";
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700 border-slate-300",
-  finalised: "bg-blue-50 text-blue-700 border-blue-300",
+  finalised: "bg-emerald-50 text-emerald-700 border-emerald-300",
   outstanding: "bg-amber-50 text-amber-700 border-amber-300",
+  partially_paid: "bg-blue-50 text-blue-700 border-blue-300",
   overdue: "bg-red-50 text-red-700 border-red-300",
   paid: "bg-emerald-50 text-emerald-700 border-emerald-300",
   voided: "bg-slate-100 text-slate-500 border-slate-300 line-through",
@@ -103,6 +113,8 @@ export default function InvoiceDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [deleteLineTarget, setDeleteLineTarget] = useState<{ id: string; description: string } | null>(null);
+  const [deleteAdjustmentTarget, setDeleteAdjustmentTarget] =
+    useState<DeleteInvoiceAdjustmentTarget | null>(null);
   const [walletCreditPromptMethod, setWalletCreditPromptMethod] =
     useState<ExternalPaymentMethod | null>(null);
 
@@ -405,6 +417,8 @@ export default function InvoiceDetailPage() {
           </CardContent>
         </Card>
 
+        <InvoiceLedgerCard invoiceId={inv.id} onChanged={() => void refetch()} />
+
         {inv.notes?.trim() ? (
           <Card>
             <CardContent className="p-5 space-y-1">
@@ -498,11 +512,38 @@ export default function InvoiceDetailPage() {
               <div className="space-y-2">
                 {data.adjustments.map((a) => (
                   <div key={a.id} className="rounded-md border p-3 text-sm">
-                    <div className="flex justify-between gap-3">
-                      <span className="capitalize">{a.adjustment_type.replace(/_/g, " ")}</span>
-                      <span className="font-semibold">{aed(Math.abs(a.adjusted_amount ?? 0))}</span>
+                    <div className="flex justify-between gap-3 items-start">
+                      <div className="min-w-0 flex-1">
+                        <span className="capitalize">{a.adjustment_type.replace(/_/g, " ")}</span>
+                        {a.reason ? (
+                          <p className="text-muted-foreground mt-0.5">{a.reason}</p>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-semibold tabular-nums">
+                          {aed(Math.abs(a.adjusted_amount ?? 0))}
+                        </span>
+                        {canDeleteInvoiceAdjustments(status) && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            data-testid="invoice-detail-delete-adjustment-btn"
+                            aria-label={`Remove ${a.adjustment_type.replace(/_/g, " ")}`}
+                            onClick={() =>
+                              setDeleteAdjustmentTarget({
+                                id: a.id,
+                                adjustment_type: a.adjustment_type,
+                                reason: a.reason,
+                              })
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-muted-foreground">{a.reason}</p>
                   </div>
                 ))}
               </div>
@@ -828,6 +869,19 @@ export default function InvoiceDetailPage() {
             if (!open) setDeleteLineTarget(null);
           }}
           lineItem={deleteLineTarget}
+          invoiceId={inv.id}
+          ownerId={inv.owner_id}
+          onDeleted={() => void refetch()}
+        />
+      )}
+
+      {inv?.owner_id && (
+        <DeleteInvoiceAdjustmentDialog
+          open={!!deleteAdjustmentTarget}
+          onOpenChange={(open) => {
+            if (!open) setDeleteAdjustmentTarget(null);
+          }}
+          adjustment={deleteAdjustmentTarget}
           invoiceId={inv.id}
           ownerId={inv.owner_id}
           onDeleted={() => void refetch()}

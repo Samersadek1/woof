@@ -10,6 +10,7 @@ import {
 import { createBookingInvoice } from "@/lib/bookingUtils";
 import { formatAed, roundAed } from "@/lib/money";
 import { invoiceDueDateAtCheckIn } from "@/lib/invoiceDueDate";
+import { invoiceAdjustmentDiscountTotal } from "@/lib/invoiceRecalc";
 import { invoiceDisplayTotals, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
 
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -172,7 +173,17 @@ export async function syncBoardingBookingInvoice(
   });
 
   const merged: BoardingInvoiceLineItem[] = [...nightLines, ...preserved.map(lineRowToServiceItem)];
-  const discountAmount = roundAed(invoice.discount_amount ?? 0);
+
+  const { data: adjustmentsBeforeSync, error: adjFetchErr } = await getSupabase()
+    .from("billing_adjustments")
+    .select("adjustment_type, adjusted_amount")
+    .eq("invoice_id", invoice.id);
+  if (adjFetchErr) throw adjFetchErr;
+
+  // Do not carry stale invoice.discount_amount; double occupancy is recomputed by RPC below.
+  const discountAmount = invoiceAdjustmentDiscountTotal(adjustmentsBeforeSync ?? [], {
+    excludeTypes: ["double_occupancy_discount"],
+  });
   const { subtotal, grossTotal, vatAed } = totalsFromLineItems(merged, discountAmount);
   const amountPaid = await effectiveAmountPaid(invoice);
   const { grandTotal } = invoiceDisplayTotals({
