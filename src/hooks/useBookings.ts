@@ -538,6 +538,52 @@ export function useCreateBooking() {
   });
 }
 
+/** Link one or more existing pets to an existing booking (skips pets already on the booking). */
+export function useAddPetsToBooking() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      booking_id,
+      pet_ids,
+      pet_care_by_pet_id,
+    }: {
+      booking_id: string;
+      pet_ids: string[];
+      pet_care_by_pet_id?: CreateBookingPayload["pet_care_by_pet_id"];
+    }) => {
+      if (pet_ids.length === 0) return [] as string[];
+
+      const { data: existing, error: existingError } = await supabase
+        .from("booking_pets")
+        .select("pet_id")
+        .eq("booking_id", booking_id);
+
+      if (existingError) throw existingError;
+
+      const alreadyLinked = new Set((existing ?? []).map((r) => r.pet_id));
+      const newPetIds = pet_ids.filter((id) => !alreadyLinked.has(id));
+      if (newPetIds.length === 0) return [] as string[];
+
+      const rows: BookingPetInsert[] = newPetIds.map((pet_id) => ({
+        booking_id,
+        pet_id,
+        feeding_notes: pet_care_by_pet_id?.[pet_id]?.feeding_notes ?? null,
+        medication_notes: pet_care_by_pet_id?.[pet_id]?.medication_notes ?? null,
+        special_instructions: pet_care_by_pet_id?.[pet_id]?.special_instructions ?? null,
+      }));
+
+      const { error } = await supabase.from("booking_pets").insert(rows);
+      if (error) throw error;
+
+      return newPetIds;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["bookings"] });
+    },
+  });
+}
+
 export function useUpdateBooking() {
   const queryClient = useQueryClient();
 

@@ -18,6 +18,7 @@ import {
   useRooms,
   useCreateBooking,
   useUpdateBooking,
+  useAddPetsToBooking,
   useUndoCheckOut,
   isAssessmentRequiredError,
   BOOKING_DETAIL_SELECT,
@@ -1047,6 +1048,142 @@ function AssignRealRoomPanel({
   );
 }
 
+function AddPetToBookingDialog({
+  open,
+  onOpenChange,
+  booking,
+  onAdded,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  booking: BookingWithDetails;
+  onAdded: (addedPets: BookingWithDetails["booking_pets"]) => void;
+}) {
+  const { data: ownerPets = [], isLoading } = usePets(booking.owner_id);
+  const addPets = useAddPetsToBooking();
+  const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (open) setSelectedPetIds([]);
+  }, [open]);
+
+  const alreadyLinkedIds = useMemo(
+    () => new Set(booking.booking_pets.map((bp) => bp.pet_id)),
+    [booking.booking_pets],
+  );
+
+  const availablePets = useMemo(
+    () => ownerPets.filter((p) => !alreadyLinkedIds.has(p.id)),
+    [ownerPets, alreadyLinkedIds],
+  );
+
+  const togglePet = (petId: string) => {
+    setSelectedPetIds((ids) =>
+      ids.includes(petId) ? ids.filter((id) => id !== petId) : [...ids, petId],
+    );
+  };
+
+  const handleAdd = () => {
+    addPets.mutate(
+      { booking_id: booking.id, pet_ids: selectedPetIds },
+      {
+        onSuccess: (added) => {
+          if (added.length === 0) {
+            toast.info("Selected pets are already on this booking");
+            onOpenChange(false);
+            return;
+          }
+          toast.success(
+            added.length === 1
+              ? "Pet added to booking"
+              : `${added.length} pets added to booking`,
+          );
+          const addedPets = added.map((petId) => {
+            const pet = ownerPets.find((p) => p.id === petId);
+            return {
+              pet_id: petId,
+              feeding_notes: null,
+              medication_notes: null,
+              special_instructions: null,
+              pets: pet
+                ? {
+                    name: pet.name,
+                    other_notes: pet.other_notes ?? null,
+                    feeding_notes: pet.feeding_notes ?? null,
+                    medication_notes: pet.medication_notes ?? null,
+                    behaviour_notes: pet.behaviour_notes ?? null,
+                    feeding_instructions: pet.feeding_instructions ?? null,
+                    medications: pet.medications ?? null,
+                    behavioural_notes: pet.behavioural_notes ?? null,
+                    special_alerts: pet.special_alerts ?? null,
+                  }
+                : null,
+            };
+          });
+          onAdded(addedPets as BookingWithDetails["booking_pets"]);
+          onOpenChange(false);
+        },
+        onError: (err) => toast.error(extractErrorMessage(err, "Could not add pet to booking")),
+      },
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid="boarding-add-pet-dialog">
+        <DialogHeader>
+          <DialogTitle>Add pet to booking</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading pets…</p>
+          ) : availablePets.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              All of this owner's pets are already on this booking.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {availablePets.map((pet) => (
+                <label
+                  key={pet.id}
+                  className="flex items-center gap-3 rounded-md border p-3 cursor-pointer hover:bg-muted/50"
+                >
+                  <Checkbox
+                    checked={selectedPetIds.includes(pet.id)}
+                    onCheckedChange={() => togglePet(pet.id)}
+                    data-testid={`boarding-add-pet-checkbox-${pet.id}`}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{pet.name}</p>
+                    {(pet.breed || pet.species) && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {[pet.breed, pet.species].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAdd}
+            disabled={selectedPetIds.length === 0 || addPets.isPending}
+            data-testid="boarding-add-pet-confirm-btn"
+          >
+            {addPets.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Add{selectedPetIds.length > 0 ? ` (${selectedPetIds.length})` : ""}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function BoardingBookingDetailSheets({
   booking,
   onBookingChange,
@@ -1069,6 +1206,7 @@ function BoardingBookingDetailSheets({
   const [changeRoomOpen, setChangeRoomOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [undoCheckInOpen, setUndoCheckInOpen] = useState(false);
+  const [addPetOpen, setAddPetOpen] = useState(false);
 
   const bookingId = booking?.id;
   const { data: assignmentRows = [] } = useBookingRoomAssignmentsForBookings(
@@ -1148,9 +1286,24 @@ function BoardingBookingDetailSheets({
                 </div>
 
                 <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">
-                    Pet{booking.booking_pets.length !== 1 ? "s" : ""}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs uppercase text-muted-foreground font-medium">
+                      Pet{booking.booking_pets.length !== 1 ? "s" : ""}
+                    </p>
+                    {booking.status !== "cancelled" && booking.status !== "checked_out" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        data-testid="boarding-add-pet-btn"
+                        onClick={() => setAddPetOpen(true)}
+                      >
+                        <Plus className="mr-1 h-3.5 w-3.5" />
+                        Add pet
+                      </Button>
+                    )}
+                  </div>
                   {booking.booking_pets.length === 0 ? (
                     <p className="text-sm">—</p>
                   ) : (
@@ -1396,6 +1549,21 @@ function BoardingBookingDetailSheets({
           onOpenChange={setCancelOpen}
           booking={booking}
           onCancelled={() => onBookingChange(null)}
+        />
+      )}
+
+      {booking && addPetOpen && (
+        <AddPetToBookingDialog
+          open={addPetOpen}
+          onOpenChange={setAddPetOpen}
+          booking={booking}
+          onAdded={(addedPets) => {
+            queryClient.invalidateQueries({ queryKey: ["bookings"] });
+            onBookingChange({
+              ...booking,
+              booking_pets: [...booking.booking_pets, ...addedPets],
+            });
+          }}
         />
       )}
 
