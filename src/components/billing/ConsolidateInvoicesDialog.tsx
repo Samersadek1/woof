@@ -58,7 +58,7 @@ export function ConsolidateInvoicesDialog({
         <DialogHeader>
           <DialogTitle>Consolidate {invoiceIds.length} invoices</DialogTitle>
           <DialogDescription>
-            Creates one new finalised invoice and voids the selected sources.
+            Creates one new invoice for the combined balance and voids the selected sources.
           </DialogDescription>
         </DialogHeader>
         <StaffNameSelect value={staffName} onChange={setStaffName} label="Processed by" />
