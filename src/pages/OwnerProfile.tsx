@@ -31,13 +31,14 @@ import {
   useInvoicesForOwner,
   useOwnerStatement,
   useBillingAdjustments,
-  useFinaliseInvoice,
+  useCollectPayment,
   formatAed,
   type InvoiceWithItems,
   type InvoiceStatus,
 } from "@/hooks/useBilling";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import { usePendingHourlyDaycareForOwner } from "@/hooks/useDaycare";
 import { Input } from "@/components/ui/input";
@@ -105,7 +106,7 @@ import {
   BedDouble,
   ExternalLink,
   FileText,
-  CheckCircle2,
+  CreditCard,
   Printer,
   Receipt,
 } from "lucide-react";
@@ -285,7 +286,10 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const { data: topupReceipts = [], isLoading: topupReceiptsLoading } =
     useWalletTopupReceipts(ownerId);
   const { adjustments, isLoading: adjLoading } = useBillingAdjustments(ownerId);
-  const finalise = useFinaliseInvoice();
+  const collectPayment = useCollectPayment();
+  const [collectPaymentInvoice, setCollectPaymentInvoice] = useState<
+    { id: string; total: number; ownerId: string } | null
+  >(null);
 
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState("");
@@ -305,10 +309,22 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
     [invoices],
   );
 
-  const handleFinalise = (inv: InvoiceWithItems) => {
-    finalise.mutate(inv.id, {
-      onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} finalised`),
-      onError: (err) => toast.error(err.message),
+  const handleCollectPayment = (inv: InvoiceWithItems) => {
+    if ((inv.total ?? 0) === 0) {
+      // Zero-value invoice — close directly to paid, no dialog.
+      collectPayment.mutate(
+        { invoiceId: inv.id, total: 0, ownerId: inv.owner_id },
+        {
+          onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} closed`),
+          onError: (err) => toast.error(err.message),
+        },
+      );
+      return;
+    }
+    setCollectPaymentInvoice({
+      id: inv.id,
+      total: (inv.total ?? 0) - (inv.amount_paid ?? 0),
+      ownerId: inv.owner_id,
     });
   };
 
@@ -524,8 +540,8 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                             <ExternalLink className="h-3.5 w-3.5" />
                           </Button>
                           {canFinalise && (
-                            <Button size="sm" variant="ghost" disabled={finalise.isPending} onClick={() => handleFinalise(inv)} title="Finalise">
-                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            <Button size="sm" variant="ghost" disabled={collectPayment.isPending} onClick={() => handleCollectPayment(inv)} title="Collect Payment">
+                              <CreditCard className="h-3.5 w-3.5" />
                             </Button>
                           )}
                         </div>
@@ -681,6 +697,19 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
           void refetchInvoices();
         }}
       />
+
+      {collectPaymentInvoice && (
+        <PaymentSplitDialog
+          open={!!collectPaymentInvoice}
+          onOpenChange={(o) => {
+            if (!o) setCollectPaymentInvoice(null);
+          }}
+          invoiceId={collectPaymentInvoice.id}
+          ownerId={collectPaymentInvoice.ownerId}
+          invoiceTotal={collectPaymentInvoice.total}
+          onSuccess={() => setCollectPaymentInvoice(null)}
+        />
+      )}
     </section>
   );
 }

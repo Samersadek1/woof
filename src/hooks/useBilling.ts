@@ -533,19 +533,43 @@ export function useCreateInvoice() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Hook 4: useFinaliseInvoice
+// Hook 4: useCollectPayment
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function useFinaliseInvoice() {
+/**
+ * Replaces the old "Finalise" action. Zero-value invoices close directly to
+ * `paid`; invoices with a balance are a no-op here — the caller opens
+ * PaymentSplitDialog, which records payment and the DB trigger updates status.
+ * `finalised` is never set by this path.
+ */
+export function useCollectPayment() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (invoiceId: string) => {
+    mutationFn: async ({
+      invoiceId,
+      total,
+      ownerId: _ownerId,
+    }: {
+      invoiceId: string;
+      total: number;
+      ownerId: string;
+    }) => {
+      if (total === 0) {
+        const { data, error } = await supabase
+          .from("invoices")
+          .update({ status: "paid" as const, paid_at: new Date().toISOString() })
+          .eq("id", invoiceId)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      }
+      // Balance owed — no status change here; PaymentSplitDialog handles payment.
       const { data, error } = await supabase
         .from("invoices")
-        .update({ status: "finalised" as const })
-        .eq("id", invoiceId)
         .select()
+        .eq("id", invoiceId)
         .single();
       if (error) throw error;
       return data;

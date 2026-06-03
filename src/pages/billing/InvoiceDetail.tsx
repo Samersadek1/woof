@@ -9,7 +9,7 @@ import { useCancellationRefundPreview } from "@/hooks/useCancellationRefund";
 import { useProcessWalletPayment, useRecordExternalPayment, useRevertInvoicePayment, useUpdatePaymentAttribution } from "@/hooks/usePayments";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { paymentMethodLabel, type ExternalPaymentMethod } from "@/lib/paymentMethod";
-import { Printer, Trash2 } from "lucide-react";
+import { CreditCard, Printer, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ import {
 import { toast } from "sonner";
 import { invoiceResolvedAmounts, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
 import { InvoiceAdjustmentAmountInput } from "@/components/billing/InvoiceAdjustmentAmountInput";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import {
   discountReasonWithMode,
   type InvoiceDiscountMode,
@@ -111,6 +112,7 @@ export default function InvoiceDetailPage() {
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustApprover, setAdjustApprover] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [collectPaymentOpen, setCollectPaymentOpen] = useState(false);
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [deleteLineTarget, setDeleteLineTarget] = useState<{ id: string; description: string } | null>(null);
   const [deleteAdjustmentTarget, setDeleteAdjustmentTarget] =
@@ -225,11 +227,19 @@ export default function InvoiceDetailPage() {
     beginExternalPay(method);
   };
 
-  const doFinalise = async () => {
-    const { error } = await supabase.from("invoices").update({ status: "finalised" }).eq("id", inv.id);
-    if (error) return toast.error(error.message);
-    toast.success("Invoice finalised.");
-    refetch();
+  const doCollectPayment = async () => {
+    if ((inv.total ?? 0) === 0) {
+      // Zero-value — close directly to paid (never finalised).
+      const { error } = await supabase
+        .from("invoices")
+        .update({ status: "paid", paid_at: new Date().toISOString() })
+        .eq("id", inv.id);
+      if (error) return toast.error(error.message);
+      toast.success("Invoice closed", { description: "No charge invoice marked as paid." });
+      refetch();
+    } else {
+      setCollectPaymentOpen(true);
+    }
   };
 
   const doVoid = async () => {
@@ -457,7 +467,7 @@ export default function InvoiceDetailPage() {
           data.lines.some((l) => l.service_type === HOURLY_PLACEHOLDER_SERVICE_TYPE) && (
           <Card className="border-amber-200 bg-amber-50/40">
             <CardContent className="p-4 text-sm text-amber-900">
-              This draft invoice has placeholder hourly lines. Use <strong>Complete Hourly Billing</strong> in Daycare Operations to enter hours and finalise, or add line items manually and click <strong>Finalise</strong>.
+              This draft invoice has placeholder hourly lines. Use <strong>Complete Hourly Billing</strong> in Daycare Operations to enter hours and finalise, or add line items manually and click <strong>Collect Payment</strong>.
             </CardContent>
           </Card>
         )}
@@ -607,7 +617,20 @@ export default function InvoiceDetailPage() {
             )}
             {status === "draft" && (
               <>
-                <Button onClick={doFinalise}>Finalise</Button>
+                <Button onClick={doCollectPayment}>
+                  <CreditCard className="mr-2 h-4 w-4" /> Collect Payment
+                </Button>
+                <PaymentSplitDialog
+                  open={collectPaymentOpen}
+                  onOpenChange={setCollectPaymentOpen}
+                  invoiceId={inv.id}
+                  ownerId={inv.owner_id}
+                  invoiceTotal={Math.max(0, (inv.total ?? 0) - (inv.amount_paid ?? 0))}
+                  onSuccess={() => {
+                    setCollectPaymentOpen(false);
+                    refetch();
+                  }}
+                />
                 {canEditInvoiceLineItems(status) && (
                   <Button variant="outline" onClick={() => setAddLineOpen(true)}>
                     Add line item

@@ -15,7 +15,7 @@ import {
 import {
   useInvoicesForOwner,
   useCreateInvoice,
-  useFinaliseInvoice,
+  useCollectPayment,
   useProcessPayment,
   useVoidInvoice,
   useCalculateCancellationRefund,
@@ -34,6 +34,7 @@ import {
 } from "@/lib/paymentMethod";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
@@ -874,7 +875,10 @@ function WalletTab({ ownerId, owner }: { ownerId: string; owner: { first_name: s
 function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: string }) {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const finalise = useFinaliseInvoice();
+  const collectPayment = useCollectPayment();
+  const [collectPaymentInvoice, setCollectPaymentInvoice] = useState<
+    { id: string; total: number; ownerId: string } | null
+  >(null);
   const [payInvoice, setPayInvoice] = useState<InvoiceWithItems | null>(null);
   const [voidInvoice, setVoidInvoice] = useState<InvoiceWithItems | null>(null);
   const [viewInvoice, setViewInvoice] = useState<InvoiceWithItems | null>(null);
@@ -891,10 +895,22 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
     [invoices],
   );
 
-  const handleFinalise = (inv: InvoiceWithItems) => {
-    finalise.mutate(inv.id, {
-      onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} finalised`),
-      onError: (err) => toast.error(err.message),
+  const handleCollectPayment = (inv: InvoiceWithItems) => {
+    if ((inv.total ?? 0) === 0) {
+      // Zero-value invoice — close directly to paid, no dialog.
+      collectPayment.mutate(
+        { invoiceId: inv.id, total: 0, ownerId: inv.owner_id },
+        {
+          onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} closed`),
+          onError: (err) => toast.error(err.message),
+        },
+      );
+      return;
+    }
+    setCollectPaymentInvoice({
+      id: inv.id,
+      total: (inv.total ?? 0) - (inv.amount_paid ?? 0),
+      ownerId: inv.owner_id,
     });
   };
 
@@ -1050,8 +1066,8 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                             <Eye className="mr-1 h-3.5 w-3.5" /> View
                           </Button>
                           {canFinalise && (
-                            <Button size="sm" variant="outline" disabled={finalise.isPending} onClick={() => handleFinalise(inv)}>
-                              <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Finalise
+                            <Button size="sm" variant="outline" disabled={collectPayment.isPending} onClick={() => handleCollectPayment(inv)}>
+                              <CreditCard className="mr-1 h-3.5 w-3.5" /> Collect Payment
                             </Button>
                           )}
                           {canPay && (
@@ -1102,6 +1118,19 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
           refetchInvoices();
         }}
       />
+
+      {collectPaymentInvoice && (
+        <PaymentSplitDialog
+          open={!!collectPaymentInvoice}
+          onOpenChange={(o) => {
+            if (!o) setCollectPaymentInvoice(null);
+          }}
+          invoiceId={collectPaymentInvoice.id}
+          ownerId={collectPaymentInvoice.ownerId}
+          invoiceTotal={collectPaymentInvoice.total}
+          onSuccess={() => setCollectPaymentInvoice(null)}
+        />
+      )}
     </>
   );
 }
