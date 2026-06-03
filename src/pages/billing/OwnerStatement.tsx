@@ -14,6 +14,10 @@ function aed(v: number) {
   return `AED ${v.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function collectableBalance(total: number, amountPaid = 0): number {
+  return Math.max(0, total - amountPaid);
+}
+
 function deriveBranchCodeFromInvoiceNumber(invoiceNumber: string | null): string | null {
   const normalized = invoiceNumber?.trim();
   if (!normalized) return null;
@@ -34,8 +38,18 @@ export default function OwnerStatementPage() {
     () =>
       statement
         .filter((r) => ["outstanding", "overdue", "partially_paid"].includes(r.status))
+        .filter((r) => collectableBalance(r.total, r.amount_paid ?? 0) > 0)
         .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")),
     [statement],
+  );
+
+  const outstandingTotal = useMemo(
+    () =>
+      outstanding.reduce(
+        (sum, r) => sum + collectableBalance(r.total, r.amount_paid ?? 0),
+        0,
+      ),
+    [outstanding],
   );
 
   const byMonth = useMemo(() => {
@@ -101,7 +115,12 @@ export default function OwnerStatementPage() {
 
           <Card>
             <CardContent className="p-5 space-y-3">
-              <h3 className="font-semibold">Outstanding invoices</h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-semibold">Outstanding invoices</h3>
+                {!isLoading && outstanding.length > 0 ? (
+                  <p className="text-sm font-semibold tabular-nums">{aed(outstandingTotal)}</p>
+                ) : null}
+              </div>
               {isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading…</p>
               ) : outstanding.length === 0 ? (
@@ -123,7 +142,9 @@ export default function OwnerStatementPage() {
                         <p className="text-xs text-muted-foreground">Due {r.due_date ? format(new Date(`${r.due_date}T00:00:00`), "d MMM yyyy") : "—"}</p>
                       </div>
                       <div className="text-right">
-                        <p className="font-semibold tabular-nums">{aed(r.total)}</p>
+                        <p className="font-semibold tabular-nums">
+                          {aed(collectableBalance(r.total, r.amount_paid ?? 0))}
+                        </p>
                         {r.days_overdue > 0 && <p className="text-xs text-red-600">Overdue {r.days_overdue}d</p>}
                       </div>
                     </div>

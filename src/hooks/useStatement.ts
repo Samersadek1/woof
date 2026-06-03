@@ -8,6 +8,7 @@ export type StatementRow = {
   service_type: string | null;
   status: string;
   total: number;
+  amount_paid?: number;
   created_at: string;
   due_date: string | null;
   days_overdue: number;
@@ -26,7 +27,7 @@ function daysOverdueFor(dueDate: string | null, status: string): number {
 async function loadStatementDirect(ownerId: string): Promise<StatementRow[]> {
   const { data, error } = await supabase
     .from("invoices")
-    .select("id, invoice_number, status, total, vat_aed, service_type, notes, created_at, due_date, receipt_only")
+    .select("id, invoice_number, status, total, amount_paid, vat_aed, service_type, notes, created_at, due_date, receipt_only")
     .eq("owner_id", ownerId)
     .or("receipt_only.is.null,receipt_only.eq.false")
     .order("created_at", { ascending: false });
@@ -43,6 +44,7 @@ async function loadStatementDirect(ownerId: string): Promise<StatementRow[]> {
       service_type: r.service_type,
       notes: r.notes,
     }).grandTotal,
+    amount_paid: Number(r.amount_paid ?? 0),
     created_at: r.created_at,
     due_date: r.due_date,
     days_overdue: daysOverdueFor(r.due_date, r.status),
@@ -62,7 +64,18 @@ export function useStatementOfAccount(ownerId?: string) {
       if (error) {
         return loadStatementDirect(ownerId as string);
       }
-      return (data ?? []) as StatementRow[];
+      const { data: paidRows, error: paidErr } = await supabase
+        .from("invoices")
+        .select("id, amount_paid")
+        .eq("owner_id", ownerId as string);
+      if (paidErr) throw paidErr;
+      const paidById = new Map(
+        (paidRows ?? []).map((row) => [row.id, Number(row.amount_paid ?? 0)]),
+      );
+      return ((data ?? []) as StatementRow[]).map((row) => ({
+        ...row,
+        amount_paid: paidById.get(row.invoice_id) ?? 0,
+      }));
     },
   });
 }
