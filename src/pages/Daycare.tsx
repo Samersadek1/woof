@@ -52,6 +52,7 @@ import {
   CompleteHourlyBillingDialog,
   type HourlyBillingSession,
 } from "@/components/daycare/CompleteHourlyBillingDialog";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import {
   composeNotesWithBillingPath,
   parseDaycareBillingPath,
@@ -649,6 +650,10 @@ function PlannerTab() {
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [billingChoiceByPet, setBillingChoiceByPet] = useState<Record<string, string>>({});
   const [skipInvoiceDiscount, setSkipInvoiceDiscount] = useState(false);
+  // Single-day check-in now creates an `outstanding` invoice and collects
+  // payment via PaymentSplitDialog (same pattern as hourly completion).
+  const [singleDayPayment, setSingleDayPayment] = useState<{ invoiceId: string; total: number } | null>(null);
+  const [singleDayPayOpen, setSingleDayPayOpen] = useState(false);
   const [checkInDraft, setCheckInDraft] = useState({
     session_date: TODAY,
     pickup_used: false,
@@ -1067,16 +1072,30 @@ function PlannerTab() {
 
       if (referenceSessionId && lineItems.length > 0) {
         try {
-          await createServiceInvoice({
+          const singleDayInvoiceId = await createServiceInvoice({
             ownerId,
             serviceType: "daycare",
             referenceId: referenceSessionId,
             lineItems,
             notes: checkInDraft.remark || null,
-            invoiceStatus: "finalised",
+            // previously 'finalised' — changed to outstanding + explicit payment step
+            invoiceStatus: "outstanding",
             skipMemberDiscount: skipInvoiceDiscount,
             checkInDate: checkInDraft.session_date,
           });
+          // Open the payment dialog so staff confirms collection — even when the
+          // balance is zero (e.g. wallet credit covers it), never auto-collect.
+          const { data: createdInv } = await supabase
+            .from("invoices")
+            .select("total, amount_paid")
+            .eq("id", singleDayInvoiceId)
+            .maybeSingle();
+          const remaining = Math.max(
+            0,
+            (createdInv?.total ?? 0) - (createdInv?.amount_paid ?? 0),
+          );
+          setSingleDayPayment({ invoiceId: singleDayInvoiceId, total: remaining });
+          setSingleDayPayOpen(true);
         } catch (error) {
           const message = extractErrorMessage(error);
           toast.error(`Invoice failed: ${message}`);
@@ -1650,6 +1669,20 @@ function PlannerTab() {
           )}
         </CardContent>
       </Card>
+
+      {singleDayPayment && ownerId ? (
+        <PaymentSplitDialog
+          open={singleDayPayOpen}
+          onOpenChange={(v) => {
+            setSingleDayPayOpen(v);
+            if (!v) setSingleDayPayment(null);
+          }}
+          invoiceId={singleDayPayment.invoiceId}
+          ownerId={ownerId}
+          invoiceTotal={singleDayPayment.total}
+          title="Collect daycare payment"
+        />
+      ) : null}
     </div>
   );
 }

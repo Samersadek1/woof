@@ -1731,7 +1731,8 @@ const GroomingPage = () => {
           onOpenChange={setSplitPayOpen}
           invoiceId={payInvoice.id}
           ownerId={paymentAppt.owner_id}
-          invoiceTotal={payInvoiceTotals.grandTotal}
+          // net of prior payments — handles partial payment edge case
+          invoiceTotal={Math.max(0, payInvoiceTotals.grandTotal - (payInvoice?.amount_paid ?? 0))}
           defaultStaffName={paymentStaffName}
           title="Collect grooming payment"
           onSuccess={async () => {

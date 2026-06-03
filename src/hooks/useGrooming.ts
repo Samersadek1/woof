@@ -355,7 +355,7 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
       const { data, error } = await supabase
         .from("invoices")
         .select(
-          "id, invoice_number, status, total, vat_aed, payment_method, invoice_payments(payment_method, created_at)",
+          "id, invoice_number, status, total, vat_aed, amount_paid, payment_method, invoice_payments(payment_method, created_at)",
         )
         .eq("service_id", appointmentId!)
         .eq("service_type", "grooming")
@@ -377,6 +377,7 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
         status: data.status,
         total: data.total,
         vat_aed: data.vat_aed,
+        amount_paid: data.amount_paid,
         payment_method: paymentMethod,
       } as {
         id: string;
@@ -384,6 +385,7 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
         status: string;
         total: number | null;
         vat_aed: number | null;
+        amount_paid: number | null;
         payment_method: string | null;
       };
     },

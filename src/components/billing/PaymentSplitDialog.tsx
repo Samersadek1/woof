@@ -85,6 +85,7 @@ export function PaymentSplitDialog({
   }, [open, split.fromCard]);
 
   const cardNum = Math.max(0, roundAed(parseFloat(cardAmount) || 0));
+  // TODO: wallet-leg vs account-balance mismatch in PaymentSplitDialog
   const walletApplied = Math.max(0, roundAed(invoiceTotal - cardNum));
 
   const handleConfirm = async () => {

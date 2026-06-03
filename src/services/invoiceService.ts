@@ -229,59 +229,8 @@ export async function recordPayment(
   };
 }
 
-export interface ApplyWalletThenExternalParams {
-  invoiceId: string;
-  /** Outstanding balance to settle (incl. VAT). */
-  balanceDue: number;
-  /** Owner wallet balance available right now. */
-  walletAvailable: number;
-  /** Method to use for the remainder after wallet. */
-  externalMethod: Exclude<PaymentMethod, "wallet">;
-  recordedBy: string;
-  notes?: string;
-  client?: Client;
-}
-
-/**
- * Convenience: settle an invoice wallet-first then card/cash for the remainder,
- * recording each leg as its own `invoice_payments` row. Wallet is applied as
- * `min(balanceDue, walletAvailable)`.
- */
-export async function applyWalletThenExternal(
-  params: ApplyWalletThenExternalParams,
-): Promise<{ success: boolean; error?: string; walletApplied: number; externalApplied: number }> {
-  const balanceDue = roundAed(params.balanceDue);
-  const walletApplied = roundAed(Math.max(0, Math.min(balanceDue, params.walletAvailable)));
-  const externalApplied = roundAed(Math.max(0, balanceDue - walletApplied));
-
-  if (walletApplied > 0) {
-    const res = await recordPayment({
-      invoiceId: params.invoiceId,
-      amount: walletApplied,
-      method: "wallet",
-      recordedBy: params.recordedBy,
-      notes: params.notes,
-      client: params.client,
-    });
-    if (!res.success) return { success: false, error: res.error, walletApplied: 0, externalApplied: 0 };
-  }
-
-  if (externalApplied > 0) {
-    const res = await recordPayment({
-      invoiceId: params.invoiceId,
-      amount: externalApplied,
-      method: params.externalMethod,
-      recordedBy: params.recordedBy,
-      notes: params.notes,
-      client: params.client,
-    });
-    if (!res.success) {
-      return { success: false, error: res.error, walletApplied, externalApplied: 0 };
-    }
-  }
-
-  return { success: true, walletApplied, externalApplied };
-}
+// applyWalletThenExternal removed — use PaymentSplitDialog for wallet-first
+// split payments. recordPayment handles individual legs.
 
 export interface VoidInvoiceParams {
   invoiceId: string;
