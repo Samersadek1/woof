@@ -30,7 +30,7 @@ export function usePets(ownerId: string) {
         .eq("owner_id", ownerId);
 
       if (error) throw error;
-      return data as PetWithVaccinations[];
+      return (data as PetWithVaccinations[]).map((pet) => normalizePetDateOfBirth(pet));
     },
   });
 }
@@ -47,7 +47,7 @@ export function usePet(id: string) {
         .single();
 
       if (error) throw error;
-      return data as PetWithVaccinations;
+      return normalizePetDateOfBirth(data as PetWithVaccinations);
     },
   });
 }

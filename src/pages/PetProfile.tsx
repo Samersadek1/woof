@@ -2,6 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parse, differenceInYears, differenceInMonths, parseISO } from "date-fns";
+import { formatIsoDate, isValidIsoDate } from "@/lib/petProfileFields";
 import TopBar from "@/components/dashboard/TopBar";
 import { usePet, useUpdatePet } from "@/hooks/usePets";
 import { useUpdateAssessment } from "@/hooks/useAssessment";
@@ -213,8 +214,8 @@ type BookingDetailSelection =
   | { kind: "grooming"; groom: GroomingAppointmentWithJoins };
 
 function petAge(dob: string | null): string {
-  if (!dob) return "—";
-  const birth = parseISO(dob);
+  if (!isValidIsoDate(dob)) return "—";
+  const birth = parseISO(String(dob).slice(0, 10));
   const years = differenceInYears(new Date(), birth);
   if (years >= 1) return `${years} yr${years !== 1 ? "s" : ""}`;
   const months = differenceInMonths(new Date(), birth);
@@ -639,7 +640,12 @@ const PetProfilePage = () => {
               {[
                 { label: "Colour", value: pet.colour },
                 { label: "Gender", value: pet.gender ? pet.gender.charAt(0).toUpperCase() + pet.gender.slice(1) : null },
-                { label: "Date of birth", value: pet.date_of_birth ? `${format(parseISO(pet.date_of_birth), "d MMM yyyy")} (${petAge(pet.date_of_birth)})` : null },
+                {
+                  label: "Date of birth",
+                  value: isValidIsoDate(pet.date_of_birth)
+                    ? `${formatIsoDate(pet.date_of_birth, "d MMM yyyy")} (${petAge(pet.date_of_birth)})`
+                    : null,
+                },
                 { label: "Weight", value: pet.weight_kg != null ? `${pet.weight_kg} kg` : null },
                 { label: "Microchip", value: pet.microchip_number },
                 { label: "Vet", value: pet.vet_name },
@@ -729,9 +735,7 @@ const PetProfilePage = () => {
                   Assessment date
                 </p>
                 <p className="text-sm">
-                  {pet.assessment_date
-                    ? format(parseISO(pet.assessment_date), "d MMM yyyy")
-                    : "—"}
+                  {formatIsoDate(pet.assessment_date, "d MMM yyyy")}
                 </p>
               </div>
               <div>
@@ -795,10 +799,8 @@ const PetProfilePage = () => {
                   <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200">
                     Assessment scheduled for{" "}
                     {scheduledAssessment?.check_in_date
-                      ? format(parseISO(scheduledAssessment.check_in_date), "d MMM yyyy")
-                      : (pet.assessment_date
-                          ? format(parseISO(pet.assessment_date), "d MMM yyyy")
-                          : "—")}
+                      ? formatIsoDate(scheduledAssessment.check_in_date, "d MMM yyyy")
+                      : formatIsoDate(pet.assessment_date, "d MMM yyyy")}
                     {scheduledAssessmentSlot ? ` at ${scheduledAssessmentSlot}` : ""}
                   </Badge>
                   <Button onClick={markPassed} disabled={updateAssessment.isPending}>
@@ -861,7 +863,7 @@ const PetProfilePage = () => {
                             <span className="font-medium">
                               {row.units_remaining} {creditServiceLabel(row.service_code)} remaining
                             </span>
-                            {" "}— expires {format(parseISO(row.expires_at), "dd MMM yyyy")}
+                            {" "}— expires {formatIsoDate(row.expires_at, "dd MMM yyyy")}
                           </div>
                           {row.is_bonus ? (
                             <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200">
@@ -966,9 +968,9 @@ const PetProfilePage = () => {
                           </TableCell>
                           <TableCell className="text-sm font-medium">{service}</TableCell>
                           <TableCell className="text-sm whitespace-nowrap">
-                            {format(parseISO(b.check_in_date), "d MMM yyyy")}
+                            {formatIsoDate(b.check_in_date, "d MMM yyyy")}
                             {" → "}
-                            {format(parseISO(b.check_out_date), "d MMM yyyy")}
+                            {formatIsoDate(b.check_out_date, "d MMM yyyy")}
                           </TableCell>
                           <TableCell>
                             <Badge
@@ -989,7 +991,7 @@ const PetProfilePage = () => {
                     }
                     if (row.kind === "grooming") {
                       const g = row.groom;
-                      const dateLine = `${format(parseISO(g.appointment_date), "d MMM yyyy")}${
+                      const dateLine = `${formatIsoDate(g.appointment_date, "d MMM yyyy")}${
                         g.appointment_time
                           ? ` · ${formatGroomSlotTime(g.appointment_time)}`
                           : ""
@@ -1133,13 +1135,13 @@ const PetProfilePage = () => {
                   <div className="space-y-1">
                     <p className="text-xs uppercase text-muted-foreground font-medium">Check-in</p>
                     <p className="text-sm">
-                      {format(parseISO(bookingDetail.stay.check_in_date), "d MMM yyyy")}
+                      {formatIsoDate(bookingDetail.stay.check_in_date, "d MMM yyyy")}
                     </p>
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs uppercase text-muted-foreground font-medium">Check-out</p>
                     <p className="text-sm">
-                      {format(parseISO(bookingDetail.stay.check_out_date), "d MMM yyyy")}
+                      {formatIsoDate(bookingDetail.stay.check_out_date, "d MMM yyyy")}
                     </p>
                   </div>
                 </div>
@@ -1192,7 +1194,7 @@ const PetProfilePage = () => {
               <SheetHeader>
                 <SheetTitle>Grooming appointment</SheetTitle>
                 <SheetDescription>
-                  {format(parseISO(bookingDetail.groom.appointment_date), "EEEE, d MMMM yyyy")}
+                  {formatIsoDate(bookingDetail.groom.appointment_date, "EEEE, d MMMM yyyy")}
                   {bookingDetail.groom.appointment_time
                     ? ` · ${formatGroomSlotTime(bookingDetail.groom.appointment_time)}`
                     : ""}
