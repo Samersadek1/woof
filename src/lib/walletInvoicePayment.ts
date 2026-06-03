@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { deriveInvoiceStatusAfterRecalc } from "@/lib/boardingInvoiceLineUtils";
 import { roundAed } from "@/lib/money";
 import { invoiceAmountDue } from "@/lib/vatConfig";
+import { recordPayment } from "@/services/invoiceService";
 
 export type WalletPaymentResult = {
   success: boolean;
@@ -13,48 +13,6 @@ export type WalletPaymentResult = {
   shortfall?: number;
   partial?: boolean;
 };
-
-/**
- * Dual-write a wallet payment into the unified `invoice_payments` table (new
- * model) alongside the legacy invoices.amount_paid update. The
- * `trg_update_invoice_status_on_payment` trigger then recomputes status from the
- * sum of invoice_payments. Best-effort: a failure here must not fail a payment
- * that already debited the wallet.
- *
- * closing_balance = invoice.total - amount_paid (remaining invoice balance).
- * Wallet-balance-after lives on wallet_transactions.balance_after, not here.
- */
-async function dualWriteWalletPayment(
-  supabase: SupabaseClient<Database>,
-  params: {
-    invoiceId: string;
-    ownerId: string;
-    amount: number;
-    walletTransactionId: string | null;
-    performedBy: string;
-  },
-): Promise<void> {
-  try {
-    const { data: inv } = await supabase
-      .from("invoices")
-      .select("opening_balance, total, amount_paid")
-      .eq("id", params.invoiceId)
-      .single();
-    const closingBalance = roundAed((inv?.total ?? 0) - (inv?.amount_paid ?? 0));
-    await supabase.from("invoice_payments").insert({
-      invoice_id: params.invoiceId,
-      owner_id: params.ownerId,
-      amount: roundAed(params.amount),
-      payment_method: "wallet",
-      wallet_transaction_id: params.walletTransactionId,
-      opening_balance: roundAed(inv?.opening_balance ?? 0),
-      closing_balance: closingBalance,
-      recorded_by: params.performedBy || "system",
-    });
-  } catch {
-    // Best-effort dual-write; legacy amount_paid update already succeeded.
-  }
-}
 
 type RpcWalletResult = {
   success?: boolean;
@@ -126,16 +84,37 @@ export async function payInvoiceFromWallet(
     if (!rpcErr && data) {
       const rpc = data as RpcWalletResult;
       if (rpc.success) {
-        await dualWriteWalletPayment(supabase, {
-          invoiceId,
-          ownerId,
-          amount: rpc.amount_charged ?? balanceDue,
-          walletTransactionId: null,
-          performedBy,
-        });
+        const amount = rpc.amount_charged ?? balanceDue;
+        // RPC already debited the wallet + wrote wallet_transactions; only the
+        // invoice_payments row is still needed. Best-effort dual-write.
+        try {
+          const dual = await recordPayment({
+            invoiceId,
+            amount,
+            method: "wallet",
+            recordedBy: performedBy,
+            skipWalletDeduction: true,
+            client: supabase,
+          });
+          if (!dual.success) {
+            console.error("[invoice_payments dual-write failed]", {
+              invoiceId,
+              amount,
+              err: dual.error,
+            });
+            // Non-fatal — legacy path already recorded payment
+          }
+        } catch (err) {
+          console.error("[invoice_payments dual-write failed]", {
+            invoiceId,
+            amount,
+            err,
+          });
+          // Non-fatal — legacy path already recorded payment
+        }
         return {
           success: true,
-          amountCharged: rpc.amount_charged ?? balanceDue,
+          amountCharged: amount,
           newWalletBalance: rpc.new_balance,
           ownerId,
         };
@@ -152,68 +131,29 @@ export async function payInvoiceFromWallet(
   }
 
   const chargeAmount = roundAed(Math.min(walletBalance, balanceDue));
-  const newWalletBalance = roundAed(walletBalance - chargeAmount);
   const newAmountPaid = roundAed(alreadyPaid + chargeAmount);
   const partial = newAmountPaid < grandTotal;
-  const newStatus = deriveInvoiceStatusAfterRecalc(
-    invoice.status,
-    newAmountPaid,
-    grandTotal,
-  );
 
-  const { error: ownerUpdateErr } = await supabase
-    .from("owners")
-    .update({ wallet_balance: newWalletBalance })
-    .eq("id", ownerId);
-  if (ownerUpdateErr) {
-    return { success: false, error: ownerUpdateErr.message, ownerId };
-  }
-
-  const invoiceUpdate: Database["public"]["Tables"]["invoices"]["Update"] = {
-    status: newStatus as Database["public"]["Enums"]["invoice_status"],
-    payment_method: "wallet",
-    amount_paid: newAmountPaid,
-  };
-  if (!partial) {
-    invoiceUpdate.paid_at = new Date().toISOString();
-  }
-
-  const { error: invUpdateErr } = await supabase
-    .from("invoices")
-    .update(invoiceUpdate)
-    .eq("id", invoiceId);
-  if (invUpdateErr) {
-    return { success: false, error: invUpdateErr.message, ownerId };
-  }
-
-  const { data: txRow, error: txErr } = await supabase
-    .from("wallet_transactions")
-    .insert({
-      owner_id: ownerId,
-      transaction_type: "deduction",
-      amount: -chargeAmount,
-      balance_after: newWalletBalance,
-      invoice_id: invoiceId,
-      reference_type: "invoice",
-      reference_id: invoiceId,
-      performed_by: performedBy,
-      notes: partial
-        ? "Partial invoice payment via wallet"
-        : "Invoice payment via wallet",
-    })
-    .select("id")
-    .single();
-  if (txErr) {
-    return { success: false, error: txErr.message, ownerId };
-  }
-
-  await dualWriteWalletPayment(supabase, {
+  // recordPayment owns the wallet deduction (wallet_transactions + balance
+  // decrement), the invoice_payments row, and — via the
+  // trg_update_invoice_status_on_payment trigger — invoices.amount_paid / status
+  // / paid_at. This is the primary write here (not a best-effort dual-write), so
+  // a failure is fatal for this payment.
+  const res = await recordPayment({
     invoiceId,
-    ownerId,
     amount: chargeAmount,
-    walletTransactionId: txRow?.id ?? null,
-    performedBy,
+    method: "wallet",
+    recordedBy: performedBy,
+    notes: partial
+      ? "Partial invoice payment via wallet"
+      : "Invoice payment via wallet",
+    client: supabase,
   });
+  if (!res.success) {
+    return { success: false, error: res.error, ownerId };
+  }
+
+  const newWalletBalance = res.closingBalance ?? roundAed(walletBalance - chargeAmount);
 
   return {
     success: true,

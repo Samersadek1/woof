@@ -7,6 +7,7 @@ import {
   invoicePaymentMethodToTransactionType,
   type ExternalPaymentMethod,
 } from "@/lib/paymentMethod";
+import { recordPayment } from "@/services/invoiceService";
 
 export type RecordExternalPaymentResult = {
   success: boolean;
@@ -81,14 +82,17 @@ export async function recordExternalInvoicePayment(
   });
   if (txErr) return { success: false, error: txErr.message };
 
+  // amount_paid / status / paid_at are owned by the
+  // trg_update_invoice_status_on_payment trigger (fires on the invoice_payments
+  // insert in recordPayment below). We still set status/paid_at here as a
+  // best-effort fallback for the case where the payment row insert fails; the
+  // trigger overwrites these from SUM(invoice_payments) on success.
   const { error: payErr } = await supabase
     .from("invoices")
     .update({
       status: newStatus as Database["public"]["Enums"]["invoice_status"],
       // TODO: deprecate after invoice_payments migration
       payment_method: method,
-      // TODO: deprecate after invoice_payments migration
-      amount_paid: newAmountPaid,
       paid_at: partial ? null : new Date().toISOString(),
     })
     .eq("id", invoice.id);
@@ -100,29 +104,37 @@ export async function recordExternalInvoicePayment(
     };
   }
 
-  // Dual-write to invoice_payments (new model). Best-effort: the legacy
-  // amount_paid update above already succeeded. closing_balance is the remaining
-  // invoice balance (total - amount_paid); wallet balance is unaffected by
-  // card/cash payments and is not represented here.
+  // Record the payment in the unified invoice_payments table via the shared
+  // service. Card/cash do not move the wallet, so skipWalletDeduction keeps
+  // recordPayment from touching wallet_transactions / owner.wallet_balance — the
+  // legacy +amount wallet_transactions log above is the audit record for the
+  // external payment. The trigger then sets amount_paid / status from the row.
+  // Best-effort: the wallet_transactions log already recorded the payment.
   try {
-    const { data: inv } = await supabase
-      .from("invoices")
-      .select("opening_balance, total, amount_paid")
-      .eq("id", invoice.id)
-      .single();
-    const closingBalance = roundAed((inv?.total ?? 0) - (inv?.amount_paid ?? 0));
-    await supabase.from("invoice_payments").insert({
-      invoice_id: invoice.id,
-      owner_id: invoice.owner_id,
+    const dual = await recordPayment({
+      invoiceId: invoice.id,
       amount: roundAed(amount),
-      payment_method: method,
-      wallet_transaction_id: null,
-      opening_balance: roundAed(inv?.opening_balance ?? 0),
-      closing_balance: closingBalance,
-      recorded_by: performedBy.trim() || "system",
+      method,
+      recordedBy: performedBy.trim() || "system",
+      notes: note?.trim() || undefined,
+      skipWalletDeduction: true,
+      client: supabase,
     });
-  } catch {
-    // Best-effort dual-write.
+    if (!dual.success) {
+      console.error("[invoice_payments dual-write failed]", {
+        invoiceId: invoice.id,
+        amount,
+        err: dual.error,
+      });
+      // Non-fatal — legacy path already recorded payment
+    }
+  } catch (err) {
+    console.error("[invoice_payments dual-write failed]", {
+      invoiceId: invoice.id,
+      amount,
+      err,
+    });
+    // Non-fatal — legacy path already recorded payment
   }
 
   return {

@@ -107,6 +107,15 @@ export interface RecordPaymentParams {
   recordedBy: string;
   notes?: string;
   client?: Client;
+  /**
+   * When the wallet has already been debited by the caller (e.g. the
+   * process_wallet_payment RPC, or a legacy wallet flow), skip creating the
+   * wallet_transactions deduction and decrementing owner.wallet_balance here.
+   * Only the invoice_payments row is written. Default false.
+   */
+  skipWalletDeduction?: boolean;
+  /** Link an existing wallet_transactions row to the payment. Default null. */
+  walletTransactionId?: string | null;
 }
 
 export interface RecordPaymentResult {
@@ -159,9 +168,9 @@ export async function recordPayment(
   const closingBalance = roundAed(openingBalance - amount);
   const recordedBy = params.recordedBy.trim() || "system";
 
-  let walletTransactionId: string | null = null;
+  let walletTransactionId: string | null = params.walletTransactionId ?? null;
 
-  if (params.method === "wallet") {
+  if (params.method === "wallet" && !params.skipWalletDeduction) {
     const { data: tx, error: txErr } = await supabase
       .from("wallet_transactions")
       .insert({
