@@ -31,9 +31,9 @@ BEGIN
   UPDATE invoices SET
     amount_paid = v_paid,
     status = CASE
-      WHEN v_paid <= 0       THEN 'outstanding'
-      WHEN v_paid >= v_total THEN 'paid'
-      ELSE                        'partially_paid'
+      WHEN v_paid <= 0       THEN 'outstanding'::invoice_status
+      WHEN v_paid >= v_total THEN 'paid'::invoice_status
+      ELSE                        'partially_paid'::invoice_status
     END,
     paid_at    = CASE WHEN v_paid >= v_total THEN now() ELSE NULL END,
     updated_at = now()
