@@ -56,6 +56,7 @@ export function useStatementOfAccount(ownerId?: string) {
     queryKey: ["statement", ownerId],
     enabled: !!ownerId,
     queryFn: async () => {
+      // TODO: get_statement_of_account RPC doesn't filter receipt_only — align with fallback query
       const { data, error } = await supabase.rpc("get_statement_of_account", {
         p_owner_id: ownerId as string,
       });
