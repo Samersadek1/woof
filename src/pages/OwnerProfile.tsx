@@ -32,6 +32,7 @@ import {
   useOwnerStatement,
   useBillingAdjustments,
   useCollectPayment,
+  useMarkAsDue,
   formatAed,
   type InvoiceWithItems,
   type InvoiceStatus,
@@ -107,6 +108,7 @@ import {
   ExternalLink,
   FileText,
   CreditCard,
+  Clock,
   Printer,
   Receipt,
 } from "lucide-react";
@@ -287,6 +289,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
     useWalletTopupReceipts(ownerId);
   const { adjustments, isLoading: adjLoading } = useBillingAdjustments(ownerId);
   const collectPayment = useCollectPayment();
+  const markAsDue = useMarkAsDue();
   const [collectPaymentInvoice, setCollectPaymentInvoice] = useState<
     { id: string; total: number; ownerId: string } | null
   >(null);
@@ -308,6 +311,13 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
     () => invoices.filter((inv) => canConsolidateInvoiceStatus(inv.status)).length,
     [invoices],
   );
+
+  const handleMarkAsDue = (inv: InvoiceWithItems) => {
+    markAsDue.mutate(inv.id, {
+      onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} marked as due`),
+      onError: (err) => toast.error(err.message),
+    });
+  };
 
   const handleCollectPayment = (inv: InvoiceWithItems) => {
     if ((inv.total ?? 0) === 0) {
@@ -539,6 +549,11 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
                           </Button>
+                          {canFinalise && (
+                            <Button size="sm" variant="ghost" disabled={markAsDue.isPending} onClick={() => handleMarkAsDue(inv)} title="Mark as Due">
+                              <Clock className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                           {canFinalise && (
                             <Button size="sm" variant="ghost" disabled={collectPayment.isPending} onClick={() => handleCollectPayment(inv)} title="Collect Payment">
                               <CreditCard className="h-3.5 w-3.5" />

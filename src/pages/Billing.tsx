@@ -16,6 +16,7 @@ import {
   useInvoicesForOwner,
   useCreateInvoice,
   useCollectPayment,
+  useMarkAsDue,
   useProcessPayment,
   useVoidInvoice,
   useCalculateCancellationRefund,
@@ -876,6 +877,7 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const collectPayment = useCollectPayment();
+  const markAsDue = useMarkAsDue();
   const [collectPaymentInvoice, setCollectPaymentInvoice] = useState<
     { id: string; total: number; ownerId: string } | null
   >(null);
@@ -894,6 +896,13 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
     () => invoices.filter((inv) => canConsolidateInvoiceStatus(inv.status)).length,
     [invoices],
   );
+
+  const handleMarkAsDue = (inv: InvoiceWithItems) => {
+    markAsDue.mutate(inv.id, {
+      onSuccess: () => toast.success(`Invoice ${inv.invoice_number ?? ""} marked as due`),
+      onError: (err) => toast.error(err.message),
+    });
+  };
 
   const handleCollectPayment = (inv: InvoiceWithItems) => {
     if ((inv.total ?? 0) === 0) {
@@ -1065,6 +1074,11 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                           <Button size="sm" variant="outline" onClick={() => setViewInvoice(inv)} title="View invoice">
                             <Eye className="mr-1 h-3.5 w-3.5" /> View
                           </Button>
+                          {canFinalise && (
+                            <Button size="sm" variant="ghost" disabled={markAsDue.isPending} onClick={() => handleMarkAsDue(inv)}>
+                              <Clock className="mr-1 h-3.5 w-3.5" /> Mark as Due
+                            </Button>
+                          )}
                           {canFinalise && (
                             <Button size="sm" variant="outline" disabled={collectPayment.isPending} onClick={() => handleCollectPayment(inv)}>
                               <CreditCard className="mr-1 h-3.5 w-3.5" /> Collect Payment
