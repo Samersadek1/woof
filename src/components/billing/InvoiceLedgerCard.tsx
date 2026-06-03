@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
-import { formatAed } from "@/lib/money";
+import { formatAed, roundAed } from "@/lib/money";
 import { paymentMethodLabel } from "@/lib/paymentMethod";
 import { voidInvoice } from "@/services/invoiceService";
 import { useInvoiceLedger, invoiceLedgerQueryKey } from "@/hooks/useInvoiceLedger";
@@ -61,7 +61,8 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
     );
   }
 
-  const { invoice, lines, payments, amendments, openingBalance, charges, totalPaid } = ledger;
+  const { invoice, lines, payments, amendments, charges, totalPaid } = ledger;
+  const walletBalance = account?.walletBalance ?? 0;
   const accountBalance = account?.accountBalance ?? 0;
   const balanceDue = Math.max(0, charges - totalPaid);
   const invoiceSettled = balanceDue < 0.01;
@@ -76,6 +77,8 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
       : 0;
   const otherOutstanding = Math.max(0, (account?.outstandingDebt ?? 0) - thisOutstanding);
   const hasOtherUnpaid = otherOutstanding > 0.01;
+  // Account position before this invoice's unpaid portion is counted.
+  const balanceBefore = roundAed(accountBalance + thisOutstanding);
 
   const handleVoid = async () => {
     if (!voidReason.trim()) {
@@ -165,43 +168,39 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
           </div>
         ) : null}
 
-        {/* Ledger body */}
+        {/* Ledger body — account roll-forward: before → this invoice → after */}
         <div className="space-y-1 text-sm md:max-w-md">
-          <div className="pb-2">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Account balance</span>
-              <span
-                className={`tabular-nums font-medium ${
-                  accountBalance >= 0 ? "text-emerald-700" : "text-red-700"
-                }`}
-                data-testid="invoice-ledger-account-balance"
-              >
-                {accountBalance >= 0 ? "+" : ""}
-                {formatAed(accountBalance)}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Live position across the whole account (wallet minus all unpaid invoices). This is
-              not the same as balance due on this invoice below.
-            </p>
-          </div>
-
-          <div className="pt-2 border-t">
+          {/* ACCOUNT (before this invoice) */}
+          <div>
             <p className="font-semibold text-xs uppercase tracking-wide text-muted-foreground mb-1">
-              This invoice
+              Account
             </p>
-            <div className="flex justify-between py-0.5 text-muted-foreground">
-              <span>Opening balance (wallet at issue)</span>
-              <span className="tabular-nums">
-                {openingBalance >= 0 ? "+" : ""}
-                {formatAed(openingBalance)}
+            <div className="flex justify-between py-0.5">
+              <span className="text-muted-foreground">Wallet balance</span>
+              <span className="tabular-nums">{formatAed(walletBalance)}</span>
+            </div>
+            <div className="flex justify-between py-0.5">
+              <span className="text-muted-foreground">Other unpaid invoices</span>
+              <span className="tabular-nums text-red-700">
+                {otherOutstanding > 0 ? `- ${formatAed(otherOutstanding)}` : formatAed(0)}
+              </span>
+            </div>
+            <div className="flex justify-between border-t mt-1 pt-1 font-medium">
+              <span>Balance before this invoice</span>
+              <span
+                className={`tabular-nums ${balanceBefore >= 0 ? "text-emerald-700" : "text-red-700"}`}
+                data-testid="invoice-ledger-balance-before"
+              >
+                {balanceBefore < 0 ? "- " : ""}
+                {formatAed(Math.abs(balanceBefore))}
               </span>
             </div>
           </div>
 
+          {/* THIS INVOICE */}
           <div className="pt-2 border-t">
             <p className="font-semibold text-xs uppercase tracking-wide text-muted-foreground">
-              Charges
+              This invoice
             </p>
             {lines.length === 0 ? (
               <p className="text-muted-foreground py-1">No line items.</p>
@@ -211,56 +210,58 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
                 return (
                   <div key={l.id} className="flex justify-between py-0.5">
                     <span>{l.description}</span>
-                    <span className="tabular-nums text-red-700">-{formatAed(total)}</span>
+                    <span className="tabular-nums text-red-700">- {formatAed(total)}</span>
                   </div>
                 );
               })
             )}
-            <div className="flex justify-between border-t mt-1 pt-1 font-medium">
-              <span>Charges total</span>
-              <span className="tabular-nums text-red-700">-{formatAed(charges)}</span>
+            <div className="flex justify-between py-0.5">
+              <span className="text-muted-foreground">Charges</span>
+              <span className="tabular-nums text-red-700">- {formatAed(charges)}</span>
             </div>
-          </div>
-
-          <div className="pt-2 border-t">
-            <p className="font-semibold text-xs uppercase tracking-wide text-muted-foreground">
-              Payments
-            </p>
-            {payments.length === 0 ? (
-              <p className="text-muted-foreground py-1">No payments recorded.</p>
-            ) : (
-              payments.map((p) => (
-                <div key={p.id} className="flex justify-between py-0.5">
-                  <span>
-                    {paymentMethodLabel(p.payment_method)}
+            {payments.length > 0
+              ? payments.map((p) => (
+                  <div key={p.id} className="flex justify-between py-0.5">
                     <span className="text-muted-foreground">
-                      {" "}
-                      · {format(new Date(p.created_at), "d MMM, HH:mm")}
+                      {paymentMethodLabel(p.payment_method)}
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {format(new Date(p.created_at), "d MMM, HH:mm")}
+                      </span>
                     </span>
-                  </span>
-                  <span className="tabular-nums text-emerald-700">+{formatAed(p.amount)}</span>
-                </div>
-              ))
-            )}
+                    <span className="tabular-nums text-emerald-700">+ {formatAed(p.amount)}</span>
+                  </div>
+                ))
+              : null}
+            <div className="flex justify-between py-0.5">
+              <span className="text-muted-foreground">Payments</span>
+              <span className="tabular-nums text-emerald-700">+ {formatAed(totalPaid)}</span>
+            </div>
             <div className="flex justify-between border-t mt-1 pt-1 font-medium">
-              <span>Total paid</span>
-              <span className="tabular-nums text-emerald-700">+{formatAed(totalPaid)}</span>
+              <span>Due on this invoice</span>
+              <span
+                className={`tabular-nums ${invoiceSettled ? "text-emerald-700" : "text-red-700"}`}
+                data-testid="invoice-ledger-closing-balance"
+              >
+                {formatAed(balanceDue)}
+              </span>
             </div>
           </div>
 
+          {/* NEW ACCOUNT BALANCE (after this invoice) */}
           <div className="flex justify-between border-t-2 mt-2 pt-2 text-base font-semibold">
-            <span>Balance due (this invoice)</span>
+            <span>New account balance</span>
             <span
-              className={`tabular-nums ${invoiceSettled ? "text-emerald-700" : "text-red-700"}`}
-              data-testid="invoice-ledger-closing-balance"
+              className={`tabular-nums ${accountBalance >= 0 ? "text-emerald-700" : "text-red-700"}`}
+              data-testid="invoice-ledger-account-balance"
             >
-              {formatAed(balanceDue)}
+              {accountBalance < 0 ? "- " : "+ "}
+              {formatAed(Math.abs(accountBalance))}
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            {invoiceSettled
-              ? "Nothing left to collect on this invoice."
-              : "Amount still owed on this invoice only — not the full account balance above."}
+            Whole-account position after this invoice (wallet minus all unpaid invoices).
+            Negative means the owner owes; positive means account credit.
           </p>
         </div>
 

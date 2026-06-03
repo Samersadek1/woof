@@ -485,7 +485,13 @@ export async function getInvoiceLedger(
     service_type: invoice.service_type,
     notes: invoice.notes,
   });
-  const totalPaid = roundAed(payments.reduce((sum, p) => sum + (p.amount ?? 0), 0));
+  // Prefer the unified invoice_payments rows; fall back to the legacy
+  // invoices.amount_paid when no rows exist yet (un-backfilled legacy invoices
+  // and the rare best-effort dual-write miss). Avoids showing AED 0 paid / full
+  // balance due on invoices that were actually paid before invoice_payments.
+  const paymentsSum = roundAed(payments.reduce((sum, p) => sum + (p.amount ?? 0), 0));
+  const totalPaid =
+    payments.length > 0 ? paymentsSum : roundAed(invoice.amount_paid ?? 0);
   const closingBalance = roundAed(openingBalance - charges + totalPaid);
 
   return {
