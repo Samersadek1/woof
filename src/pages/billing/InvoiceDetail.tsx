@@ -5,9 +5,11 @@ import TopBar from "@/components/dashboard/TopBar";
 import { supabase } from "@/integrations/supabase/client";
 import { useInvoiceDetail } from "@/hooks/useInvoiceDetail";
 import { useLinkedDaycareSessionsForInvoice } from "@/hooks/useDaycare";
-import { useUpdatePaymentAttribution } from "@/hooks/usePayments";
+import { useCancellationRefundPreview } from "@/hooks/useCancellationRefund";
+import { useProcessWalletPayment, useRecordExternalPayment, useRevertInvoicePayment, useUpdatePaymentAttribution } from "@/hooks/usePayments";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
-import { Clock, CreditCard, Printer, Trash2 } from "lucide-react";
+import { paymentMethodLabel, type ExternalPaymentMethod } from "@/lib/paymentMethod";
+import { CreditCard, Printer, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +44,7 @@ import {
   resolveAdjustmentDiscountAmount,
 } from "@/lib/invoiceAdjustmentDiscount";
 import { applyInvoiceDiscountAdjustment, isDiscountAdjustmentType } from "@/lib/invoiceRecalc";
+import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { InvoiceLedgerCard } from "@/components/billing/InvoiceLedgerCard";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { DeleteInvoiceLineItemDialog } from "@/components/billing/DeleteInvoiceLineItemDialog";
@@ -49,11 +52,15 @@ import {
   DeleteInvoiceAdjustmentDialog,
   type DeleteInvoiceAdjustmentTarget,
 } from "@/components/billing/DeleteInvoiceAdjustmentDialog";
+import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
 import {
   canDeleteInvoiceAdjustments,
   canDeleteInvoiceLineItems,
+  canEditInvoiceLineItems,
 } from "@/lib/invoiceRecalc";
+import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
+import { canRevertInvoicePayment, walletRefundFromPayments } from "@/lib/revertInvoicePayment";
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700 border-slate-300",
@@ -80,27 +87,49 @@ export default function InvoiceDetailPage() {
   const backHref = returnTo?.startsWith("/") ? returnTo : "/billing/invoices";
   const backLabel = backHref.startsWith("/customers/") ? "Back to customer profile" : "Back to invoices";
   const { data, isLoading, refetch } = useInvoiceDetail(id);
+  const walletPay = useProcessWalletPayment();
+  const externalPay = useRecordExternalPayment();
+  const revertPayment = useRevertInvoicePayment();
   const updateAttribution = useUpdatePaymentAttribution();
 
+  const [walletOpen, setWalletOpen] = useState(false);
+  const [externalPayOpen, setExternalPayOpen] = useState<ExternalPaymentMethod | null>(null);
+  const [payAmount, setPayAmount] = useState("");
   const [voidBlockedOpen, setVoidBlockedOpen] = useState(false);
   const [editPaymentId, setEditPaymentId] = useState<string | null>(null);
   const [editPaymentName, setEditPaymentName] = useState("");
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const [revertReason, setRevertReason] = useState("");
+  const [serviceStart, setServiceStart] = useState("");
+  const [refundAmount, setRefundAmount] = useState("0");
+  const [refundNote, setRefundNote] = useState("");
+  const [performedBy, setPerformedBy] = useState("");
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustType, setAdjustType] = useState("discount_override");
   const [adjustDiscountMode, setAdjustDiscountMode] = useState<InvoiceDiscountMode>("percent");
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustApprover, setAdjustApprover] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [collectPaymentOpen, setCollectPaymentOpen] = useState(false);
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [deleteLineTarget, setDeleteLineTarget] = useState<{ id: string; description: string } | null>(null);
   const [deleteAdjustmentTarget, setDeleteAdjustmentTarget] =
     useState<DeleteInvoiceAdjustmentTarget | null>(null);
+  const [walletCreditPromptMethod, setWalletCreditPromptMethod] =
+    useState<ExternalPaymentMethod | null>(null);
 
   const handlePrint = useCallback(() => {
     if (!id) return;
     window.open(`/print/invoice/${id}`, "_blank", "noopener,noreferrer");
   }, [id]);
+
+  const refundPreview = useCancellationRefundPreview(
+    data?.invoice?.owner_id,
+    data?.invoice?.id,
+    serviceStart || undefined,
+  );
 
   const isDaycareInvoice = data?.invoice?.service_type === "daycare";
   const { data: linkedDaycareSessions = [] } = useLinkedDaycareSessionsForInvoice(
@@ -147,6 +176,16 @@ export default function InvoiceDetailPage() {
     };
   }, [data]);
 
+  const showRevertPayment = useMemo(() => {
+    if (!data?.invoice) return false;
+    return canRevertInvoicePayment(data.invoice, data.payments);
+  }, [data]);
+
+  const walletRevertAmount = useMemo(() => {
+    if (!data?.payments) return 0;
+    return walletRefundFromPayments(data.payments);
+  }, [data?.payments]);
+
   if (isLoading) {
     return (
       <>
@@ -173,16 +212,19 @@ export default function InvoiceDetailPage() {
   const inv = data.invoice;
   const ownerName = `${inv.owners?.first_name ?? ""} ${inv.owners?.last_name ?? ""}`.trim() || "—";
   const status = inv.status;
+  const walletBalance = ownerWalletCredit(inv.owners?.wallet_balance);
 
-  const doMarkAsDue = async () => {
-    const { error } = await supabase
-      .from("invoices")
-      .update({ status: "outstanding" })
-      .eq("id", inv.id)
-      .eq("status", "draft");
-    if (error) return toast.error(error.message);
-    toast.success("Invoice marked as due.");
-    refetch();
+  const beginExternalPay = (method: ExternalPaymentMethod) => {
+    setExternalPayOpen(method);
+    setPayAmount(computed.outstanding.toFixed(2));
+  };
+
+  const openExternalPay = (method: ExternalPaymentMethod) => {
+    if (ownerHasWalletCredit(inv.owners?.wallet_balance)) {
+      setWalletCreditPromptMethod(method);
+      return;
+    }
+    beginExternalPay(method);
   };
 
   const doCollectPayment = async () => {
@@ -202,6 +244,7 @@ export default function InvoiceDetailPage() {
 
   const doVoid = async () => {
     if (computed.amountPaid > 0) {
+      setRefundAmount(String(walletRefundFromPayments(data?.payments ?? [])));
       setVoidBlockedOpen(true);
       return;
     }
@@ -212,6 +255,50 @@ export default function InvoiceDetailPage() {
     if (error) return toast.error(error.message);
     toast.success("Invoice voided.");
     refetch();
+  };
+
+  const doRecordExternal = async () => {
+    if (!externalPayOpen) return;
+    if (!performedBy.trim()) return toast.error("Staff name is required.");
+    const amount = parseFloat(payAmount || "0");
+    if (!amount || Number.isNaN(amount)) return toast.error("Enter a valid payment amount.");
+    try {
+      const result = await externalPay.mutateAsync({
+        invoiceId: inv.id,
+        method: externalPayOpen,
+        performedBy: performedBy.trim(),
+        amountAed: amount,
+        note: refundNote.trim() || undefined,
+      });
+      toast.success(
+        result.partial
+          ? `Partial ${paymentMethodLabel(externalPayOpen)} payment recorded.`
+          : `Recorded ${paymentMethodLabel(externalPayOpen)} payment.`,
+      );
+      setExternalPayOpen(null);
+      setRefundNote("");
+      setPayAmount("");
+      refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Could not record payment.");
+    }
+  };
+
+  const doWalletPay = async () => {
+    if (!performedBy.trim()) return toast.error("Staff name is required.");
+    try {
+      const result = await walletPay.mutateAsync({ invoiceId: inv.id, performedBy: performedBy.trim() });
+      if (result.partial) {
+        toast.success(`Partial wallet payment recorded — AED ${result.amount_charged?.toFixed(2)} deducted.`);
+      } else {
+        toast.success("Wallet payment completed.");
+      }
+      setWalletOpen(false);
+      setPerformedBy("");
+      refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Wallet payment failed.");
+    }
   };
 
   const doAddAdjustment = async () => {
@@ -522,7 +609,7 @@ export default function InvoiceDetailPage() {
 
         <Card>
           <CardContent className="p-4 flex flex-wrap gap-2">
-            {status !== "cancelled" && (
+            {status !== "voided" && status !== "cancelled" && (
               <Button variant="outline" onClick={handlePrint} data-testid="invoice-detail-print-btn">
                 <Printer className="mr-2 h-4 w-4" />
                 Print
@@ -530,38 +617,66 @@ export default function InvoiceDetailPage() {
             )}
             {status === "draft" && (
               <>
-                <Button variant="outline" onClick={doMarkAsDue}>
-                  <Clock className="mr-2 h-4 w-4" /> Mark as Due
-                </Button>
                 <Button onClick={doCollectPayment}>
                   <CreditCard className="mr-2 h-4 w-4" /> Collect Payment
                 </Button>
+                <PaymentSplitDialog
+                  open={collectPaymentOpen}
+                  onOpenChange={setCollectPaymentOpen}
+                  invoiceId={inv.id}
+                  ownerId={inv.owner_id}
+                  invoiceTotal={Math.max(0, (inv.total ?? 0) - (inv.amount_paid ?? 0))}
+                  onSuccess={() => {
+                    setCollectPaymentOpen(false);
+                    refetch();
+                  }}
+                />
+                {canEditInvoiceLineItems(status) && (
+                  <Button variant="outline" onClick={() => setAddLineOpen(true)}>
+                    Add line item
+                  </Button>
+                )}
                 <Button variant="destructive" onClick={doVoid}>Void</Button>
               </>
             )}
-            {["outstanding", "partially_paid", "overdue", "issued"].includes(status) && (
+            {["finalised", "outstanding", "overdue", "issued", "partially_paid"].includes(status) && (
               <>
-                <Button onClick={doCollectPayment}>
-                  <CreditCard className="mr-2 h-4 w-4" /> Collect Payment
+                <Button onClick={() => { setPayAmount(computed.outstanding.toFixed(2)); setWalletOpen(true); }}>
+                  {status === "partially_paid" ? `Pay remainder (${aed(computed.outstanding)})` : "Pay with wallet"}
                 </Button>
+                <Button variant="outline" onClick={() => openExternalPay("cash")}>Record cash</Button>
+                <Button variant="outline" onClick={() => openExternalPay("card")}>Record card</Button>
+                <Button variant="outline" onClick={() => openExternalPay("bank_transfer")}>Bank transfer</Button>
+                <Button variant="outline" onClick={() => openExternalPay("payment_link")}>Payment link</Button>
                 <Button variant="destructive" onClick={doVoid}>Void</Button>
+                <Button variant="outline" onClick={() => {
+                  setServiceStart(inv.issue_date || inv.created_at.slice(0, 10));
+                  setRefundAmount(String(walletRefundFromPayments(data.payments)));
+                  setCancelOpen(true);
+                }}>Cancel & refund</Button>
               </>
             )}
-            {(status === "draft" ||
-              ["outstanding", "partially_paid", "overdue", "issued"].includes(status)) && (
-              <PaymentSplitDialog
-                open={collectPaymentOpen}
-                onOpenChange={setCollectPaymentOpen}
-                invoiceId={inv.id}
-                ownerId={inv.owner_id}
-                invoiceTotal={Math.max(0, (inv.total ?? 0) - (inv.amount_paid ?? 0))}
-                onSuccess={() => {
-                  setCollectPaymentOpen(false);
-                  refetch();
+            {(status === "paid" || status === "partially_paid") && showRevertPayment && (
+              <Button
+                type="button"
+                variant="outline"
+                className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                data-testid="invoice-detail-revert-payment-btn"
+                onClick={() => {
+                  setRevertReason("");
+                  setRevertOpen(true);
                 }}
-              />
+              >
+                Revert payment
+              </Button>
+            )}
+            {status === "paid" && (
+              <Button variant="destructive" onClick={doVoid}>Void</Button>
             )}
             {status === "voided" && <p className="text-sm text-muted-foreground">Voided invoice is read-only.</p>}
+            <Button type="button" variant="destructive" onClick={() => setDeleteOpen(true)}>
+              Delete invoice
+            </Button>
           </CardContent>
         </Card>
       </main>

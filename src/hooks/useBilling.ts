@@ -581,35 +581,6 @@ export function useCollectPayment() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Hook 4b: useMarkAsDue
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Move a draft invoice to `outstanding` (collectable debt) without taking any
- * payment. No-op if the invoice is not a draft.
- */
-export function useMarkAsDue() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (invoiceId: string) => {
-      const { data, error } = await supabase
-        .from("invoices")
-        .update({ status: "outstanding" as const })
-        .eq("id", invoiceId)
-        .eq("status", "draft")
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["invoices"] });
-    },
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // Hook 5: useProcessPayment
 // ═══════════════════════════════════════════════════════════════════════════════
 

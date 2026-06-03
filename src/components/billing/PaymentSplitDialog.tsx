@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -25,7 +25,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { formatAed } from "@/hooks/useBilling";
 import { useAccountBalance, accountBalanceQueryKey } from "@/hooks/useAccountBalance";
 import { invoiceLedgerQueryKey } from "@/hooks/useInvoiceLedger";
-import { recordPayment } from "@/services/invoiceService";
+import { calculatePaymentSplit } from "@/lib/accountBalance";
+import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
 import { recordExternalInvoicePayment } from "@/lib/recordExternalInvoicePayment";
 import { roundAed } from "@/lib/money";
 import { WALLET_TOPUP_PAYMENT_METHOD_OPTIONS } from "@/lib/paymentMethod";
@@ -45,11 +46,10 @@ export interface PaymentSplitDialogProps {
 }
 
 /**
- * Wallet + card/cash payment. The wallet and card amounts are two independent
- * editable fields (neither is derived from the other). The wallet leg charges
- * exactly the entered amount against the owner's raw `wallet_balance` via
- * `recordPayment`; the card/cash leg records its own amount. Partial payments
- * are allowed. The DB trigger transitions invoice status from the recorded rows.
+ * Wallet-first payment confirmation. Auto-applies available account credit, then
+ * collects the remainder by card/cash. Both legs route through the existing
+ * payment helpers, which dual-write to `invoice_payments`; the DB trigger then
+ * transitions invoice status (outstanding → partially_paid → finalised).
  */
 export function PaymentSplitDialog({
   open,
@@ -63,69 +63,36 @@ export function PaymentSplitDialog({
   onSuccess,
 }: PaymentSplitDialogProps) {
   const queryClient = useQueryClient();
-
-  // Account balance (wallet minus outstanding debt) — display only.
   const { data: account, isLoading: accountLoading } = useAccountBalance(
     open ? ownerId : undefined,
   );
   const accountBalance = account?.accountBalance ?? 0;
 
-  // Raw wallet balance — drives the wallet field max and validation.
-  const { data: ownerData } = useQuery({
-    queryKey: ["owner-wallet", ownerId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("owners")
-        .select("wallet_balance")
-        .eq("id", ownerId)
-        .single();
-      return data;
-    },
-    enabled: open && !!ownerId,
-  });
-  const ownerWalletBalance = ownerData?.wallet_balance ?? 0;
+  const split = useMemo(
+    () => calculatePaymentSplit(accountBalance, invoiceTotal),
+    [accountBalance, invoiceTotal],
+  );
 
-  const [walletAmount, setWalletAmount] = useState("");
   const [cardAmount, setCardAmount] = useState("");
   const [method, setMethod] = useState<ExternalPaymentMethod>("card");
   const [staffName, setStaffName] = useState(defaultStaffName ?? "");
   const [submitting, setSubmitting] = useState(false);
 
-  // Seed both amounts when the dialog opens (and once the wallet balance loads):
-  // apply available wallet first, suggest the remainder by card/cash. Both stay
-  // freely editable afterwards.
+  // Seed the editable card amount from the auto-calculated split when the dialog
+  // opens or the computed split changes.
   useEffect(() => {
-    if (!open) return;
-    const walletAvailable = Math.min(Math.max(ownerWalletBalance ?? 0, 0), invoiceTotal);
-    const cardSuggested = Math.max(0, invoiceTotal - walletAvailable);
-    setWalletAmount(walletAvailable > 0 ? walletAvailable.toFixed(2) : "");
-    setCardAmount(cardSuggested > 0 ? cardSuggested.toFixed(2) : "");
-  }, [open, ownerWalletBalance, invoiceTotal]);
+    if (open) setCardAmount(split.fromCard > 0 ? String(split.fromCard) : "0");
+  }, [open, split.fromCard]);
 
-  const walletNum = Math.max(0, roundAed(parseFloat(walletAmount) || 0));
   const cardNum = Math.max(0, roundAed(parseFloat(cardAmount) || 0));
-  const totalCollecting = roundAed(walletNum + cardNum);
-  const remainingAfter = roundAed(invoiceTotal - totalCollecting);
+  // TODO: wallet-leg vs account-balance mismatch in PaymentSplitDialog
+  const walletApplied = Math.max(0, roundAed(invoiceTotal - cardNum));
 
   const handleConfirm = async () => {
     if (!staffName.trim()) {
       toast.error("Enter staff name");
       return;
     }
-    if (walletNum > ownerWalletBalance) {
-      toast.error(`Wallet amount exceeds available balance (${formatAed(ownerWalletBalance)})`);
-      return;
-    }
-    if (totalCollecting === 0) {
-      toast.error("Enter an amount to collect");
-      return;
-    }
-    if (totalCollecting > invoiceTotal) {
-      toast.error(`Total exceeds invoice amount (${formatAed(invoiceTotal)})`);
-      return;
-    }
-    // Partial payment is allowed — no minimum enforcement.
-
     setSubmitting(true);
     try {
       if (ensureOutstanding) {
@@ -137,24 +104,19 @@ export function PaymentSplitDialog({
         if (statusErr) throw new Error(statusErr.message);
       }
 
-      // Wallet leg — exact amount via recordPayment (deduction + invoice_payments).
-      if (walletNum > 0) {
-        const res = await recordPayment({
+      if (walletApplied > 0) {
+        const res = await payInvoiceFromWallet(supabase, {
           invoiceId,
-          amount: walletNum,
-          method: "wallet",
-          recordedBy: staffName,
-          client: supabase,
+          performedBy: staffName.trim(),
         });
         if (!res.success) throw new Error(res.error || "Wallet payment failed");
       }
 
-      // Card/cash leg — exact amount via the external payment helper.
       if (cardNum > 0) {
         const res = await recordExternalInvoicePayment(supabase, {
           invoiceId,
           method,
-          performedBy: staffName,
+          performedBy: staffName.trim(),
           amountAed: cardNum,
         });
         if (!res.success) throw new Error(res.error || "Card payment failed");
@@ -162,7 +124,6 @@ export function PaymentSplitDialog({
 
       await queryClient.invalidateQueries({ queryKey: invoiceLedgerQueryKey(invoiceId) });
       await queryClient.invalidateQueries({ queryKey: accountBalanceQueryKey(ownerId) });
-      await queryClient.invalidateQueries({ queryKey: ["owner-wallet", ownerId] });
       await queryClient.invalidateQueries({ queryKey: ["invoice-alerts"] });
       toast.success("Payment recorded");
       onSuccess?.();
@@ -180,12 +141,15 @@ export function PaymentSplitDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            Enter the wallet and card/cash amounts independently. Partial payments are allowed.
+            Wallet credit is applied first; collect any remainder by card or cash.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 text-sm">
-          {/* Display-only context */}
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Invoice total</span>
+            <span className="tabular-nums font-medium">{formatAed(invoiceTotal)}</span>
+          </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Account balance</span>
             <span
@@ -197,31 +161,14 @@ export function PaymentSplitDialog({
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Wallet available</span>
-            <span className="tabular-nums font-medium">{formatAed(ownerWalletBalance)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Invoice total</span>
-            <span className="tabular-nums font-medium">{formatAed(invoiceTotal)}</span>
-          </div>
-
-          {/* Editable amounts */}
-          <div className="space-y-2">
-            <Label htmlFor="split-wallet-amount">Wallet to apply (AED)</Label>
-            <Input
-              id="split-wallet-amount"
-              type="number"
-              min="0"
-              max={ownerWalletBalance}
-              step="0.01"
-              value={walletAmount}
-              onChange={(e) => setWalletAmount(e.target.value)}
-              data-testid="payment-split-wallet-amount"
-            />
+            <span className="text-muted-foreground">Wallet applied</span>
+            <span className="tabular-nums font-medium text-emerald-700">
+              {formatAed(walletApplied)}
+            </span>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="split-card-amount">Card/cash amount (AED)</Label>
+            <Label htmlFor="split-card-amount">Remaining by card/cash (AED)</Label>
             <Input
               id="split-card-amount"
               type="number"
@@ -236,7 +183,10 @@ export function PaymentSplitDialog({
           {cardNum > 0 ? (
             <div className="space-y-2">
               <Label htmlFor="split-method">Payment method</Label>
-              <Select value={method} onValueChange={(v) => setMethod(v as ExternalPaymentMethod)}>
+              <Select
+                value={method}
+                onValueChange={(v) => setMethod(v as ExternalPaymentMethod)}
+              >
                 <SelectTrigger id="split-method">
                   <SelectValue />
                 </SelectTrigger>
@@ -246,6 +196,7 @@ export function PaymentSplitDialog({
                       {o.label}
                     </SelectItem>
                   ))}
+                  <SelectItem value="payment_link">Payment Link</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -254,25 +205,6 @@ export function PaymentSplitDialog({
           <div className="space-y-2">
             <Label>Staff name</Label>
             <StaffNameSelect value={staffName} onChange={setStaffName} />
-          </div>
-
-          {/* Live totals */}
-          <div className="flex justify-between border-t pt-2">
-            <span className="text-muted-foreground">Collecting total</span>
-            <span className="tabular-nums font-medium" data-testid="payment-split-collecting-total">
-              {formatAed(totalCollecting)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Remaining after</span>
-            <span
-              className={`tabular-nums font-medium ${
-                remainingAfter > 0 ? "text-red-700" : "text-emerald-700"
-              }`}
-              data-testid="payment-split-remaining-after"
-            >
-              {formatAed(remainingAfter)}
-            </span>
           </div>
         </div>
 
