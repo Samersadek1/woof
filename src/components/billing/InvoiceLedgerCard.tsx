@@ -29,12 +29,7 @@ interface InvoiceLedgerCardProps {
   onChanged?: () => void;
 }
 
-const UNPAID_STATUSES = new Set([
-  "outstanding",
-  "overdue",
-  "partially_paid",
-  "issued",
-]);
+const UNPAID_STATUSES = new Set(["outstanding", "overdue", "partially_paid"]);
 
 export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardProps) {
   const queryClient = useQueryClient();
@@ -77,10 +72,7 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
   // This invoice's contribution to outstanding debt, used to detect whether the
   // owner has *other* unpaid invoices on their account.
   const thisOutstanding =
-    !invoice.receipt_only &&
-    (invoice.status === "outstanding" ||
-      invoice.status === "overdue" ||
-      invoice.status === "partially_paid")
+    !invoice.receipt_only && UNPAID_STATUSES.has(invoice.status)
       ? Math.max(0, charges - totalPaid)
       : 0;
   const otherOutstanding = Math.max(0, (account?.outstandingDebt ?? 0) - thisOutstanding);

@@ -31,14 +31,7 @@ export interface InvoiceSummary {
   days_overdue: number;
 }
 
-const UNPAID: InvoiceStatus[] = [
-  "draft",
-  "issued",
-  "finalised",
-  "partially_paid",
-  "outstanding",
-  "overdue",
-];
+const UNPAID: InvoiceStatus[] = ["partially_paid", "outstanding", "overdue"];
 
 function deriveBranchCodeFromInvoiceNumber(invoiceNumber: string | null): string | null {
   const normalized = invoiceNumber?.trim();

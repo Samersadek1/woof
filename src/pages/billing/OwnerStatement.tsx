@@ -33,7 +33,7 @@ export default function OwnerStatementPage() {
   const outstanding = useMemo(
     () =>
       statement
-        .filter((r) => ["draft", "issued", "finalised", "outstanding", "overdue", "partially_paid"].includes(r.status))
+        .filter((r) => ["outstanding", "overdue", "partially_paid"].includes(r.status))
         .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")),
     [statement],
   );

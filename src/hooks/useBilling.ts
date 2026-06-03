@@ -859,7 +859,7 @@ export function useOwnerStatement(ownerId: string) {
   const invoices = statementQuery.data ?? [];
   const walletBalance = ownerQuery.data?.wallet_balance ?? 0;
 
-  const UNPAID: string[] = ["draft", "finalised", "issued", "outstanding", "overdue", "partially_paid"];
+  const UNPAID: string[] = ["outstanding", "overdue", "partially_paid"];
   const totalOutstanding = invoices
     .filter((i) => UNPAID.includes(i.status))
     .reduce((sum, i) => sum + statementBalanceDue(i), 0);

@@ -390,14 +390,7 @@ const DashboardPage = () => {
   const { data: dueTodayOverdue = [], isLoading: dueTodayLoading } = useQuery({
     queryKey: ["dashboard-due-today-overdue", asOf],
     queryFn: async () => {
-      const UNPAID: InvoiceStatus[] = [
-        "draft",
-        "issued",
-        "finalised",
-        "outstanding",
-        "overdue",
-        "partially_paid",
-      ];
+      const UNPAID: InvoiceStatus[] = ["outstanding", "overdue", "partially_paid"];
       const { data, error } = await supabase
         .from("invoices")
         .select("id, owner_id, total, vat_aed, service_type, notes, amount_paid, due_date, status, owners(first_name, last_name)")

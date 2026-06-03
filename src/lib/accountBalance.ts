@@ -4,6 +4,13 @@ import { roundAed } from "@/lib/money";
 
 type Client = SupabaseClient<Database>;
 
+/** Collectable debt only — draft/finalised are not outstanding in the Phase 2 model. */
+const OUTSTANDING_INVOICE_STATUSES = [
+  "outstanding",
+  "overdue",
+  "partially_paid",
+] as const;
+
 export interface AccountBalance {
   walletBalance: number;
   outstandingDebt: number;
@@ -32,8 +39,8 @@ export async function getAccountBalance(
     .from("invoices")
     .select("total, amount_paid")
     .eq("owner_id", ownerId)
-    .in("status", ["outstanding", "overdue", "partially_paid"])
-    .eq("receipt_only", false);
+    .in("status", [...OUTSTANDING_INVOICE_STATUSES])
+    .or("receipt_only.is.null,receipt_only.eq.false");
 
   const outstandingDebt = roundAed(
     (invoices ?? []).reduce((sum, inv) => {
