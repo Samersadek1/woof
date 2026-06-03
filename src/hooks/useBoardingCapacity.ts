@@ -51,6 +51,10 @@ export type KennelMapOccupancy = {
   booking_id: string;
   bookings: {
     booking_ref: string | null;
+    booking_type: string;
+    status: string;
+    check_in_date: string;
+    check_out_date: string;
     booking_pets: { pets: { name: string } | null }[];
   } | null;
 };
@@ -96,15 +100,26 @@ export function useKennelMap(date: string) {
       const { data: occ, error: occErr } = await supabase
         .from("booking_room_assignments")
         .select(
-          "room_id, booking_id, bookings(booking_ref, booking_pets(pets(name)))",
+          "room_id, booking_id, bookings(booking_ref, booking_type, status, check_in_date, check_out_date, booking_pets(pets(name)))",
         )
         .lte("start_date", date)
         .gte("end_date", date); // inclusive end_date: last occupied night
       if (occErr) throw occErr;
 
+      const occFiltered = ((occ ?? []) as KennelMapOccupancy[]).filter((row) => {
+        const b = row.bookings;
+        if (!b) return false;
+        return (
+          b.booking_type === "boarding" &&
+          (b.status === "confirmed" || b.status === "checked_in") &&
+          b.check_in_date <= date &&
+          date < b.check_out_date
+        );
+      });
+
       return {
         rooms: (rooms ?? []) as KennelMapRoom[],
-        occ: (occ ?? []) as KennelMapOccupancy[],
+        occ: occFiltered,
       };
     },
   });
