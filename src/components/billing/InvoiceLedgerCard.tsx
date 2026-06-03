@@ -61,11 +61,10 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
     );
   }
 
-  const { invoice, lines, payments, amendments, charges, totalPaid } = ledger;
+  const { invoice, lines, payments, amendments, openingBalance, charges, totalPaid } = ledger;
   const accountBalance = account?.accountBalance ?? 0;
-  // Per-invoice net: payments collected minus charges on this invoice.
-  const closingBalance = totalPaid - charges;
-  const inCredit = closingBalance >= 0;
+  const balanceDue = Math.max(0, charges - totalPaid);
+  const invoiceSettled = balanceDue < 0.01;
   const canVoid = invoice.status !== "finalised" && invoice.status !== "voided";
   const hasPayments = payments.length > 0;
 
@@ -168,17 +167,36 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
 
         {/* Ledger body */}
         <div className="space-y-1 text-sm md:max-w-md">
-          <div className="flex justify-between pb-1">
-            <span className="text-muted-foreground">Account balance</span>
-            <span
-              className={`tabular-nums font-medium ${
-                accountBalance >= 0 ? "text-emerald-700" : "text-red-700"
-              }`}
-              data-testid="invoice-ledger-account-balance"
-            >
-              {accountBalance >= 0 ? "+" : ""}
-              {formatAed(accountBalance)}
-            </span>
+          <div className="pb-2">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Account balance</span>
+              <span
+                className={`tabular-nums font-medium ${
+                  accountBalance >= 0 ? "text-emerald-700" : "text-red-700"
+                }`}
+                data-testid="invoice-ledger-account-balance"
+              >
+                {accountBalance >= 0 ? "+" : ""}
+                {formatAed(accountBalance)}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Live position across the whole account (wallet minus all unpaid invoices). This is
+              not the same as balance due on this invoice below.
+            </p>
+          </div>
+
+          <div className="pt-2 border-t">
+            <p className="font-semibold text-xs uppercase tracking-wide text-muted-foreground mb-1">
+              This invoice
+            </p>
+            <div className="flex justify-between py-0.5 text-muted-foreground">
+              <span>Opening balance (wallet at issue)</span>
+              <span className="tabular-nums">
+                {openingBalance >= 0 ? "+" : ""}
+                {formatAed(openingBalance)}
+              </span>
+            </div>
           </div>
 
           <div className="pt-2 border-t">
@@ -231,19 +249,18 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
           </div>
 
           <div className="flex justify-between border-t-2 mt-2 pt-2 text-base font-semibold">
-            <span>Closing balance</span>
+            <span>Balance due (this invoice)</span>
             <span
-              className={`tabular-nums ${inCredit ? "text-emerald-700" : "text-red-700"}`}
+              className={`tabular-nums ${invoiceSettled ? "text-emerald-700" : "text-red-700"}`}
               data-testid="invoice-ledger-closing-balance"
             >
-              {inCredit ? "+" : ""}
-              {formatAed(closingBalance)}
+              {formatAed(balanceDue)}
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            {inCredit
-              ? "This invoice is fully covered."
-              : "Balance still due on this invoice."}
+            {invoiceSettled
+              ? "Nothing left to collect on this invoice."
+              : "Amount still owed on this invoice only — not the full account balance above."}
           </p>
         </div>
 
