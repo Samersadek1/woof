@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _bra_backup: {
@@ -1673,6 +1648,66 @@ export type Database = {
           },
         ]
       }
+      invoice_payments_backfill_20260603: {
+        Row: {
+          amount: number
+          created_at: string
+          invoice_id: string
+          old_status: string | null
+          payment_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          invoice_id: string
+          old_status?: string | null
+          payment_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          invoice_id?: string
+          old_status?: string | null
+          payment_id?: string
+        }
+        Relationships: []
+      }
+      invoice_status_migration_20260603: {
+        Row: {
+          amount_paid: number | null
+          balance_due: number | null
+          invoice_id: string
+          invoice_number: string | null
+          migrated_at: string
+          new_status: string
+          old_status: string
+          owner_id: string | null
+          total: number | null
+        }
+        Insert: {
+          amount_paid?: number | null
+          balance_due?: number | null
+          invoice_id: string
+          invoice_number?: string | null
+          migrated_at?: string
+          new_status?: string
+          old_status: string
+          owner_id?: string | null
+          total?: number | null
+        }
+        Update: {
+          amount_paid?: number | null
+          balance_due?: number | null
+          invoice_id?: string
+          invoice_number?: string | null
+          migrated_at?: string
+          new_status?: string
+          old_status?: string
+          owner_id?: string | null
+          total?: number | null
+        }
+        Relationships: []
+      }
       invoices: {
         Row: {
           amendment_locked_at: string | null
@@ -2082,6 +2117,44 @@ export type Database = {
             columns: ["package_def_id"]
             isOneToOne: false
             referencedRelation: "package_definitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_reminders: {
+        Row: {
+          amount_at_time: number
+          channel: string
+          id: string
+          notes: string | null
+          owner_id: string
+          sent_at: string
+          sent_by: string
+        }
+        Insert: {
+          amount_at_time: number
+          channel?: string
+          id?: string
+          notes?: string | null
+          owner_id: string
+          sent_at?: string
+          sent_by: string
+        }
+        Update: {
+          amount_at_time?: number
+          channel?: string
+          id?: string
+          notes?: string | null
+          owner_id?: string
+          sent_at?: string
+          sent_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_reminders_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
             referencedColumns: ["id"]
           },
         ]
@@ -3325,6 +3398,16 @@ export type Database = {
         Args: { p_booking_id: string }
         Returns: number
       }
+      collect_account_payment: {
+        Args: {
+          p_external_amount: number
+          p_external_method: Database["public"]["Enums"]["payment_method"]
+          p_owner_id: string
+          p_performed_by: string
+          p_wallet_amount: number
+        }
+        Returns: Json
+      }
       consolidate_owner_invoices: {
         Args: {
           p_invoice_ids: string[]
@@ -3380,6 +3463,10 @@ export type Database = {
       do_legacy_import_atomic: { Args: { p_payload: Json }; Returns: Json }
       flag_overdue_invoices: { Args: never; Returns: number }
       generate_booking_ref: { Args: never; Returns: string }
+      get_client_payment_summary: {
+        Args: { p_owner_id: string }
+        Returns: Json
+      }
       get_dashboard_metrics: { Args: { p_as_of?: string }; Returns: Json }
       get_statement_of_account: {
         Args: { p_owner_id: string }
@@ -3997,9 +4084,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       addon_type: [
