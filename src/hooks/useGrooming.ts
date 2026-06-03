@@ -354,19 +354,38 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("invoices")
-        .select("id, invoice_number, status, total, vat_aed, payment_method")
+        .select(
+          "id, invoice_number, status, total, vat_aed, payment_method, invoice_payments(payment_method, created_at)",
+        )
         .eq("service_id", appointmentId!)
         .eq("service_type", "grooming")
         .maybeSingle();
       if (error) throw error;
-      return data as {
+      if (!data) return null;
+
+      const payments =
+        ((data as { invoice_payments?: Array<{ payment_method: string | null; created_at: string }> })
+          .invoice_payments ?? [])
+          .slice()
+          .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+      // TODO: deprecate invoices.payment_method
+      const paymentMethod = payments[0]?.payment_method ?? data.payment_method ?? null;
+
+      return {
+        id: data.id,
+        invoice_number: data.invoice_number,
+        status: data.status,
+        total: data.total,
+        vat_aed: data.vat_aed,
+        payment_method: paymentMethod,
+      } as {
         id: string;
         invoice_number: string | null;
         status: string;
         total: number | null;
         vat_aed: number | null;
         payment_method: string | null;
-      } | null;
+      };
     },
   });
 }

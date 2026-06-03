@@ -42,6 +42,7 @@ type InvoiceRow = {
     total_price: number;
     sort_order: number | null;
   }>;
+  invoice_payments?: Array<{ payment_method: string | null; created_at: string }>;
 };
 
 type AdjustmentRow = {
@@ -70,7 +71,8 @@ async function fetchInvoicePrintable(invoiceId: string) {
       discount_amount, total, vat_aed, amount_paid, payment_method, notes, service_type, owner_id, booking_id,
       owners(first_name, last_name, phone, address, email),
       bookings(booking_ref, check_in_date, check_out_date),
-      line_items:invoice_line_items(id, description, quantity, unit_price, total_price, sort_order)
+      line_items:invoice_line_items(id, description, quantity, unit_price, total_price, sort_order),
+      invoice_payments(payment_method, created_at)
     `,
     )
     .eq("id", invoiceId)
@@ -78,6 +80,14 @@ async function fetchInvoicePrintable(invoiceId: string) {
 
   if (error) throw error;
   const invoice = data as InvoiceRow;
+
+  // Effective invoice-level method: most recent invoice_payments row, falling
+  // back to the legacy invoices.payment_method for un-backfilled invoices.
+  const latestPaymentMethod = (invoice.invoice_payments ?? [])
+    .slice()
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0]?.payment_method;
+  // TODO: deprecate invoices.payment_method
+  invoice.payment_method = latestPaymentMethod ?? invoice.payment_method ?? null;
 
   const [{ data: payments, error: paymentError }, { data: adjustments, error: adjustmentError }] =
     await Promise.all([

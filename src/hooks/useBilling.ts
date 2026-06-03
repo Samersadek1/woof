@@ -99,6 +99,8 @@ export interface InvoiceWithItems {
   vat_aed: number | null;
   // TODO: deprecate after invoice_payments migration
   payment_method: PaymentMethod | null;
+  /** Effective method: most recent invoice_payments row, else invoices.payment_method. */
+  paymentMethod: PaymentMethod | null;
   // TODO: deprecate after invoice_payments migration
   amount_paid?: number;
   paid_at: string | null;
@@ -1001,7 +1003,7 @@ export function useInvoicesForOwner(
     enabled: !!ownerId,
     queryFn: async () => {
       const invoiceSelect =
-        "*, line_items:invoice_line_items(*), bookings(booking_ref, check_in_date, check_out_date)";
+        "*, line_items:invoice_line_items(*), bookings(booking_ref, check_in_date, check_out_date), invoice_payments(payment_method, created_at)";
       let q = supabase
         .from("invoices")
         .select(invoiceSelect)
@@ -1022,6 +1024,16 @@ export function useInvoicesForOwner(
         const raw = inv as Record<string, unknown>;
         const lineItems = (raw.line_items as RawLineItem[] | null) ?? [];
         const booking = raw.bookings as RawBooking;
+        const payments =
+          (raw.invoice_payments as
+            | Array<{ payment_method: PaymentMethod | null; created_at: string }>
+            | null) ?? [];
+        const latestPayment = payments
+          .slice()
+          .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
+        // TODO: deprecate invoices.payment_method
+        const derivedPaymentMethod =
+          latestPayment?.payment_method ?? (inv.payment_method as PaymentMethod | null);
 
         return {
           id: inv.id,
@@ -1037,6 +1049,7 @@ export function useInvoicesForOwner(
           total: inv.total ?? 0,
           vat_aed: inv.vat_aed ?? null,
           payment_method: inv.payment_method as PaymentMethod | null,
+          paymentMethod: derivedPaymentMethod,
           // TODO: deprecate after invoice_payments migration
           amount_paid: Number((inv as Record<string, unknown>).amount_paid ?? 0),
           paid_at: inv.paid_at ?? (inv.status === "paid" ? inv.updated_at : null),

@@ -623,7 +623,7 @@ function InvoiceDetailDialog({
 
           {invoice.paid_at && (
             <p style={{ marginTop: 16, fontSize: 13, color: "#16a34a" }}>
-              Paid on {format(parseISO(invoice.paid_at), "d MMM yyyy")} via {invoice.payment_method ?? "—"}
+              Paid on {format(parseISO(invoice.paid_at), "d MMM yyyy")} via {invoice.paymentMethod ?? "—"}
             </p>
           )}
           {invoice.voided_at && (
