@@ -28,10 +28,10 @@ export async function importWithChunkReload<T>(
     const alreadyReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1";
     if (!alreadyReloaded) {
       sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
-      window.location.reload();
-      return new Promise(() => {
-        /* hang until reload */
-      });
+      const url = new URL(window.location.href);
+      url.searchParams.set("_chunk", String(Date.now()));
+      window.location.replace(url.toString());
+      throw error;
     }
 
     sessionStorage.removeItem(CHUNK_RELOAD_KEY);
