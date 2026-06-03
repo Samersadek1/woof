@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useInvoiceDetail } from "@/hooks/useInvoiceDetail";
 import { useLinkedDaycareSessionsForInvoice } from "@/hooks/useDaycare";
 import { useCancellationRefundPreview } from "@/hooks/useCancellationRefund";
-import { useProcessWalletPayment, useRecordExternalPayment, useRevertInvoicePayment, useUpdatePaymentAttribution } from "@/hooks/usePayments";
+import { useProcessWalletPayment, useRecordExternalPayment, useRevertInvoicePayment } from "@/hooks/usePayments";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { paymentMethodLabel, type ExternalPaymentMethod } from "@/lib/paymentMethod";
 import { CreditCard, Printer, Trash2 } from "lucide-react";
@@ -90,14 +90,11 @@ export default function InvoiceDetailPage() {
   const walletPay = useProcessWalletPayment();
   const externalPay = useRecordExternalPayment();
   const revertPayment = useRevertInvoicePayment();
-  const updateAttribution = useUpdatePaymentAttribution();
 
   const [walletOpen, setWalletOpen] = useState(false);
   const [externalPayOpen, setExternalPayOpen] = useState<ExternalPaymentMethod | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [voidBlockedOpen, setVoidBlockedOpen] = useState(false);
-  const [editPaymentId, setEditPaymentId] = useState<string | null>(null);
-  const [editPaymentName, setEditPaymentName] = useState("");
   const [cancelOpen, setCancelOpen] = useState(false);
   const [revertOpen, setRevertOpen] = useState(false);
   const [revertReason, setRevertReason] = useState("");
@@ -562,40 +559,6 @@ export default function InvoiceDetailPage() {
         </Card>
 
         <Card>
-          <CardContent className="p-5 space-y-2">
-            <h3 className="font-semibold">Payments</h3>
-            {data.payments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No payments recorded.</p>
-            ) : (
-              <div className="space-y-2">
-                {data.payments.map((p) => (
-                  <div key={p.id} className="rounded-md border p-3 text-sm flex items-center justify-between gap-3">
-                    <div>
-                      <p className="capitalize">{p.payment_method ?? p.transaction_type.replace(/_/g, " ")}</p>
-                      <p className="text-muted-foreground">{format(new Date(p.created_at), "d MMM yyyy, HH:mm")} · {p.performed_by ?? "—"}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setEditPaymentId(p.id);
-                          setEditPaymentName(p.performed_by ?? "");
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <span className="font-semibold tabular-nums">{aed(Math.abs(p.amount))}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
           <CardContent className="p-5 grid gap-1 text-sm md:max-w-md ml-auto">
             <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{aed(computed.lineSubtotal)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Total discount</span><span>{aed(computed.totalDiscount)}</span></div>
@@ -733,32 +696,6 @@ export default function InvoiceDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setVoidBlockedOpen(false)}>Close</Button>
             <Button onClick={() => { setVoidBlockedOpen(false); setCancelOpen(true); }}>Cancel &amp; refund</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!editPaymentId} onOpenChange={() => setEditPaymentId(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit processed by</DialogTitle></DialogHeader>
-          <StaffNameSelect value={editPaymentName} onChange={setEditPaymentName} label="Processed by" />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditPaymentId(null)}>Cancel</Button>
-            <Button
-              onClick={async () => {
-                if (!editPaymentId || !editPaymentName.trim()) return;
-                await updateAttribution.mutateAsync({
-                  paymentId: editPaymentId,
-                  performedBy: editPaymentName.trim(),
-                  invoiceId: inv.id,
-                  ownerId: inv.owner_id,
-                });
-                toast.success("Payment attribution updated.");
-                setEditPaymentId(null);
-                refetch();
-              }}
-            >
-              Save
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
