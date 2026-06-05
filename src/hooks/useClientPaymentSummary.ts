@@ -41,6 +41,7 @@ export function useLogPaymentReminder() {
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: clientPaymentSummaryQueryKey(vars.ownerId) });
+      qc.invalidateQueries({ queryKey: ["owners-with-debt"] });
     },
   });
 }

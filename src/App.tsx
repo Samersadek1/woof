@@ -22,6 +22,7 @@ const BoardingPage = lazy(() => import("@/pages/Boarding"));
 const PetProfilePage = lazy(() => import("@/pages/PetProfile"));
 const RoomsAdminPage = lazy(() => import("@/pages/RoomsAdmin"));
 const BillingPage = lazy(() => import("@/pages/Billing"));
+const PaymentsPage = lazy(() => import("@/pages/PaymentsPage"));
 const InvoiceListPage = lazy(() => import("@/pages/billing/InvoiceList"));
 const InvoiceDetailPage = lazy(() => import("@/pages/billing/InvoiceDetail"));
 const CreateInvoicePage = lazy(() => import("@/pages/billing/CreateInvoice"));
@@ -125,6 +126,7 @@ const App = () => (
                 <Route path="agent" element={<AgentPage />} />
                 <Route path="grooming" element={<GroomingPage />} />
                 <Route path="billing" element={<BillingPage />} />
+                <Route path="payments" element={<PaymentsPage />} />
                 <Route path="billing/invoices" element={<InvoiceListPage />} />
                 <Route path="billing/invoices/new" element={<CreateInvoicePage />} />
                 <Route path="billing/invoices/:id" element={<InvoiceDetailPage />} />

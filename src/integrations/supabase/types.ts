@@ -3468,6 +3468,21 @@ export type Database = {
         Returns: Json
       }
       get_dashboard_metrics: { Args: { p_as_of?: string }; Returns: Json }
+      get_owners_with_collectable_debt: {
+        Args: never
+        Returns: {
+          due_now: number
+          in_progress: number
+          invoice_count: number
+          last_reminder_at: string
+          max_days_overdue: number
+          oldest_due_date: string
+          owner_id: string
+          owner_name: string
+          phone: string
+          wallet_credit: number
+        }[]
+      }
       get_statement_of_account: {
         Args: { p_owner_id: string }
         Returns: {

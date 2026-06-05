@@ -24,6 +24,8 @@ import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { supabase } from "@/integrations/supabase/client";
 import { accountBalanceQueryKey, useAccountBalance } from "@/hooks/useAccountBalance";
 import { clientPaymentSummaryQueryKey } from "@/hooks/useClientPaymentSummary";
+import { invoiceLedgerQueryKey } from "@/hooks/useInvoiceLedger";
+import { ownersWithDebtQueryKey } from "@/hooks/useOwnersWithDebt";
 import { formatAed, roundAed } from "@/lib/money";
 import { WALLET_TOPUP_PAYMENT_METHOD_OPTIONS } from "@/lib/paymentMethod";
 import type { ExternalPaymentMethod } from "@/lib/paymentMethod";
@@ -146,11 +148,19 @@ export function AccountPaymentDialog({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: clientPaymentSummaryQueryKey(ownerId) }),
         queryClient.invalidateQueries({ queryKey: accountBalanceQueryKey(ownerId) }),
+        queryClient.invalidateQueries({ queryKey: ownersWithDebtQueryKey() }),
         queryClient.invalidateQueries({ queryKey: ["invoices"] }),
         queryClient.invalidateQueries({ queryKey: ["statement"] }),
         queryClient.invalidateQueries({ queryKey: ["owners"] }),
         queryClient.invalidateQueries({ queryKey: ["wallet_transactions"] }),
       ]);
+
+      const allocations = result.allocations ?? [];
+      for (const alloc of allocations) {
+        await queryClient.invalidateQueries({
+          queryKey: invoiceLedgerQueryKey(alloc.invoice_id),
+        });
+      }
 
       onSuccess?.();
       onOpenChange(false);
