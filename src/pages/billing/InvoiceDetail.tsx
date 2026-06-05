@@ -263,59 +263,6 @@ export default function InvoiceDetailPage() {
     refetch();
   };
 
-  const doCancelRefund = async () => {
-    const amount = parseFloat(refundAmount || "0") || 0;
-    if (!performedBy.trim()) return toast.error("Staff name is required.");
-    if (amount > 0) {
-      const currentBalance = inv.owners?.wallet_balance ?? 0;
-      const { error: txErr } = await supabase.from("wallet_transactions").insert({
-        owner_id: inv.owner_id,
-        invoice_id: inv.id,
-        transaction_type: "refund",
-        amount,
-        balance_after: currentBalance + amount,
-        payment_method: null,
-        performed_by: performedBy.trim(),
-        notes: refundNote.trim() || "Cancellation refund",
-      });
-      if (txErr) return toast.error(txErr.message);
-    }
-    const { error } = await supabase
-      .from("invoices")
-      .update({
-        status: "voided",
-        voided_reason: refundNote.trim() || "Cancelled with refund",
-        voided_at: new Date().toISOString(),
-      })
-      .eq("id", inv.id);
-    if (error) return toast.error(error.message);
-    toast.success("Invoice cancelled and refund recorded.");
-    setCancelOpen(false);
-    refetch();
-  };
-
-  const doRevertPayment = async () => {
-    if (!performedBy.trim()) return toast.error("Staff name is required.");
-    try {
-      const result = await revertPayment.mutateAsync({
-        invoiceId: inv.id,
-        performedBy: performedBy.trim(),
-        reason: revertReason.trim() || undefined,
-      });
-      if (result.walletRefunded && result.walletRefunded > 0) {
-        toast.success(`Payment reverted — AED ${result.walletRefunded.toFixed(2)} returned to wallet.`);
-      } else {
-        toast.success("Payment reverted.");
-      }
-      setRevertOpen(false);
-      setRevertReason("");
-      setPerformedBy("");
-      refetch();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Could not revert payment.");
-    }
-  };
-
   return (
     <>
       <TopBar title="Invoice Detail" />
@@ -566,58 +513,17 @@ export default function InvoiceDetailPage() {
         </Card>
       </main>
 
-      <Dialog open={walletOpen} onOpenChange={setWalletOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Wallet payment</DialogTitle><DialogDescription>Current wallet {aed(inv.owners?.wallet_balance ?? 0)}</DialogDescription></DialogHeader>
-          <div className="space-y-2 text-sm">
-            <div className="rounded-md border p-3 space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (before VAT)</span><span>{aed(computed.netExVat)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{aed(computed.vat)}</span></div>
-              <div className="flex justify-between font-semibold border-t pt-1"><span>Grand total</span><span>{aed(computed.grandTotal)}</span></div>
-            </div>
-            <p>Outstanding: <strong>{aed(computed.outstanding)}</strong></p>
-            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setWalletOpen(false)}>Cancel</Button>
-            <Button type="button" onClick={doWalletPay} disabled={walletPay.isPending}>{walletPay.isPending ? "Processing..." : "Confirm payment"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!externalPayOpen} onOpenChange={() => setExternalPayOpen(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Record {externalPayOpen ? paymentMethodLabel(externalPayOpen) : "payment"}</DialogTitle></DialogHeader>
-          <div className="space-y-2 text-sm">
-            <div className="rounded-md border p-3 space-y-1">
-              <div className="flex justify-between font-semibold border-t pt-1"><span>Balance outstanding</span><span>{aed(computed.outstanding)}</span></div>
-            </div>
-            <div className="space-y-2">
-              <Label>Amount (AED)</Label>
-              <Input type="number" min="0.01" step="0.01" max={computed.outstanding} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
-            </div>
-            <Label>Reference note (optional)</Label>
-            <Textarea value={refundNote} onChange={(e) => setRefundNote(e.target.value)} />
-            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setExternalPayOpen(null)}>Cancel</Button>
-            <Button onClick={doRecordExternal} disabled={externalPay.isPending}>{externalPay.isPending ? "Saving..." : "Confirm"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={voidBlockedOpen} onOpenChange={setVoidBlockedOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Invoice has payments</DialogTitle>
             <DialogDescription>
-              Voiding will not automatically refund the wallet. Use Cancel &amp; refund or Revert payment first.
+              Voiding will not automatically refund the wallet. Revert or refund payments from the
+              ledger before voiding.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setVoidBlockedOpen(false)}>Close</Button>
-            <Button onClick={() => { setVoidBlockedOpen(false); setCancelOpen(true); }}>Cancel &amp; refund</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -647,85 +553,6 @@ export default function InvoiceDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Cancel & refund</DialogTitle></DialogHeader>
-          <div className="space-y-2 text-sm">
-            <Label>Service start date</Label>
-            <Input type="date" value={serviceStart} onChange={(e) => setServiceStart(e.target.value)} />
-            {refundPreview.data && (
-              <div className="rounded-md border bg-muted/40 p-3">
-                <p className="font-medium">{refundPreview.data.policy_label}</p>
-                <p>{refundPreview.data.hours_notice.toFixed(0)}h notice · {refundPreview.data.refund_pct}% · {aed(refundPreview.data.refund_aed)}</p>
-              </div>
-            )}
-            <Label>Refund amount</Label>
-            <Input type="number" min="0" step="0.01" value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} />
-            <Label>Note</Label>
-            <Textarea value={refundNote} onChange={(e) => setRefundNote(e.target.value)} />
-            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCancelOpen(false)}>Cancel</Button>
-            <Button onClick={doCancelRefund}>Confirm</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={revertOpen} onOpenChange={setRevertOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Revert payment</DialogTitle>
-            <DialogDescription>
-              This marks the invoice unpaid again and credits the owner wallet when the payment came from wallet.
-              Original payment rows stay on the invoice for audit. Only available within the last 2 weeks.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 text-sm">
-            <div className="rounded-md border p-3 space-y-1">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Amount paid</span>
-                <span>{aed(computed.amountPaid)}</span>
-              </div>
-              {walletRevertAmount > 0 && (
-                <p className="text-xs text-muted-foreground pt-1">
-                  Wallet balance will be credited by {aed(walletRevertAmount)}.
-                </p>
-              )}
-            </div>
-            <Label>Reason (optional)</Label>
-            <Textarea
-              value={revertReason}
-              onChange={(e) => setRevertReason(e.target.value)}
-              placeholder="e.g. recorded against wrong invoice"
-            />
-            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRevertOpen(false)}>Cancel</Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={doRevertPayment}
-              disabled={revertPayment.isPending}
-              data-testid="invoice-detail-revert-payment-confirm"
-            >
-              {revertPayment.isPending ? "Reverting..." : "Revert payment"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <DeleteInvoiceDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        invoiceUuid={inv.id}
-        invoiceNumberDisplay={inv.invoice_number?.trim() || inv.id.slice(0, 8)}
-        ownerName={ownerName}
-        totalAmount={computed.grandTotal}
-        onDeleted={() => navigate(backHref)}
-      />
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent>
@@ -795,29 +622,6 @@ export default function InvoiceDetailPage() {
           onDeleted={() => void refetch()}
         />
       )}
-
-      <WalletCreditExternalPaymentDialog
-        open={!!walletCreditPromptMethod}
-        onOpenChange={(open) => {
-          if (!open) setWalletCreditPromptMethod(null);
-        }}
-        walletBalance={walletBalance}
-        outstanding={computed.outstanding}
-        externalMethod={walletCreditPromptMethod}
-        onUseWallet={() => {
-          const method = walletCreditPromptMethod;
-          setWalletCreditPromptMethod(null);
-          if (method) setExternalPayOpen(null);
-          setPayAmount(computed.outstanding.toFixed(2));
-          setWalletOpen(true);
-        }}
-        onContinueExternal={() => {
-          if (!walletCreditPromptMethod) return;
-          const method = walletCreditPromptMethod;
-          setWalletCreditPromptMethod(null);
-          beginExternalPay(method);
-        }}
-      />
     </>
   );
 }
