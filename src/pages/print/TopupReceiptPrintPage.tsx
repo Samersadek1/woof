@@ -2,6 +2,7 @@ import { format, parseISO } from "date-fns";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { PrintLayout } from "@/components/print/PrintLayout";
+import { PrintCompanyHeader } from "@/components/print/PrintCompanyHeader";
 import { supabase } from "@/integrations/supabase/client";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { formatAed } from "@/hooks/useBilling";
@@ -85,16 +86,20 @@ export default function TopupReceiptPrintPage() {
 
       {data ? (
         <article className="print-page relative border border-black p-4 text-[12px]">
-          <header className="mb-4 flex items-start justify-between border-b border-black pb-3">
-            <div>
+          <header className="mb-4 border-b border-black pb-3">
+            <PrintCompanyHeader
+              right={
+                <>
+                  <p className="font-semibold">{data.receipt_number ?? "—"}</p>
+                  <p>{fmtDate(data.issued_at)}</p>
+                </>
+              }
+            />
+            <div className="mt-3">
               <h1 className="text-lg font-bold">Wallet Top-Up Receipt</h1>
               <p className="print-sans text-[11px] text-neutral-600">
                 Not a tax invoice — wallet credit confirmation
               </p>
-            </div>
-            <div className="text-right">
-              <p className="font-semibold">{data.receipt_number ?? "—"}</p>
-              <p className="print-sans text-[11px]">{fmtDate(data.issued_at)}</p>
             </div>
           </header>
 

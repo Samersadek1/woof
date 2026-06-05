@@ -2,6 +2,7 @@ import { format, parseISO } from "date-fns";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { PrintLayout } from "@/components/print/PrintLayout";
+import { PrintCompanyHeader } from "@/components/print/PrintCompanyHeader";
 import { supabase } from "@/integrations/supabase/client";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { invoiceAdjustmentsForDisplay, invoiceResolvedAmounts, vatLineLabel } from "@/lib/vatConfig";
@@ -187,27 +188,15 @@ export default function InvoicePrintPage() {
           ) : null}
 
           <header className="relative z-[1] mb-4 border-b border-black pb-2">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <img
-                  src="/woof-logo.png"
-                  alt="woof"
-                  className="h-14 w-14 shrink-0 print-keep-color"
-                />
-                <div>
-                  <p className="print-label text-xl font-bold">WOOF PETS SERVICES LLC</p>
-                  <p className="print-sans text-xs">
-                    Dubai · TRN: 104486686900003 · +971 00 000 0000
-                  </p>
-                  <p className="print-sans text-xs">hello@woof.ae</p>
-                </div>
-              </div>
-              <div className="print-sans text-right text-xs">
-                <p>Invoice: {invoice.invoice_number ?? invoice.id.slice(0, 8)}</p>
-                <p>Date: {format(parseISO(invoice.issue_date), "d MMM yyyy")}</p>
-                <p>Due: {invoice.due_date ? format(parseISO(invoice.due_date), "d MMM yyyy") : "—"}</p>
-              </div>
-            </div>
+            <PrintCompanyHeader
+              right={
+                <>
+                  <p>Invoice: {invoice.invoice_number ?? invoice.id.slice(0, 8)}</p>
+                  <p>Date: {format(parseISO(invoice.issue_date), "d MMM yyyy")}</p>
+                  <p>Due: {invoice.due_date ? format(parseISO(invoice.due_date), "d MMM yyyy") : "—"}</p>
+                </>
+              }
+            />
           </header>
 
           <section className="relative z-[1] mb-4 border border-black p-2">
