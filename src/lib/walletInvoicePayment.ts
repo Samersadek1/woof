@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { resolveWalletChargeAmount } from "@/lib/accountBalance";
 import { roundAed } from "@/lib/money";
 import { invoiceAmountDue } from "@/lib/vatConfig";
 import { recordPayment } from "@/services/invoiceService";
@@ -29,9 +30,9 @@ type RpcWalletResult = {
  */
 export async function payInvoiceFromWallet(
   supabase: SupabaseClient<Database>,
-  params: { invoiceId: string; performedBy: string },
+  params: { invoiceId: string; performedBy: string; amountAed?: number },
 ): Promise<WalletPaymentResult> {
-  const { invoiceId, performedBy } = params;
+  const { invoiceId, performedBy, amountAed } = params;
 
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
@@ -64,8 +65,9 @@ export async function payInvoiceFromWallet(
   if (ownerErr) return { success: false, error: ownerErr.message, ownerId };
 
   const walletBalance = roundAed(owner.wallet_balance ?? 0);
+  const chargeAmount = resolveWalletChargeAmount(amountAed, walletBalance, balanceDue);
 
-  if (walletBalance <= 0) {
+  if (chargeAmount <= 0) {
     return {
       success: false,
       error: "Insufficient wallet balance",
@@ -74,8 +76,14 @@ export async function payInvoiceFromWallet(
     };
   }
 
+  const useRpcFastPath =
+    amountAed == null &&
+    chargeAmount >= balanceDue &&
+    walletBalance >= balanceDue &&
+    alreadyPaid <= 0;
+
   // Full payment on a clean invoice — prefer RPC when deployed.
-  if (walletBalance >= balanceDue && alreadyPaid <= 0) {
+  if (useRpcFastPath) {
     const { data, error: rpcErr } = await supabase.rpc("process_wallet_payment", {
       p_invoice_id: invoiceId,
       p_performed_by: performedBy,
@@ -130,7 +138,6 @@ export async function payInvoiceFromWallet(
     }
   }
 
-  const chargeAmount = roundAed(Math.min(walletBalance, balanceDue));
   const newAmountPaid = roundAed(alreadyPaid + chargeAmount);
   const partial = newAmountPaid < grandTotal;
 

@@ -80,3 +80,20 @@ export function calculatePaymentSplit(
     totalToCollect: roundAed(invoiceTotal),
   };
 }
+
+/** Seed editable wallet + card fields for a single-invoice payment dialog. */
+export function seedInvoicePaymentSplit(walletBalance: number, invoiceTotal: number) {
+  const walletSeed = roundAed(Math.min(Math.max(walletBalance, 0), invoiceTotal));
+  const cardSeed = roundAed(Math.max(0, invoiceTotal - walletSeed));
+  return { walletSeed, cardSeed };
+}
+
+/** Wallet charge capped by available wallet and outstanding balance. */
+export function resolveWalletChargeAmount(
+  requestedAed: number | undefined,
+  walletBalance: number,
+  balanceDue: number,
+): number {
+  const requested = requestedAed ?? balanceDue;
+  return roundAed(Math.min(Math.max(0, requested), walletBalance, balanceDue));
+}

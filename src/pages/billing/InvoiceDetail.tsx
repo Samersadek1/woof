@@ -61,6 +61,7 @@ import {
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
 import { canRevertInvoicePayment, walletRefundFromPayments } from "@/lib/revertInvoicePayment";
+import { markInvoiceOutstanding } from "@/lib/markInvoiceOutstanding";
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700 border-slate-300",
@@ -116,6 +117,9 @@ export default function InvoiceDetailPage() {
     useState<DeleteInvoiceAdjustmentTarget | null>(null);
   const [walletCreditPromptMethod, setWalletCreditPromptMethod] =
     useState<ExternalPaymentMethod | null>(null);
+  const [markDueOpen, setMarkDueOpen] = useState(false);
+  const [markDueReason, setMarkDueReason] = useState("");
+  const [markDueBusy, setMarkDueBusy] = useState(false);
 
   const handlePrint = useCallback(() => {
     if (!id) return;
@@ -236,6 +240,29 @@ export default function InvoiceDetailPage() {
       refetch();
     } else {
       setCollectPaymentOpen(true);
+    }
+  };
+
+  const doMarkAsDue = async () => {
+    if (!performedBy.trim()) return toast.error("Staff name is required.");
+    if (!markDueReason.trim()) return toast.error("A reason is required.");
+    setMarkDueBusy(true);
+    try {
+      const result = await markInvoiceOutstanding(supabase, {
+        invoiceId: inv.id,
+        performedBy: performedBy.trim(),
+        reason: markDueReason.trim(),
+      });
+      if (!result.success) throw new Error(result.error || "Could not mark invoice as due.");
+      toast.success("Invoice marked as due");
+      setMarkDueOpen(false);
+      setMarkDueReason("");
+      setPerformedBy("");
+      refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Could not mark invoice as due.");
+    } finally {
+      setMarkDueBusy(false);
     }
   };
 
@@ -583,12 +610,23 @@ export default function InvoiceDetailPage() {
                 <Button onClick={doCollectPayment}>
                   <CreditCard className="mr-2 h-4 w-4" /> Collect Payment
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setMarkDueReason("");
+                    setMarkDueOpen(true);
+                  }}
+                  data-testid="invoice-detail-mark-due-btn"
+                >
+                  Mark as due
+                </Button>
                 <PaymentSplitDialog
                   open={collectPaymentOpen}
                   onOpenChange={setCollectPaymentOpen}
                   invoiceId={inv.id}
                   ownerId={inv.owner_id}
-                  invoiceTotal={Math.max(0, (inv.total ?? 0) - (inv.amount_paid ?? 0))}
+                  invoiceTotal={computed.outstanding}
+                  ensureOutstanding={status === "draft"}
                   onSuccess={() => {
                     setCollectPaymentOpen(false);
                     refetch();
@@ -643,6 +681,39 @@ export default function InvoiceDetailPage() {
           </CardContent>
         </Card>
       </main>
+
+      <Dialog open={markDueOpen} onOpenChange={setMarkDueOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark invoice as due</DialogTitle>
+            <DialogDescription>
+              Override the draft status and make this invoice collectable. This is audit-logged.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <Label>Reason</Label>
+            <Textarea
+              value={markDueReason}
+              onChange={(e) => setMarkDueReason(e.target.value)}
+              placeholder="e.g. early checkout, owner requested invoice now"
+            />
+            <StaffNameSelect value={performedBy} onChange={setPerformedBy} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMarkDueOpen(false)} disabled={markDueBusy}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={doMarkAsDue}
+              disabled={markDueBusy}
+              data-testid="invoice-detail-mark-due-confirm"
+            >
+              {markDueBusy ? "Saving..." : "Mark as due"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={walletOpen} onOpenChange={setWalletOpen}>
         <DialogContent>
