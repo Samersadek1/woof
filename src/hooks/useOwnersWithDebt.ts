@@ -8,10 +8,12 @@ export interface OwnerWithCollectableDebt {
   owner_name: string;
   phone: string | null;
   due_now: number;
+  overdue_now: number;
   invoice_count: number;
   oldest_due_date: string | null;
   max_days_overdue: number;
   in_progress: number;
+  total_balance: number;
   wallet_credit: number;
   last_reminder_at: string | null;
 }
@@ -22,7 +24,13 @@ export function useOwnersWithDebt() {
     queryFn: async (): Promise<OwnerWithCollectableDebt[]> => {
       const { data, error } = await supabase.rpc("get_owners_with_collectable_debt");
       if (error) throw error;
-      return (data ?? []) as OwnerWithCollectableDebt[];
+      return ((data ?? []) as OwnerWithCollectableDebt[]).map((row) => ({
+        ...row,
+        overdue_now: row.overdue_now ?? 0,
+        total_balance:
+          row.total_balance ??
+          Number(row.due_now ?? 0) + Number(row.in_progress ?? 0),
+      }));
     },
   });
 }

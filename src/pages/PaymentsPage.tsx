@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
-import { ChevronRight, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Search } from "lucide-react";
 import { ClientPaymentsView } from "@/components/payments/ClientPaymentsView";
 import TopBar from "@/components/dashboard/TopBar";
 import { Badge } from "@/components/ui/badge";
@@ -26,17 +26,58 @@ import {
 } from "@/components/ui/table";
 import { useOwnersWithDebt, type OwnerWithCollectableDebt } from "@/hooks/useOwnersWithDebt";
 import { formatAed } from "@/lib/money";
+import { cn } from "@/lib/utils";
 
-type SortKey = "due_now" | "max_days_overdue";
+type SortKey = "due_now" | "overdue_now" | "in_progress" | "max_days_overdue";
 
 function displayOwnerName(name: string): string {
   return name.trim() || "—";
 }
 
+function SortableHead({
+  label,
+  columnKey,
+  activeKey,
+  sortDesc,
+  onSort,
+  className,
+}: {
+  label: string;
+  columnKey: SortKey;
+  activeKey: SortKey;
+  sortDesc: boolean;
+  onSort: (key: SortKey) => void;
+  className?: string;
+}) {
+  const active = activeKey === columnKey;
+  return (
+    <button
+      type="button"
+      className={cn(
+        "inline-flex items-center gap-1 font-medium hover:text-foreground",
+        className,
+      )}
+      onClick={() => onSort(columnKey)}
+      aria-sort={active ? (sortDesc ? "descending" : "ascending") : "none"}
+    >
+      <span>{label}</span>
+      {active ? (
+        sortDesc ? (
+          <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        ) : (
+          <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        )
+      ) : (
+        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" aria-hidden />
+      )}
+    </button>
+  );
+}
+
 const PaymentsPage = () => {
   const { data: rows = [], isLoading, isError, error } = useOwnersWithDebt();
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("max_days_overdue");
+  const [sortKey, setSortKey] = useState<SortKey>("due_now");
   const [sortDesc, setSortDesc] = useState(true);
   const [selectedOwnerId, setSelectedOwnerId] = useState<string | null>(null);
 
@@ -52,8 +93,8 @@ const PaymentsPage = () => {
       : [...rows];
 
     list.sort((a, b) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
+      const av = Number(a[sortKey] ?? 0);
+      const bv = Number(b[sortKey] ?? 0);
       return sortDesc ? bv - av : av - bv;
     });
     return list;
@@ -63,8 +104,12 @@ const PaymentsPage = () => {
     () => rows.reduce((sum, r) => sum + Number(r.due_now ?? 0), 0),
     [rows],
   );
-  const overdueCount = useMemo(
-    () => rows.filter((r) => r.max_days_overdue > 0).length,
+  const totalCollectableOverdue = useMemo(
+    () => rows.reduce((sum, r) => sum + Number(r.overdue_now ?? 0), 0),
+    [rows],
+  );
+  const totalCollectableInProgress = useMemo(
+    () => rows.reduce((sum, r) => sum + Number(r.in_progress ?? 0), 0),
     [rows],
   );
 
@@ -93,17 +138,17 @@ const PaymentsPage = () => {
           </Card>
           <Card>
             <CardContent className="p-4">
-              <p className="text-xs uppercase text-muted-foreground">Clients with debt</p>
-              <p className="text-2xl font-bold tabular-nums mt-1">
-                {isLoading ? "…" : rows.length}
+              <p className="text-xs uppercase text-muted-foreground">Total collectable (overdue)</p>
+              <p className="text-2xl font-bold tabular-nums mt-1 text-red-600">
+                {isLoading ? "…" : formatAed(totalCollectableOverdue)}
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
-              <p className="text-xs uppercase text-muted-foreground">Overdue</p>
-              <p className="text-2xl font-bold tabular-nums mt-1 text-red-600">
-                {isLoading ? "…" : overdueCount}
+              <p className="text-xs uppercase text-muted-foreground">Total collectable (in progress)</p>
+              <p className="text-2xl font-bold tabular-nums mt-1 text-slate-700">
+                {isLoading ? "…" : formatAed(totalCollectableInProgress)}
               </p>
             </CardContent>
           </Card>
@@ -134,32 +179,51 @@ const PaymentsPage = () => {
               </p>
             ) : filtered.length === 0 ? (
               <p className="p-12 text-center text-sm text-muted-foreground">
-                {rows.length === 0 ? "No outstanding payments" : "No clients match your search."}
+                {rows.length === 0 ? "No clients with open balances" : "No clients match your search."}
               </p>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead className="min-w-[180px]">Client</TableHead>
-                    <TableHead className="text-right">
-                      <button
-                        type="button"
-                        className="font-medium hover:underline"
-                        onClick={() => toggleSort("due_now")}
-                      >
-                        Due now{sortKey === "due_now" ? (sortDesc ? " ↓" : " ↑") : ""}
-                      </button>
+                    <TableHead className="text-right min-w-[130px]">
+                      <SortableHead
+                        label="Total collectable"
+                        columnKey="due_now"
+                        activeKey={sortKey}
+                        sortDesc={sortDesc}
+                        onSort={toggleSort}
+                        className="ml-auto"
+                      />
                     </TableHead>
-                    <TableHead className="text-right min-w-[100px]">In progress</TableHead>
+                    <TableHead className="text-right min-w-[130px]">
+                      <SortableHead
+                        label="Overdue"
+                        columnKey="overdue_now"
+                        activeKey={sortKey}
+                        sortDesc={sortDesc}
+                        onSort={toggleSort}
+                        className="ml-auto"
+                      />
+                    </TableHead>
+                    <TableHead className="text-right min-w-[130px]">
+                      <SortableHead
+                        label="In progress"
+                        columnKey="in_progress"
+                        activeKey={sortKey}
+                        sortDesc={sortDesc}
+                        onSort={toggleSort}
+                        className="ml-auto"
+                      />
+                    </TableHead>
                     <TableHead className="min-w-[140px]">
-                      <button
-                        type="button"
-                        className="font-medium hover:underline"
-                        onClick={() => toggleSort("max_days_overdue")}
-                      >
-                        Oldest due / overdue
-                        {sortKey === "max_days_overdue" ? (sortDesc ? " ↓" : " ↑") : ""}
-                      </button>
+                      <SortableHead
+                        label="Days overdue"
+                        columnKey="max_days_overdue"
+                        activeKey={sortKey}
+                        sortDesc={sortDesc}
+                        onSort={toggleSort}
+                      />
                     </TableHead>
                     <TableHead className="min-w-[120px]">Last reminder</TableHead>
                     <TableHead className="w-[100px]" />
@@ -213,6 +277,9 @@ function OwnerDebtRow({
   row: OwnerWithCollectableDebt;
   onOpen: () => void;
 }) {
+  const draftOnly = row.due_now === 0 && row.in_progress > 0;
+  const canCollect = row.due_now > 0;
+
   return (
     <TableRow
       className="cursor-pointer hover:bg-muted/40"
@@ -226,7 +293,10 @@ function OwnerDebtRow({
         ) : null}
       </TableCell>
       <TableCell className="text-right tabular-nums font-semibold text-red-600">
-        {formatAed(row.due_now)}
+        {row.due_now > 0 ? formatAed(row.due_now) : "—"}
+      </TableCell>
+      <TableCell className="text-right tabular-nums font-semibold text-red-600">
+        {row.overdue_now > 0 ? formatAed(row.overdue_now) : "—"}
       </TableCell>
       <TableCell className="text-right tabular-nums text-muted-foreground">
         {row.in_progress > 0 ? formatAed(row.in_progress) : "—"}
@@ -235,6 +305,10 @@ function OwnerDebtRow({
         {row.max_days_overdue > 0 ? (
           <Badge variant="outline" className="border-red-300 text-red-700 bg-red-50">
             {row.max_days_overdue}d overdue
+          </Badge>
+        ) : draftOnly ? (
+          <Badge variant="outline" className="border-slate-300 text-slate-700 bg-slate-50">
+            Draft only
           </Badge>
         ) : row.oldest_due_date ? (
           <span className="text-sm tabular-nums">
@@ -260,12 +334,12 @@ function OwnerDebtRow({
           }}
           data-testid={`payments-collect-btn-${row.owner_id}`}
         >
-          Collect
+          {canCollect ? "Collect" : "View"}
           <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
       </TableCell>
     </TableRow>
   );
-};
+}
 
 export default PaymentsPage;

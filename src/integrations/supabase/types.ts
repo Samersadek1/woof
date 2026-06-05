@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       _bra_backup: {
@@ -3477,9 +3502,11 @@ export type Database = {
           last_reminder_at: string
           max_days_overdue: number
           oldest_due_date: string
+          overdue_now: number
           owner_id: string
           owner_name: string
           phone: string
+          total_balance: number
           wallet_credit: number
         }[]
       }
@@ -4099,6 +4126,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       addon_type: [
