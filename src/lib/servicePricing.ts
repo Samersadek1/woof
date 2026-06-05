@@ -74,6 +74,17 @@ export function daycareHourlyPetSubtotal(
   };
 }
 
+/** Single-day daycare keys from the Live Rate Card (`pricing.key`). */
+export const DAYCARE_SINGLE_DAY_PRICING_KEYS = [
+  "daycare_single_day",
+  "daycare_2_dogs",
+  "daycare_3_dogs",
+  "daycare_4_dogs",
+  "daycare_5_dogs",
+  "daycare_6_dogs",
+  "daycare_family_per_dog",
+] as const;
+
 /** Keys used by the Live Rate Card (matches `pricing.key`). */
 export const DAYCARE_HOURLY_PRICING_KEYS = [
   "daycare_hourly_single_day",
@@ -161,11 +172,22 @@ export function daycareHourlyGroupPricing(
 
   const base3 = amountFor(prices, "daycare_hourly_3_dogs");
   const single = amountFor(prices, "daycare_hourly_single_day");
-  return {
-    pricingKey: "daycare_hourly_3_dogs",
-    total: base3 + (n - 3) * single,
-    label: `Daycare hourly — 3 dogs + ${n - 3} extra`,
-  };
+  const extrapolated = base3 + (n - 3) * single;
+  if (base3 > 0 && extrapolated > 0) {
+    return {
+      pricingKey: "daycare_hourly_3_dogs",
+      total: extrapolated,
+      label: `Daycare hourly — 3 dogs + ${n - 3} extra`,
+    };
+  }
+  if (single > 0) {
+    return {
+      pricingKey: DAYCARE_HOURLY_UNIT_KEY,
+      total: n * single,
+      label: `Daycare hourly — ${n} dog${n === 1 ? "" : "s"} (per-dog rate; multi-dog rate card missing)`,
+    };
+  }
+  return { pricingKey: "", total: 0, label: "" };
 }
 
 export function daycareGroupPricing(
@@ -209,9 +231,20 @@ export function daycareGroupPricing(
   // Fallback keeps pricing monotonic if explicit higher-count keys are not configured.
   const base3 = amountFor(prices, "daycare_3_dogs");
   const single = amountFor(prices, "daycare_single_day");
-  return {
-    pricingKey: "daycare_3_dogs",
-    total: base3 + (n - 3) * single,
-    label: `Daycare single day — 3 dogs + ${n - 3} extra`,
-  };
+  const extrapolated = base3 + (n - 3) * single;
+  if (base3 > 0 && extrapolated > 0) {
+    return {
+      pricingKey: "daycare_3_dogs",
+      total: extrapolated,
+      label: `Daycare single day — 3 dogs + ${n - 3} extra`,
+    };
+  }
+  if (single > 0) {
+    return {
+      pricingKey: "daycare_single_day",
+      total: n * single,
+      label: `Daycare single day — ${n} dog${n === 1 ? "" : "s"} (per-dog rate; multi-dog rate card missing)`,
+    };
+  }
+  return { pricingKey: "", total: 0, label: "" };
 }

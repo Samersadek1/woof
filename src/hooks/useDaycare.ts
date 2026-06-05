@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { cancelDaycareCheckIn } from "@/lib/daycareCancelCheckIn";
 import { appendDogSizeToNotes } from "@/lib/dogSizeNotes";
-import { composeNotesWithBillingPath, isDaycareHourlyPending, isHourlyBillingDraft, parseHourlyDraftId, type DaycareBillingPath } from "@/lib/daycareSessionMeta";
+import { composeNotesWithBillingPath, isDaycareHourlyPending, isHourlyBillingDraft, parseDaycareBillingPath, parseHourlyDraftId, type DaycareBillingPath } from "@/lib/daycareSessionMeta";
 import { DAYCARE_CREDIT_CODES } from "@/lib/daycareCredits";
 import {
   isSharedHouseholdDaycarePool,
@@ -882,7 +882,7 @@ export type LinkedDaycareSessionForInvoice = {
   pet_name: string;
 };
 
-/** Daycare sessions linked to an invoice (primary service_id or hourly family marker in notes). */
+/** Daycare sessions linked to an invoice (primary service_id, note marker, or same-day single-day sibling). */
 export function useLinkedDaycareSessionsForInvoice(
   invoiceId: string | undefined,
   primarySessionId: string | null | undefined,
@@ -892,27 +892,71 @@ export function useLinkedDaycareSessionsForInvoice(
     enabled: !!invoiceId,
     queryFn: async (): Promise<LinkedDaycareSessionForInvoice[]> => {
       const marker = `HOURLY_INVOICED:${invoiceId}`;
+
+      const { data: invoice, error: invErr } = await supabase
+        .from("invoices")
+        .select("owner_id, issue_date")
+        .eq("id", invoiceId as string)
+        .maybeSingle();
+      if (invErr) throw invErr;
+
       const filters: string[] = [`notes.ilike.%${marker}%`];
       if (primarySessionId) filters.push(`id.eq.${primarySessionId}`);
 
-      const { data, error } = await supabase
+      const { data: markedOrPrimary, error } = await supabase
         .from("daycare_sessions")
-        .select("id, session_date, pets(name)")
+        .select("id, session_date, pets(name), notes, package_id")
         .or(filters.join(","))
         .order("session_date", { ascending: true });
       if (error) throw error;
 
       const seen = new Set<string>();
       const rows: LinkedDaycareSessionForInvoice[] = [];
-      for (const row of data ?? []) {
-        if (seen.has(row.id)) continue;
+
+      const addRow = (row: {
+        id: string;
+        session_date: string;
+        pets: { name: string } | null;
+      }) => {
+        if (seen.has(row.id)) return;
         seen.add(row.id);
         rows.push({
           id: row.id,
           session_date: row.session_date,
-          pet_name: (row as { pets: { name: string } | null }).pets?.name ?? "Pet",
+          pet_name: row.pets?.name ?? "Pet",
         });
+      };
+
+      for (const row of markedOrPrimary ?? []) {
+        addRow(row as { id: string; session_date: string; pets: { name: string } | null });
       }
+
+      // Legacy single-day batch invoices only link the primary session via service_id.
+      if (invoice?.owner_id && invoice.issue_date) {
+        const { data: sameDay, error: sameDayErr } = await supabase
+          .from("daycare_sessions")
+          .select("id, session_date, pets(name), notes, package_id")
+          .eq("owner_id", invoice.owner_id)
+          .eq("session_date", invoice.issue_date);
+        if (sameDayErr) throw sameDayErr;
+
+        for (const row of sameDay ?? []) {
+          const typed = row as {
+            id: string;
+            session_date: string;
+            pets: { name: string } | null;
+            notes: string | null;
+            package_id: string | null;
+          };
+          if (parseDaycareBillingPath(typed.notes, typed.package_id) !== "single") continue;
+          addRow(typed);
+        }
+      }
+
+      rows.sort(
+        (a, b) =>
+          a.session_date.localeCompare(b.session_date) || a.pet_name.localeCompare(b.pet_name),
+      );
       return rows;
     },
   });

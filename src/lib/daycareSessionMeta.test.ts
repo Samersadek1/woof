@@ -11,6 +11,7 @@ import {
   clearHourlyDraftFromNotes,
   parseDaycareBillingPath,
   visibleDaycareNotes,
+  enrichDaycareSessionInvoiceMap,
   resolveDaycareSessionInvoiceId,
   isDaycareHourlyPending,
 } from "./daycareSessionMeta";
@@ -166,5 +167,61 @@ describe("daycareSessionMeta", () => {
     expect(
       visibleDaycareNotes("Dog size: Medium\nBILLING_PATH:hourly\nHOURLY_DRAFT:inv-3"),
     ).toBe("Dog size: Medium");
+  });
+
+  it("enrichDaycareSessionInvoiceMap links same-day single-day siblings to primary invoice", () => {
+    const primaryMap = new Map([["storm", "inv-1"]]);
+    const sessions = [
+      {
+        id: "storm",
+        owner_id: "owner-a",
+        session_date: "2026-06-05",
+        notes: "BILLING_PATH:single",
+        package_id: null,
+      },
+      {
+        id: "sky",
+        owner_id: "owner-a",
+        session_date: "2026-06-05",
+        notes: "BILLING_PATH:single",
+        package_id: null,
+      },
+      {
+        id: "ocean",
+        owner_id: "owner-a",
+        session_date: "2026-06-05",
+        notes: "BILLING_PATH:single",
+        package_id: null,
+      },
+    ];
+    const enriched = enrichDaycareSessionInvoiceMap(sessions, primaryMap);
+    expect(enriched.get("storm")).toBe("inv-1");
+    expect(enriched.get("sky")).toBe("inv-1");
+    expect(enriched.get("ocean")).toBe("inv-1");
+    expect(
+      resolveDaycareSessionInvoiceId("sky", "BILLING_PATH:single", enriched),
+    ).toBe("inv-1");
+  });
+
+  it("enrichDaycareSessionInvoiceMap does not link hourly siblings on same day", () => {
+    const primaryMap = new Map([["storm", "inv-1"]]);
+    const sessions = [
+      {
+        id: "storm",
+        owner_id: "owner-a",
+        session_date: "2026-06-05",
+        notes: "BILLING_PATH:single",
+        package_id: null,
+      },
+      {
+        id: "hourly-dog",
+        owner_id: "owner-a",
+        session_date: "2026-06-05",
+        notes: "BILLING_PATH:hourly",
+        package_id: null,
+      },
+    ];
+    const enriched = enrichDaycareSessionInvoiceMap(sessions, primaryMap);
+    expect(enriched.get("hourly-dog")).toBeUndefined();
   });
 });

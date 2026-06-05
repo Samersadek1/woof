@@ -16,8 +16,9 @@ import {
 import {
   buildPriceMap,
   daycareGroupPricing,
-  DAYCARE_HOURLY_UNIT_KEY,
 } from "@/lib/servicePricing";
+import { fetchDaycareCheckInPriceRows } from "@/lib/daycareCheckInPricing";
+import { buildDaycareSingleDayLineItems } from "@/lib/daycareInvoiceLines";
 import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
@@ -54,6 +55,7 @@ import {
 } from "@/components/daycare/CompleteHourlyBillingDialog";
 import {
   composeNotesWithBillingPath,
+  composeNotesWithHourlyInvoiced,
   parseDaycareBillingPath,
   visibleDaycareNotes,
   BILLING_PATH_PREFIX,
@@ -62,6 +64,7 @@ import {
   isSingleDayInvoiceMissing,
   isHourlyBillingInvoiced,
   isHourlyBillingDraft,
+  enrichDaycareSessionInvoiceMap,
 } from "@/lib/daycareSessionMeta";
 import { findOrCreateHourlyDraft } from "@/lib/daycareHourlyDraftInvoice";
 import { useDaycareSessionInvoiceMap } from "@/hooks/useDaycareSessionInvoiceMap";
@@ -685,20 +688,7 @@ function PlannerTab() {
   );
   const { data: pricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
     queryKey: ["pricing", "daycare_checkin"],
-    queryFn: async () => {
-      const [single, hourly] = await Promise.all([
-        supabase.rpc("resolve_woof_service_rate", { p_service_code: "daycare_full_day" }),
-        supabase.rpc("resolve_woof_service_rate", { p_service_code: "daycare_hourly" }),
-      ]);
-      if (single.error) throw single.error;
-      if (hourly.error) throw hourly.error;
-      const singleAmount = (single.data as { amount_aed: number }[] | null)?.[0]?.amount_aed ?? 0;
-      const hourlyAmount = (hourly.data as { amount_aed: number }[] | null)?.[0]?.amount_aed ?? 0;
-      return [
-        { key: "daycare_single_day", amount_aed: singleAmount },
-        { key: DAYCARE_HOURLY_UNIT_KEY, amount_aed: hourlyAmount },
-      ];
-    },
+    queryFn: () => fetchDaycareCheckInPriceRows(supabase),
   });
   const { data: transportPricingRows = [] } = useQuery<{ key: string; amount_aed: number }[]>({
     queryKey: ["pricing", "transport_zones", "daycare"],
@@ -734,6 +724,9 @@ function PlannerTab() {
     () => daycareGroupPricing(singleDayCount, daycarePriceMap),
     [singleDayCount, daycarePriceMap],
   );
+  const singleDayPricingInvalid =
+    singleDayCount > 0 &&
+    (singleDayRatePreview.total <= 0 || !singleDayRatePreview.pricingKey);
   const transportRate = useMemo(() => {
     const key = transportPricingKey(checkInDraft.transport_zone);
     return transportPricingRows.find((r) => r.key === key)?.amount_aed ?? 0;
@@ -882,6 +875,12 @@ function PlannerTab() {
       toast.error("Select at least one dog");
       return;
     }
+    if (singleDayPricingInvalid) {
+      toast.error(
+        "Daycare single-day rate is missing or invalid. Check the Live Rate Card (2-dog and 3-dog rates).",
+      );
+      return;
+    }
 
     if (
       (checkInDraft.pickup_used || checkInDraft.dropoff_used) &&
@@ -987,7 +986,6 @@ function PlannerTab() {
     const invoicedPetTotal = okSingleIds.length + okCreditIds.length;
 
     if (invoicedPetTotal > 0) {
-      const singleRate = daycareGroupPricing(okSingleIds.length, daycarePriceMap);
       const zoneLabel = transportZoneLabel(checkInDraft.transport_zone);
       const transportKey = transportPricingKey(checkInDraft.transport_zone);
       const lineItems: {
@@ -999,15 +997,19 @@ function PlannerTab() {
         preserveUnitPrice?: boolean;
       }[] = [];
 
-      if (okSingleIds.length > 0 && singleRate.pricingKey) {
-        lineItems.push({
-          description: `${singleRate.label} (${okSingleIds.length} dog${okSingleIds.length === 1 ? "" : "s"})`,
-          quantity: okSingleIds.length,
-          unitPrice: singleRate.total / okSingleIds.length,
-          pricingKey: singleRate.pricingKey,
-          serviceType: "daycare",
-          preserveUnitPrice: true,
-        });
+      if (okSingleIds.length > 0) {
+        const petRows = okSingleIds.map((id) => ({
+          id,
+          name: pets?.find((p) => p.id === id)?.name ?? "Pet",
+        }));
+        lineItems.push(
+          ...buildDaycareSingleDayLineItems({
+            petIds: okSingleIds,
+            pets: petRows,
+            sessionDate: checkInDraft.session_date,
+            prices: daycarePriceMap,
+          }),
+        );
       }
       if (okCreditIds.length > 0) {
         for (const petId of okCreditIds) {
@@ -1067,7 +1069,7 @@ function PlannerTab() {
 
       if (referenceSessionId && lineItems.length > 0) {
         try {
-          await createServiceInvoice({
+          const invoiceId = await createServiceInvoice({
             ownerId,
             serviceType: "daycare",
             referenceId: referenceSessionId,
@@ -1078,6 +1080,25 @@ function PlannerTab() {
             skipMemberDiscount: skipInvoiceDiscount,
             checkInDate: checkInDraft.session_date,
           });
+
+          // Link sibling single-day sessions to the same invoice (primary uses service_id).
+          const siblingPetIds = okSingleIds.filter(
+            (petId) => sessionsCreated[petId] && sessionsCreated[petId] !== referenceSessionId,
+          );
+          if (siblingPetIds.length > 0) {
+            await Promise.all(
+              siblingPetIds.map(async (petId) => {
+                const sessionId = sessionsCreated[petId];
+                const { error } = await supabase
+                  .from("daycare_sessions")
+                  .update({
+                    notes: composeNotesWithHourlyInvoiced(sessionNotes[petId] ?? null, invoiceId),
+                  })
+                  .eq("id", sessionId);
+                if (error) throw error;
+              }),
+            );
+          }
         } catch (error) {
           const message = extractErrorMessage(error);
           toast.error(`Invoice failed: ${message}`);
@@ -1532,6 +1553,11 @@ function PlannerTab() {
                           <span>{formatAed(singleDayRatePreview.total)}</span>
                         </div>
                       )}
+                      {singleDayPricingInvalid && (
+                        <p className="text-sm text-destructive">
+                          Single-day rate is missing or invalid — check the Live Rate Card before check-in.
+                        </p>
+                      )}
                       {(checkInDraft.pickup_used || checkInDraft.dropoff_used) && (
                         <div className="flex items-center justify-between text-sm text-muted-foreground">
                           <span>
@@ -1642,7 +1668,7 @@ function PlannerTab() {
               <Button
                 data-testid="daycare-create-session-btn"
                 onClick={handleCheckInSelected}
-                disabled={isSubmittingCheckIn || selectedPetIds.length === 0}
+                disabled={isSubmittingCheckIn || selectedPetIds.length === 0 || singleDayPricingInvalid}
               >
                 {isSubmittingCheckIn && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Check in {selectedPetIds.length > 0 ? `${selectedPetIds.length} pet${selectedPetIds.length !== 1 ? "s" : ""}` : "selected pets"}
@@ -1747,6 +1773,21 @@ function DaycareOperationsTab() {
   const { data: invoiceIdByServiceId = new Map<string, string>() } =
     useDaycareSessionInvoiceMap(sessionIds);
 
+  const invoiceIdBySessionId = useMemo(
+    () =>
+      enrichDaycareSessionInvoiceMap(
+        sessions.map((s) => ({
+          id: s.id,
+          owner_id: s.owner_id,
+          session_date: s.session_date,
+          notes: s.notes,
+          package_id: s.package_id,
+        })),
+        invoiceIdByServiceId,
+      ),
+    [sessions, invoiceIdByServiceId],
+  );
+
   const hourlyBillingSessions = useMemo((): HourlyBillingSession[] => {
     if (!hourlyBillingTarget) return [];
     return sessions
@@ -1760,7 +1801,7 @@ function DaycareOperationsTab() {
             packageId: session.package_id,
             checkedIn: Boolean(session.checked_in),
           },
-          invoiceIdByServiceId,
+          invoiceIdBySessionId,
         );
       })
       .map((session) => ({
@@ -1769,7 +1810,7 @@ function DaycareOperationsTab() {
         petName: session.pets?.name ?? "Pet",
         notes: session.notes,
       }));
-  }, [hourlyBillingTarget, sessions, invoiceIdByServiceId]);
+  }, [hourlyBillingTarget, sessions, invoiceIdBySessionId]);
 
   const pendingHourlyCount = useMemo(
     () =>
@@ -1781,10 +1822,10 @@ function DaycareOperationsTab() {
             packageId: session.package_id,
             checkedIn: Boolean(session.checked_in),
           },
-          invoiceIdByServiceId,
+          invoiceIdBySessionId,
         ),
       ).length,
-    [sessions, invoiceIdByServiceId],
+    [sessions, invoiceIdBySessionId],
   );
 
   const totalDogs = sessions.length;
@@ -1877,7 +1918,7 @@ function DaycareOperationsTab() {
                 const invoiceId = resolveDaycareSessionInvoiceId(
                   s.id,
                   s.notes,
-                  invoiceIdByServiceId,
+                  invoiceIdBySessionId,
                 );
                 const hourlyPending = isDaycareHourlyPending(
                   {
@@ -1886,7 +1927,7 @@ function DaycareOperationsTab() {
                     packageId: s.package_id,
                     checkedIn: Boolean(s.checked_in),
                   },
-                  invoiceIdByServiceId,
+                  invoiceIdBySessionId,
                 );
                 const invoiceMissing = isSingleDayInvoiceMissing(
                   {
@@ -1895,7 +1936,7 @@ function DaycareOperationsTab() {
                     packageId: s.package_id,
                     checkedIn: Boolean(s.checked_in),
                   },
-                  invoiceIdByServiceId,
+                  invoiceIdBySessionId,
                 );
                 const tags = buildDaycareTags({
                   sessionDate: s.session_date,

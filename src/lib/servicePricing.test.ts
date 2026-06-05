@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   billableDaycareHourlyHours,
   buildPriceMap,
+  daycareGroupPricing,
   daycareHourlyInvoiceLineUnits,
   daycareHourlyLinearTotal,
   daycareHourlyPetSubtotal,
@@ -54,5 +55,41 @@ describe("servicePricing", () => {
     expect(daycareHourlyPetSubtotal(0.25, prices).total).toBe(5);
     expect(daycareHourlyPetSubtotal(31 / 60, prices).roundedHours).toBe(1);
     expect(daycareHourlyPetSubtotal(31 / 60, prices).total).toBe(10);
+  });
+
+  describe("daycareGroupPricing", () => {
+    const partialMap = buildPriceMap([{ key: "daycare_single_day", amount_aed: 105 }]);
+    const fullMap = buildPriceMap([
+      { key: "daycare_single_day", amount_aed: 115.5 },
+      { key: "daycare_2_dogs", amount_aed: 173.25 },
+      { key: "daycare_3_dogs", amount_aed: 231 },
+    ]);
+
+    it("uses explicit 3-dog rate when configured", () => {
+      const result = daycareGroupPricing(3, fullMap);
+      expect(result.total).toBe(231);
+      expect(result.pricingKey).toBe("daycare_3_dogs");
+      expect(result.label).toBe("Daycare single day — 3 dogs");
+    });
+
+    it("does not return zero for 3 dogs when only 1-dog rate is loaded", () => {
+      const result = daycareGroupPricing(3, partialMap);
+      expect(result.total).toBeGreaterThan(0);
+      expect(result.total).toBe(315);
+      expect(result.pricingKey).toBe("daycare_single_day");
+    });
+
+    it("does not return negative for 2 dogs when only 1-dog rate is loaded", () => {
+      const result = daycareGroupPricing(2, partialMap);
+      expect(result.total).toBeGreaterThan(0);
+      expect(result.total).toBe(210);
+      expect(result.pricingKey).toBe("daycare_single_day");
+    });
+
+    it("uses explicit 2-dog rate when configured", () => {
+      const result = daycareGroupPricing(2, fullMap);
+      expect(result.total).toBe(173.25);
+      expect(result.pricingKey).toBe("daycare_2_dogs");
+    });
   });
 });

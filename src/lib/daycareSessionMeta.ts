@@ -93,6 +93,42 @@ export function resolveDaycareSessionInvoiceId(
   return parseHourlyDraftId(notes);
 }
 
+export type DaycareSessionInvoiceLinkInput = {
+  id: string;
+  owner_id: string;
+  session_date: string;
+  notes: string | null | undefined;
+  package_id: string | null | undefined;
+};
+
+/**
+ * Extends the service_id-only invoice map so same-day single-day siblings
+ * (checked in on one batch invoice) resolve to the primary session's invoice.
+ */
+export function enrichDaycareSessionInvoiceMap(
+  sessions: DaycareSessionInvoiceLinkInput[],
+  primaryMap: Map<string, string>,
+): Map<string, string> {
+  const map = new Map(primaryMap);
+  const singleDayInvoiceByOwnerDate = new Map<string, string>();
+
+  for (const session of sessions) {
+    const invoiceId = primaryMap.get(session.id);
+    if (!invoiceId) continue;
+    if (parseDaycareBillingPath(session.notes, session.package_id ?? null) !== "single") continue;
+    singleDayInvoiceByOwnerDate.set(`${session.owner_id}:${session.session_date}`, invoiceId);
+  }
+
+  for (const session of sessions) {
+    if (map.has(session.id)) continue;
+    if (parseDaycareBillingPath(session.notes, session.package_id ?? null) !== "single") continue;
+    const invoiceId = singleDayInvoiceByOwnerDate.get(`${session.owner_id}:${session.session_date}`);
+    if (invoiceId) map.set(session.id, invoiceId);
+  }
+
+  return map;
+}
+
 export type DaycareSessionBillingFlags = {
   sessionId: string;
   notes: string | null | undefined;

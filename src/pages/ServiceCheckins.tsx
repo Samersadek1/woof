@@ -19,6 +19,7 @@ import {
   isSingleDayInvoiceMissing,
   isHourlyBillingInvoiced,
   isHourlyBillingDraft,
+  enrichDaycareSessionInvoiceMap,
 } from "@/lib/daycareSessionMeta";
 import { useDaycareSessionInvoiceMap } from "@/hooks/useDaycareSessionInvoiceMap";
 import { DaycareSessionInvoiceLink } from "@/components/daycare/DaycareSessionInvoiceLink";
@@ -167,6 +168,21 @@ export default function ServiceCheckinsPage() {
   const { data: invoiceIdByServiceId = new Map<string, string>() } =
     useDaycareSessionInvoiceMap(daycareSessionIds);
 
+  const invoiceIdBySessionId = useMemo(
+    () =>
+      enrichDaycareSessionInvoiceMap(
+        daycareRows.map((row) => ({
+          id: row.id,
+          owner_id: row.ownerId,
+          session_date: row.sessionDate,
+          notes: row.notes,
+          package_id: row.packageId,
+        })),
+        invoiceIdByServiceId,
+      ),
+    [daycareRows, invoiceIdByServiceId],
+  );
+
   const hourlyBillingSessions = useMemo((): HourlyBillingSession[] => {
     if (!hourlyBillingTarget) return [];
     return daycareRows
@@ -180,7 +196,7 @@ export default function ServiceCheckinsPage() {
             packageId: row.packageId,
             checkedIn: row.checkedIn,
           },
-          invoiceIdByServiceId,
+          invoiceIdBySessionId,
         );
       })
       .map((row) => ({
@@ -189,7 +205,7 @@ export default function ServiceCheckinsPage() {
         petName: row.petName,
         notes: row.notes,
       }));
-  }, [hourlyBillingTarget, daycareRows, invoiceIdByServiceId]);
+  }, [hourlyBillingTarget, daycareRows, invoiceIdBySessionId]);
 
   const pendingHourlyCount = useMemo(
     () =>
@@ -201,10 +217,10 @@ export default function ServiceCheckinsPage() {
             packageId: row.packageId,
             checkedIn: row.checkedIn,
           },
-          invoiceIdByServiceId,
+          invoiceIdBySessionId,
         ),
       ).length,
-    [daycareRows, invoiceIdByServiceId],
+    [daycareRows, invoiceIdBySessionId],
   );
 
   const title = useMemo(
@@ -316,7 +332,7 @@ export default function ServiceCheckinsPage() {
                     const invoiceId = resolveDaycareSessionInvoiceId(
                       row.id,
                       row.notes,
-                      invoiceIdByServiceId,
+                      invoiceIdBySessionId,
                     );
                     const hourlyPending = isDaycareHourlyPending(
                       {
@@ -325,7 +341,7 @@ export default function ServiceCheckinsPage() {
                         packageId: row.packageId,
                         checkedIn: row.checkedIn,
                       },
-                      invoiceIdByServiceId,
+                      invoiceIdBySessionId,
                     );
                     const invoiceMissing = isSingleDayInvoiceMissing(
                       {
@@ -334,7 +350,7 @@ export default function ServiceCheckinsPage() {
                         packageId: row.packageId,
                         checkedIn: row.checkedIn,
                       },
-                      invoiceIdByServiceId,
+                      invoiceIdBySessionId,
                     );
                     const visibleNotes = visibleDaycareNotes(row.notes);
 
