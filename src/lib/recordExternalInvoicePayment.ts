@@ -6,8 +6,24 @@ import { invoiceAmountDue } from "@/lib/vatConfig";
 import {
   invoicePaymentMethodToTransactionType,
   type ExternalPaymentMethod,
+  type PaymentMethod,
 } from "@/lib/paymentMethod";
 import { recordPayment } from "@/services/invoiceService";
+
+/**
+ * How recently a same-amount payment on the same invoice counts as a likely
+ * duplicate. Staff retries / double-clicks happen within minutes; legitimate
+ * second payments are rare and confirmed with an override.
+ */
+export const DUPLICATE_PAYMENT_WINDOW_MINUTES = 10;
+
+export type DuplicatePaymentInfo = {
+  paymentId: string;
+  amount: number;
+  method: PaymentMethod;
+  recordedBy: string | null;
+  createdAt: string;
+};
 
 export type RecordExternalPaymentResult = {
   success: boolean;
@@ -16,7 +32,42 @@ export type RecordExternalPaymentResult = {
   amountRecorded?: number;
   newAmountPaid?: number;
   partial?: boolean;
+  /** Set when a recent same-amount payment exists and the caller did not confirm. */
+  duplicate?: DuplicatePaymentInfo;
 };
+
+/**
+ * Look for a recent payment of the same amount already recorded on this invoice.
+ * Used to warn staff before recording what is likely the same payment twice.
+ * Alert-only: callers decide whether to proceed with an override.
+ */
+export async function findRecentDuplicateExternalPayment(
+  supabase: SupabaseClient<Database>,
+  params: { invoiceId: string; amountAed: number; windowMinutes?: number },
+): Promise<DuplicatePaymentInfo | null> {
+  const amount = roundAed(params.amountAed);
+  const windowMinutes = params.windowMinutes ?? DUPLICATE_PAYMENT_WINDOW_MINUTES;
+  const since = new Date(Date.now() - windowMinutes * 60_000).toISOString();
+
+  const { data, error } = await supabase
+    .from("invoice_payments")
+    .select("id, amount, payment_method, recorded_by, created_at")
+    .eq("invoice_id", params.invoiceId)
+    .eq("amount", amount)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error || !data || data.length === 0) return null;
+  const row = data[0];
+  return {
+    paymentId: row.id,
+    amount: row.amount,
+    method: row.payment_method,
+    recordedBy: row.recorded_by,
+    createdAt: row.created_at,
+  };
+}
 
 export async function recordExternalInvoicePayment(
   supabase: SupabaseClient<Database>,
@@ -26,6 +77,8 @@ export async function recordExternalInvoicePayment(
     performedBy: string;
     amountAed?: number;
     note?: string;
+    /** Skip the recent-duplicate guard (staff explicitly confirmed). */
+    confirmDuplicate?: boolean;
   },
 ): Promise<RecordExternalPaymentResult> {
   const { invoiceId, method, performedBy, note } = params;
@@ -56,6 +109,18 @@ export async function recordExternalInvoicePayment(
   const amount = roundAed(Math.min(Math.max(0, requested), outstanding));
   if (amount <= 0) {
     return { success: false, error: "Payment amount must be greater than zero." };
+  }
+
+  // Alert-only duplicate guard: warn (don't block) when an identical payment was
+  // recorded on this invoice moments ago. Bypassed once staff confirm.
+  if (!params.confirmDuplicate) {
+    const duplicate = await findRecentDuplicateExternalPayment(supabase, {
+      invoiceId,
+      amountAed: amount,
+    });
+    if (duplicate) {
+      return { success: false, ownerId: invoice.owner_id, duplicate };
+    }
   }
 
   const { data: owner, error: ownerErr } = await supabase

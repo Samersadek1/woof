@@ -27,7 +27,12 @@ import { useAccountBalance, accountBalanceQueryKey } from "@/hooks/useAccountBal
 import { invoiceLedgerQueryKey } from "@/hooks/useInvoiceLedger";
 import { seedInvoicePaymentSplit } from "@/lib/accountBalance";
 import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
-import { recordExternalInvoicePayment } from "@/lib/recordExternalInvoicePayment";
+import {
+  recordExternalInvoicePayment,
+  findRecentDuplicateExternalPayment,
+  type DuplicatePaymentInfo,
+} from "@/lib/recordExternalInvoicePayment";
+import { DuplicatePaymentConfirmDialog } from "@/components/billing/DuplicatePaymentConfirmDialog";
 import { roundAed } from "@/lib/money";
 import { WALLET_TOPUP_PAYMENT_METHOD_OPTIONS } from "@/lib/paymentMethod";
 import type { ExternalPaymentMethod } from "@/lib/paymentMethod";
@@ -71,6 +76,7 @@ export function PaymentSplitDialog({
   const [method, setMethod] = useState<ExternalPaymentMethod>("card");
   const [staffName, setStaffName] = useState(defaultStaffName ?? "");
   const [submitting, setSubmitting] = useState(false);
+  const [duplicatePayment, setDuplicatePayment] = useState<DuplicatePaymentInfo | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -86,7 +92,9 @@ export function PaymentSplitDialog({
   const totalCollecting = roundAed(walletNum + cardNum);
   const remainingAfter = roundAed(invoiceTotal - totalCollecting);
 
-  const handleConfirm = async () => {
+  const handleConfirm = () => runPayment(false);
+
+  const runPayment = async (confirmDuplicate: boolean) => {
     if (!staffName.trim()) {
       toast.error("Enter staff name");
       return;
@@ -102,6 +110,19 @@ export function PaymentSplitDialog({
     if (totalCollecting > invoiceTotal) {
       toast.error(`Total cannot exceed invoice balance (${formatAed(invoiceTotal)})`);
       return;
+    }
+
+    // Pre-check the external leg before any writes so a confirm-and-retry never
+    // re-runs the wallet deduction.
+    if (cardNum > 0 && !confirmDuplicate) {
+      const dup = await findRecentDuplicateExternalPayment(supabase, {
+        invoiceId,
+        amountAed: cardNum,
+      });
+      if (dup) {
+        setDuplicatePayment(dup);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -130,6 +151,7 @@ export function PaymentSplitDialog({
           method,
           performedBy: staffName.trim(),
           amountAed: cardNum,
+          confirmDuplicate: true,
         });
         if (!res.success) throw new Error(res.error || "Card payment failed");
       }
@@ -142,6 +164,7 @@ export function PaymentSplitDialog({
           ? `Partial payment recorded — ${formatAed(remainingAfter)} still outstanding`
           : "Payment recorded",
       );
+      setDuplicatePayment(null);
       onSuccess?.();
       onOpenChange(false);
     } catch (err) {
@@ -152,6 +175,7 @@ export function PaymentSplitDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => (!submitting ? onOpenChange(v) : undefined)}>
       <DialogContent className="sm:max-w-md" data-testid="payment-split-dialog">
         <DialogHeader>
@@ -266,5 +290,14 @@ export function PaymentSplitDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <DuplicatePaymentConfirmDialog
+      open={!!duplicatePayment}
+      duplicate={duplicatePayment}
+      submitting={submitting}
+      onConfirm={() => runPayment(true)}
+      onCancel={() => setDuplicatePayment(null)}
+    />
+    </>
   );
 }

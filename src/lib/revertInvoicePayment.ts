@@ -59,7 +59,13 @@ export function walletRefundFromPayments(payments: PaymentRow[]): number {
 
 /**
  * Undo a recent paid invoice: reset invoice first, then credit wallet if needed.
- * Original payment rows are kept for audit; a matching refund row is added for wallet pays.
+ *
+ * The `invoice_payments` rows are the ledger's source of truth, so leaving them
+ * behind makes a reverted payment keep showing on the ledger/detail. We archive
+ * them to `invoice_amendments` (audit trail) and delete them so the ledger,
+ * detail and print all agree. The underlying `wallet_transactions` rows are kept
+ * (full financial history + wallet balance), and a `refund` row is added for
+ * wallet pays.
  */
 export async function revertInvoicePayment(
   supabase: SupabaseClient<Database>,
@@ -86,6 +92,14 @@ export async function revertInvoicePayment(
   const payments = (paymentsRaw ?? []).filter((p) =>
     PAYMENT_TRANSACTION_TYPES.has(p.transaction_type),
   );
+
+  // Ledger source-of-truth rows to archive + remove so reverted payments stop
+  // showing on the ledger / detail.
+  const { data: invoicePaymentRows, error: ipErr } = await supabase
+    .from("invoice_payments")
+    .select("id, amount, payment_method, recorded_by, created_at")
+    .eq("invoice_id", invoiceId);
+  if (ipErr) return { success: false, error: ipErr.message };
 
   if (!canRevertInvoicePayment(invoice, paymentsRaw ?? [])) {
     return {
@@ -115,6 +129,34 @@ export async function revertInvoicePayment(
     })
     .eq("id", invoiceId);
   if (invUpdateErr) return { success: false, error: invUpdateErr.message, ownerId };
+
+  // Archive the ledger rows to invoice_amendments, then delete them so the
+  // reverted payment no longer appears on the ledger / detail. wallet_transactions
+  // are deliberately retained for financial audit.
+  if (invoicePaymentRows && invoicePaymentRows.length > 0) {
+    const { error: auditErr } = await supabase.from("invoice_amendments").insert({
+      invoice_id: invoiceId,
+      amended_by: performedBy.trim(),
+      field_changed: "payments_reverted",
+      old_value: JSON.stringify(
+        invoicePaymentRows.map((r) => ({
+          amount: r.amount,
+          method: r.payment_method,
+          recorded_by: r.recorded_by,
+          created_at: r.created_at,
+        })),
+      ),
+      new_value: null,
+      reason: reason?.trim() || "Payment reverted",
+    });
+    if (auditErr) return { success: false, error: auditErr.message, ownerId };
+
+    const { error: delErr } = await supabase
+      .from("invoice_payments")
+      .delete()
+      .eq("invoice_id", invoiceId);
+    if (delErr) return { success: false, error: delErr.message, ownerId };
+  }
 
   if (walletRefund > 0) {
     const { data: owner, error: ownerErr } = await supabase

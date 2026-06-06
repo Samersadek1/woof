@@ -96,7 +96,14 @@ async function fetchInvoicePrintable(invoiceId: string) {
         .from("wallet_transactions")
         .select("id, created_at, transaction_type, payment_method, performed_by, notes, amount")
         .eq("invoice_id", invoiceId)
-        .in("transaction_type", ["cash_payment", "card_payment", "bank_transfer_payment", "deduction"])
+        .in("transaction_type", [
+          "cash_payment",
+          "card_payment",
+          "bank_transfer_payment",
+          "payment_link_payment",
+          "deduction",
+          "refund",
+        ])
         .order("created_at", { ascending: true }),
       supabase
         .from("billing_adjustments")
@@ -166,6 +173,34 @@ export default function InvoicePrintPage() {
   const paidAmount = invoice?.amount_paid ?? 0;
   const outstanding = Math.max(grandTotal - paidAmount, 0);
   const wm = invoice ? watermark(invoice.status) : null;
+
+  // Only show what the customer actually paid. Staff-error corrections (reverted
+  // or duplicate payments) leave stale rows behind, so we reconcile the raw
+  // payment rows against the invoice's true amount_paid (capped at the grand
+  // total to drop duplicate overpayments) and surface only real activity.
+  const REFUND_TYPE = "refund";
+  const isRevertCorrection = (row: PaymentHistoryRow) =>
+    (row.notes ?? "").toLowerCase().startsWith("payment reverted");
+  const paidCap = Math.min(paidAmount, grandTotal);
+  const paymentRows = payments
+    .filter((p) => p.transaction_type !== REFUND_TYPE)
+    .slice()
+    .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+  let runningPaid = 0;
+  const visiblePayments: PaymentHistoryRow[] = [];
+  for (const p of paymentRows) {
+    const amt = Math.abs(p.amount);
+    if (runningPaid + amt <= paidCap + 0.01) {
+      visiblePayments.push(p);
+      runningPaid += amt;
+    }
+  }
+  // Genuine refunds (real money returned) stay visible; revert/correction
+  // credit-backs do not.
+  const visibleRefunds = payments.filter(
+    (p) => p.transaction_type === REFUND_TYPE && !isRevertCorrection(p),
+  );
+  const hasPaymentActivity = visiblePayments.length > 0 || visibleRefunds.length > 0;
 
   return (
     <PrintLayout imageUrls={["/woof-logo.png"]}>
@@ -317,7 +352,7 @@ export default function InvoicePrintPage() {
             </div>
           </section>
 
-          {payments.length > 0 ? (
+          {hasPaymentActivity ? (
             <section className="relative z-[1] mb-4">
               <p className="print-label mb-1 text-[11px] font-semibold uppercase">Payment History</p>
               <table className="w-full border-collapse border border-black print-sans text-[11px]">
@@ -330,7 +365,7 @@ export default function InvoicePrintPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {payments.map((payment) => (
+                  {visiblePayments.map((payment) => (
                     <tr key={payment.id}>
                       <td className="border border-black px-2 py-1">
                         {format(parseISO(payment.created_at), "d MMM yyyy")}
@@ -343,6 +378,20 @@ export default function InvoicePrintPage() {
                       </td>
                       <td className="border border-black px-2 py-1">
                         {payment.performed_by ?? payment.notes ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                  {visibleRefunds.map((refund) => (
+                    <tr key={refund.id}>
+                      <td className="border border-black px-2 py-1">
+                        {format(parseISO(refund.created_at), "d MMM yyyy")}
+                      </td>
+                      <td className="border border-black px-2 py-1">Refund</td>
+                      <td className="border border-black px-2 py-1 text-right">
+                        - AED {Math.abs(refund.amount).toFixed(2)}
+                      </td>
+                      <td className="border border-black px-2 py-1">
+                        {refund.performed_by ?? refund.notes ?? "—"}
                       </td>
                     </tr>
                   ))}

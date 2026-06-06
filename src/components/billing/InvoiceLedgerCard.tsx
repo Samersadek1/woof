@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronDown, ChevronRight, Lock } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Lock, Pencil } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,12 +16,35 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { formatAed, roundAed } from "@/lib/money";
-import { paymentMethodLabel } from "@/lib/paymentMethod";
+import {
+  paymentMethodLabel,
+  INVOICE_PAYMENT_METHOD_OPTIONS,
+  type ExternalPaymentMethod,
+} from "@/lib/paymentMethod";
 import { voidInvoice } from "@/services/invoiceService";
+import { useChangePaymentMethod } from "@/hooks/usePayments";
 import { useInvoiceLedger, invoiceLedgerQueryKey } from "@/hooks/useInvoiceLedger";
 import { useAccountBalance, accountBalanceQueryKey } from "@/hooks/useAccountBalance";
+
+const EXTERNAL_METHOD_OPTIONS = INVOICE_PAYMENT_METHOD_OPTIONS.filter(
+  (o) => o.value !== "wallet",
+);
+
+type EditablePayment = {
+  id: string;
+  amount: number;
+  method: ExternalPaymentMethod;
+  createdAt: string;
+};
 
 interface InvoiceLedgerCardProps {
   invoiceId: string;
@@ -43,6 +66,12 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
   const [refundAmount, setRefundAmount] = useState("");
   const [voidedBy, setVoidedBy] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const changeMethod = useChangePaymentMethod();
+  const [editPayment, setEditPayment] = useState<EditablePayment | null>(null);
+  const [newMethod, setNewMethod] = useState<ExternalPaymentMethod>("card");
+  const [changeStaff, setChangeStaff] = useState("");
+  const [changeReason, setChangeReason] = useState("");
 
   const amendmentLock = useMemo(() => {
     const lockedAt = ledger?.invoice.amendment_locked_at;
@@ -220,18 +249,43 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
               <span className="tabular-nums text-red-700">- {formatAed(charges)}</span>
             </div>
             {payments.length > 0
-              ? payments.map((p) => (
-                  <div key={p.id} className="flex justify-between py-0.5">
-                    <span className="text-muted-foreground">
-                      {paymentMethodLabel(p.payment_method)}
-                      <span className="text-muted-foreground">
-                        {" "}
-                        · {format(new Date(p.created_at), "d MMM, HH:mm")}
+              ? payments.map((p) => {
+                  const editable =
+                    invoice.status !== "voided" && p.payment_method !== "wallet";
+                  return (
+                    <div key={p.id} className="flex justify-between py-0.5">
+                      <span className="text-muted-foreground flex items-center gap-1">
+                        {paymentMethodLabel(p.payment_method)}
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {format(new Date(p.created_at), "d MMM, HH:mm")}
+                        </span>
+                        {editable ? (
+                          <button
+                            type="button"
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Change payment method"
+                            onClick={() => {
+                              setEditPayment({
+                                id: p.id,
+                                amount: p.amount,
+                                method: p.payment_method as ExternalPaymentMethod,
+                                createdAt: p.created_at,
+                              });
+                              setNewMethod(p.payment_method as ExternalPaymentMethod);
+                              setChangeStaff("");
+                              setChangeReason("");
+                            }}
+                            data-testid="invoice-ledger-change-method-btn"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        ) : null}
                       </span>
-                    </span>
-                    <span className="tabular-nums text-emerald-700">+ {formatAed(p.amount)}</span>
-                  </div>
-                ))
+                      <span className="tabular-nums text-emerald-700">+ {formatAed(p.amount)}</span>
+                    </div>
+                  );
+                })
               : null}
             <div className="flex justify-between py-0.5">
               <span className="text-muted-foreground">Payments</span>
@@ -388,6 +442,94 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
               data-testid="invoice-ledger-void-confirm"
             >
               {submitting ? "Voiding…" : "Void invoice"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editPayment} onOpenChange={(o) => (!o ? setEditPayment(null) : undefined)}>
+        <DialogContent data-testid="invoice-ledger-change-method-dialog">
+          <DialogHeader>
+            <DialogTitle>Change payment method</DialogTitle>
+            <DialogDescription>
+              Correct how this payment was recorded without reverting it. The amount and
+              date stay the same; the change is logged with your name.
+            </DialogDescription>
+          </DialogHeader>
+          {editPayment ? (
+            <div className="space-y-3 text-sm">
+              <div className="rounded-md border p-3 flex justify-between">
+                <span className="text-muted-foreground">
+                  {paymentMethodLabel(editPayment.method)} ·{" "}
+                  {format(new Date(editPayment.createdAt), "d MMM yyyy, HH:mm")}
+                </span>
+                <span className="tabular-nums font-medium">{formatAed(editPayment.amount)}</span>
+              </div>
+              <div className="space-y-1">
+                <Label>New method</Label>
+                <Select
+                  value={newMethod}
+                  onValueChange={(v) => setNewMethod(v as ExternalPaymentMethod)}
+                >
+                  <SelectTrigger data-testid="invoice-ledger-change-method-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXTERNAL_METHOD_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Reason (optional)</Label>
+                <Textarea
+                  value={changeReason}
+                  onChange={(e) => setChangeReason(e.target.value)}
+                  placeholder="e.g. recorded as card by mistake, was a bank transfer"
+                />
+              </div>
+              <StaffNameSelect value={changeStaff} onChange={setChangeStaff} label="Changed by" />
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPayment(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!editPayment) return;
+                if (!changeStaff.trim()) {
+                  toast.error("Staff name is required.");
+                  return;
+                }
+                if (newMethod === editPayment.method) {
+                  setEditPayment(null);
+                  return;
+                }
+                try {
+                  await changeMethod.mutateAsync({
+                    paymentId: editPayment.id,
+                    newMethod,
+                    performedBy: changeStaff.trim(),
+                    reason: changeReason.trim() || undefined,
+                    invoiceId,
+                  });
+                  toast.success(`Payment method changed to ${paymentMethodLabel(newMethod)}.`);
+                  setEditPayment(null);
+                  onChanged?.();
+                } catch (e: unknown) {
+                  toast.error(
+                    e instanceof Error ? e.message : "Could not change payment method.",
+                  );
+                }
+              }}
+              disabled={changeMethod.isPending}
+              data-testid="invoice-ledger-change-method-confirm"
+            >
+              {changeMethod.isPending ? "Saving…" : "Save change"}
             </Button>
           </DialogFooter>
         </DialogContent>

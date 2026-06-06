@@ -37,6 +37,8 @@ import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
+import { DuplicatePaymentConfirmDialog } from "@/components/billing/DuplicatePaymentConfirmDialog";
+import type { DuplicatePaymentInfo } from "@/lib/recordExternalInvoicePayment";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
@@ -258,12 +260,16 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
   const [staffName, setStaffName] = useState("");
   const [amountAed, setAmountAed] = useState("");
   const [walletCreditPromptOpen, setWalletCreditPromptOpen] = useState(false);
+  const [duplicatePayment, setDuplicatePayment] = useState<DuplicatePaymentInfo | null>(null);
+  const [pendingMethod, setPendingMethod] = useState<BillingPaymentMethod | null>(null);
 
   useEffect(() => {
     if (!open || !invoice) return;
     setMethod("wallet");
     setAmountAed("");
     setWalletCreditPromptOpen(false);
+    setDuplicatePayment(null);
+    setPendingMethod(null);
   }, [open, invoice?.id]);
 
   if (!invoice) return null;
@@ -278,17 +284,28 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
   });
   const outstanding = Math.max(0, pay.grandTotal - (invoice.amount_paid ?? 0));
 
-  const submitPayment = async (paymentMethod: BillingPaymentMethod = method) => {
+  const submitPayment = async (
+    paymentMethod: BillingPaymentMethod = method,
+    confirmDuplicate = false,
+  ) => {
     if (!staffName.trim()) { toast.error("Enter staff name"); return; }
     const parsedAmount =
       paymentMethod === "wallet" ? undefined : parseFloat(amountAed || String(outstanding));
     try {
-      await processPayment.mutateAsync({
+      const result = await processPayment.mutateAsync({
         invoiceId: invoice.id,
         method: paymentMethod,
         staffName: staffName.trim(),
         amountAed: parsedAmount,
+        confirmDuplicate,
       });
+      if (result.duplicate && !confirmDuplicate) {
+        setPendingMethod(paymentMethod);
+        setDuplicatePayment(result.duplicate);
+        return;
+      }
+      setDuplicatePayment(null);
+      setPendingMethod(null);
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Payment failed.");
@@ -375,6 +392,17 @@ function PaymentDialog({ open, invoice, onClose }: { open: boolean; invoice: Inv
       onContinueExternal={() => {
         setWalletCreditPromptOpen(false);
         void submitPayment(method);
+      }}
+    />
+
+    <DuplicatePaymentConfirmDialog
+      open={!!duplicatePayment}
+      duplicate={duplicatePayment}
+      submitting={processPayment.isPending}
+      onConfirm={() => void submitPayment(pendingMethod ?? method, true)}
+      onCancel={() => {
+        setDuplicatePayment(null);
+        setPendingMethod(null);
       }}
     />
     </>

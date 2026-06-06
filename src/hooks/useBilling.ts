@@ -21,7 +21,10 @@ import {
 } from "@/lib/vatConfig";
 import { formatAed, roundAed, AED_DECIMAL_DIGITS } from "@/lib/money";
 import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
-import { recordExternalInvoicePayment } from "@/lib/recordExternalInvoicePayment";
+import {
+  recordExternalInvoicePayment,
+  type DuplicatePaymentInfo,
+} from "@/lib/recordExternalInvoicePayment";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -589,6 +592,7 @@ interface ProcessPaymentInput {
   method: PaymentMethod;
   staffName: string;
   amountAed?: number;
+  confirmDuplicate?: boolean;
 }
 
 interface ProcessPaymentResult {
@@ -599,6 +603,8 @@ interface ProcessPaymentResult {
   newWalletBalance?: number;
   error?: string;
   shortfall?: number;
+  /** Set when a recent same-amount payment exists and was not confirmed. */
+  duplicate?: DuplicatePaymentInfo;
 }
 
 export function useProcessPayment() {
@@ -648,7 +654,18 @@ export function useProcessPayment() {
         method: input.method,
         performedBy: input.staffName,
         amountAed: input.amountAed,
+        confirmDuplicate: input.confirmDuplicate,
       });
+
+      // Likely duplicate — let the caller confirm before retrying. Not an error.
+      if (result.duplicate && !input.confirmDuplicate) {
+        return {
+          success: false,
+          method: input.method,
+          amountCharged: 0,
+          duplicate: result.duplicate,
+        };
+      }
 
       if (!result.success) {
         toast.error(result.error ?? "Payment failed");

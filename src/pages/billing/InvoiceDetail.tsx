@@ -46,6 +46,8 @@ import {
 import { applyInvoiceDiscountAdjustment, isDiscountAdjustmentType } from "@/lib/invoiceRecalc";
 import { DeleteInvoiceDialog } from "@/components/billing/DeleteInvoiceDialog";
 import { InvoiceLedgerCard } from "@/components/billing/InvoiceLedgerCard";
+import { DuplicatePaymentConfirmDialog } from "@/components/billing/DuplicatePaymentConfirmDialog";
+import type { DuplicatePaymentInfo } from "@/lib/recordExternalInvoicePayment";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { DeleteInvoiceLineItemDialog } from "@/components/billing/DeleteInvoiceLineItemDialog";
 import {
@@ -95,6 +97,7 @@ export default function InvoiceDetailPage() {
   const [walletOpen, setWalletOpen] = useState(false);
   const [externalPayOpen, setExternalPayOpen] = useState<ExternalPaymentMethod | null>(null);
   const [payAmount, setPayAmount] = useState("");
+  const [duplicatePayment, setDuplicatePayment] = useState<DuplicatePaymentInfo | null>(null);
   const [voidBlockedOpen, setVoidBlockedOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [revertOpen, setRevertOpen] = useState(false);
@@ -281,7 +284,7 @@ export default function InvoiceDetailPage() {
     refetch();
   };
 
-  const doRecordExternal = async () => {
+  const submitExternal = async (confirmDuplicate: boolean) => {
     if (!externalPayOpen) return;
     if (!performedBy.trim()) return toast.error("Staff name is required.");
     const amount = parseFloat(payAmount || "0");
@@ -293,7 +296,12 @@ export default function InvoiceDetailPage() {
         performedBy: performedBy.trim(),
         amountAed: amount,
         note: refundNote.trim() || undefined,
+        confirmDuplicate,
       });
+      if (result.duplicate && !confirmDuplicate) {
+        setDuplicatePayment(result.duplicate);
+        return;
+      }
       toast.success(
         result.partial
           ? `Partial ${paymentMethodLabel(externalPayOpen)} payment recorded.`
@@ -302,11 +310,14 @@ export default function InvoiceDetailPage() {
       setExternalPayOpen(null);
       setRefundNote("");
       setPayAmount("");
+      setDuplicatePayment(null);
       refetch();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Could not record payment.");
     }
   };
+
+  const doRecordExternal = () => submitExternal(false);
 
   const doWalletPay = async () => {
     if (!performedBy.trim()) return toast.error("Staff name is required.");
@@ -755,6 +766,14 @@ export default function InvoiceDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DuplicatePaymentConfirmDialog
+        open={!!duplicatePayment}
+        duplicate={duplicatePayment}
+        submitting={externalPay.isPending}
+        onConfirm={() => submitExternal(true)}
+        onCancel={() => setDuplicatePayment(null)}
+      />
 
       <Dialog open={voidBlockedOpen} onOpenChange={setVoidBlockedOpen}>
         <DialogContent>

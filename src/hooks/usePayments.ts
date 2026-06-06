@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
 import { revertInvoicePayment } from "@/lib/revertInvoicePayment";
 import { recordExternalInvoicePayment } from "@/lib/recordExternalInvoicePayment";
+import { changeInvoicePaymentMethod } from "@/lib/changeInvoicePaymentMethod";
+import { invoiceLedgerQueryKey } from "@/hooks/useInvoiceLedger";
 import type { ExternalPaymentMethod } from "@/lib/paymentMethod";
 
 interface WalletPaymentArgs {
@@ -16,10 +18,12 @@ interface ExternalPaymentArgs {
   performedBy: string;
   amountAed?: number;
   note?: string;
+  confirmDuplicate?: boolean;
 }
 
 function invalidateBilling(qc: ReturnType<typeof useQueryClient>, invoiceId: string, ownerId?: string) {
   qc.invalidateQueries({ queryKey: ["invoice", invoiceId] });
+  qc.invalidateQueries({ queryKey: invoiceLedgerQueryKey(invoiceId) });
   qc.invalidateQueries({ queryKey: ["invoices"] });
   qc.invalidateQueries({ queryKey: ["wallet"] });
   qc.invalidateQueries({ queryKey: ["statement"] });
@@ -58,13 +62,17 @@ export function useRecordExternalPayment() {
   return useMutation({
     mutationFn: async (args: ExternalPaymentArgs) => {
       const result = await recordExternalInvoicePayment(supabase, args);
-      if (!result.success) {
+      // A duplicate warning is not an error — surface it so the caller can
+      // confirm and retry with confirmDuplicate.
+      if (!result.success && !result.duplicate) {
         throw new Error(result.error || "Could not record payment.");
       }
       return result;
     },
     onSuccess: (data, vars) => {
-      invalidateBilling(qc, vars.invoiceId, data.ownerId);
+      if (data.success) {
+        invalidateBilling(qc, vars.invoiceId, data.ownerId);
+      }
     },
   });
 }
@@ -125,6 +133,29 @@ export function useUpdatePaymentAttribution() {
     },
     onSuccess: (data) => {
       invalidateBilling(qc, data.invoiceId, data.ownerId);
+    },
+  });
+}
+
+export function useChangePaymentMethod() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (args: {
+      paymentId: string;
+      newMethod: ExternalPaymentMethod;
+      performedBy: string;
+      reason?: string;
+      invoiceId: string;
+    }) => {
+      const result = await changeInvoicePaymentMethod(supabase, args);
+      if (!result.success) {
+        throw new Error(result.error || "Could not change payment method.");
+      }
+      return result;
+    },
+    onSuccess: (data, vars) => {
+      invalidateBilling(qc, vars.invoiceId, data.ownerId);
     },
   });
 }
