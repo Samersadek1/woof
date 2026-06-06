@@ -875,6 +875,66 @@ export type Database = {
           },
         ]
       }
+      daily_checklists: {
+        Row: {
+          checklist_date: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          id: string
+          items: Json
+          outstanding_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          sign_offs: Json
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          checklist_date: string
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          items?: Json
+          outstanding_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sign_offs?: Json
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          checklist_date?: string
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          items?: Json
+          outstanding_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sign_offs?: Json
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_checklists_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_checklists_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       daycare_sessions: {
         Row: {
           checked_in: boolean

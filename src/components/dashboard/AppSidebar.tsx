@@ -7,6 +7,7 @@ import {
   Wallet,
   Receipt,
   ClipboardList,
+  ListChecks,
   LogOut,
   PawPrint,
   Settings,
@@ -21,6 +22,7 @@ import { useNavigate } from "react-router-dom";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+  { icon: ListChecks, label: "Daily Checklist", path: "/daily-checklist" },
   { icon: Users, label: "Customers & Pets", path: "/customers" },
   { icon: Hotel, label: "Boarding", path: "/boarding" },
   { icon: Sun, label: "Daycare", path: "/daycare" },
