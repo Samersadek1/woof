@@ -21,6 +21,7 @@ import {
   useTopUpWallet,
   useWalletTopupReceipts,
 } from "@/hooks/useWallet";
+import { useCurrentStaffName } from "@/hooks/useCurrentStaffName";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PetWithVaccinations } from "@/hooks/usePets";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
@@ -278,6 +279,7 @@ function makePetForm(ownerId: string): PetInsert {
 
 function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const navigate = useNavigate();
+  const { staffName } = useCurrentStaffName();
   const statement = useOwnerStatement(ownerId);
   const { data: pendingHourly = [], isLoading: pendingHourlyLoading } =
     usePendingHourlyDaycareForOwner(ownerId);
@@ -668,10 +670,28 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                 const amount = parseFloat(topUpAmount);
                 if (!amount || amount <= 0) return toast.error("Enter a valid amount.");
                 topUp.mutate(
-                  { owner_id: ownerId, amount, payment_method: "cash", notes: "Top-up from owner profile" },
                   {
-                    onSuccess: () => {
-                      toast.success("Wallet topped up.");
+                    owner_id: ownerId,
+                    amount,
+                    payment_method: "cash",
+                    notes: "Top-up from owner profile",
+                    issued_by: staffName.trim() || "reception",
+                  },
+                  {
+                    onSuccess: (data) => {
+                      toast.success("Wallet topped up.", {
+                        action: data?.id
+                          ? {
+                              label: "Print receipt",
+                              onClick: () =>
+                                window.open(
+                                  `/print/topup-receipt/${data.id}`,
+                                  "_blank",
+                                  "noopener,noreferrer",
+                                ),
+                            }
+                          : undefined,
+                      });
                       setTopUpAmount("");
                       setTopUpOpen(false);
                     },
@@ -743,6 +763,7 @@ const OwnerProfilePage = () => {
   const [addBalanceNote, setAddBalanceNote] = useState("");
   const [packageDialogOpen, setPackageDialogOpen] = useState(false);
   const manualTopUp = useManualTopUpWallet();
+  const { staffName } = useCurrentStaffName();
 
   const { data: ownerActiveCredits = [], isLoading: creditsLoading } = useQuery({
     queryKey: ["owner_active_credits", id, pets?.map((p) => p.id).join(",") ?? ""],
@@ -2094,10 +2115,27 @@ const OwnerProfilePage = () => {
                 return;
               }
               manualTopUp.mutate(
-                { owner_id: id!, amount, notes: note },
                 {
-                  onSuccess: () => {
-                    toast.success(`AED ${amount.toFixed(2)} added to wallet.`);
+                  owner_id: id!,
+                  amount,
+                  notes: note,
+                  issued_by: staffName.trim() || "reception",
+                },
+                {
+                  onSuccess: (data) => {
+                    toast.success(`AED ${amount.toFixed(2)} added to wallet.`, {
+                      action: data?.id
+                        ? {
+                            label: "Print receipt",
+                            onClick: () =>
+                              window.open(
+                                `/print/topup-receipt/${data.id}`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              ),
+                          }
+                        : undefined,
+                    });
                     setAddBalanceAmount("");
                     setAddBalanceNote("");
                     setAddBalanceOpen(false);

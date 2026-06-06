@@ -356,6 +356,10 @@ export interface CreateTopupReceiptParams {
 /**
  * Record a wallet top-up receipt. Wallet top-ups NEVER create an invoice — this
  * is receipt-only bookkeeping for the printable receipt.
+ *
+ * Normal staff top-ups must use the `credit_wallet_topup` RPC (via useWallet
+ * hooks), which creates the receipt atomically with the wallet transaction.
+ * This helper remains for one-off admin/backfill tooling only.
  */
 export async function createTopupReceipt(
   params: CreateTopupReceiptParams,

@@ -12,6 +12,7 @@ import {
   useDeductWallet,
   type WalletTransaction,
 } from "@/hooks/useWallet";
+import { useCurrentStaffName } from "@/hooks/useCurrentStaffName";
 import {
   useInvoicesForOwner,
   useCreateInvoice,
@@ -155,6 +156,7 @@ interface WalletModalProps {
 function WalletModal({ open, mode, ownerId, onClose }: WalletModalProps) {
   const topUp = useTopUpWallet();
   const deduct = useDeductWallet();
+  const { staffName } = useCurrentStaffName();
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [notes, setNotes] = useState("");
@@ -167,7 +169,13 @@ function WalletModal({ open, mode, ownerId, onClose }: WalletModalProps) {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!numAmount || numAmount <= 0) { toast.error("Enter a valid amount"); return; }
-    const payload = { owner_id: ownerId, amount: numAmount, payment_method: method, notes: notes.trim() || null };
+    const payload = {
+      owner_id: ownerId,
+      amount: numAmount,
+      payment_method: method,
+      notes: notes.trim() || null,
+      issued_by: staffName.trim() || "reception",
+    };
     const mutation = mode === "topup" ? topUp : deduct;
     const successMsg = mode === "topup"
       ? `AED ${numAmount.toFixed(2)} added to wallet`

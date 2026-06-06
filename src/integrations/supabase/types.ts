@@ -3484,6 +3484,18 @@ export type Database = {
         }[]
       }
       create_room_type: { Args: { p_label: string }; Returns: string }
+      credit_wallet_topup: {
+        Args: {
+          p_amount: number
+          p_notes?: string
+          p_owner_id: string
+          p_payment_method?: Database["public"]["Enums"]["payment_method"]
+          p_performed_by?: string
+          p_staff_id?: string
+          p_transaction_type?: Database["public"]["Enums"]["transaction_type"]
+        }
+        Returns: Json
+      }
       deactivate_peak_period: { Args: { p_id: string }; Returns: undefined }
       do_legacy_import_atomic: { Args: { p_payload: Json }; Returns: Json }
       flag_overdue_invoices: { Args: never; Returns: number }
