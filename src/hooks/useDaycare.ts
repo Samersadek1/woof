@@ -783,8 +783,10 @@ export type IssueCustomDaycarePackageInput = {
   owner_id: string;
   pet_ids: string[];
   units: number;
+  amount_aed: number;
   label: string;
-  line_items: CustomPackageLineItem[];
+  /** Optional additional-service lines (discount does not apply to these). */
+  line_items?: CustomPackageLineItem[];
   validity_months?: number;
   payment_method?: Database["public"]["Enums"]["payment_method"];
   service_code?: Extract<ServiceCode, "daycare_full_day" | "daycare_hourly">;
@@ -800,13 +802,13 @@ export function useIssueCustomDaycarePackage() {
         p_owner_id: input.owner_id,
         p_pet_ids: input.pet_ids,
         p_units: input.units,
-        p_amount_aed: 0,
+        p_amount_aed: input.amount_aed,
         p_label: input.label.trim(),
         p_validity_months: input.validity_months ?? 6,
         p_payment_method: input.payment_method ?? "card",
         p_service_code: input.service_code ?? "daycare_full_day",
         p_issue_date: input.issue_date,
-        p_line_items: input.line_items,
+        p_line_items: input.line_items?.length ? input.line_items : null,
       } as Database["public"]["Functions"]["issue_custom_daycare_package"]["Args"]);
       if (error) throw error;
       return (data as {
