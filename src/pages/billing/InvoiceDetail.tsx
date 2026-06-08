@@ -64,10 +64,6 @@ import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE } from "@/lib/daycareHourlyDraftInvoice";
 import { canRevertInvoicePayment, walletRefundFromPayments } from "@/lib/revertInvoicePayment";
 import { markInvoiceOutstanding } from "@/lib/markInvoiceOutstanding";
-import {
-  canCollectInvoicePayment,
-  isLegacyImportPaidStatusMismatch,
-} from "@/lib/invoiceCollectPayment";
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700 border-slate-300",
@@ -221,12 +217,6 @@ export default function InvoiceDetailPage() {
   const ownerName = `${inv.owners?.first_name ?? ""} ${inv.owners?.last_name ?? ""}`.trim() || "—";
   const status = inv.status;
   const walletBalance = ownerWalletCredit(inv.owners?.wallet_balance);
-  const canPay = canCollectInvoicePayment(status, computed.outstanding);
-  const legacyPaidMismatch = isLegacyImportPaidStatusMismatch(
-    inv.notes,
-    status,
-    computed.outstanding,
-  );
 
   const beginExternalPay = (method: ExternalPaymentMethod) => {
     setExternalPayOpen(method);
@@ -508,24 +498,6 @@ export default function InvoiceDetailPage() {
           </Card>
         )}
 
-        {legacyPaidMismatch ? (
-          <Card className="border-amber-200 bg-amber-50/40">
-            <CardContent className="p-4 text-sm text-amber-900">
-              This legacy import invoice is marked <strong>paid</strong> but no payment was recorded in
-              woof. Use the payment actions below to record how the owner paid.
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {status === "paid" && computed.outstanding > 0.01 && !legacyPaidMismatch ? (
-          <Card className="border-amber-200 bg-amber-50/40">
-            <CardContent className="p-4 text-sm text-amber-900">
-              Status shows paid but <strong>{aed(computed.outstanding)}</strong> is still outstanding.
-              Record payment below to sync the ledger.
-            </CardContent>
-          </Card>
-        ) : null}
-
         {status === "draft" && inv.service_type === "daycare" &&
           data.lines.some((l) => l.service_type === HOURLY_PLACEHOLDER_SERVICE_TYPE) && (
           <Card className="border-amber-200 bg-amber-50/40">
@@ -679,7 +651,7 @@ export default function InvoiceDetailPage() {
                 <Button variant="destructive" onClick={doVoid}>Void</Button>
               </>
             )}
-            {canPay && (
+            {["finalised", "outstanding", "overdue", "issued", "partially_paid"].includes(status) && (
               <>
                 <Button onClick={() => { setPayAmount(computed.outstanding.toFixed(2)); setWalletOpen(true); }}>
                   {status === "partially_paid" ? `Pay remainder (${aed(computed.outstanding)})` : "Pay with wallet"}
@@ -688,16 +660,12 @@ export default function InvoiceDetailPage() {
                 <Button variant="outline" onClick={() => openExternalPay("card")}>Record card</Button>
                 <Button variant="outline" onClick={() => openExternalPay("bank_transfer")}>Bank transfer</Button>
                 <Button variant="outline" onClick={() => openExternalPay("payment_link")}>Payment link</Button>
-                {!["paid", "partially_paid"].includes(status) && (
-                  <>
-                    <Button variant="destructive" onClick={doVoid}>Void</Button>
-                    <Button variant="outline" onClick={() => {
-                      setServiceStart(inv.issue_date || inv.created_at.slice(0, 10));
-                      setRefundAmount(String(walletRefundFromPayments(data.payments)));
-                      setCancelOpen(true);
-                    }}>Cancel & refund</Button>
-                  </>
-                )}
+                <Button variant="destructive" onClick={doVoid}>Void</Button>
+                <Button variant="outline" onClick={() => {
+                  setServiceStart(inv.issue_date || inv.created_at.slice(0, 10));
+                  setRefundAmount(String(walletRefundFromPayments(data.payments)));
+                  setCancelOpen(true);
+                }}>Cancel & refund</Button>
               </>
             )}
             {(status === "paid" || status === "partially_paid") && showRevertPayment && (

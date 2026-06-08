@@ -101,7 +101,9 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
   // This invoice's contribution to outstanding debt, used to detect whether the
   // owner has *other* unpaid invoices on their account.
   const thisOutstanding =
-    !invoice.receipt_only && balanceDue > 0.01 ? balanceDue : 0;
+    !invoice.receipt_only && UNPAID_STATUSES.has(invoice.status)
+      ? Math.max(0, charges - totalPaid)
+      : 0;
   const otherOutstanding = Math.max(0, (account?.outstandingDebt ?? 0) - thisOutstanding);
   const hasOtherUnpaid = otherOutstanding > 0.01;
   // Account position before this invoice's unpaid portion is counted.
@@ -154,25 +156,10 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
           </div>
         ) : null}
 
-        {balanceDue > 0.01 ? (
+        {UNPAID_STATUSES.has(invoice.status) ? (
           <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900">
-            {UNPAID_STATUSES.has(invoice.status) ? (
-              <>
-                This invoice is <strong>{invoice.status.replace(/_/g, " ")}</strong> and has an
-                outstanding balance.
-              </>
-            ) : invoice.status === "paid" ? (
-              <>
-                Status shows <strong>paid</strong> but{" "}
-                <strong>{formatAed(balanceDue)}</strong> is still outstanding — record payment on
-                the invoice page.
-              </>
-            ) : (
-              <>
-                This invoice has an outstanding balance of{" "}
-                <strong>{formatAed(balanceDue)}</strong>.
-              </>
-            )}
+            This invoice is <strong>{invoice.status.replace(/_/g, " ")}</strong> and has an
+            outstanding balance.
           </div>
         ) : null}
 

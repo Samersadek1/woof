@@ -1,9 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { roundAed } from "@/lib/money";
-import { invoiceAmountDue } from "@/lib/vatConfig";
 
 type Client = SupabaseClient<Database>;
+
+/** Collectable debt only — draft/finalised are not outstanding in the Phase 2 model. */
+const OUTSTANDING_INVOICE_STATUSES = [
+  "outstanding",
+  "overdue",
+  "partially_paid",
+] as const;
 
 export interface AccountBalance {
   walletBalance: number;
@@ -28,24 +34,17 @@ export async function getAccountBalance(
 
   const walletBalance = roundAed(owner?.wallet_balance ?? 0);
 
-  // Outstanding balance per invoice = amount due (incl. VAT) − amount_paid.
-  // Include legacy rows marked `paid` without payment rows — status alone is not reliable.
+  // Outstanding balance per invoice = total - amount_paid.
   const { data: invoices } = await supabase
     .from("invoices")
-    .select("total, amount_paid, vat_aed, service_type, notes, status")
+    .select("total, amount_paid")
     .eq("owner_id", ownerId)
-    .not("status", "in", '("voided","cancelled","draft")')
+    .in("status", [...OUTSTANDING_INVOICE_STATUSES])
     .or("receipt_only.is.null,receipt_only.eq.false");
 
   const outstandingDebt = roundAed(
     (invoices ?? []).reduce((sum, inv) => {
-      const due = invoiceAmountDue({
-        total: inv.total ?? 0,
-        vat_aed: inv.vat_aed,
-        service_type: inv.service_type,
-        notes: inv.notes,
-      });
-      const balance = due - (inv.amount_paid ?? 0);
+      const balance = (inv.total ?? 0) - (inv.amount_paid ?? 0);
       return sum + (balance > 0 ? balance : 0);
     }, 0),
   );

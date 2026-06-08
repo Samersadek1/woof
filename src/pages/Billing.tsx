@@ -40,7 +40,6 @@ import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCr
 import { DuplicatePaymentConfirmDialog } from "@/components/billing/DuplicatePaymentConfirmDialog";
 import type { DuplicatePaymentInfo } from "@/lib/recordExternalInvoicePayment";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
-import { canCollectInvoicePayment, invoiceBalanceDue } from "@/lib/invoiceCollectPayment";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
@@ -1051,15 +1050,8 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                 {invoices.map((inv) => {
                   const sb = INVOICE_STATUS_BADGE[inv.status] ?? INVOICE_STATUS_BADGE.draft;
                   const canFinalise = inv.status === "draft";
-                  const balanceDue = invoiceBalanceDue({
-                    total: inv.total,
-                    vat_aed: inv.vat_aed,
-                    service_type: inv.service_type,
-                    notes: inv.notes,
-                    amount_paid: inv.amount_paid,
-                  });
-                  const canPay = canCollectInvoicePayment(inv.status, balanceDue);
-                  const canVoid = !["cancelled", "voided", "paid"].includes(inv.status) || balanceDue > 0.01;
+                  const canPay = ["finalised", "issued", "outstanding", "overdue", "partially_paid"].includes(inv.status);
+                  const canVoid = !["cancelled", "voided", "paid"].includes(inv.status);
                   const canSelect = canConsolidateInvoiceStatus(inv.status);
                   return (
                     <TableRow key={inv.id}>

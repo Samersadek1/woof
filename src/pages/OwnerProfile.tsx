@@ -41,7 +41,6 @@ import { invoiceDisplayTotals } from "@/lib/vatConfig";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
-import { canCollectInvoicePayment, invoiceBalanceDue } from "@/lib/invoiceCollectPayment";
 import { usePendingHourlyDaycareForOwner } from "@/hooks/useDaycare";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -326,13 +325,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
     }
     setCollectPaymentInvoice({
       id: inv.id,
-      total: invoiceBalanceDue({
-        total: inv.total ?? 0,
-        vat_aed: inv.vat_aed,
-        service_type: inv.service_type,
-        notes: inv.notes,
-        amount_paid: inv.amount_paid,
-      }),
+      total: (inv.total ?? 0) - (inv.amount_paid ?? 0),
       ownerId: inv.owner_id,
     });
   };
@@ -493,15 +486,8 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                     service_type: inv.service_type,
                     notes: inv.notes,
                   }).grandTotal;
-                  const closingBalance = invoiceBalanceDue({
-                    total: inv.total,
-                    vat_aed: inv.vat_aed,
-                    service_type: inv.service_type,
-                    notes: inv.notes,
-                    amount_paid: inv.amount_paid,
-                  });
-                  const paidAmount = grandTotal - closingBalance;
-                  const canPay = canCollectInvoicePayment(inv.status, closingBalance);
+                  const paidAmount = inv.amount_paid ?? 0;
+                  const closingBalance = Math.max(0, grandTotal - paidAmount);
                   return (
                     <TableRow key={inv.id}>
                       <TableCell>
@@ -557,18 +543,6 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                           </Button>
                           {canFinalise && (
                             <Button size="sm" variant="ghost" disabled={collectPayment.isPending} onClick={() => handleCollectPayment(inv)} title="Collect Payment">
-                              <CreditCard className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                          {canPay && !canFinalise && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={collectPayment.isPending}
-                              onClick={() => handleCollectPayment(inv)}
-                              title="Record payment"
-                              data-testid={`owner-profile-invoice-pay-${inv.id}`}
-                            >
                               <CreditCard className="h-3.5 w-3.5" />
                             </Button>
                           )}
