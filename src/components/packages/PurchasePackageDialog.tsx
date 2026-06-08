@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { useIssueCustomDaycarePackage } from "@/hooks/useDaycare";
+import { useIssueCustomDaycarePackage, type CustomPackageLineItem } from "@/hooks/useDaycare";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { PET_SIZE_COLUMNS, formatPackageIncludes } from "@/lib/packageCatalog";
 import { useGroomingPackageCatalog } from "@/hooks/useGroomingPackages";
@@ -40,7 +41,30 @@ const CATEGORY_LABELS: Record<string, string> = {
   treadmill: "Treadmill",
 };
 
+const CUSTOM_MULTI_PET_DISCOUNT_PCT = 10;
+
 type SaleMode = "catalog" | "custom";
+
+type CustomLineDraft = {
+  id: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+};
+
+function emptyCustomLine(): CustomLineDraft {
+  return { id: crypto.randomUUID(), description: "", quantity: "1", unitPrice: "0" };
+}
+
+function buildPetLineDescription(
+  label: string,
+  petName: string,
+  units: number,
+  serviceCode: "daycare_full_day" | "daycare_hourly",
+): string {
+  const unitLabel = serviceCode === "daycare_hourly" ? "hourly credits" : "daycare days";
+  return `${label} — ${petName} (${units} ${unitLabel})`;
+}
 
 type Props = {
   ownerId: string;
@@ -80,7 +104,8 @@ export function PurchasePackageDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [customLabel, setCustomLabel] = useState("");
   const [customUnits, setCustomUnits] = useState("1");
-  const [customAmount, setCustomAmount] = useState("0");
+  const [customLineItems, setCustomLineItems] = useState<CustomLineDraft[]>([emptyCustomLine()]);
+  const customLinesManuallyEdited = useRef(false);
   const [customValidityMonths, setCustomValidityMonths] = useState("6");
   const [customServiceCode, setCustomServiceCode] = useState<"daycare_full_day" | "daycare_hourly">(
     "daycare_full_day",
@@ -218,9 +243,47 @@ export function PurchasePackageDialog({
   };
 
   const customUnitsNum = Math.max(1, Math.min(365, parseInt(customUnits, 10) || 1));
-  const customAmountNum = Math.max(0, parseFloat(customAmount) || 0);
   const customValidityNum = Math.max(1, Math.min(36, parseInt(customValidityMonths, 10) || 6));
-  const customLineTotal = customAmountNum * selectedPetIds.length;
+
+  const resolvedCustomLines = useMemo(
+    () =>
+      customLineItems.map((line) => {
+        const quantity = Math.max(1, parseInt(line.quantity, 10) || 1);
+        const unitPrice = Math.max(0, parseFloat(line.unitPrice) || 0);
+        return {
+          ...line,
+          quantity,
+          unitPrice,
+          lineTotal: Math.round(quantity * unitPrice * 100) / 100,
+        };
+      }),
+    [customLineItems],
+  );
+
+  const customLineSubtotal = useMemo(
+    () => resolvedCustomLines.reduce((sum, line) => sum + line.lineTotal, 0),
+    [resolvedCustomLines],
+  );
+  const customDiscount = useMemo(() => {
+    if (selectedPetIds.length < 2) return 0;
+    return Math.round((customLineSubtotal * CUSTOM_MULTI_PET_DISCOUNT_PCT) * 100) / 10000;
+  }, [selectedPetIds.length, customLineSubtotal]);
+  const customLineTotal = customLineSubtotal - customDiscount;
+
+  const patchCustomLine = (id: string, patch: Partial<CustomLineDraft>) => {
+    customLinesManuallyEdited.current = true;
+    setCustomLineItems((prev) => prev.map((line) => (line.id === id ? { ...line, ...patch } : line)));
+  };
+
+  const addCustomLine = () => {
+    customLinesManuallyEdited.current = true;
+    setCustomLineItems((prev) => [...prev, emptyCustomLine()]);
+  };
+
+  const removeCustomLine = (id: string) => {
+    customLinesManuallyEdited.current = true;
+    setCustomLineItems((prev) => (prev.length <= 1 ? prev : prev.filter((line) => line.id !== id)));
+  };
 
   const resetForm = () => {
     setSelectedPetIds([]);
@@ -229,11 +292,36 @@ export function PurchasePackageDialog({
     setSaleMode("catalog");
     setCustomLabel("");
     setCustomUnits("1");
-    setCustomAmount("0");
+    setCustomLineItems([emptyCustomLine()]);
+    customLinesManuallyEdited.current = false;
     setCustomValidityMonths("6");
     setCustomServiceCode("daycare_full_day");
     setIssueDate(format(new Date(), "yyyy-MM-dd"));
   };
+
+  useEffect(() => {
+    if (!allowCustomDaycare || saleMode !== "custom" || customLinesManuallyEdited.current) return;
+    if (selectedPetIds.length === 0) return;
+
+    const label = customLabel.trim() || "Custom daycare package";
+    const selectedPets = pets.filter((pet) => selectedPetIds.includes(pet.id));
+    setCustomLineItems(
+      selectedPets.map((pet) => ({
+        id: crypto.randomUUID(),
+        description: buildPetLineDescription(label, pet.name, customUnitsNum, customServiceCode),
+        quantity: "1",
+        unitPrice: "0",
+      })),
+    );
+  }, [
+    allowCustomDaycare,
+    saleMode,
+    selectedPetIds,
+    pets,
+    customLabel,
+    customUnitsNum,
+    customServiceCode,
+  ]);
 
   const handleCustomIssue = async () => {
     const label = customLabel.trim();
@@ -246,13 +334,27 @@ export function PurchasePackageDialog({
       return;
     }
 
+    const lineItems: CustomPackageLineItem[] = [];
+    for (const line of resolvedCustomLines) {
+      const description = line.description.trim();
+      if (!description) {
+        toast.error("Each line item needs a description.");
+        return;
+      }
+      lineItems.push({
+        description,
+        quantity: line.quantity,
+        unit_price: line.unitPrice,
+      });
+    }
+
     issueCustom.mutate(
       {
         owner_id: ownerId,
         pet_ids: selectedPetIds,
         units: customUnitsNum,
-        amount_aed: customAmountNum,
         label,
+        line_items: lineItems,
         validity_months: customValidityNum,
         payment_method: paymentMethod,
         service_code: customServiceCode,
@@ -271,6 +373,7 @@ export function PurchasePackageDialog({
               : `Custom package issued. Invoice ${result.invoice_id.slice(0, 8)} · AED ${total.toFixed(2)}`,
           );
           queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+          queryClient.invalidateQueries({ queryKey: ["owner_active_credits"] });
           queryClient.invalidateQueries({ queryKey: ["owners"] });
           queryClient.invalidateQueries({ queryKey: ["pets", ownerId] });
           await finishSale(result.invoice_id, total);
@@ -313,6 +416,7 @@ export function PurchasePackageDialog({
     const purchaseTotal = Number(result.total_amount_aed);
     toast.success(`Package purchased. Invoice ${result.invoice_id.slice(0, 8)} · AED ${purchaseTotal.toFixed(2)}`);
     queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+    queryClient.invalidateQueries({ queryKey: ["owner_active_credits"] });
     queryClient.invalidateQueries({ queryKey: ["owners"] });
     queryClient.invalidateQueries({ queryKey: ["pets", ownerId] });
     await finishSale(result.invoice_id, purchaseTotal);
@@ -337,6 +441,8 @@ export function PurchasePackageDialog({
                 setSaleMode(v as SaleMode);
                 setSelectedPackageCode("");
                 setSelectedPetIds([]);
+                setCustomLineItems([emptyCustomLine()]);
+                customLinesManuallyEdited.current = false;
               }}
             >
               <TabsList className="grid w-full grid-cols-2">
@@ -380,18 +486,6 @@ export function PurchasePackageDialog({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="custom-pkg-amount">Price per pet (AED)</Label>
-                  <Input
-                    id="custom-pkg-amount"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    data-testid="purchase-pkg-custom-amount"
-                    value={customAmount}
-                    onChange={(e) => setCustomAmount(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
                   <Label>Credit type</Label>
                   <Select
                     value={customServiceCode}
@@ -419,7 +513,80 @@ export function PurchasePackageDialog({
                   />
                 </div>
               </div>
-              {customAmountNum === 0 ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h5 className="text-sm font-medium">Invoice line items</h5>
+                    <p className="text-xs text-muted-foreground">
+                      Add one or more charges with manual prices. Selecting pets auto-fills suggested lines until you edit them.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-testid="purchase-pkg-custom-add-line"
+                    onClick={addCustomLine}
+                  >
+                    <Plus className="mr-1 h-4 w-4" />
+                    Add line
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {customLineItems.map((line, index) => (
+                    <div
+                      key={line.id}
+                      className="grid gap-2 rounded-md border p-3 sm:grid-cols-[1fr_88px_120px_auto]"
+                      data-testid={`purchase-pkg-custom-line-${index}`}
+                    >
+                      <div className="space-y-1">
+                        <Label className="text-xs">Description</Label>
+                        <Input
+                          data-testid={`purchase-pkg-custom-line-desc-${index}`}
+                          placeholder="e.g. 5-day daycare package — Buddy"
+                          value={line.description}
+                          onChange={(e) => patchCustomLine(line.id, { description: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Qty</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          data-testid={`purchase-pkg-custom-line-qty-${index}`}
+                          value={line.quantity}
+                          onChange={(e) => patchCustomLine(line.id, { quantity: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Unit price (AED)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          data-testid={`purchase-pkg-custom-line-price-${index}`}
+                          value={line.unitPrice}
+                          onChange={(e) => patchCustomLine(line.id, { unitPrice: e.target.value })}
+                        />
+                      </div>
+                      <div className="flex items-end justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          data-testid={`purchase-pkg-custom-line-remove-${index}`}
+                          disabled={customLineItems.length <= 1}
+                          onClick={() => removeCustomLine(line.id)}
+                          aria-label="Remove line item"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {customLineTotal === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   AED 0 packages are marked paid automatically — no payment collection step.
                 </p>
@@ -559,18 +726,26 @@ export function PurchasePackageDialog({
             <div className="rounded-md border p-3 space-y-1 text-sm">
               {isCustom ? (
                 <>
-                  {pets
-                    .filter((p) => selectedPetIds.includes(p.id))
-                    .map((pet) => (
-                      <div key={pet.id} className="flex items-center justify-between">
-                        <span>
-                          {pet.name} · {customUnitsNum}{" "}
-                          {customServiceCode === "daycare_hourly" ? "hour(s)" : "day(s)"}
-                        </span>
-                        <span>AED {customAmountNum.toFixed(2)}</span>
-                      </div>
-                    ))}
+                  {resolvedCustomLines.map((line, index) => (
+                    <div key={line.id} className="flex items-center justify-between gap-3">
+                      <span className="truncate">
+                        {line.description.trim() || `Line ${index + 1}`}
+                        {line.quantity > 1 ? ` × ${line.quantity}` : ""}
+                      </span>
+                      <span className="shrink-0 tabular-nums">AED {line.lineTotal.toFixed(2)}</span>
+                    </div>
+                  ))}
                   <Separator />
+                  <div data-testid="purchase-pkg-subtotal" className="flex items-center justify-between">
+                    <span>Subtotal</span>
+                    <span>AED {customLineSubtotal.toFixed(2)}</span>
+                  </div>
+                  {selectedPetIds.length >= 2 ? (
+                    <div data-testid="purchase-pkg-discount" className="flex items-center justify-between text-emerald-700">
+                      <span>Multi-pet {CUSTOM_MULTI_PET_DISCOUNT_PCT}% discount</span>
+                      <span>- AED {customDiscount.toFixed(2)}</span>
+                    </div>
+                  ) : null}
                   <div data-testid="purchase-pkg-total" className="flex items-center justify-between font-semibold">
                     <span>Total</span>
                     <span>AED {customLineTotal.toFixed(2)}</span>
@@ -634,7 +809,12 @@ export function PurchasePackageDialog({
                 <Button
                   data-testid="purchase-pkg-custom-confirm-btn"
                   onClick={handleCustomIssue}
-                  disabled={busy || !customLabel.trim() || selectedPetIds.length === 0}
+                  disabled={
+                    busy ||
+                    !customLabel.trim() ||
+                    selectedPetIds.length === 0 ||
+                    resolvedCustomLines.some((line) => !line.description.trim())
+                  }
                 >
                   {issueCustom.isPending ? "Issuing…" : "Issue package"}
                 </Button>

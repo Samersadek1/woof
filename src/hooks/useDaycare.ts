@@ -108,7 +108,54 @@ export const daycareQueryKeys = {
   sessionsByPet: (petId: string) => ["daycare_sessions", "pet", petId] as const,
   sessionsByOwner: (ownerId: string) => ["daycare_sessions", "owner", ownerId] as const,
   creditsByPet: (petId: string) => ["service_credits", "active", petId] as const,
+  ownerActiveCredits: (ownerId: string) => ["owner_active_credits", ownerId] as const,
 };
+
+export type OwnerActiveCreditRow = CreditRpcRow & {
+  pet_id: string;
+  pet_name: string;
+};
+
+/** Credits with remaining balance for every pet on the owner (incl. shared pools via RPC). */
+export function useOwnerActiveCredits(ownerId?: string) {
+  return useQuery({
+    queryKey: daycareQueryKeys.ownerActiveCredits(ownerId ?? ""),
+    enabled: !!ownerId,
+    queryFn: async (): Promise<OwnerActiveCreditRow[]> => {
+      const { data: petRows, error: petsErr } = await supabase
+        .from("pets")
+        .select("id, name")
+        .eq("owner_id", ownerId!);
+      if (petsErr) throw petsErr;
+      if (!petRows?.length) return [];
+
+      const rows = await Promise.all(
+        petRows.map(async (pet) => {
+          const { data, error } = await supabase.rpc("list_active_credits_for_pet", {
+            p_pet_id: pet.id,
+            p_service_code: null,
+          });
+          if (error) throw error;
+          return ((data ?? []) as CreditRpcRow[])
+            .filter((row) => row.units_remaining > 0)
+            .map((row) => ({
+              ...row,
+              pet_id: pet.id,
+              pet_name: pet.name,
+            }));
+        }),
+      );
+
+      const flat = rows.flat();
+      const seen = new Set<string>();
+      return flat.filter((row) => {
+        if (seen.has(row.credit_id)) return false;
+        seen.add(row.credit_id);
+        return true;
+      });
+    },
+  });
+}
 
 export type DaycareSessionWithDetails = DaycareSession & {
   pets: { name: string; species: string } | null;
@@ -212,6 +259,7 @@ export function useConsumeServiceCredit() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+      queryClient.invalidateQueries({ queryKey: ["owner_active_credits"] });
       queryClient.invalidateQueries({ queryKey: ["owners"] });
       queryClient.invalidateQueries({ queryKey: ["pets"] });
     },
@@ -725,12 +773,18 @@ export function useDeleteDaycarePackage() {
   });
 }
 
+export type CustomPackageLineItem = {
+  description: string;
+  quantity: number;
+  unit_price: number;
+};
+
 export type IssueCustomDaycarePackageInput = {
   owner_id: string;
   pet_ids: string[];
   units: number;
-  amount_aed: number;
   label: string;
+  line_items: CustomPackageLineItem[];
   validity_months?: number;
   payment_method?: Database["public"]["Enums"]["payment_method"];
   service_code?: Extract<ServiceCode, "daycare_full_day" | "daycare_hourly">;
@@ -746,13 +800,14 @@ export function useIssueCustomDaycarePackage() {
         p_owner_id: input.owner_id,
         p_pet_ids: input.pet_ids,
         p_units: input.units,
-        p_amount_aed: input.amount_aed,
+        p_amount_aed: 0,
         p_label: input.label.trim(),
         p_validity_months: input.validity_months ?? 6,
         p_payment_method: input.payment_method ?? "card",
         p_service_code: input.service_code ?? "daycare_full_day",
         p_issue_date: input.issue_date,
-      });
+        p_line_items: input.line_items,
+      } as Database["public"]["Functions"]["issue_custom_daycare_package"]["Args"]);
       if (error) throw error;
       return (data as {
         invoice_id: string;
@@ -764,6 +819,7 @@ export function useIssueCustomDaycarePackage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["service_credits"] });
+      queryClient.invalidateQueries({ queryKey: ["owner_active_credits"] });
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
     },
   });
