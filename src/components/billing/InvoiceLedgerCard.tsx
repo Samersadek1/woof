@@ -34,6 +34,8 @@ import { voidInvoice } from "@/services/invoiceService";
 import { useChangePaymentMethod } from "@/hooks/usePayments";
 import { useInvoiceLedger, invoiceLedgerQueryKey } from "@/hooks/useInvoiceLedger";
 import { useAccountBalance, accountBalanceQueryKey } from "@/hooks/useAccountBalance";
+import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
+import { canCollectInvoicePayment } from "@/lib/invoiceCollectPayment";
 
 const EXTERNAL_METHOD_OPTIONS = INVOICE_PAYMENT_METHOD_OPTIONS.filter(
   (o) => o.value !== "wallet",
@@ -72,6 +74,7 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
   const [newMethod, setNewMethod] = useState<ExternalPaymentMethod>("card");
   const [changeStaff, setChangeStaff] = useState("");
   const [changeReason, setChangeReason] = useState("");
+  const [payOpen, setPayOpen] = useState(false);
 
   const amendmentLock = useMemo(() => {
     const lockedAt = ledger?.invoice.amendment_locked_at;
@@ -95,6 +98,7 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
   const accountBalance = account?.accountBalance ?? 0;
   const balanceDue = Math.max(0, charges - totalPaid);
   const invoiceSettled = balanceDue < 0.01;
+  const canPay = canCollectInvoicePayment(invoice.status, balanceDue);
   const canVoid = invoice.status !== "finalised" && invoice.status !== "voided";
   const hasPayments = payments.length > 0;
 
@@ -155,24 +159,35 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
         ) : null}
 
         {balanceDue > 0.01 ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900">
+          <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900 space-y-3">
             {UNPAID_STATUSES.has(invoice.status) ? (
-              <>
+              <p>
                 This invoice is <strong>{invoice.status.replace(/_/g, " ")}</strong> and has an
-                outstanding balance.
-              </>
+                outstanding balance of <strong>{formatAed(balanceDue)}</strong>.
+              </p>
             ) : invoice.status === "paid" ? (
-              <>
+              <p>
                 Status shows <strong>paid</strong> but{" "}
-                <strong>{formatAed(balanceDue)}</strong> is still outstanding — record payment on
-                the invoice page.
-              </>
+                <strong>{formatAed(balanceDue)}</strong> was never recorded — common on legacy
+                imports.
+              </p>
             ) : (
-              <>
+              <p>
                 This invoice has an outstanding balance of{" "}
                 <strong>{formatAed(balanceDue)}</strong>.
-              </>
+              </p>
             )}
+            {canPay ? (
+              <Button
+                type="button"
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={() => setPayOpen(true)}
+                data-testid="invoice-ledger-record-payment-btn"
+              >
+                Record payment · {formatAed(balanceDue)}
+              </Button>
+            ) : null}
           </div>
         ) : null}
 
@@ -547,6 +562,21 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PaymentSplitDialog
+        open={payOpen}
+        onOpenChange={setPayOpen}
+        invoiceId={invoiceId}
+        ownerId={invoice.owner_id}
+        invoiceTotal={balanceDue}
+        title="Record payment"
+        onSuccess={() => {
+          setPayOpen(false);
+          queryClient.invalidateQueries({ queryKey: invoiceLedgerQueryKey(invoiceId) });
+          queryClient.invalidateQueries({ queryKey: accountBalanceQueryKey(invoice.owner_id) });
+          onChanged?.();
+        }}
+      />
     </Card>
   );
 }

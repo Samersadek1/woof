@@ -563,13 +563,15 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                           {canPay && !canFinalise && (
                             <Button
                               size="sm"
-                              variant="ghost"
+                              variant="outline"
+                              className="text-emerald-700 border-emerald-200 hover:bg-emerald-50"
                               disabled={collectPayment.isPending}
                               onClick={() => handleCollectPayment(inv)}
                               title="Record payment"
                               data-testid={`owner-profile-invoice-pay-${inv.id}`}
                             >
-                              <CreditCard className="h-3.5 w-3.5" />
+                              <CreditCard className="mr-1 h-3.5 w-3.5" />
+                              Pay
                             </Button>
                           )}
                         </div>
