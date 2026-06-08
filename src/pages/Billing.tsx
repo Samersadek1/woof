@@ -519,7 +519,6 @@ function InvoiceDetailDialog({
   const navigate = useNavigate();
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [deleteLineTarget, setDeleteLineTarget] = useState<{ id: string; description: string } | null>(null);
-  const [payOpen, setPayOpen] = useState(false);
   const handlePrint = useCallback(() => {
     if (!invoice) return;
     window.open(
@@ -541,14 +540,6 @@ function InvoiceDetailDialog({
   const sb = INVOICE_STATUS_BADGE[invoice.status] ?? INVOICE_STATUS_BADGE.draft;
   const lineItems = invoice.line_items ?? [];
   const canDeleteLines = canDeleteInvoiceLineItems(invoice.status);
-  const balanceDue = invoiceBalanceDue({
-    total: invoice.total,
-    vat_aed: invoice.vat_aed,
-    service_type: invoice.service_type,
-    notes: invoice.notes,
-    amount_paid: invoice.amount_paid,
-  });
-  const canPay = canCollectInvoicePayment(invoice.status, balanceDue);
 
   return (
     <>
@@ -682,34 +673,6 @@ function InvoiceDetailDialog({
           {invoice.notes && (
             <p style={{ marginTop: 12, fontSize: 13, color: "#666" }}>Notes: {invoice.notes}</p>
           )}
-          {canPay ? (
-            <div
-              style={{
-                marginTop: 16,
-                padding: 12,
-                borderRadius: 8,
-                border: "1px solid #fcd34d",
-                background: "#fffbeb",
-                fontSize: 13,
-                color: "#78350f",
-              }}
-            >
-              <p style={{ marginBottom: 8 }}>
-                {invoice.status === "paid"
-                  ? `Marked paid but ${formatAed(balanceDue)} was never recorded.`
-                  : `${formatAed(balanceDue)} outstanding.`}
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                className="bg-emerald-600 hover:bg-emerald-700"
-                onClick={() => setPayOpen(true)}
-                data-testid="billing-invoice-dialog-record-payment-btn"
-              >
-                Record payment · {formatAed(balanceDue)}
-              </Button>
-            </div>
-          ) : null}
         </div>
 
         <DialogFooter className="gap-2 pt-4 flex-wrap">
@@ -756,20 +719,6 @@ function InvoiceDetailDialog({
         invoiceId={invoice.id}
         ownerId={ownerId}
         onDeleted={onInvoiceUpdated}
-      />
-    )}
-    {ownerId && invoice && canPay && (
-      <PaymentSplitDialog
-        open={payOpen}
-        onOpenChange={setPayOpen}
-        invoiceId={invoice.id}
-        ownerId={ownerId}
-        invoiceTotal={balanceDue}
-        title="Record payment"
-        onSuccess={() => {
-          setPayOpen(false);
-          onInvoiceUpdated?.();
-        }}
       />
     )}
     </>

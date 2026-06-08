@@ -510,19 +510,9 @@ export default function InvoiceDetailPage() {
 
         {legacyPaidMismatch ? (
           <Card className="border-amber-200 bg-amber-50/40">
-            <CardContent className="p-4 text-sm text-amber-900 space-y-3">
-              <p>
-                This legacy import invoice is marked <strong>paid</strong> but no payment was recorded in
-                woof ({aed(computed.outstanding)} outstanding).
-              </p>
-              <Button
-                type="button"
-                className="bg-emerald-600 hover:bg-emerald-700"
-                onClick={() => setCollectPaymentOpen(true)}
-                data-testid="invoice-detail-record-payment-btn"
-              >
-                Record payment · {aed(computed.outstanding)}
-              </Button>
+            <CardContent className="p-4 text-sm text-amber-900">
+              This legacy import invoice is marked <strong>paid</strong> but no payment was recorded in
+              woof. Use the payment actions below to record how the owner paid.
             </CardContent>
           </Card>
         ) : null}
@@ -669,6 +659,18 @@ export default function InvoiceDetailPage() {
                 >
                   Mark as due
                 </Button>
+                <PaymentSplitDialog
+                  open={collectPaymentOpen}
+                  onOpenChange={setCollectPaymentOpen}
+                  invoiceId={inv.id}
+                  ownerId={inv.owner_id}
+                  invoiceTotal={computed.outstanding}
+                  ensureOutstanding={status === "draft"}
+                  onSuccess={() => {
+                    setCollectPaymentOpen(false);
+                    refetch();
+                  }}
+                />
                 {canEditInvoiceLineItems(status) && (
                   <Button variant="outline" onClick={() => setAddLineOpen(true)}>
                     Add line item
@@ -679,14 +681,6 @@ export default function InvoiceDetailPage() {
             )}
             {canPay && (
               <>
-                <Button
-                  type="button"
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                  onClick={() => setCollectPaymentOpen(true)}
-                  data-testid="invoice-detail-collect-payment-btn"
-                >
-                  Record payment · {aed(computed.outstanding)}
-                </Button>
                 <Button onClick={() => { setPayAmount(computed.outstanding.toFixed(2)); setWalletOpen(true); }}>
                   {status === "partially_paid" ? `Pay remainder (${aed(computed.outstanding)})` : "Pay with wallet"}
                 </Button>
@@ -730,20 +724,6 @@ export default function InvoiceDetailPage() {
           </CardContent>
         </Card>
       </main>
-
-      <PaymentSplitDialog
-        open={collectPaymentOpen}
-        onOpenChange={setCollectPaymentOpen}
-        invoiceId={inv.id}
-        ownerId={inv.owner_id}
-        invoiceTotal={computed.outstanding}
-        ensureOutstanding={status === "draft"}
-        title="Record payment"
-        onSuccess={() => {
-          setCollectPaymentOpen(false);
-          refetch();
-        }}
-      />
 
       <Dialog open={markDueOpen} onOpenChange={setMarkDueOpen}>
         <DialogContent>
