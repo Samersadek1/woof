@@ -150,6 +150,53 @@ async function applyTransaction(
   return tx as WalletTransaction;
 }
 
+// ── EnrichedWalletTransaction ─────────────────────────────────────────────────
+
+/** A wallet transaction row augmented with joined invoice metadata. */
+export type EnrichedWalletTransaction = WalletTransaction & {
+  invoices: { invoice_number: string | null; service_type: string | null } | null;
+};
+
+/** Transaction types that represent money credited to the wallet (positive flows). */
+const CREDIT_TYPES: TransactionType[] = ["top_up", "manual_topup", "refund"];
+
+export function isWalletCredit(tx: Pick<WalletTransaction, "transaction_type" | "amount">): boolean {
+  return (CREDIT_TYPES as string[]).includes(tx.transaction_type) || tx.amount > 0;
+}
+
+// ── useStatementLedger ────────────────────────────────────────────────────────
+
+export const statementLedgerQueryKey = (
+  ownerId: string,
+  from?: string,
+  to?: string,
+) => ["statement_ledger", ownerId, from ?? null, to ?? null] as const;
+
+/**
+ * Fetches wallet transactions enriched with invoice metadata for the
+ * bank-statement style ledger view. Ordered newest-first.
+ */
+export function useStatementLedger(ownerId?: string, from?: string, to?: string) {
+  return useQuery({
+    queryKey: statementLedgerQueryKey(ownerId ?? "", from, to),
+    enabled: !!ownerId,
+    queryFn: async () => {
+      let q = supabase
+        .from("wallet_transactions")
+        .select("*, invoices(invoice_number, service_type)")
+        .eq("owner_id", ownerId as string)
+        .order("created_at", { ascending: false });
+
+      if (from) q = q.gte("created_at", from);
+      if (to) q = q.lte("created_at", to);
+
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as EnrichedWalletTransaction[];
+    },
+  });
+}
+
 // ── useWalletTransactions ─────────────────────────────────────────────────────
 
 export function useWalletTransactions(ownerId: string) {

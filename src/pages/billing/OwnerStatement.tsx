@@ -1,14 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import { format } from "date-fns";
 import { Link, useParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
 import { useOwner } from "@/hooks/useOwners";
 import { useStatementOfAccount } from "@/hooks/useStatement";
-import { useWalletTransactions } from "@/hooks/useWallet";
-import { Card, CardContent } from "@/components/ui/card";
+import { useStatementLedger } from "@/hooks/useWallet";
+import { StatementLedgerTable } from "@/components/billing/StatementLedgerTable";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 
 function aed(v: number) {
   return `AED ${v.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -18,21 +18,14 @@ function collectableBalance(total: number, amountPaid = 0): number {
   return Math.max(0, total - amountPaid);
 }
 
-function deriveBranchCodeFromInvoiceNumber(invoiceNumber: string | null): string | null {
-  const normalized = invoiceNumber?.trim();
-  if (!normalized) return null;
-  const match = normalized.match(/^([A-Za-z]{2,8})[-/]/);
-  return match ? match[1].toUpperCase() : null;
-}
-
 export default function OwnerStatementPage() {
   const { ownerId } = useParams<{ ownerId: string }>();
   const { data: owner } = useOwner(ownerId || "");
-  const { data: statement = [], isLoading } = useStatementOfAccount(ownerId);
-  const { data: tx = [] } = useWalletTransactions(ownerId || "");
+  const { data: statement = [], isLoading: statementLoading } = useStatementOfAccount(ownerId);
+  const { data: ledger = [], isLoading: ledgerLoading } = useStatementLedger(ownerId);
   const printRef = useRef<HTMLDivElement>(null);
-  const [walletPage, setWalletPage] = useState(1);
-  const perPage = 20;
+
+  const ownerName = owner ? `${owner.first_name} ${owner.last_name ?? ""}`.trim() : "owner";
 
   const outstanding = useMemo(
     () =>
@@ -44,40 +37,25 @@ export default function OwnerStatementPage() {
   );
 
   const outstandingTotal = useMemo(
-    () =>
-      outstanding.reduce(
-        (sum, r) => sum + collectableBalance(r.total, r.amount_paid ?? 0),
-        0,
-      ),
+    () => outstanding.reduce((sum, r) => sum + collectableBalance(r.total, r.amount_paid ?? 0), 0),
     [outstanding],
   );
-
-  const byMonth = useMemo(() => {
-    const m = new Map<string, typeof statement>();
-    for (const row of statement) {
-      const key = format(new Date(row.created_at), "yyyy-MM");
-      if (!m.has(key)) m.set(key, []);
-      m.get(key)!.push(row);
-    }
-    return Array.from(m.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [statement]);
 
   const lifetimeSpend = useMemo(
     () => statement.filter((r) => r.status === "paid").reduce((sum, r) => sum + r.total, 0),
     [statement],
   );
 
-  const walletRows = tx.slice((walletPage - 1) * perPage, walletPage * perPage);
-  const walletPages = Math.max(1, Math.ceil(tx.length / perPage));
-
   const printStatement = () => {
     if (!printRef.current) return;
     const win = window.open("", "_blank");
     if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Statement</title><style>
+    win.document.write(`<!doctype html><html><head><title>Statement — ${ownerName}</title><style>
       body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:32px;color:#111}
       table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
       th{background:#f6f6f6;font-size:12px;color:#666;text-transform:uppercase}
+      .debit{color:#dc2626}.credit{color:#059669}.balance{font-weight:600}
+      .muted{color:#6b7280;font-size:11px}
     </style></head><body>${printRef.current.innerHTML}</body></html>`);
     win.document.close();
     win.focus();
@@ -86,127 +64,96 @@ export default function OwnerStatementPage() {
 
   return (
     <>
-      <TopBar title="Owner Statement" />
+      <TopBar title="Statement of Account" />
       <main className="flex-1 overflow-auto p-8 space-y-6">
         <div className="flex items-center justify-between">
           <div className="text-sm text-muted-foreground">
-            <Link to="/billing/invoices" className="text-primary hover:underline">Invoices</Link> / Statement
+            <Link to="/billing/invoices" className="text-primary hover:underline">Invoices</Link>
+            {" / "}
+            Statement
           </div>
-          <Button onClick={printStatement}>Print statement</Button>
+          <Button onClick={printStatement} variant="outline">Print statement</Button>
         </div>
 
         <div ref={printRef} className="space-y-6">
+          {/* ── Summary header ── */}
           <Card>
-            <CardContent className="p-5 grid gap-3 md:grid-cols-2">
+            <CardContent className="p-5 grid gap-4 sm:grid-cols-3">
               <div>
-                <p className="text-sm text-muted-foreground">Owner</p>
-                <p className="text-xl font-semibold">{owner ? `${owner.first_name} ${owner.last_name ?? ""}`.trim() : "—"}</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Client</p>
+                <p className="text-xl font-semibold">{ownerName || "—"}</p>
                 <div className="flex items-center gap-2 mt-2">
                   <Badge variant="outline">Woof</Badge>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-sm text-muted-foreground">Wallet balance</p>
-                <p className="text-3xl font-bold tabular-nums">{aed(owner?.wallet_balance ?? 0)}</p>
-                <p className="text-sm text-muted-foreground mt-1">Lifetime spend {aed(lifetimeSpend)}</p>
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Wallet balance</p>
+                <p className="text-2xl font-bold tabular-nums">{aed(owner?.wallet_balance ?? 0)}</p>
+                <p className="text-xs text-muted-foreground mt-1">Lifetime spend {aed(lifetimeSpend)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Outstanding</p>
+                <p className={`text-2xl font-bold tabular-nums ${outstandingTotal > 0 ? "text-red-600 dark:text-red-400" : ""}`}>
+                  {aed(outstandingTotal)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {outstanding.length} unpaid invoice{outstanding.length !== 1 ? "s" : ""}
+                </p>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="p-5 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="font-semibold">Outstanding invoices</h3>
-                {!isLoading && outstanding.length > 0 ? (
-                  <p className="text-sm font-semibold tabular-nums">{aed(outstandingTotal)}</p>
-                ) : null}
-              </div>
-              {isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
-              ) : outstanding.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No outstanding invoices.</p>
-              ) : (
-                <div className="space-y-2">
-                  {outstanding.map((r) => (
-                    <div key={r.invoice_id} className="rounded-md border p-3 flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-mono text-xs">{r.invoice_number ?? r.invoice_id.slice(0, 8)}</p>
-                          {deriveBranchCodeFromInvoiceNumber(r.invoice_number) ? (
-                            <Badge variant="outline" className="font-mono text-[11px]">
-                              {deriveBranchCodeFromInvoiceNumber(r.invoice_number)}
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <p className="text-sm capitalize">{r.service_type?.replace(/_/g, " ") ?? "—"}</p>
-                        <p className="text-xs text-muted-foreground">Due {r.due_date ? format(new Date(`${r.due_date}T00:00:00`), "d MMM yyyy") : "—"}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-semibold tabular-nums">
-                          {aed(collectableBalance(r.total, r.amount_paid ?? 0))}
-                        </p>
-                        {r.days_overdue > 0 && <p className="text-xs text-red-600">Overdue {r.days_overdue}d</p>}
-                      </div>
-                    </div>
-                  ))}
+          {/* ── Outstanding invoices ── */}
+          {!statementLoading && outstanding.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2 pt-4 px-5">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Outstanding invoices</CardTitle>
+                  <span className="text-sm font-semibold tabular-nums">{aed(outstandingTotal)}</span>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-5 space-y-3">
-              <h3 className="font-semibold">History</h3>
-              {byMonth.map(([month, rows]) => (
-                <details key={month} open className="rounded-md border p-3">
-                  <summary className="cursor-pointer font-medium">{month}</summary>
-                  <Separator className="my-2" />
-                  <div className="space-y-2">
-                    {rows.map((r) => (
-                      <div key={r.invoice_id} className="flex items-center justify-between text-sm">
-                        <span className="flex items-center gap-2">
-                          <span>{r.invoice_number ?? r.invoice_id.slice(0, 8)} · {r.status}</span>
-                          {deriveBranchCodeFromInvoiceNumber(r.invoice_number) ? (
-                            <Badge variant="outline" className="font-mono text-[11px]">
-                              {deriveBranchCodeFromInvoiceNumber(r.invoice_number)}
-                            </Badge>
-                          ) : null}
-                        </span>
-                        <span className="tabular-nums">{aed(r.total)}</span>
+              </CardHeader>
+              <CardContent className="px-5 pb-4 space-y-2">
+                {outstanding.map((r) => (
+                  <div key={r.invoice_id} className="rounded-md border p-3 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/billing/invoices/${r.invoice_id}`}
+                          className="font-mono text-xs text-primary hover:underline"
+                        >
+                          {r.invoice_number ?? r.invoice_id.slice(0, 8)}
+                        </Link>
                       </div>
-                    ))}
+                      <p className="text-sm capitalize mt-0.5">{r.service_type?.replace(/_/g, " ") ?? "—"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Due {r.due_date ? format(new Date(`${r.due_date}T00:00:00`), "d MMM yyyy") : "—"}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold tabular-nums">
+                        {aed(collectableBalance(r.total, r.amount_paid ?? 0))}
+                      </p>
+                      {r.days_overdue > 0 && (
+                        <p className="text-xs text-red-600">Overdue {r.days_overdue}d</p>
+                      )}
+                    </div>
                   </div>
-                </details>
-              ))}
-            </CardContent>
-          </Card>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
+          {/* ── Bank-statement ledger ── */}
           <Card>
-            <CardContent className="p-5 space-y-3">
-              <h3 className="font-semibold">Wallet activity</h3>
-              {walletRows.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No wallet activity.</p>
-              ) : (
-                <div className="space-y-2">
-                  {walletRows.map((w) => (
-                    <div key={w.id} className="rounded-md border p-3 text-sm flex justify-between items-center">
-                      <div>
-                        <p className="capitalize">{w.transaction_type.replace(/_/g, " ")}</p>
-                        <p className="text-xs text-muted-foreground">{format(new Date(w.created_at), "d MMM yyyy, HH:mm")}</p>
-                      </div>
-                      <div className="text-right tabular-nums">
-                        <p>{aed(w.amount)}</p>
-                        <p className="text-xs text-muted-foreground">Balance {aed(w.balance_after)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="flex items-center justify-end gap-2">
-                <Button variant="outline" size="sm" disabled={walletPage <= 1} onClick={() => setWalletPage((p) => p - 1)}>Prev</Button>
-                <span className="text-xs text-muted-foreground">{walletPage}/{walletPages}</span>
-                <Button variant="outline" size="sm" disabled={walletPage >= walletPages} onClick={() => setWalletPage((p) => p + 1)}>Next</Button>
-              </div>
+            <CardHeader className="pb-2 pt-4 px-5">
+              <CardTitle className="text-base">Transaction history</CardTitle>
+            </CardHeader>
+            <CardContent className="px-5 pb-5">
+              <StatementLedgerTable
+                rows={ledger}
+                isLoading={ledgerLoading}
+                ownerName={ownerName}
+              />
             </CardContent>
           </Card>
         </div>
