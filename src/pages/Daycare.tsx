@@ -1722,13 +1722,14 @@ function composeNotesWithCollection(notes: string | null | undefined, status: Co
   const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
   const billingLine = lines.find((line) => line.startsWith(BILLING_PATH_PREFIX));
   const invoicedLine = lines.find((line) => line.startsWith("HOURLY_INVOICED:"));
+  const draftLine = lines.find((line) => line.startsWith("HOURLY_DRAFT:"));
   const cleaned = visibleDaycareNotes(notes);
   if (status === "not_collected") {
-    const parts = [cleaned, billingLine, invoicedLine].filter(Boolean);
+    const parts = [cleaned, billingLine, invoicedLine, draftLine].filter(Boolean);
     return parts.length > 0 ? parts.join("\n") : null;
   }
   const meta = `${COLLECTION_META_PREFIX}${status}`;
-  const parts = [cleaned, billingLine, invoicedLine, meta].filter(Boolean);
+  const parts = [cleaned, billingLine, invoicedLine, draftLine, meta].filter(Boolean);
   return parts.join("\n");
 }
 
