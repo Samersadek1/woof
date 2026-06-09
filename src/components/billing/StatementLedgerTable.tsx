@@ -78,13 +78,14 @@ function cutoffForRange(range: DateRangeOption): Date | null {
 // ── CSV export ────────────────────────────────────────────────────────────────
 
 function exportCsv(rows: EnrichedWalletTransaction[], ownerName: string) {
-  const header = ["Date", "Description", "Service", "Invoice #", "Payment Method", "Debit (AED)", "Credit (AED)", "Balance (AED)", "Notes"];
+  const header = ["Date", "Description", "Service", "Service Date", "Invoice #", "Payment Method", "Debit (AED)", "Credit (AED)", "Balance (AED)", "Notes"];
   const lines = rows.map((r) => {
     const isCredit = r.amount > 0;
     return [
       format(new Date(r.created_at), "d MMM yyyy"),
       txLabel(r.transaction_type),
       serviceLabel(r.invoices?.service_type),
+      r.invoices?.issue_date ? format(new Date(`${r.invoices.issue_date}T00:00:00`), "d MMM yyyy") : "",
       r.invoices?.invoice_number ?? r.invoice_id ?? "",
       paymentMethodLabel(r.payment_method),
       isCredit ? "" : formatAedAmount(Math.abs(r.amount)),
@@ -209,6 +210,9 @@ export function StatementLedgerTable({ rows, isLoading, ownerName = "owner" }: S
                   const absAmount = Math.abs(row.amount);
                   const service = serviceLabel(row.invoices?.service_type);
                   const invoiceNumber = row.invoices?.invoice_number;
+                  const issueDate = row.invoices?.issue_date
+                    ? format(new Date(`${row.invoices.issue_date}T00:00:00`), "d MMM yyyy")
+                    : null;
 
                   return (
                     <TableRow key={row.id} className="text-sm">
@@ -225,6 +229,9 @@ export function StatementLedgerTable({ rows, isLoading, ownerName = "owner" }: S
                         <div className="font-medium">{txLabel(row.transaction_type)}</div>
                         {service && (
                           <div className="text-xs text-muted-foreground">{service}</div>
+                        )}
+                        {issueDate && (
+                          <div className="text-xs text-muted-foreground">Service date: {issueDate}</div>
                         )}
                         {row.notes && (
                           <Tooltip>

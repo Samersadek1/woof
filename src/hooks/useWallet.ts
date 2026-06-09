@@ -154,7 +154,7 @@ async function applyTransaction(
 
 /** A wallet transaction row augmented with joined invoice metadata. */
 export type EnrichedWalletTransaction = WalletTransaction & {
-  invoices: { invoice_number: string | null; service_type: string | null } | null;
+  invoices: { invoice_number: string | null; service_type: string | null; issue_date: string | null } | null;
 };
 
 /** Transaction types that represent money credited to the wallet (positive flows). */
@@ -183,7 +183,7 @@ export function useStatementLedger(ownerId?: string, from?: string, to?: string)
     queryFn: async () => {
       let q = supabase
         .from("wallet_transactions")
-        .select("*, invoices(invoice_number, service_type)")
+        .select("*, invoices(invoice_number, service_type, issue_date)")
         .eq("owner_id", ownerId as string)
         .order("created_at", { ascending: false });
 
