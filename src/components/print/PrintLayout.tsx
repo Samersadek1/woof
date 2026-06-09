@@ -167,7 +167,17 @@ export function PrintLayout({
                   Loading photos...
                 </Button>
               )}
-              <Button type="button" variant="outline" onClick={() => window.history.back()}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  if (window.history.length > 1) {
+                    window.history.back();
+                  } else {
+                    window.close();
+                  }
+                }}
+              >
                 Back
               </Button>
             </div>
