@@ -147,10 +147,11 @@ export function useChangePaymentMethod() {
       performedBy: string;
       reason?: string;
       invoiceId: string;
+      newDate?: string;
     }) => {
       const result = await changeInvoicePaymentMethod(supabase, args);
       if (!result.success) {
-        throw new Error(result.error || "Could not change payment method.");
+        throw new Error(result.error || "Could not change payment.");
       }
       return result;
     },

@@ -70,6 +70,7 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
   const changeMethod = useChangePaymentMethod();
   const [editPayment, setEditPayment] = useState<EditablePayment | null>(null);
   const [newMethod, setNewMethod] = useState<ExternalPaymentMethod>("card");
+  const [newDate, setNewDate] = useState("");
   const [changeStaff, setChangeStaff] = useState("");
   const [changeReason, setChangeReason] = useState("");
 
@@ -273,6 +274,7 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
                                 createdAt: p.created_at,
                               });
                               setNewMethod(p.payment_method as ExternalPaymentMethod);
+                              setNewDate(format(new Date(p.created_at), "yyyy-MM-dd'T'HH:mm"));
                               setChangeStaff("");
                               setChangeReason("");
                             }}
@@ -450,10 +452,10 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
       <Dialog open={!!editPayment} onOpenChange={(o) => (!o ? setEditPayment(null) : undefined)}>
         <DialogContent data-testid="invoice-ledger-change-method-dialog">
           <DialogHeader>
-            <DialogTitle>Change payment method</DialogTitle>
+            <DialogTitle>Edit payment</DialogTitle>
             <DialogDescription>
-              Correct how this payment was recorded without reverting it. The amount and
-              date stay the same; the change is logged with your name.
+              Correct the method or date on this payment without reverting it. Changes are
+              logged with your name.
             </DialogDescription>
           </DialogHeader>
           {editPayment ? (
@@ -466,7 +468,7 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
                 <span className="tabular-nums font-medium">{formatAed(editPayment.amount)}</span>
               </div>
               <div className="space-y-1">
-                <Label>New method</Label>
+                <Label>Payment method</Label>
                 <Select
                   value={newMethod}
                   onValueChange={(v) => setNewMethod(v as ExternalPaymentMethod)}
@@ -482,6 +484,15 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Payment date &amp; time</Label>
+                <Input
+                  type="datetime-local"
+                  value={newDate}
+                  onChange={(e) => setNewDate(e.target.value)}
+                  data-testid="invoice-ledger-change-date-input"
+                />
               </div>
               <div className="space-y-1">
                 <Label>Reason (optional)</Label>
@@ -505,7 +516,12 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
                   toast.error("Staff name is required.");
                   return;
                 }
-                if (newMethod === editPayment.method) {
+                const methodUnchanged = newMethod === editPayment.method;
+                const newDateIso = newDate ? new Date(newDate).toISOString() : null;
+                const dateUnchanged =
+                  !newDateIso ||
+                  newDateIso === new Date(editPayment.createdAt).toISOString();
+                if (methodUnchanged && dateUnchanged) {
                   setEditPayment(null);
                   return;
                 }
@@ -513,23 +529,24 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
                   await changeMethod.mutateAsync({
                     paymentId: editPayment.id,
                     newMethod,
+                    newDate: newDateIso ?? undefined,
                     performedBy: changeStaff.trim(),
                     reason: changeReason.trim() || undefined,
                     invoiceId,
                   });
-                  toast.success(`Payment method changed to ${paymentMethodLabel(newMethod)}.`);
+                  toast.success("Payment updated.");
                   setEditPayment(null);
                   onChanged?.();
                 } catch (e: unknown) {
                   toast.error(
-                    e instanceof Error ? e.message : "Could not change payment method.",
+                    e instanceof Error ? e.message : "Could not update payment.",
                   );
                 }
               }}
               disabled={changeMethod.isPending}
               data-testid="invoice-ledger-change-method-confirm"
             >
-              {changeMethod.isPending ? "Saving…" : "Save change"}
+              {changeMethod.isPending ? "Saving…" : "Save changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
