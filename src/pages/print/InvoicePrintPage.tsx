@@ -43,7 +43,14 @@ type InvoiceRow = {
     total_price: number;
     sort_order: number | null;
   }>;
-  invoice_payments?: Array<{ payment_method: string | null; created_at: string }>;
+  invoice_payments?: Array<{
+    id: string;
+    payment_method: string | null;
+    created_at: string;
+    amount: number | null;
+    recorded_by: string | null;
+    notes: string | null;
+  }>;
 };
 
 type AdjustmentRow = {
@@ -73,7 +80,7 @@ async function fetchInvoicePrintable(invoiceId: string) {
       owners(first_name, last_name, phone, address, email),
       bookings(booking_ref, check_in_date, check_out_date),
       line_items:invoice_line_items(id, description, quantity, unit_price, total_price, sort_order),
-      invoice_payments(payment_method, created_at)
+      invoice_payments(id, payment_method, created_at, amount, recorded_by, notes)
     `,
     )
     .eq("id", invoiceId)
@@ -174,27 +181,50 @@ export default function InvoicePrintPage() {
   const outstanding = Math.max(grandTotal - paidAmount, 0);
   const wm = invoice ? watermark(invoice.status) : null;
 
-  // Only show what the customer actually paid. Staff-error corrections (reverted
-  // or duplicate payments) leave stale rows behind, so we reconcile the raw
-  // payment rows against the invoice's true amount_paid (capped at the grand
-  // total to drop duplicate overpayments) and surface only real activity.
   const REFUND_TYPE = "refund";
   const isRevertCorrection = (row: PaymentHistoryRow) =>
     (row.notes ?? "").toLowerCase().startsWith("payment reverted");
-  const paidCap = Math.min(paidAmount, grandTotal);
-  const paymentRows = payments
-    .filter((p) => p.transaction_type !== REFUND_TYPE)
-    .slice()
-    .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
-  let runningPaid = 0;
-  const visiblePayments: PaymentHistoryRow[] = [];
-  for (const p of paymentRows) {
-    const amt = Math.abs(p.amount);
-    if (runningPaid + amt <= paidCap + 0.01) {
-      visiblePayments.push(p);
-      runningPaid += amt;
-    }
-  }
+
+  // When invoice_payments rows exist they are the ledger source of truth and
+  // take priority. Orphaned wallet_transactions (e.g. from corrected/duplicate
+  // payment attempts that never produced an invoice_payments row) are ignored.
+  // For older invoices that pre-date the invoice_payments table we fall back to
+  // the wallet_transactions cap-filter logic.
+  const invoicePaymentRows = invoice?.invoice_payments ?? [];
+  const hasInvoicePaymentRows = invoicePaymentRows.length > 0;
+
+  const visiblePayments: PaymentHistoryRow[] = hasInvoicePaymentRows
+    ? invoicePaymentRows
+        .slice()
+        .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
+        .map((ip) => ({
+          id: ip.id,
+          created_at: ip.created_at,
+          transaction_type: "payment",
+          payment_method: ip.payment_method,
+          performed_by: ip.recorded_by,
+          notes: ip.notes,
+          amount: ip.amount ?? 0,
+        }))
+    : (() => {
+        // Legacy path: wallet_transactions with paidCap guard to drop duplicates.
+        const paidCap = Math.min(paidAmount, grandTotal);
+        const rows = payments
+          .filter((p) => p.transaction_type !== REFUND_TYPE)
+          .slice()
+          .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+        let running = 0;
+        const visible: PaymentHistoryRow[] = [];
+        for (const p of rows) {
+          const amt = Math.abs(p.amount);
+          if (running + amt <= paidCap + 0.01) {
+            visible.push(p);
+            running += amt;
+          }
+        }
+        return visible;
+      })();
+
   // Genuine refunds (real money returned) stay visible; revert/correction
   // credit-backs do not.
   const visibleRefunds = payments.filter(
