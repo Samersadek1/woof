@@ -616,6 +616,15 @@ export default function InvoiceDetailPage() {
                 Print
               </Button>
             )}
+            {canEditInvoiceLineItems(status) && (
+              <Button
+                variant="outline"
+                onClick={() => setAddLineOpen(true)}
+                data-testid="invoice-detail-add-line-btn"
+              >
+                Add line item
+              </Button>
+            )}
             {status === "draft" && (
               <>
                 <Button onClick={doCollectPayment}>
@@ -643,11 +652,6 @@ export default function InvoiceDetailPage() {
                     refetch();
                   }}
                 />
-                {canEditInvoiceLineItems(status) && (
-                  <Button variant="outline" onClick={() => setAddLineOpen(true)}>
-                    Add line item
-                  </Button>
-                )}
                 <Button variant="destructive" onClick={doVoid}>Void</Button>
               </>
             )}
