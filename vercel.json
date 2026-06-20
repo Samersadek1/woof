@@ -1,7 +1,6 @@
 {
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "handle": "filesystem" },
     {
       "source": "/((?!api/|assets/|version\\.json).*)",
       "destination": "/index.html"
