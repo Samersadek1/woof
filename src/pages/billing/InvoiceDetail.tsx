@@ -34,7 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { invoiceResolvedAmounts, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
+import { invoiceLineDisplayAmounts, invoiceResolvedAmounts, roundMoney2, vatLineLabel } from "@/lib/vatConfig";
 import { InvoiceAdjustmentAmountInput } from "@/components/billing/InvoiceAdjustmentAmountInput";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import {
@@ -514,15 +514,14 @@ export default function InvoiceDetailPage() {
               {data.lines.length === 0 ? (
                 <TableRow><TableCell colSpan={canDeleteInvoiceLineItems(status) ? 6 : 5} className="h-16 text-center text-muted-foreground">No line items.</TableCell></TableRow>
               ) : data.lines.map((l) => {
-                const raw = l.unit_price * l.quantity;
-                const total = l.total_price ?? l.line_total ?? raw;
+                const { lineDiscount, lineTotal } = invoiceLineDisplayAmounts(l);
                 return (
                   <TableRow key={l.id}>
                     <TableCell>{l.description}</TableCell>
                     <TableCell className="text-right tabular-nums">{l.quantity}</TableCell>
                     <TableCell className="text-right tabular-nums">{aed(l.unit_price)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{aed(Math.max(0, raw - total))}</TableCell>
-                    <TableCell className="text-right tabular-nums font-semibold">{aed(total)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{aed(lineDiscount)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-semibold">{aed(lineTotal)}</TableCell>
                     {canDeleteInvoiceLineItems(status) && (
                       <TableCell className="text-right">
                         <Button

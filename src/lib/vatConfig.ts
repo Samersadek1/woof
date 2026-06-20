@@ -17,6 +17,25 @@ export function roundMoney2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+export type InvoiceLineAmountInput = {
+  quantity: number;
+  unit_price: number;
+  total_price?: number | null;
+  line_total?: number | null;
+};
+
+/** Per-line discount/total for invoice table and print (stored line totals only). */
+export function invoiceLineDisplayAmounts(line: InvoiceLineAmountInput): {
+  lineSubtotal: number;
+  lineDiscount: number;
+  lineTotal: number;
+} {
+  const lineSubtotal = roundMoney2(line.unit_price * line.quantity);
+  const lineTotal = roundMoney2(line.total_price ?? line.line_total ?? lineSubtotal);
+  const lineDiscount = roundMoney2(Math.max(0, lineSubtotal - lineTotal));
+  return { lineSubtotal, lineDiscount, lineTotal };
+}
+
 /** VAT amount when prices are VAT-inclusive gross values. */
 export function vatAmountFromGrossInclusive(grossInclusive: number): number {
   const gross = Math.max(0, grossInclusive);

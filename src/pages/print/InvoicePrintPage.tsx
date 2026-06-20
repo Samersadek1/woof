@@ -5,7 +5,12 @@ import { PrintLayout } from "@/components/print/PrintLayout";
 import { PrintCompanyHeader } from "@/components/print/PrintCompanyHeader";
 import { supabase } from "@/integrations/supabase/client";
 import { ownerDisplayName } from "@/lib/bookingUtils";
-import { invoiceAdjustmentsForDisplay, invoiceResolvedAmounts, vatLineLabel } from "@/lib/vatConfig";
+import {
+  invoiceAdjustmentsForDisplay,
+  invoiceLineDisplayAmounts,
+  invoiceResolvedAmounts,
+  vatLineLabel,
+} from "@/lib/vatConfig";
 
 type InvoiceRow = {
   id: string;
@@ -300,9 +305,7 @@ export default function InvoicePrintPage() {
                   .slice()
                   .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
                   .map((line) => {
-                    const lineBase = line.unit_price * line.quantity;
-                    const lineDiscount = subtotal > 0 ? (discount * lineBase) / subtotal : 0;
-                    const lineTotal = lineBase - lineDiscount;
+                    const { lineDiscount, lineTotal } = invoiceLineDisplayAmounts(line);
                     return (
                       <tr key={line.id}>
                         <td className="border border-black px-2 py-1">{line.description}</td>

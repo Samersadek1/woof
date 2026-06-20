@@ -5,6 +5,7 @@ import {
   invoiceAmountDue,
   invoiceDisplayTotals,
   invoiceDiscountPercent,
+  invoiceLineDisplayAmounts,
   invoiceResolvedAmounts,
   invoiceTotalDisplayedDiscount,
   treatsStoredTotalAsGrossInclusive,
@@ -104,6 +105,31 @@ describe("vatConfig", () => {
       }),
     ).toBe(50);
     expect(invoiceAdjustmentsForDisplay(0, adjustments)).toEqual(adjustments);
+  });
+
+  it("shows zero per-line discount when only invoice header has discount_amount", () => {
+    const line = { quantity: 2, unit_price: 12.9, total_price: 25.8 };
+    expect(invoiceLineDisplayAmounts(line)).toEqual({
+      lineSubtotal: 25.8,
+      lineDiscount: 0,
+      lineTotal: 25.8,
+    });
+    expect(
+      invoiceTotalDisplayedDiscount({
+        lineDiscount: 0,
+        discount_amount: 34.65,
+      }),
+    ).toBe(34.65);
+  });
+
+  it("uses stored line totals for per-line discount on print/detail", () => {
+    expect(
+      invoiceLineDisplayAmounts({ quantity: 1, unit_price: 115.5, total_price: 98.18 }),
+    ).toEqual({
+      lineSubtotal: 115.5,
+      lineDiscount: 17.32,
+      lineTotal: 98.18,
+    });
   });
 
   it("resolves gross total when adjustments were not synced to the invoice header", () => {
