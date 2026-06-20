@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   addDays,
@@ -12,20 +12,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import {
   useGroomingAppointments,
-  useGroomingHistoryList,
-  useGroomingGlobalSearch,
-  useDeleteGroomingAppointment,
   useUpdateGroomingAppointment,
   useGroomingStatusTransition,
   useInvoiceForGroomingAppointment,
   useGroomingDayInvoices,
+  useFinalizeGroomingCheckout,
   sumGroomingInvoicePaidAed,
   sumGroomingInvoicePendingAed,
   type GroomingAppointmentWithJoins,
 } from "@/hooks/useGrooming";
-import { useProcessPayment, formatAed } from "@/hooks/useBilling";
-import { supabase } from "@/integrations/supabase/client";
-import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
+import { formatAed } from "@/hooks/useBilling";
 import {
   normalizeGroomingWorkflowStatus,
   previousWorkflowStatus,
@@ -80,6 +76,7 @@ import {
 } from "@/lib/groomingNewAppointmentPricing";
 import { VisitNotesField } from "@/components/grooming/VisitNotesField";
 import { GroomingDayBoard } from "@/components/grooming/GroomingDayBoard";
+import { GroomingHistory } from "@/components/grooming/GroomingHistory";
 import { GroomingConflictOverrideDialog } from "@/components/grooming/GroomingConflictOverrideDialog";
 import {
   GroomingNewAppointmentSheet,
@@ -92,6 +89,11 @@ import {
   type GroomingServiceCheckbox,
 } from "@/lib/groomingServiceForm";
 import { useGroomingStations } from "@/hooks/useGroomingStations";
+import { useCurrentStaffName } from "@/hooks/useCurrentStaffName";
+import {
+  usePetGroomingNoteForAppointment,
+  useUpsertPetGroomingNote,
+} from "@/hooks/usePetGroomingNotes";
 import {
   logGroomingCapacityOverride,
   rpcValidateGroomingAppt,
@@ -142,7 +144,6 @@ import {
   CalendarIcon,
   ClipboardList,
   FileText,
-  CreditCard,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
@@ -151,6 +152,9 @@ import {
   labelForGroomingService,
   type GroomingService,
 } from "@/lib/groomingCatalog";
+import { GroomingGroomerSelect } from "@/components/grooming/GroomingGroomerSelect";
+import { useGroomingGroomers } from "@/hooks/useGroomingGroomers";
+import { activeLinkedStayLabel } from "@/lib/groomingBoardUi";
 
 const SERVICE_BADGE: Record<GroomingService, string> = {
   full_groom: "bg-purple-100 text-purple-800 border-purple-200",
@@ -308,7 +312,8 @@ function AppointmentCard({
     .join(" · ");
 
   const duration = a.duration_minutes ?? 60;
-  const { services: selectedServiceLabels, groomingDate } = parseGroomingMeta(a.notes);
+  const { services: selectedServiceLabels } = parseGroomingMeta(a.notes);
+  const linkedStay = activeLinkedStayLabel(a.bookings, a.appointment_date);
   const primaryLabel = serviceLabel(a.service);
   const extraServiceLabels = selectedServiceLabels.filter(
     (s) => s.toLowerCase() !== primaryLabel.toLowerCase(),
@@ -405,13 +410,13 @@ function AppointmentCard({
                   {label}
                 </Badge>
               ))}
-              {a.booking_id ? (
+              {linkedStay ? (
                 <Badge
                   variant="outline"
                   className="gap-1 bg-slate-50 text-slate-800 border-slate-200"
                 >
                   <Package className="h-3 w-3" />
-                  Boarding checkout
+                  {linkedStay}
                 </Badge>
               ) : null}
             </div>
@@ -430,11 +435,6 @@ function AppointmentCard({
                 {groomerDisplay(a)}
               </span>
             </p>
-            {groomingDate ? (
-              <p className="text-xs text-muted-foreground">
-                Grooming date: <span className="text-foreground">{groomingDate}</span>
-              </p>
-            ) : null}
 
             <div className="flex flex-col gap-2 lg:items-end" onClick={(e) => e.stopPropagation()}>
               <Button
@@ -453,6 +453,8 @@ function AppointmentCard({
     </Card>
   );
 }
+
+const GROOMING_INVOICE_RETURN_TO = "/grooming";
 
 const GroomingPage = () => {
   const [searchParams] = useSearchParams();
@@ -479,55 +481,30 @@ const GroomingPage = () => {
   const [groomingTab, setGroomingTab] = useState("day");
   const { data: dayAppointments = [] } = useGroomingAppointments(dateStr);
   const { data: groomingStations = [], isLoading: stationsLoading } = useGroomingStations();
-  const [historySearch, setHistorySearch] = useState("");
-  const historySearchActive = historySearch.trim().length >= 2;
-  const { data: historyAppointments = [], isFetching: historyListFetching } =
-    useGroomingHistoryList(todayStr, groomingTab === "history" && !historySearchActive);
-  const { data: searchResults = [], isFetching: searchFetching } =
-    useGroomingGlobalSearch(historySearch);
+  const { staffName } = useCurrentStaffName();
+  const upsertPetGroomingNote = useUpsertPetGroomingNote();
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [slotPrefill, setSlotPrefill] = useState<GroomingSlotPrefill | null>(null);
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [pendingConflicts, setPendingConflicts] = useState<GroomingScheduleConflict[]>([]);
-  const [serviceFilter, setServiceFilter] = useState<string>("all");
-  const [serviceSearch, setServiceSearch] = useState("");
   const [eodReportOpen, setEodReportOpen] = useState(false);
+  const [actionGroomingNote, setActionGroomingNote] = useState("");
 
   const navigate = useNavigate();
   const { session } = useAuth();
   const statusTransition = useGroomingStatusTransition();
-  const deleteGroomingAppt = useDeleteGroomingAppointment();
-  const processPayment = useProcessPayment();
+  const finalizeCheckout = useFinalizeGroomingCheckout();
   const updateAppt = useUpdateGroomingAppointment();
 
   const [actionAppt, setActionAppt] = useState<GroomingAppointmentWithJoins | null>(null);
   const [editAppt, setEditAppt] = useState<GroomingAppointmentWithJoins | null>(null);
-  const [paymentAppt, setPaymentAppt] = useState<GroomingAppointmentWithJoins | null>(null);
   const [cancelTarget, setCancelTarget] = useState<GroomingAppointmentWithJoins | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<GroomingAppointmentWithJoins | null>(null);
-  const [deleteReason, setDeleteReason] = useState("");
-  const [paymentStaffName, setPaymentStaffName] = useState("Front desk");
-  const [splitPayOpen, setSplitPayOpen] = useState(false);
-
-  // Mark a grooming appointment's payment as recorded through the new
-  // invoice_payments model so we can backfill/retire the legacy column.
-  const markGroomingPaymentMigrated = async (appointmentId: string) => {
-    const { error } = await supabase
-      .from("grooming_appointments")
-      .update({ payment_migrated: true })
-      .eq("id", appointmentId);
-    if (error) {
-      // Non-fatal: payment succeeded; flag can be re-applied on next payment.
-      console.warn("Could not set grooming payment_migrated", error.message);
-    }
-  };
 
   const [editSelectedServices, setEditSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
   ]);
   const [editApptDate, setEditApptDate] = useState<Date>(new Date());
-  const [editGroomingDate, setEditGroomingDate] = useState<Date>(new Date());
   const [editApptTime, setEditApptTime] = useState("10:00");
   const [editDurationMin, setEditDurationMin] = useState(60);
   const [editStationId, setEditStationId] = useState<string | null>(null);
@@ -535,26 +512,87 @@ const GroomingPage = () => {
   const [editPrice, setEditPrice] = useState("");
   const [editVisitNotes, setEditVisitNotes] = useState("");
 
+  const { data: groomers = [] } = useGroomingGroomers();
+
+  const transitionActionAppt = useCallback(
+    (toStatus: string, successMessage: string, opts?: { isUndo?: boolean }) => {
+      if (!actionAppt) return;
+      statusTransition.mutate(
+        { id: actionAppt.id, toStatus, isUndo: opts?.isUndo },
+        {
+          onSuccess: async (data) => {
+            setActionAppt((prev) =>
+              prev && prev.id === data.id ? { ...prev, status: data.status } : prev,
+            );
+            if (
+              normalizeGroomingWorkflowStatus(toStatus) === "completed" &&
+              !opts?.isUndo
+            ) {
+              try {
+                const result = await finalizeCheckout.mutateAsync({
+                  appointmentId: data.id,
+                  performedBy: staffName.trim() || session?.user?.email || undefined,
+                });
+                setActionAppt((prev) =>
+                  prev && prev.id === data.id
+                    ? { ...prev, invoice_id: result.invoiceId }
+                    : prev,
+                );
+              } catch (e) {
+                toast.error(
+                  e instanceof Error ? e.message : "Invoice could not be finalized at checkout.",
+                );
+              }
+            }
+            toast.success(successMessage);
+          },
+          onError: (e) =>
+            toast.error(e instanceof Error ? e.message : "Update failed."),
+        },
+      );
+    },
+    [actionAppt, finalizeCheckout, session?.user?.email, staffName, statusTransition],
+  );
+
+  const openGroomingInvoice = useCallback(
+    (invoiceId: string) => {
+      navigate(
+        `/billing/invoices/${invoiceId}?returnTo=${encodeURIComponent(GROOMING_INVOICE_RETURN_TO)}`,
+      );
+      setActionAppt(null);
+    },
+    [navigate],
+  );
+
   const eodApptIds = useMemo(() => dayAppointments.map((a) => a.id), [dayAppointments]);
   const { data: eodInvoices = [], isFetching: eodInvoicesLoading } = useGroomingDayInvoices(
     eodApptIds,
     { enabled: eodReportOpen },
   );
 
-  const { data: panelInvoice } = useInvoiceForGroomingAppointment(actionAppt?.id ?? null);
-  const { data: payInvoice, isLoading: payInvoiceLoading } =
-    useInvoiceForGroomingAppointment(paymentAppt?.id ?? null);
-
-  const payInvoiceTotals = useMemo(
-    () =>
-      payInvoice
-        ? invoiceDisplayTotals({
-            total: payInvoice.total ?? 0,
-            vat_aed: payInvoice.vat_aed,
-          })
-        : null,
-    [payInvoice],
+  const { data: panelInvoice, isLoading: panelInvoiceLoading } =
+    useInvoiceForGroomingAppointment(actionAppt?.id ?? null);
+  const { data: existingPetGroomingNote } = usePetGroomingNoteForAppointment(
+    actionAppt?.id ?? null,
   );
+
+  const panelInvoiceTotals = useMemo(() => {
+    if (!panelInvoice) return null;
+    const display = invoiceDisplayTotals({
+      total: panelInvoice.total ?? 0,
+      vat_aed: panelInvoice.vat_aed,
+    });
+    const amountPaid = panelInvoice.amount_paid ?? 0;
+    return {
+      subtotal: panelInvoice.subtotal ?? 0,
+      discount: panelInvoice.discount_amount ?? 0,
+      netExVat: display.netExVat,
+      vat: display.vat,
+      grandTotal: display.grandTotal,
+      amountPaid,
+      outstanding: Math.max(0, display.grandTotal - amountPaid),
+    };
+  }, [panelInvoice]);
 
   const eodStatusCounts = useMemo(() => {
     let completed = 0;
@@ -590,11 +628,13 @@ const GroomingPage = () => {
   };
 
   useEffect(() => {
+    setActionGroomingNote(existingPetGroomingNote?.note ?? "");
+  }, [existingPetGroomingNote?.note, actionAppt?.id]);
+
+  useEffect(() => {
     if (!editAppt) return;
     setEditSelectedServices(serviceCheckboxValuesFromAppointment(editAppt));
     setEditApptDate(parseISO(editAppt.appointment_date));
-    const gd = parseGroomingMeta(editAppt.notes).groomingDate;
-    setEditGroomingDate(gd ? parseISO(gd) : parseISO(editAppt.appointment_date));
     setEditApptTime(appointmentTimeToInputValue(editAppt.appointment_time));
     setEditDurationMin(editAppt.duration_minutes ?? 60);
     setEditStationId(editAppt.station_id ?? null);
@@ -614,14 +654,17 @@ const GroomingPage = () => {
       toast.error("Select at least one service.");
       return;
     }
-    if (!/^\d{2}:\d{2}$/.test(editApptTime)) {
+    const hasTime = editApptTime.trim().length > 0;
+    if (hasTime && !/^\d{2}:\d{2}$/.test(editApptTime)) {
       toast.error("Enter a valid appointment time.");
       return;
     }
-    const scheduleErr = validateGroomingScheduleTime(editApptTime, editDurationMin);
-    if (scheduleErr) {
-      toast.error(scheduleErr);
-      return;
+    if (hasTime) {
+      const scheduleErr = validateGroomingScheduleTime(editApptTime, editDurationMin);
+      if (scheduleErr) {
+        toast.error(scheduleErr);
+        return;
+      }
     }
     const primaryCb = resolvePrimaryGroomingCheckbox(
       editSelectedServices.filter(isGroomingPricingCheckbox),
@@ -645,31 +688,35 @@ const GroomingPage = () => {
       .join(", ");
     const metaNotes = [
       selectedServiceLabels ? `Services: ${selectedServiceLabels}` : null,
-      `Grooming date: ${format(editGroomingDate, "yyyy-MM-dd")}`,
+      `Grooming date: ${format(editApptDate, "yyyy-MM-dd")}`,
       `Estimated pickup: ${estimatedPickupFromStartAndDuration(editApptTime, editDurationMin)}`,
     ].filter(Boolean);
     const composedNotes = [editVisitNotes.trim(), ...metaNotes].filter(Boolean).join("\n");
 
     const appointmentDate = format(editApptDate, "yyyy-MM-dd");
-    const validation = await rpcValidateGroomingAppt({
-      date: appointmentDate,
-      stationId: editStationId,
-      start: timeToDb(editApptTime),
-      duration: editDurationMin,
-      apptId: editAppt.id,
-    });
-    const warnings = validation.warnings ?? [];
-    if (!validation.ok && warnings.length > 0 && !overrideReason) {
-      setPendingConflicts(warningsToScheduleConflicts(warnings));
-      setConflictDialogOpen(true);
-      return;
+    const hasSchedule = hasTime && !!editStationId;
+    let warnings: { code: string; msg: string }[] = [];
+    if (hasSchedule) {
+      const validation = await rpcValidateGroomingAppt({
+        date: appointmentDate,
+        stationId: editStationId,
+        start: timeToDb(editApptTime),
+        duration: editDurationMin,
+        apptId: editAppt.id,
+      });
+      warnings = validation.warnings ?? [];
+      if (!validation.ok && warnings.length > 0 && !overrideReason) {
+        setPendingConflicts(warningsToScheduleConflicts(warnings));
+        setConflictDialogOpen(true);
+        return;
+      }
     }
 
     updateAppt.mutate(
       {
         id: editAppt.id,
         appointment_date: appointmentDate,
-        appointment_time: timeToDb(editApptTime),
+        appointment_time: hasTime ? timeToDb(editApptTime) : null,
         duration_minutes: editDurationMin,
         station_id: editStationId,
         service: primaryService,
@@ -709,64 +756,27 @@ const GroomingPage = () => {
     void performSaveEdit();
   };
 
-  const handleDeleteGroomingAppt = () => {
-    if (!deleteTarget || !deleteReason.trim()) return;
-    const ownerName = deleteTarget.owners
-      ? ownerDisplayName(deleteTarget.owners.first_name, deleteTarget.owners.last_name)
-      : "Unknown";
-    deleteGroomingAppt.mutate(
+  const saveActionGroomingNote = () => {
+    if (!actionAppt || !actionGroomingNote.trim()) return;
+    upsertPetGroomingNote.mutate(
       {
-        appointmentId: deleteTarget.id,
-        appointmentDate: deleteTarget.appointment_date,
-        petName: deleteTarget.pets?.name ?? "Unknown",
-        ownerName,
-        service: serviceLabel(deleteTarget.service),
-        price: deleteTarget.price,
-        reason: deleteReason.trim(),
-        deletedByEmail: session?.user?.email ?? "unknown",
+        petId: actionAppt.pet_id,
+        appointmentId: actionAppt.id,
+        note: actionGroomingNote,
+        writtenBy: staffName.trim() || session?.user?.email || "Staff",
       },
       {
-        onSuccess: () => {
-          toast.success("Appointment deleted");
-          setDeleteTarget(null);
-          setDeleteReason("");
-        },
+        onSuccess: () => toast.success("Grooming note saved"),
         onError: (e) =>
-          toast.error(e instanceof Error ? e.message : "Could not delete appointment."),
+          toast.error(e instanceof Error ? e.message : "Could not save grooming note"),
       },
     );
   };
 
-  const sortedHistory = useMemo(() => {
-    const source = historySearchActive ? searchResults : historyAppointments;
-    return [...source].sort((a, b) => {
-      const d =
-        b.appointment_date.localeCompare(a.appointment_date) ||
-        (b.appointment_time ?? "").localeCompare(a.appointment_time ?? "");
-      return d;
-    });
-  }, [historySearchActive, searchResults, historyAppointments]);
-  const historyTableFetching = historySearchActive ? searchFetching : historyListFetching;
-  const serviceMatches = (
-    a: GroomingAppointmentWithJoins,
-    exactFilter: string,
-    textFilter: string,
-  ) => {
-    const labels = appointmentServiceLabels(a);
-    const byChip =
-      exactFilter === "all" ||
-      labels.some((label) => chipMatchesServiceFilter(label, exactFilter));
-    const q = textFilter.trim().toLowerCase();
-    const byText = !q || labels.some((label) => label.toLowerCase().includes(q));
-    return byChip && byText;
-  };
-  const filteredHistory = useMemo(
-    () =>
-      sortedHistory.filter((a) =>
-        serviceMatches(a, serviceFilter, serviceSearch),
-      ),
-    [sortedHistory, serviceFilter, serviceSearch],
-  );
+  const showGroomingNoteEditor =
+    actionAppt &&
+    (normalizeGroomingWorkflowStatus(actionAppt.status) === "in_progress" ||
+      normalizeGroomingWorkflowStatus(actionAppt.status) === "completed");
 
   return (
     <>
@@ -950,37 +960,6 @@ const GroomingPage = () => {
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Service filters</Label>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={serviceFilter === "all" ? "default" : "outline"}
-                onClick={() => setServiceFilter("all")}
-              >
-                All services
-              </Button>
-              {GROOMING_SERVICE_CHECKBOX_OPTIONS.map((o) => (
-                <Button
-                  key={`service-filter-${o.value}`}
-                  type="button"
-                  size="sm"
-                  variant={serviceFilter === o.label ? "default" : "outline"}
-                  onClick={() => setServiceFilter(o.label)}
-                >
-                  {o.label}
-                </Button>
-              ))}
-            </div>
-            <Input
-              className="max-w-md"
-              placeholder="Search service name..."
-              value={serviceSearch}
-              onChange={(e) => setServiceSearch(e.target.value)}
-            />
-          </div>
-
           <TabsContent value="day" className="space-y-4">
             {stationsLoading ? (
               <Skeleton className="min-h-[480px] w-full" />
@@ -999,178 +978,10 @@ const GroomingPage = () => {
           </TabsContent>
 
           <TabsContent value="history" className="space-y-4">
-            <div className="max-w-md">
-              <Label className="text-xs text-muted-foreground">
-                Search by pet or owner (optional)
-              </Label>
-              <Input
-                className="mt-1"
-                placeholder="Filter by pet or owner name…"
-                value={historySearch}
-                onChange={(e) => setHistorySearch(e.target.value)}
-              />
-            </div>
-            {historySearch.trim().length > 0 && historySearch.trim().length < 2 && (
-              <p className="text-sm text-muted-foreground">
-                Enter at least 2 characters to filter the list.
-              </p>
-            )}
-            {historyTableFetching && <Skeleton className="h-40 w-full" />}
-            {!historyTableFetching && (historySearchActive || historySearch.trim().length === 0) && (
-              <div className="rounded-md border overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Pet</TableHead>
-                      <TableHead>Owner</TableHead>
-                      <TableHead>Service</TableHead>
-                      <TableHead>Groomer</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Price</TableHead>
-                      <TableHead className="w-[100px]">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredHistory.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="text-center text-muted-foreground">
-                          No appointments match the current filters.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredHistory.map((r) => (
-                        <TableRow key={r.id}>
-                          <TableCell className="whitespace-nowrap">
-                            {format(parseISO(r.appointment_date), "d MMM yyyy")}
-                          </TableCell>
-                          <TableCell>{r.pets?.name ?? "—"}</TableCell>
-                          <TableCell>
-                            {r.owners
-                              ? ownerDisplayName(r.owners.first_name, r.owners.last_name)
-                              : "—"}
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-0.5">
-                              <p>{serviceLabel(r.service)}</p>
-                              {parseGroomingMeta(r.notes).services
-                                .filter(
-                                  (s) =>
-                                    s.toLowerCase() !==
-                                    serviceLabel(r.service).toLowerCase(),
-                                )
-                                .slice(0, 3)
-                                .map((s) => (
-                                  <p
-                                    key={`${r.id}-${s}`}
-                                    className="text-xs text-muted-foreground"
-                                  >
-                                    + {s}
-                                  </p>
-                                ))}
-                            </div>
-                          </TableCell>
-                          <TableCell>{groomerDisplay(r)}</TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "font-normal border",
-                                workflowStatusBadgeClass(r.status),
-                              )}
-                            >
-                              {workflowStatusLabel(r.status)}
-                              {r.no_show ? " · No show" : ""}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {r.price != null ? `AED ${r.price}` : "—"}
-                          </TableCell>
-                          <TableCell>
-                            {normalizeGroomingWorkflowStatus(r.status) === "cancelled" ? (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="text-destructive hover:text-destructive"
-                                onClick={() => {
-                                  setDeleteTarget(r);
-                                  setDeleteReason("");
-                                }}
-                              >
-                                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                Delete
-                              </Button>
-                            ) : (
-                              "—"
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
+            <GroomingHistory todayStr={todayStr} active={groomingTab === "history"} />
           </TabsContent>
         </Tabs>
       </main>
-
-      <AlertDialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDeleteTarget(null);
-            setDeleteReason("");
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete cancelled appointment?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes the appointment and its status history. This cannot be
-              undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="py-2">
-            <Label htmlFor="grooming-delete-reason">
-              Reason for deletion <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              id="grooming-delete-reason"
-              placeholder="Enter reason..."
-              value={deleteReason}
-              onChange={(e) => setDeleteReason(e.target.value)}
-              rows={3}
-              className="mt-1.5"
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onClick={() => {
-                setDeleteTarget(null);
-                setDeleteReason("");
-              }}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={!deleteReason.trim() || deleteGroomingAppt.isPending}
-              onClick={(e) => {
-                e.preventDefault();
-                handleDeleteGroomingAppt();
-              }}
-            >
-              {deleteGroomingAppt.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : null}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
         <AlertDialogContent>
@@ -1228,20 +1039,34 @@ const GroomingPage = () => {
                 </Badge>
               </div>
 
+              {showGroomingNoteEditor ? (
+                <div className="space-y-2 rounded-lg border p-3">
+                  <Label htmlFor="action-grooming-note">Grooming notes</Label>
+                  <Textarea
+                    id="action-grooming-note"
+                    value={actionGroomingNote}
+                    onChange={(e) => setActionGroomingNote(e.target.value)}
+                    placeholder="Session notes for this groom…"
+                    rows={4}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!actionGroomingNote.trim() || upsertPetGroomingNote.isPending}
+                    onClick={saveActionGroomingNote}
+                  >
+                    Save grooming note
+                  </Button>
+                </div>
+              ) : null}
+
               {normalizeGroomingWorkflowStatus(actionAppt.status) === "new" && (
                 <>
                   <Button
+                    data-testid="grooming-check-in-btn"
                     disabled={statusTransition.isPending}
-                    onClick={() =>
-                      statusTransition.mutate(
-                        { id: actionAppt.id, toStatus: "checked_in" },
-                        {
-                          onSuccess: () => toast.success("Checked in."),
-                          onError: (e) =>
-                            toast.error(e instanceof Error ? e.message : "Update failed."),
-                        },
-                      )
-                    }
+                    onClick={() => transitionActionAppt("checked_in", "Checked in.")}
                   >
                     Check In
                   </Button>
@@ -1264,19 +1089,19 @@ const GroomingPage = () => {
               {normalizeGroomingWorkflowStatus(actionAppt.status) === "checked_in" && (
                 <>
                   <Button
+                    variant="outline"
                     disabled={statusTransition.isPending}
-                    onClick={() =>
-                      statusTransition.mutate(
-                        { id: actionAppt.id, toStatus: "in_progress" },
-                        {
-                          onSuccess: () => toast.success("Started."),
-                          onError: (e) =>
-                            toast.error(e instanceof Error ? e.message : "Update failed."),
-                        },
-                      )
-                    }
+                    onClick={() => transitionActionAppt("in_progress", "Started grooming.")}
                   >
-                    Start
+                    Start grooming
+                  </Button>
+                  <Button
+                    data-testid="grooming-check-out-btn"
+                    disabled={statusTransition.isPending}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={() => transitionActionAppt("completed", "Checked out.")}
+                  >
+                    Check Out
                   </Button>
                   <Button
                     variant="outline"
@@ -1297,20 +1122,12 @@ const GroomingPage = () => {
               {normalizeGroomingWorkflowStatus(actionAppt.status) === "in_progress" && (
                 <>
                   <Button
+                    data-testid="grooming-check-out-btn"
                     disabled={statusTransition.isPending}
                     className="bg-emerald-600 hover:bg-emerald-700"
-                    onClick={() =>
-                      statusTransition.mutate(
-                        { id: actionAppt.id, toStatus: "completed" },
-                        {
-                          onSuccess: () => toast.success("Completed."),
-                          onError: (e) =>
-                            toast.error(e instanceof Error ? e.message : "Update failed."),
-                        },
-                      )
-                    }
+                    onClick={() => transitionActionAppt("completed", "Checked out.")}
                   >
-                    Complete
+                    Check Out
                   </Button>
                   <Button
                     variant="outline"
@@ -1325,55 +1142,100 @@ const GroomingPage = () => {
                 </>
               )}
 
-              {normalizeGroomingWorkflowStatus(actionAppt.status) === "completed" && (
+              {(normalizeGroomingWorkflowStatus(actionAppt.status) === "completed" ||
+                normalizeGroomingWorkflowStatus(actionAppt.status) === "paid") && (
                 <>
+                  {panelInvoiceLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading invoice…
+                    </div>
+                  ) : !panelInvoice ? (
+                    <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3">
+                      No invoice linked yet. Try checking out again or create one from Billing.
+                    </p>
+                  ) : (
+                    <div className="rounded-lg border p-4 space-y-2">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                        Invoice
+                      </p>
+                      <p className="font-mono text-sm">
+                        {panelInvoice.invoice_number ?? panelInvoice.id.slice(0, 8)}
+                      </p>
+                      {panelInvoiceTotals ? (
+                        <div className="text-sm space-y-1">
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">Subtotal</span>
+                            <span className="tabular-nums">
+                              {formatAed(panelInvoiceTotals.subtotal)}
+                            </span>
+                          </div>
+                          {panelInvoiceTotals.discount > 0 ? (
+                            <div className="flex justify-between gap-2">
+                              <span className="text-muted-foreground">Discount</span>
+                              <span className="tabular-nums">
+                                −{formatAed(panelInvoiceTotals.discount)}
+                              </span>
+                            </div>
+                          ) : null}
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">Subtotal (ex VAT)</span>
+                            <span className="tabular-nums">
+                              {formatAed(panelInvoiceTotals.netExVat)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">{vatLineLabel()}</span>
+                            <span className="tabular-nums">{formatAed(panelInvoiceTotals.vat)}</span>
+                          </div>
+                          <div className="flex justify-between gap-2 text-base font-semibold border-t pt-1">
+                            <span>Grand total</span>
+                            <span className="tabular-nums">
+                              {formatAed(panelInvoiceTotals.grandTotal)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">Amount paid</span>
+                            <span className="tabular-nums">
+                              {formatAed(panelInvoiceTotals.amountPaid)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-2 font-medium">
+                            <span>Balance outstanding</span>
+                            <span className="tabular-nums">
+                              {formatAed(panelInvoiceTotals.outstanding)}
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
+                      <p className="text-xs text-muted-foreground capitalize">
+                        Status: {panelInvoice.status.replace(/_/g, " ")}
+                      </p>
+                    </div>
+                  )}
                   <Button
-                    onClick={() => {
-                      setPaymentAppt(actionAppt);
-                      setActionAppt(null);
-                    }}
-                  >
-                    <CreditCard className="mr-2 h-4 w-4" />
-                    Take Payment
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setEditAppt(actionAppt);
-                      setActionAppt(null);
-                    }}
-                  >
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Edit
-                  </Button>
-                </>
-              )}
-
-              {normalizeGroomingWorkflowStatus(actionAppt.status) === "paid" && (
-                <>
-                  <Button
-                    variant="outline"
                     disabled={!panelInvoice?.id}
-                    onClick={() => {
-                      if (panelInvoice?.id) {
-                        navigate(`/billing/invoices/${panelInvoice.id}`);
-                        setActionAppt(null);
-                      }
-                    }}
+                    onClick={() => panelInvoice?.id && openGroomingInvoice(panelInvoice.id)}
+                    data-testid="grooming-open-invoice-btn"
                   >
                     <FileText className="mr-2 h-4 w-4" />
-                    View Invoice
+                    Open invoice
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setEditAppt(actionAppt);
-                      setActionAppt(null);
-                    }}
-                  >
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Edit
+                  <Button variant="outline" onClick={() => setActionAppt(null)}>
+                    Dismiss
                   </Button>
+                  {normalizeGroomingWorkflowStatus(actionAppt.status) === "completed" ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditAppt(actionAppt);
+                        setActionAppt(null);
+                      }}
+                    >
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
+                  ) : null}
                 </>
               )}
 
@@ -1396,14 +1258,9 @@ const GroomingPage = () => {
                   onClick={() => {
                     const prev = workflowUndoTarget(actionAppt.status);
                     if (!prev) return;
-                    statusTransition.mutate(
-                      { id: actionAppt.id, toStatus: prev, isUndo: true },
-                      {
-                        onSuccess: () => toast.success(`Reverted to ${workflowStatusLabel(prev)}.`),
-                        onError: (e) =>
-                          toast.error(e instanceof Error ? e.message : "Could not undo."),
-                      },
-                    );
+                    transitionActionAppt(prev, `Reverted to ${workflowStatusLabel(prev)}.`, {
+                      isUndo: true,
+                    });
                   }}
                 >
                   <Undo2 className="mr-2 h-4 w-4" />
@@ -1414,180 +1271,6 @@ const GroomingPage = () => {
           )}
         </SheetContent>
       </Sheet>
-
-      <Sheet open={!!paymentAppt} onOpenChange={(o) => !o && setPaymentAppt(null)}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Take payment</SheetTitle>
-            <SheetDescription>
-              Record cash or card against the grooming invoice. Status moves to Paid on success.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="mt-6 space-y-4">
-            {paymentAppt && (
-              <p className="text-sm">
-                <span className="font-medium">{paymentAppt.pets?.name}</span>
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {formatApptTime(paymentAppt.appointment_time)}
-                </span>
-              </p>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="payment-staff">Recorded by</Label>
-              <Input
-                id="payment-staff"
-                value={paymentStaffName}
-                onChange={(e) => setPaymentStaffName(e.target.value)}
-                placeholder="Staff name"
-              />
-            </div>
-            {payInvoiceLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading invoice…
-              </div>
-            ) : !payInvoice ? (
-              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3">
-                No invoice linked to this appointment. Draft invoices are normally created when the
-                appointment is booked; you can add one from Billing if needed.
-              </p>
-            ) : (
-              <>
-                <div className="rounded-lg border p-4 space-y-2">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Invoice</p>
-                  <p className="font-mono text-sm">{payInvoice.invoice_number ?? payInvoice.id.slice(0, 8)}</p>
-                  {payInvoiceTotals ? (
-                    <div className="text-sm space-y-1">
-                      <div className="flex justify-between gap-2">
-                        <span className="text-muted-foreground">Subtotal (before VAT)</span>
-                        <span className="tabular-nums">{formatAed(payInvoiceTotals.netExVat)}</span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-muted-foreground">{vatLineLabel()}</span>
-                        <span className="tabular-nums">{formatAed(payInvoiceTotals.vat)}</span>
-                      </div>
-                      <div className="flex justify-between gap-2 text-base font-semibold border-t pt-1">
-                        <span>Grand total</span>
-                        <span className="tabular-nums">{formatAed(payInvoiceTotals.grandTotal)}</span>
-                      </div>
-                    </div>
-                  ) : null}
-                  <p className="text-xs text-muted-foreground capitalize">
-                    Status: {payInvoice.status.replace(/_/g, " ")}
-                  </p>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Button
-                    disabled={processPayment.isPending || statusTransition.isPending}
-                    onClick={async () => {
-                      if (!paymentAppt || !payInvoice) return;
-                      try {
-                        if (payInvoice.status === "paid") {
-                          await statusTransition.mutateAsync({
-                            id: paymentAppt.id,
-                            toStatus: "paid",
-                          });
-                          toast.success("Appointment marked paid.");
-                          setPaymentAppt(null);
-                          return;
-                        }
-                        await processPayment.mutateAsync({
-                          invoiceId: payInvoice.id,
-                          method: "cash",
-                          staffName: paymentStaffName.trim() || "Front desk",
-                        });
-                        await markGroomingPaymentMigrated(paymentAppt.id);
-                        await statusTransition.mutateAsync({
-                          id: paymentAppt.id,
-                          toStatus: "paid",
-                        });
-                        setPaymentAppt(null);
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : "Payment failed.");
-                      }
-                    }}
-                  >
-                    {processPayment.isPending && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    )}
-                    Mark paid (cash)
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={processPayment.isPending || statusTransition.isPending}
-                    onClick={async () => {
-                      if (!paymentAppt || !payInvoice) return;
-                      try {
-                        if (payInvoice.status === "paid") {
-                          await statusTransition.mutateAsync({
-                            id: paymentAppt.id,
-                            toStatus: "paid",
-                          });
-                          toast.success("Appointment marked paid.");
-                          setPaymentAppt(null);
-                          return;
-                        }
-                        await processPayment.mutateAsync({
-                          invoiceId: payInvoice.id,
-                          method: "card",
-                          staffName: paymentStaffName.trim() || "Front desk",
-                        });
-                        await markGroomingPaymentMigrated(paymentAppt.id);
-                        await statusTransition.mutateAsync({
-                          id: paymentAppt.id,
-                          toStatus: "paid",
-                        });
-                        setPaymentAppt(null);
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : "Payment failed.");
-                      }
-                    }}
-                  >
-                    {processPayment.isPending && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    )}
-                    Mark paid (card)
-                  </Button>
-                  {payInvoice.status !== "paid" ? (
-                    <Button
-                      variant="outline"
-                      disabled={processPayment.isPending || statusTransition.isPending}
-                      onClick={() => setSplitPayOpen(true)}
-                      data-testid="grooming-pay-split-btn"
-                    >
-                      Pay with account balance…
-                    </Button>
-                  ) : null}
-                </div>
-              </>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {paymentAppt && payInvoice && payInvoiceTotals ? (
-        <PaymentSplitDialog
-          open={splitPayOpen}
-          onOpenChange={setSplitPayOpen}
-          invoiceId={payInvoice.id}
-          ownerId={paymentAppt.owner_id}
-          // net of prior payments — handles partial payment edge case
-          invoiceTotal={Math.max(0, payInvoiceTotals.grandTotal - (payInvoice?.amount_paid ?? 0))}
-          defaultStaffName={paymentStaffName}
-          title="Collect grooming payment"
-          onSuccess={async () => {
-            if (!paymentAppt) return;
-            await markGroomingPaymentMigrated(paymentAppt.id);
-            await statusTransition.mutateAsync({
-              id: paymentAppt.id,
-              toStatus: "paid",
-            });
-            setSplitPayOpen(false);
-            setPaymentAppt(null);
-          }}
-        />
-      ) : null}
 
       <Sheet open={!!editAppt} onOpenChange={(o) => !o && setEditAppt(null)}>
         <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
@@ -1645,7 +1328,7 @@ const GroomingPage = () => {
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="space-y-2">
-                    <Label>Appointment Date</Label>
+                    <Label>Grooming date</Label>
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button
@@ -1664,31 +1347,6 @@ const GroomingPage = () => {
                           mode="single"
                           selected={editApptDate}
                           onSelect={(d) => d && setEditApptDate(d)}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Grooming Date</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-full justify-start text-left font-normal",
-                            !editGroomingDate && "text-muted-foreground",
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {format(editGroomingDate, "d MMM yyyy")}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={editGroomingDate}
-                          onSelect={(d) => d && setEditGroomingDate(d)}
                           initialFocus
                         />
                       </PopoverContent>
@@ -1747,14 +1405,12 @@ const GroomingPage = () => {
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Groomer</Label>
-                  <Input
-                    value={editGroomerName}
-                    onChange={(e) => setEditGroomerName(e.target.value)}
-                    placeholder="Groomer name"
-                  />
-                </div>
+                <GroomingGroomerSelect
+                  groomers={groomers}
+                  value={editGroomerName}
+                  onChange={setEditGroomerName}
+                  id="grooming-edit-groomer"
+                />
                 <div className="space-y-2">
                   <Label>Notes</Label>
                   <Textarea

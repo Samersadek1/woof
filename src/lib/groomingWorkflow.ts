@@ -79,6 +79,10 @@ export function previousWorkflowStatus(
   return WORKFLOW_ORDER[idx - 1]!;
 }
 
+/** Columns present on live `grooming_appointments` (Postgres). Omit until migrated. */
+const HAS_CHECKED_IN_AT = false;
+const HAS_PAID_AT = false;
+
 /** Clear timestamps that occur after the target step when undoing */
 export function timestampClearsForUndoTo(
   target: GroomingWorkflowStatus,
@@ -86,21 +90,24 @@ export function timestampClearsForUndoTo(
   switch (target) {
     case "new":
       return {
-        checked_in_at: null,
+        ...(HAS_CHECKED_IN_AT ? { checked_in_at: null } : {}),
         in_progress_at: null,
         completed_at: null,
-        paid_at: null,
+        ...(HAS_PAID_AT ? { paid_at: null } : {}),
       };
     case "checked_in":
       return {
         in_progress_at: null,
         completed_at: null,
-        paid_at: null,
+        ...(HAS_PAID_AT ? { paid_at: null } : {}),
       };
     case "in_progress":
-      return { completed_at: null, paid_at: null };
+      return {
+        completed_at: null,
+        ...(HAS_PAID_AT ? { paid_at: null } : {}),
+      };
     case "completed":
-      return { paid_at: null };
+      return HAS_PAID_AT ? { paid_at: null } : {};
     default:
       return {};
   }
@@ -117,13 +124,13 @@ export function timestampSetsForForwardStep(
 }> {
   switch (to) {
     case "checked_in":
-      return { checked_in_at: isoNow };
+      return HAS_CHECKED_IN_AT ? { checked_in_at: isoNow } : {};
     case "in_progress":
       return { in_progress_at: isoNow };
     case "completed":
       return { completed_at: isoNow };
     case "paid":
-      return { paid_at: isoNow };
+      return HAS_PAID_AT ? { paid_at: isoNow } : {};
     default:
       return {};
   }

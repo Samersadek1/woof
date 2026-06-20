@@ -1,10 +1,13 @@
-import { memo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { Search, X } from "lucide-react";
 import { useBookingsForGroomingLink, type BookingLinkRow } from "@/hooks/useGrooming";
 import { useDismissOnOutsidePointer } from "@/hooks/useDismissOnOutsidePointer";
 import { ownerDisplayName } from "@/lib/bookingUtils";
-import { formatGroomingBookingLinkPets } from "@/lib/groomingBookingLinkSearch";
+import {
+  formatGroomingBookingLinkPets,
+  isGroomingLinkableToBooking,
+} from "@/lib/groomingBookingLinkSearch";
 import { boardingBookingSearchActive } from "@/lib/boardingBookingSearch";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -14,6 +17,7 @@ type Props = {
   onSelect: (hit: BookingLinkRow) => void;
   selectedHit?: BookingLinkRow | null;
   onClear?: () => void;
+  groomingDate: string;
   className?: string;
 };
 
@@ -21,12 +25,17 @@ export const GroomingBookingSearch = memo(function GroomingBookingSearch({
   onSelect,
   selectedHit,
   onClear,
+  groomingDate,
   className,
 }: Props) {
   const [value, setValue] = useState("");
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { data: hits = [], isFetching } = useBookingsForGroomingLink(value);
+  const eligibleHits = useMemo(
+    () => hits.filter((hit) => isGroomingLinkableToBooking(hit, groomingDate)),
+    [hits, groomingDate],
+  );
   const showDropdown = boardingBookingSearchActive(value) && !selectedHit;
 
   useDismissOnOutsidePointer(wrapperRef, open && showDropdown, () => setOpen(false));
@@ -100,13 +109,15 @@ export const GroomingBookingSearch = memo(function GroomingBookingSearch({
       ) : null}
       {open && showDropdown ? (
         <ul className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover text-sm shadow-md">
-          {isFetching && hits.length === 0 ? (
+          {isFetching && eligibleHits.length === 0 ? (
             <li className="px-3 py-2 text-muted-foreground">Searching…</li>
           ) : null}
-          {!isFetching && hits.length === 0 ? (
-            <li className="px-3 py-2 text-muted-foreground">No bookings found.</li>
+          {!isFetching && eligibleHits.length === 0 ? (
+            <li className="px-3 py-2 text-muted-foreground">
+              No active stays overlapping {format(parseISO(groomingDate), "d MMM yyyy")}.
+            </li>
           ) : null}
-          {hits.map((hit) => (
+          {eligibleHits.map((hit) => (
             <li key={hit.id}>
               <button
                 type="button"

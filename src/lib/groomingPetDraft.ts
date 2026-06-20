@@ -21,7 +21,6 @@ import {
 export type PetGroomingDraft = {
   petId: string;
   appointmentDate: Date;
-  groomingDate: Date;
   apptTime: string;
   durationMin: number;
   stationId: string | null;
@@ -58,7 +57,6 @@ export function createDefaultPetDraft(args: {
   return {
     petId: args.petId,
     appointmentDate: args.defaultDay,
-    groomingDate: args.defaultDay,
     apptTime,
     durationMin: Math.min(60, Math.max(15, maxDur)),
     stationId: args.stationId ?? null,
@@ -182,7 +180,7 @@ export function buildDraftNotes(
   const estPickup = estimatedPickupFromStartAndDuration(draft.apptTime, draft.durationMin);
   const metaNotes = [
     selectedServiceLabels ? `Services: ${selectedServiceLabels}` : null,
-    `Grooming date: ${format(draft.groomingDate, "yyyy-MM-dd")}`,
+    `Grooming date: ${format(draft.appointmentDate, "yyyy-MM-dd")}`,
     `Estimated pickup: ${estPickup}`,
     !isComplimentary && pct > 0
       ? `Discount: ${pct}% (original AED ${originalForNote})`
@@ -194,7 +192,7 @@ export function buildDraftNotes(
 export type GroomingDraftInsertPayload = {
   pet_id: string;
   appointment_date: string;
-  appointment_time: string;
+  appointment_time: string | null;
   duration_minutes: number;
   station_id: string | null;
   service: Database["public"]["Enums"]["grooming_service"];
@@ -221,7 +219,8 @@ export function buildInsertFromDraft(args: {
   if (draft.selectedServices.length === 0) {
     return { error: "Select at least one service." };
   }
-  if (!/^\d{2}:\d{2}$/.test(draft.apptTime)) {
+  const hasTime = draft.apptTime.trim().length > 0;
+  if (hasTime && !/^\d{2}:\d{2}$/.test(draft.apptTime)) {
     return { error: "Enter a valid appointment time." };
   }
   if (!draft.dogSize) {
@@ -247,7 +246,7 @@ export function buildInsertFromDraft(args: {
   return {
     pet_id: draft.petId,
     appointment_date: format(draft.appointmentDate, "yyyy-MM-dd"),
-    appointment_time: groomingTimeToDb(draft.apptTime),
+    appointment_time: hasTime ? groomingTimeToDb(draft.apptTime) : null,
     duration_minutes: draft.durationMin,
     station_id: draft.stationId,
     service: primaryService,

@@ -28,7 +28,6 @@ import {
   vatLineLabel,
 } from "@/lib/vatConfig";
 import {
-  DISCOUNT_QUICK_PCTS,
   estimatedPickupFromStartAndDuration,
   GROOMING_SERVICE_CHECKBOX_OPTIONS,
   type GroomingServiceCheckbox,
@@ -41,7 +40,8 @@ import {
   type GroomingManualFeeBounds,
   type PetGroomingDraft,
 } from "@/lib/groomingPetDraft";
-import { maxDurationMinutesForTimeInput } from "@/lib/groomingScheduleUtils";
+import { GroomingGroomerSelect } from "@/components/grooming/GroomingGroomerSelect";
+import { useGroomingGroomers } from "@/hooks/useGroomingGroomers";
 import { fetchCheckboxBasePriceAed } from "@/lib/groomingNewAppointmentRates";
 import { useNewGroomingAppointmentPrice } from "@/hooks/useNewGroomingAppointmentPrice";
 import type { GroomingStationRow } from "@/hooks/useGroomingStations";
@@ -104,6 +104,7 @@ export function GroomingPetDraftCard({
 }: Props) {
   const priceManualRef = useRef(false);
   const dogSizeManualRef = useRef(false);
+  const { data: groomers = [] } = useGroomingGroomers();
 
   useEffect(() => {
     priceManualRef.current = false;
@@ -367,7 +368,7 @@ export function GroomingPetDraftCard({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-2">
-          <Label>Appointment date</Label>
+          <Label>Grooming date</Label>
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" className="w-full justify-start text-left font-normal">
@@ -386,26 +387,7 @@ export function GroomingPetDraftCard({
           </Popover>
         </div>
         <div className="space-y-2">
-          <Label>Grooming date</Label>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="w-full justify-start text-left font-normal">
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {format(draft.groomingDate, "d MMM yyyy")}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={draft.groomingDate}
-                onSelect={(d) => d && onChange({ groomingDate: d })}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
-        </div>
-        <div className="space-y-2">
-          <Label>Time</Label>
+          <Label>Time (optional — leave blank to float on backlog)</Label>
           <Input
             type="time"
             value={draft.apptTime}
@@ -413,7 +395,7 @@ export function GroomingPetDraftCard({
           />
         </div>
         <div className="space-y-2">
-          <Label>Station</Label>
+          <Label>Station (optional)</Label>
           <Select
             value={draft.stationId ?? "__none__"}
             onValueChange={(v) => onChange({ stationId: v === "__none__" ? null : v })}
@@ -474,31 +456,13 @@ export function GroomingPetDraftCard({
           isComplimentary && "pointer-events-none opacity-50",
         )}
       >
-        <Label>Discount</Label>
-        <div className="flex flex-wrap gap-2">
-          {DISCOUNT_QUICK_PCTS.map((pct) => {
-            const active =
-              draft.discountPct.trim() !== "" && Number.parseFloat(draft.discountPct) === pct;
-            return (
-              <Button
-                key={pct}
-                type="button"
-                size="sm"
-                variant={active ? "default" : "outline"}
-                className="min-w-[3.25rem]"
-                onClick={() => onChange({ discountPct: String(pct) })}
-              >
-                {pct}%
-              </Button>
-            );
-          })}
-        </div>
+        <Label>Discount %</Label>
         <Input
           type="number"
           min={0}
           max={100}
           step={0.5}
-          placeholder="Custom discount %"
+          placeholder="Optional discount %"
           value={draft.discountPct}
           onChange={(e) => onChange({ discountPct: e.target.value })}
         />
@@ -529,17 +493,12 @@ export function GroomingPetDraftCard({
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label>Groomer</Label>
-        <Input
-          value={draft.groomerName}
-          onChange={(e) => onChange({ groomerName: e.target.value })}
-          placeholder="Groomer name"
-        />
-        {showPreferredGroomerHint ? (
-          <p className="text-xs text-muted-foreground">Preferred groomer from client profile</p>
-        ) : null}
-      </div>
+      <GroomingGroomerSelect
+        groomers={groomers}
+        value={draft.groomerName}
+        onChange={(name) => onChange({ groomerName: name })}
+        showPreferredHint={showPreferredGroomerHint}
+      />
 
       <div className="space-y-2">
         <Label>Notes</Label>

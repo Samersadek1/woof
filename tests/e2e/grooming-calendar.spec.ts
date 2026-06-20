@@ -10,12 +10,17 @@ test.describe("grooming calendar", () => {
     await expect(page.getByTestId("grooming-station-block-btn-1")).toBeVisible();
   });
 
-  test("new appointment sheet starts with booking search", async ({ page }) => {
+  test("new appointment sheet defaults to client booking", async ({ page }) => {
     await page.goto("/grooming");
     await page.waitForLoadState("networkidle");
 
     await page.getByRole("button", { name: /new appointment/i }).click();
+    await expect(page.getByTestId("grooming-owner-search")).toBeVisible();
+    await expect(page.getByTestId("grooming-stay-link-btn")).toBeVisible();
+    await expect(page.getByTestId("grooming-booking-search")).toHaveCount(0);
+
+    await page.getByTestId("grooming-stay-link-btn").click();
     await expect(page.getByTestId("grooming-booking-search")).toBeVisible();
-    await expect(page.getByTestId("grooming-walk-in-link")).toBeVisible();
+    await expect(page.getByTestId("grooming-client-only-link")).toBeVisible();
   });
 });

@@ -5,7 +5,11 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { useDebounce } from "@/hooks/useDebounce";
+import {
+  groomingCapacityKeys,
+} from "@/hooks/useGroomingCapacity";
 import { mergeGroomingBookingLinkHits, type GroomingBookingLinkHit } from "@/lib/groomingBookingLinkSearch";
+import { finalizeGroomingCheckoutInvoice } from "@/lib/groomingCheckoutInvoice";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
@@ -15,13 +19,14 @@ import {
   timestampSetsForForwardStep,
   type GroomingWorkflowStatus,
 } from "@/lib/groomingWorkflow";
+import type { GroomingLinkedBookingInfo } from "@/lib/groomingBoardUi";
 
 type GroomingRow = Database["public"]["Tables"]["grooming_appointments"]["Row"];
 type GroomingInsert = Database["public"]["Tables"]["grooming_appointments"]["Insert"];
 type GroomingUpdate = Database["public"]["Tables"]["grooming_appointments"]["Update"];
 
 const GROOMING_JOIN_SELECT =
-  "*, owners(first_name, last_name, phone, other_notes), pets(name, breed, weight_kg, grooming_notes, colour, other_notes, special_alerts)";
+  "*, owners(first_name, last_name, phone, other_notes), pets(name, breed, weight_kg, grooming_notes, colour, other_notes, special_alerts), bookings(booking_type, status, booking_ref, check_in_date, check_out_date)";
 
 export type GroomingAppointmentWithJoins = GroomingRow & {
   owners: { first_name: string; last_name: string; phone: string; other_notes: string | null } | null;
@@ -34,6 +39,7 @@ export type GroomingAppointmentWithJoins = GroomingRow & {
     other_notes: string | null;
     special_alerts: Database["public"]["Tables"]["pets"]["Row"]["special_alerts"];
   } | null;
+  bookings: GroomingLinkedBookingInfo | null;
 };
 
 export const queryKeys = {
@@ -50,6 +56,7 @@ function invalidateGrooming(
 ) {
   if (opts.appointmentDate) {
     qc.invalidateQueries({ queryKey: queryKeys.groomingDay(opts.appointmentDate) });
+    qc.invalidateQueries({ queryKey: groomingCapacityKeys.day(opts.appointmentDate) });
   }
   if (opts.petId) {
     qc.invalidateQueries({ queryKey: queryKeys.groomingHistory(opts.petId) });
@@ -352,14 +359,44 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
     queryKey: ["invoice", "grooming", appointmentId],
     enabled: !!appointmentId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("invoices")
-        .select(
-          "id, invoice_number, status, total, vat_aed, amount_paid, payment_method, invoice_payments(payment_method, created_at)",
-        )
-        .eq("service_id", appointmentId!)
-        .eq("service_type", "grooming")
+      const { data: appt, error: apptErr } = await supabase
+        .from("grooming_appointments")
+        .select("invoice_id")
+        .eq("id", appointmentId!)
         .maybeSingle();
+      if (apptErr) throw apptErr;
+
+      const invoiceSelect =
+        "id, invoice_number, status, subtotal, discount_amount, total, vat_aed, amount_paid, payment_method, invoice_payments(payment_method, created_at)";
+
+      let data: Record<string, unknown> | null = null;
+      let error: { message: string } | null = null;
+
+      if (appt?.invoice_id) {
+        const res = await supabase
+          .from("invoices")
+          .select(invoiceSelect)
+          .eq("id", appt.invoice_id)
+          .neq("status", "voided")
+          .maybeSingle();
+        data = res.data as Record<string, unknown> | null;
+        error = res.error;
+      }
+
+      if (!data && !error) {
+        const res = await supabase
+          .from("invoices")
+          .select(invoiceSelect)
+          .eq("service_id", appointmentId!)
+          .eq("service_type", "grooming")
+          .neq("status", "voided")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        data = res.data as Record<string, unknown> | null;
+        error = res.error;
+      }
+
       if (error) throw error;
       if (!data) return null;
 
@@ -369,25 +406,33 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
           .slice()
           .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
       // TODO: deprecate invoices.payment_method
-      const paymentMethod = payments[0]?.payment_method ?? data.payment_method ?? null;
+      const paymentMethod =
+        payments[0]?.payment_method ?? (data.payment_method as string | null) ?? null;
 
       return {
-        id: data.id,
-        invoice_number: data.invoice_number,
-        status: data.status,
-        total: data.total,
-        vat_aed: data.vat_aed,
-        amount_paid: data.amount_paid,
+        id: data.id as string,
+        invoice_number: data.invoice_number as string | null,
+        status: data.status as string,
+        subtotal: data.subtotal as number | null,
+        discount_amount: data.discount_amount as number | null,
+        total: data.total as number | null,
+        vat_aed: data.vat_aed as number | null,
+        amount_paid: data.amount_paid as number | null,
         payment_method: paymentMethod,
-      } as {
-        id: string;
-        invoice_number: string | null;
-        status: string;
-        total: number | null;
-        vat_aed: number | null;
-        amount_paid: number | null;
-        payment_method: string | null;
       };
+    },
+  });
+}
+
+export function useFinalizeGroomingCheckout() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: { appointmentId: string; performedBy?: string }) =>
+      finalizeGroomingCheckoutInvoice(supabase, params),
+    onSuccess: (_result, params) => {
+      qc.invalidateQueries({ queryKey: ["invoice", "grooming", params.appointmentId] });
+      qc.invalidateQueries({ queryKey: ["grooming", "dayInvoices"] });
     },
   });
 }
@@ -453,7 +498,9 @@ export function useMarkNoShow() {
 export type BookingLinkRow = GroomingBookingLinkHit;
 
 const GROOMING_BOOKING_LINK_SELECT =
-  "id, booking_ref, owner_id, check_in_date, check_out_date, status, owners(first_name, last_name, phone), booking_pets(pet_id, pets(name))";
+  "id, booking_ref, owner_id, booking_type, check_in_date, check_out_date, status, owners(first_name, last_name, phone), booking_pets(pet_id, pets(name))";
+
+const GROOMING_LINKABLE_STATUS_FILTER = ["confirmed", "checked_in"] as const;
 
 /** Search stays by booking ref, owner name/phone, or pet name for grooming link. */
 export function useBookingsForGroomingLink(searchTerm: string) {
@@ -474,7 +521,8 @@ export function useBookingsForGroomingLink(searchTerm: string) {
         .from("bookings")
         .select(GROOMING_BOOKING_LINK_SELECT)
         .ilike("booking_ref", pat)
-        .neq("status", "cancelled")
+        .in("booking_type", ["boarding", "daycare"])
+        .in("status", [...GROOMING_LINKABLE_STATUS_FILTER])
         .order("check_in_date", { ascending: false })
         .limit(12);
 
@@ -495,7 +543,8 @@ export function useBookingsForGroomingLink(searchTerm: string) {
           .from("bookings")
           .select(GROOMING_BOOKING_LINK_SELECT)
           .in("owner_id", ownerIds)
-          .neq("status", "cancelled")
+          .in("booking_type", ["boarding", "daycare"])
+          .in("status", [...GROOMING_LINKABLE_STATUS_FILTER])
           .order("check_in_date", { ascending: false })
           .limit(12);
 
@@ -526,7 +575,8 @@ export function useBookingsForGroomingLink(searchTerm: string) {
             .from("bookings")
             .select(GROOMING_BOOKING_LINK_SELECT)
             .in("id", bookingIds)
-            .neq("status", "cancelled")
+            .in("booking_type", ["boarding", "daycare"])
+            .in("status", [...GROOMING_LINKABLE_STATUS_FILTER])
             .order("check_in_date", { ascending: false })
             .limit(12);
 

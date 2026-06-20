@@ -36,6 +36,7 @@ const StaffPage = lazy(() => import("@/pages/Staff"));
 const ProfilePage = lazy(() => import("@/pages/Profile"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const VetsAdminPage = lazy(() => import("@/pages/VetsAdmin"));
+const StaffAdminPage = lazy(() => import("@/pages/StaffAdmin"));
 const DataIssuesAdminPage = lazy(() => import("@/pages/DataIssuesAdmin"));
 const KennelCardPrintPage = lazy(() => import("@/pages/print/KennelCardPrintPage"));
 const KennelCardsPrintPage = lazy(() => import("@/pages/print/KennelCardsPrintPage"));
@@ -137,6 +138,7 @@ const App = () => (
                 <Route path="profile" element={<ProfilePage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="settings/vets" element={<VetsAdminPage />} />
+                <Route path="settings/staff" element={<StaffAdminPage />} />
                 <Route path="settings/rooms" element={<RoomsAdminPage />} />
                 <Route path="settings/data-issues" element={<DataIssuesAdminPage />} />
               </Route>

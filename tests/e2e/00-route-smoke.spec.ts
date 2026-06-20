@@ -14,6 +14,7 @@ const ROUTES = [
   "/profile",
   "/settings",
   "/settings/vets",
+  "/settings/staff",
   "/settings/rooms",
   "/agent",
   "/dashboard/checkins",

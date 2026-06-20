@@ -1,6 +1,8 @@
-/** Grooming capacity board operating window: 08:00–18:00 local. */
+/** Grooming capacity board operating window: 08:00–19:00 local. */
 export const GROOMING_BOARD_START_MINUTES = 8 * 60;
-export const GROOMING_BOARD_END_MINUTES = 18 * 60;
+export const GROOMING_BOARD_END_MINUTES = 19 * 60;
+export const GROOMING_DAY_START_TIME = "08:00";
+export const GROOMING_DAY_END_TIME = "19:00";
 
 export type GroomingScheduleConflict = {
   conflictType: "appointment_overlap" | "station_block_overlap";
@@ -39,22 +41,23 @@ export function maxDurationMinutesForTimeInput(timeHHMM: string): number {
   return maxDurationMinutesForStart(start);
 }
 
-/** Returns user-visible error or null if valid (board hours). */
+/** Returns user-visible error or null if valid (board hours). Empty time = floating (valid). */
 export function validateGroomingScheduleTime(
   timeHHMM: string,
   durationMinutes: number,
 ): string | null {
+  if (!timeHHMM.trim()) return null;
   if (!/^\d{2}:\d{2}$/.test(timeHHMM)) return "Enter a valid appointment time.";
   const start = parseTimeToMinutes(timeHHMM);
   if (start == null) return "Enter a valid appointment time.";
   if (start < GROOMING_BOARD_START_MINUTES || start >= GROOMING_BOARD_END_MINUTES) {
-    return "Appointment time must be between 8:00 AM and 6:00 PM.";
+    return "Appointment time must be between 8:00 AM and 7:00 PM.";
   }
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
     return "Enter a valid duration.";
   }
   if (start + durationMinutes > GROOMING_BOARD_END_MINUTES) {
-    return "Appointment must end by 6:00 PM.";
+    return "Appointment must end by 7:00 PM.";
   }
   return null;
 }

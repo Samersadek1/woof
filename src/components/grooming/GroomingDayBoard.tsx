@@ -1,46 +1,63 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { addDays, format, parse, parseISO, subDays } from "date-fns";
-import { ChevronLeft, ChevronRight, TriangleAlert } from "lucide-react";
+import { Link } from "react-router-dom";
+import { format, parse, parseISO } from "date-fns";
+import { Pencil, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { GroomingConflictOverrideDialog } from "@/components/grooming/GroomingConflictOverrideDialog";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import type { GroomingScheduleConflict } from "@/lib/groomingScheduleUtils";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import {
-  workflowStatusLabel,
-  normalizeGroomingWorkflowStatus,
-} from "@/lib/groomingWorkflow";
+  activeLinkedStayLabel,
+  formatMustFinishBy,
+  formatTimeRange,
+  groomingBoardPaymentBadgeClass,
+  groomingBoardPaymentLabel,
+  groomingCardGroomerLabel,
+  groomingStatusBadgeClass,
+  isGroomingDueSoon,
+  petSizeLabel,
+  stationAccentClass,
+} from "@/lib/groomingBoardUi";
+import { workflowStatusLabel } from "@/lib/groomingWorkflow";
 import {
   GroomingScheduleNeedsOverrideError,
   useGroomingDay,
   useGroomDefaultMinutes,
   useScheduleGroomingAppt,
+  useUpdateGroomingMustFinishBy,
   type GroomingBacklogRow,
   type GroomingPinnedAppt,
   type ScheduleGroomingApptInput,
 } from "@/hooks/useGroomingCapacity";
+import { GroomingGroomerSelect } from "@/components/grooming/GroomingGroomerSelect";
+import { useGroomingGroomers, type GroomingGroomerRow } from "@/hooks/useGroomingGroomers";
 import { useStaff } from "@/hooks/useStaff";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const DAY_START_MIN = 8 * 60;
-const DAY_END_MIN = 18 * 60;
-const MIN_TIMELINE_HEIGHT = 480;
+const DAY_END_MIN = 19 * 60;
+const TIMELINE_HEIGHT_PX = 600;
 const DRAG_MIME = "application/x-woof-grooming-appt";
 
 type Props = {
-  initialDate?: string;
   date?: string;
   onDateChange?: (date: string) => void;
   staffLabel?: string;
@@ -85,7 +102,7 @@ function minutesFromTimelineY(clientY: number, rect: DOMRect): number {
 function blockStyle(startMin: number, durationMin: number) {
   const top = ((startMin - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100;
   const height = (durationMin / (DAY_END_MIN - DAY_START_MIN)) * 100;
-  return { top: `${Math.max(0, top)}%`, height: `${Math.max(2, Math.min(100, height))}%` };
+  return { top: `${Math.max(0, top)}%`, height: `${Math.max(3, Math.min(100, height))}%` };
 }
 
 function userVisitNotesFromStored(notes: string | null | undefined): string | null {
@@ -99,6 +116,22 @@ function userVisitNotesFromStored(notes: string | null | undefined): string | nu
   return text || null;
 }
 
+function toDatetimeLocalValue(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    return format(parseISO(iso), "yyyy-MM-dd'T'HH:mm");
+  } catch {
+    return "";
+  }
+}
+
+function fromDatetimeLocalValue(value: string): string | null {
+  if (!value.trim()) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
 function toScheduleInput(
   date: string,
   fields: ScheduleGroomingApptInput,
@@ -106,39 +139,41 @@ function toScheduleInput(
   return { ...fields, appointment_date: date };
 }
 
+const GRID_HALF_HOURS = Array.from(
+  { length: (DAY_END_MIN - DAY_START_MIN) / 30 + 1 },
+  (_, i) => DAY_START_MIN + i * 30,
+);
+
 export function GroomingDayBoard({
-  initialDate,
   date: controlledDate,
-  onDateChange,
   staffLabel = "staff",
   onAppointmentClick,
   onEmptySlotClick,
 }: Props) {
-  const [internalDate, setInternalDate] = useState(initialDate ?? format(new Date(), "yyyy-MM-dd"));
-  const date = controlledDate ?? internalDate;
-  const setDate = onDateChange ?? setInternalDate;
-  const showDateNav = controlledDate == null;
+  const date = controlledDate ?? format(new Date(), "yyyy-MM-dd");
 
   const [placedSession, setPlacedSession] = useState(0);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideConflicts, setOverrideConflicts] = useState<GroomingScheduleConflict[]>([]);
   const [pendingSave, setPendingSave] = useState<ScheduleGroomingApptInput | null>(null);
+  const [hiddenStations, setHiddenStations] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useGroomingDay(date);
   const schedule = useScheduleGroomingAppt();
+  const updateMustFinishBy = useUpdateGroomingMustFinishBy();
+  const { data: groomers = [] } = useGroomingGroomers();
   const { data: staffRows = [] } = useStaff();
 
-  useEffect(() => {
-    if (initialDate && controlledDate == null) setInternalDate(initialDate);
-  }, [initialDate, controlledDate]);
+  const visibleStations = useMemo(
+    () => (data?.stations ?? []).filter((s) => !hiddenStations.has(s.station_id)),
+    [data?.stations, hiddenStations],
+  );
 
-  const staffNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of staffRows) {
-      map.set(s.id, [s.first_name, s.last_name].filter(Boolean).join(" "));
-    }
+  const stationIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    (data?.stations ?? []).forEach((s, i) => map.set(s.station_id, i));
     return map;
-  }, [staffRows]);
+  }, [data?.stations]);
 
   const pinnedByStation = useMemo(() => {
     const pinned = new Map<string, GroomingPinnedAppt[]>();
@@ -150,6 +185,14 @@ export function GroomingDayBoard({
     }
     return pinned;
   }, [data?.pinned]);
+
+  const staffNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of staffRows) {
+      map.set(s.id, [s.first_name, s.last_name].filter(Boolean).join(" "));
+    }
+    return map;
+  }, [staffRows]);
 
   const cap = data?.capacity;
   const meterPct =
@@ -190,7 +233,7 @@ export function GroomingDayBoard({
     stationId: string,
     time: string,
     duration: number,
-    groomerId: string | null,
+    groomerName: string | null,
   ) => {
     void saveAppt(
       {
@@ -202,7 +245,8 @@ export function GroomingDayBoard({
         station_id: stationId,
         appointment_time: time,
         duration_minutes: duration,
-        groomer_id: groomerId,
+        groomer_id: null,
+        grooming_notes: groomerName?.trim() || null,
       },
       { countPlaced: true },
     );
@@ -212,7 +256,7 @@ export function GroomingDayBoard({
     e.preventDefault();
     const raw = e.dataTransfer.getData(DRAG_MIME);
     if (!raw) return;
-    let payload: { apptId: string; duration: number; groomerId: string | null };
+    let payload: { apptId: string; duration: number; groomerName: string | null };
     try {
       payload = JSON.parse(raw) as typeof payload;
     } catch {
@@ -222,7 +266,7 @@ export function GroomingDayBoard({
     if (!row) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const startMin = minutesFromTimelineY(e.clientY, rect);
-    placeBacklog(row, stationId, minutesToTimeString(startMin), payload.duration, payload.groomerId);
+    placeBacklog(row, stationId, minutesToTimeString(startMin), payload.duration, payload.groomerName);
   };
 
   const onLaneClick = (e: React.MouseEvent<HTMLDivElement>, stationId: string) => {
@@ -233,331 +277,426 @@ export function GroomingDayBoard({
     onEmptySlotClick(stationId, minutesToHHMM(startMin));
   };
 
-  return (
-    <TooltipProvider delayDuration={200}>
-      <div
-        className="flex w-full min-h-[calc(100vh-14rem)] flex-col gap-4"
-        data-testid="grooming-day-board"
-      >
-        <div className="flex flex-wrap items-center gap-3">
-          {showDateNav ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => setDate(format(subDays(parseISO(date), 1), "yyyy-MM-dd"))}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <input
-                type="date"
-                className="rounded-md border px-2 py-1 text-sm"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                data-testid="grooming-day-board-date"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => setDate(format(addDays(parseISO(date), 1), "yyyy-MM-dd"))}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </>
-          ) : null}
+  const toggleStation = (stationId: string, visible: boolean) => {
+    setHiddenStations((prev) => {
+      const next = new Set(prev);
+      if (visible) next.delete(stationId);
+      else next.add(stationId);
+      return next;
+    });
+  };
 
-          {isLoading ? (
-            <Skeleton className="h-6 w-56" />
-          ) : cap ? (
-            <div className="flex min-w-[12rem] flex-1 flex-col gap-1">
-              <div
-                className={cn(
-                  "flex flex-wrap items-center gap-2 text-xs",
-                  (overBudget || !cap.feasible) && "text-amber-900",
-                )}
-                data-testid="grooming-day-board-meter"
-              >
-                <span className="tabular-nums font-medium">
-                  {cap.committed_minutes}/{cap.total_minutes} min
-                </span>
-                <span className="text-muted-foreground">
-                  pinned {cap.pinned_minutes} · floating {cap.floating_minutes}
-                </span>
-                <span className="text-muted-foreground">
-                  Placed this session · {placedSession}
-                </span>
-                {(overBudget || !cap.feasible) && (
-                  <span className="flex items-center gap-1">
-                    <TriangleAlert className="h-3.5 w-3.5" />
-                    Over daily budget
-                  </span>
-                )}
-              </div>
-              <Progress
-                value={meterPct}
-                className="h-2"
-                indicatorClassName={cn(overBudget && "bg-amber-500")}
-              />
+  return (
+    <div className="flex w-full min-h-[calc(100vh-14rem)] flex-col gap-4" data-testid="grooming-day-board">
+      <div className="flex flex-wrap items-start gap-4">
+        {(data?.stations ?? []).length > 0 ? (
+          <div className="flex min-w-[12rem] flex-col gap-2">
+            <Label className="text-xs text-muted-foreground">Stations</Label>
+            <div className="flex flex-wrap gap-2">
+              {(data?.stations ?? []).map((st) => {
+                const visible = !hiddenStations.has(st.station_id);
+                return (
+                  <label
+                    key={st.station_id}
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+                  >
+                    <Checkbox
+                      checked={visible}
+                      onCheckedChange={(c) => toggleStation(st.station_id, c === true)}
+                    />
+                    {st.station_name}
+                  </label>
+                );
+              })}
             </div>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         {isLoading ? (
-          <Skeleton className="min-h-[480px] w-full flex-1" />
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
-            <div className="min-h-0 flex-1 overflow-auto">
-              <div
-                className="grid min-w-[640px]"
-                style={{
-                  gridTemplateColumns: `4rem repeat(${data?.stations.length ?? 0}, minmax(8rem, 1fr))`,
-                  minHeight: MIN_TIMELINE_HEIGHT,
-                }}
-              >
-                <div className="sticky top-0 z-20 border-b bg-muted/40 p-2 text-xs text-muted-foreground">
-                  Time
-                </div>
-                {(data?.stations ?? []).map((st) => (
-                  <div
-                    key={st.station_id}
-                    className="sticky top-0 z-20 border-b border-l bg-muted/40 p-2 text-sm font-medium"
-                  >
-                    {st.station_name}
-                    <div className="text-[10px] font-normal text-muted-foreground tabular-nums">
-                      {st.used_minutes}/{st.window_minutes} min free
-                    </div>
-                  </div>
-                ))}
+          <Skeleton className="h-6 w-56" />
+        ) : cap ? (
+          <div className="flex min-w-[12rem] flex-1 flex-col gap-1">
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-2 text-xs",
+                (overBudget || !cap.feasible) && "text-amber-900",
+              )}
+              data-testid="grooming-day-board-meter"
+            >
+              <span className="tabular-nums font-medium">
+                {cap.committed_minutes}/{cap.total_minutes} min
+              </span>
+              <span className="text-muted-foreground">
+                pinned {cap.pinned_minutes} · floating {cap.floating_minutes}
+              </span>
+              <span className="text-muted-foreground">Placed this session · {placedSession}</span>
+              {(overBudget || !cap.feasible) && (
+                <span className="flex items-center gap-1">
+                  <TriangleAlert className="h-3.5 w-3.5" />
+                  Over daily budget
+                </span>
+              )}
+            </div>
+            <Progress
+              value={meterPct}
+              className="h-2"
+              indicatorClassName={cn(overBudget && "bg-amber-500")}
+            />
+          </div>
+        ) : null}
+      </div>
 
+      {isLoading ? (
+        <Skeleton className="min-h-[480px] w-full flex-1" />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
+          <div className="min-h-0 flex-1 overflow-auto">
+            <div
+              className="grid min-w-[640px]"
+              style={{
+                gridTemplateColumns: `4rem repeat(${visibleStations.length}, minmax(9rem, 1fr))`,
+                minHeight: TIMELINE_HEIGHT_PX,
+              }}
+            >
+              <div className="sticky top-0 z-20 border-b bg-muted/40 p-2 text-xs text-muted-foreground">
+                Time
+              </div>
+              {visibleStations.map((st) => (
                 <div
-                  className="relative border-r bg-muted/20"
-                  style={{ minHeight: MIN_TIMELINE_HEIGHT }}
+                  key={st.station_id}
+                  className="sticky top-0 z-20 border-b border-l bg-muted/40 p-2 text-sm font-medium"
                 >
-                  {[8, 10, 12, 14, 16, 18].map((h) => (
+                  {st.station_name}
+                  <div className="text-[10px] font-normal text-muted-foreground tabular-nums">
+                    {st.used_minutes}/{st.window_minutes} min free
+                  </div>
+                </div>
+              ))}
+
+              <div
+                className="relative border-r bg-muted/20"
+                style={{ height: TIMELINE_HEIGHT_PX }}
+              >
+                {GRID_HALF_HOURS.map((min) => {
+                  const isHour = min % 60 === 0;
+                  return (
                     <div
-                      key={h}
-                      className="absolute left-0 right-0 border-t border-border/50 text-[10px] text-muted-foreground pl-1"
+                      key={min}
+                      className={cn(
+                        "absolute left-0 right-0 border-t pl-1 text-[10px] text-muted-foreground",
+                        isHour ? "border-border/60" : "border-dashed border-border/35",
+                      )}
                       style={{
-                        top: `${((h * 60 - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100}%`,
+                        top: `${((min - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100}%`,
                       }}
                     >
-                      {h === 18 ? "18:00" : `${h}:00`}
+                      {isHour ? (min === DAY_END_MIN ? "19:00" : `${min / 60}:00`) : null}
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
+              </div>
 
-                {(data?.stations ?? []).map((st) => (
+              {visibleStations.map((st) => {
+                const stationIdx = stationIndexById.get(st.station_id) ?? 0;
+                return (
                   <div
                     key={st.station_id}
                     className={cn(
                       "relative border-l bg-muted/5",
                       onEmptySlotClick && "cursor-pointer",
                     )}
-                    style={{ minHeight: MIN_TIMELINE_HEIGHT }}
+                    style={{ height: TIMELINE_HEIGHT_PX }}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => onLaneDrop(e, st.station_id)}
                     onClick={(e) => onLaneClick(e, st.station_id)}
                     data-testid={`grooming-day-board-lane-${st.station_id}`}
                   >
-                    <div className="pointer-events-none absolute inset-0 opacity-30" aria-hidden>
-                      {[8, 10, 12, 14, 16].map((h) => (
+                    {GRID_HALF_HOURS.filter((m) => m < DAY_END_MIN).map((min) => {
+                      const isHour = min % 60 === 0;
+                      return (
                         <div
-                          key={h}
-                          className="absolute left-0 right-0 border-t border-dashed border-border/40"
+                          key={min}
+                          className={cn(
+                            "pointer-events-none absolute left-0 right-0 border-t",
+                            isHour ? "border-border/40" : "border-dashed border-border/25",
+                          )}
                           style={{
-                            top: `${((h * 60 - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100}%`,
+                            top: `${((min - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100}%`,
                           }}
                         />
-                      ))}
-                    </div>
+                      );
+                    })}
 
                     {(pinnedByStation.get(st.station_id) ?? []).map((a) => (
-                      <PinnedBlock
+                      <PinnedAppointmentCard
                         key={a.id}
                         appt={a}
-                        groomerName={
-                          a.groomer_id
-                            ? staffNameById.get(a.groomer_id) ?? null
-                            : a.grooming_notes?.trim() || null
-                        }
-                        onSave={saveAppt}
+                        stationIndex={stationIdx}
+                        staffNameById={staffNameById}
                         onOpen={() => onAppointmentClick?.(a.id)}
-                        isSaving={schedule.isPending}
                       />
                     ))}
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
+        </div>
+      )}
+
+      <section className="shrink-0 space-y-2">
+        <h3 className="text-sm font-semibold">
+          Floating backlog
+          <span className="ml-2 font-normal text-muted-foreground">
+            ({data?.backlog.length ?? 0} to place)
+          </span>
+        </h3>
+        {(data?.backlog.length ?? 0) === 0 ? (
+          <p className="text-xs text-muted-foreground">No floating grooming jobs for this day.</p>
+        ) : (
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {(data?.backlog ?? []).map((row) => (
+              <FloatingBacklogCard
+                key={row.appt_id}
+                row={row}
+                boardDate={date}
+                stations={visibleStations}
+                allStations={data?.stations ?? []}
+                groomers={groomers}
+                staffNameById={staffNameById}
+                onPlace={placeBacklog}
+                onOpen={() => onAppointmentClick?.(row.appt_id)}
+                onSaveMustFinishBy={(mustFinishBy) =>
+                  updateMustFinishBy.mutate(
+                    { apptId: row.appt_id, appointmentDate: date, mustFinishBy },
+                    {
+                      onSuccess: () => toast.success("Deadline updated"),
+                      onError: (e) =>
+                        toast.error(e instanceof Error ? e.message : "Could not save deadline"),
+                    },
+                  )
+                }
+                isSavingDeadline={updateMustFinishBy.isPending}
+              />
+            ))}
+          </ul>
         )}
+      </section>
 
-        <section className="shrink-0 space-y-2">
-          <h3 className="text-sm font-semibold">
-            Floating backlog
-            <span className="ml-2 font-normal text-muted-foreground">
-              ({data?.backlog.length ?? 0} to place)
-            </span>
-          </h3>
-          {(data?.backlog.length ?? 0) === 0 ? (
-            <p className="text-xs text-muted-foreground">No floating grooming jobs for this day.</p>
-          ) : (
-            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {(data?.backlog ?? []).map((row) => (
-                <FloatingBacklogCard
-                  key={row.appt_id}
-                  row={row}
-                  stations={data?.stations ?? []}
-                  staffRows={staffRows}
-                  onPlace={placeBacklog}
-                  onOpen={() => onAppointmentClick?.(row.appt_id)}
-                />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <GroomingConflictOverrideDialog
-          open={overrideOpen}
-          onOpenChange={setOverrideOpen}
-          conflicts={overrideConflicts}
-          isPending={schedule.isPending}
-          onConfirm={(reason) => {
-            if (!pendingSave) return;
-            void saveAppt({ ...pendingSave, overrideReason: reason });
-          }}
-        />
-      </div>
-    </TooltipProvider>
+      <GroomingConflictOverrideDialog
+        open={overrideOpen}
+        onOpenChange={setOverrideOpen}
+        conflicts={overrideConflicts}
+        isPending={schedule.isPending}
+        onConfirm={(reason) => {
+          if (!pendingSave) return;
+          void saveAppt({ ...pendingSave, overrideReason: reason });
+        }}
+      />
+    </div>
   );
 }
 
-function PinnedBlock({
+function PinnedAppointmentCard({
   appt,
-  groomerName,
-  onSave,
+  stationIndex,
+  staffNameById,
   onOpen,
-  isSaving,
 }: {
   appt: GroomingPinnedAppt;
-  groomerName: string | null;
-  onSave: (input: ScheduleGroomingApptInput) => void;
+  stationIndex: number;
+  staffNameById: Map<string, string>;
   onOpen: () => void;
-  isSaving: boolean;
 }) {
-  const [duration, setDuration] = useState(appt.duration_minutes ?? 45);
   const start = timeToMinutes(appt.appointment_time);
   if (start == null || !appt.station_id) return null;
 
-  const persistDuration = () => {
-    if (duration === appt.duration_minutes) return;
-    onSave({
-      id: appt.id,
-      pet_id: appt.pet_id,
-      owner_id: appt.owner_id,
-      service: appt.service,
-      appointment_date: appt.appointment_date,
-      station_id: appt.station_id,
-      appointment_time: appt.appointment_time,
-      duration_minutes: duration,
-      groomer_id: appt.groomer_id,
-    });
-  };
-
+  const duration = appt.duration_minutes ?? 45;
   const style = blockStyle(start, duration);
   const ownerName = appt.owners
     ? ownerDisplayName(appt.owners.first_name, appt.owners.last_name)
-    : null;
+    : "—";
+  const serviceLine = [
+    labelForGroomingService(appt.service),
+    petSizeLabel(appt.pets?.size),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const visitNotes = userVisitNotesFromStored(appt.notes);
-  const statusLabel = workflowStatusLabel(appt.status);
-  const showStatus =
-    normalizeGroomingWorkflowStatus(appt.status) !== "new" || appt.no_show;
+  const dueSoon = isGroomingDueSoon(appt.must_finish_by);
+  const accent = stationAccentClass(stationIndex);
+  const paymentLabel = groomingBoardPaymentLabel({
+    status: appt.status,
+    payment_method: appt.payment_method,
+    invoice_status: appt.invoices?.status,
+  });
+  const paymentBadgeClass = groomingBoardPaymentBadgeClass({
+    status: appt.status,
+    payment_method: appt.payment_method,
+    invoice_status: appt.invoices?.status,
+  });
+  const linkedStay = activeLinkedStayLabel(appt.bookings, appt.appointment_date);
+  const groomerLabel = groomingCardGroomerLabel({
+    groomerId: appt.groomer_id,
+    groomingNotes: appt.grooming_notes,
+    staffNameById,
+  });
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div
+    <HoverCard openDelay={200} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <button
+          type="button"
           data-pinned-block
-          className="absolute left-0.5 right-0.5 z-10 overflow-hidden rounded border border-primary/30 bg-primary/15 px-1 py-0.5 text-left text-[10px] hover:bg-primary/25"
+          className={cn(
+            "absolute left-0.5 right-0.5 z-10 overflow-hidden rounded border border-border/60 bg-card px-1.5 py-1 text-left text-[10px] shadow-sm hover:shadow-md border-l-4",
+            accent,
+          )}
           style={style}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
         >
-          <button type="button" className="w-full text-left" onClick={onOpen}>
-            <div className="font-medium truncate">{appt.pets?.name ?? "Pet"}</div>
-            <div className="truncate opacity-80">{labelForGroomingService(appt.service)}</div>
-            <div className="tabular-nums opacity-90">{duration} min</div>
-          </button>
-          <div className="mt-0.5 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-            <Input
-              type="number"
-              className="h-5 w-12 px-1 text-[10px]"
-              value={duration}
-              disabled={isSaving}
-              onChange={(e) => setDuration(Number(e.target.value) || 45)}
-              onBlur={persistDuration}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") persistDuration();
-              }}
-              aria-label="Duration minutes"
-            />
-            <span className="text-[9px] text-muted-foreground">min</span>
+          <div className="flex items-start justify-between gap-1">
+            <span className="font-semibold tabular-nums truncate">
+              {formatTimeRange(appt.appointment_time, duration)}
+            </span>
+            <Badge
+              variant="outline"
+              className={cn(
+                "shrink-0 px-1 py-0 text-[8px] leading-tight",
+                groomingStatusBadgeClass(appt.status),
+              )}
+            >
+              {workflowStatusLabel(appt.status)}
+            </Badge>
           </div>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-xs space-y-1 text-xs">
-        {ownerName ? (
+          <Link
+            to={`/customers/${appt.owner_id}`}
+            className="block truncate text-[10px] font-medium text-primary hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {ownerName}
+          </Link>
+          <div className="truncate font-medium">{appt.pets?.name ?? "Pet"}</div>
+          <div className="truncate text-muted-foreground">Groomer: {groomerLabel}</div>
+          <div className="truncate text-muted-foreground">
+            {[appt.pets?.breed, serviceLine].filter(Boolean).join(" · ")}
+          </div>
+          <div className="flex flex-wrap items-center gap-1 pt-0.5">
+            <Badge
+              variant="outline"
+              className={cn("px-1 py-0 text-[8px] leading-tight", paymentBadgeClass)}
+            >
+              {paymentLabel}
+            </Badge>
+            {linkedStay ? (
+              <Badge
+                variant="outline"
+                className="px-1 py-0 text-[8px] leading-tight border-slate-300 bg-slate-50 text-slate-800"
+              >
+                {linkedStay}
+              </Badge>
+            ) : null}
+          </div>
+          <div className="tabular-nums text-muted-foreground">{duration} min</div>
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent side="right" className="w-72 space-y-2 text-sm">
+        <p className="font-semibold tabular-nums">
+          {formatTimeRange(appt.appointment_time, duration)}
+        </p>
+        <p>
+          <span className="text-muted-foreground">Owner:</span>{" "}
+          <Link to={`/customers/${appt.owner_id}`} className="text-primary hover:underline">
+            {ownerName}
+          </Link>
+        </p>
+        <p>
+          <span className="text-muted-foreground">Dog:</span> {appt.pets?.name ?? "Pet"}
+          {appt.pets?.breed ? ` · ${appt.pets.breed}` : ""}
+        </p>
+        <p>
+          <span className="text-muted-foreground">Service:</span> {serviceLine}
+        </p>
+        {groomerLabel !== "—" ? (
           <p>
-            <span className="text-muted-foreground">Owner:</span> {ownerName}
+            <span className="text-muted-foreground">Groomer:</span> {groomerLabel}
           </p>
-        ) : null}
-        {groomerName ? (
-          <p>
-            <span className="text-muted-foreground">Groomer:</span> {groomerName}
-          </p>
-        ) : null}
+        ) : (
+          <p className="text-muted-foreground">Groomer: —</p>
+        )}
         {visitNotes ? (
-          <p className="whitespace-pre-wrap">
+          <p className="whitespace-pre-wrap text-xs">
             <span className="text-muted-foreground">Notes:</span> {visitNotes}
           </p>
         ) : null}
-        {showStatus ? (
+        <p>
+          <span className="text-muted-foreground">Payment:</span> {paymentLabel}
+        </p>
+        {linkedStay ? (
           <p>
-            <span className="text-muted-foreground">Status:</span> {statusLabel}
-            {appt.no_show ? " · No show" : ""}
+            <span className="text-muted-foreground">Linked stay:</span> {linkedStay}
           </p>
         ) : null}
-      </TooltipContent>
-    </Tooltip>
+        <div className="flex flex-wrap gap-1">
+          <Badge variant="outline" className={groomingStatusBadgeClass(appt.status)}>
+            {workflowStatusLabel(appt.status)}
+          </Badge>
+          {dueSoon ? (
+            <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-900">
+              Due soon
+            </Badge>
+          ) : null}
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 
 function FloatingBacklogCard({
   row,
+  boardDate,
   stations,
-  staffRows,
+  allStations,
+  groomers,
+  staffNameById,
   onPlace,
   onOpen,
+  onSaveMustFinishBy,
+  isSavingDeadline,
 }: {
   row: GroomingBacklogRow;
+  boardDate: string;
   stations: { station_id: string; station_name: string }[];
-  staffRows: { id: string; first_name: string; last_name: string }[];
+  allStations: { station_id: string; station_name: string }[];
+  groomers: GroomingGroomerRow[];
+  staffNameById: Map<string, string>;
   onPlace: (
     row: GroomingBacklogRow,
     stationId: string,
     time: string,
     duration: number,
-    groomerId: string | null,
+    groomerName: string | null,
   ) => void;
   onOpen: () => void;
+  onSaveMustFinishBy: (iso: string | null) => void;
+  isSavingDeadline: boolean;
 }) {
   const petSize = row.pet_size ?? "medium";
   const defaultDur = useGroomDefaultMinutes(row.service, petSize);
-  const [stationId, setStationId] = useState(stations[0]?.station_id ?? "");
+  const pickStations = stations.length > 0 ? stations : allStations;
+  const [stationId, setStationId] = useState(pickStations[0]?.station_id ?? "");
   const [time, setTime] = useState("09:00");
   const [duration, setDuration] = useState(row.duration_minutes);
-  const [groomerId, setGroomerId] = useState<string>("");
+  const [groomerName, setGroomerName] = useState(row.grooming_notes?.trim() ?? "");
+  const [deadlineDraft, setDeadlineDraft] = useState(toDatetimeLocalValue(row.must_finish_by));
+  const [deadlineOpen, setDeadlineOpen] = useState(false);
+
+  useEffect(() => {
+    setDeadlineDraft(toDatetimeLocalValue(row.must_finish_by));
+  }, [row.must_finish_by]);
 
   useEffect(() => {
     if (defaultDur.data != null && row.duration_minutes === defaultDur.data) {
@@ -569,10 +708,35 @@ function FloatingBacklogCard({
     setDuration(row.duration_minutes);
   }, [row.duration_minutes]);
 
+  const ownerName = ownerDisplayName(row.owner_first_name, row.owner_last_name);
+  const dueSoon = isGroomingDueSoon(row.must_finish_by);
+  const deadlineLabel = formatMustFinishBy(row.must_finish_by);
+  const paymentLabel = groomingBoardPaymentLabel({
+    status: row.status,
+    payment_method: row.payment_method,
+  });
+  const linkedStay = activeLinkedStayLabel(
+    row.booking_type && row.booking_status
+      ? {
+          booking_type: row.booking_type,
+          status: row.booking_status,
+          booking_ref: row.booking_ref,
+          check_in_date: row.booking_check_in_date ?? "",
+          check_out_date: row.booking_check_out_date ?? "",
+        }
+      : null,
+    boardDate,
+  );
+  const groomerLabel = groomingCardGroomerLabel({
+    groomerId: row.groomer_id,
+    groomingNotes: row.grooming_notes,
+    staffNameById,
+  });
+
   const dragPayload = JSON.stringify({
     apptId: row.appt_id,
     duration,
-    groomerId: groomerId || null,
+    groomerName: groomerName.trim() || null,
   });
 
   return (
@@ -585,16 +749,94 @@ function FloatingBacklogCard({
       }}
       data-testid={`grooming-day-board-backlog-${row.appt_id}`}
     >
-      <button type="button" className="font-medium text-left hover:underline w-full" onClick={onOpen}>
-        {row.dog_name ?? "Pet"} · {labelForGroomingService(row.service)}
-      </button>
-      {row.booking_ref ? (
+      <div className="flex items-start justify-between gap-2">
+        <button type="button" className="font-medium text-left hover:underline" onClick={onOpen}>
+          {row.dog_name ?? "Pet"}
+        </button>
+        {dueSoon ? (
+          <Badge variant="outline" className="shrink-0 border-amber-400 bg-amber-50 text-amber-900 text-[10px]">
+            Due soon
+          </Badge>
+        ) : null}
+      </div>
+      <p className="text-xs text-muted-foreground">{ownerName}</p>
+      <p className="text-xs text-muted-foreground">Groomer: {groomerLabel}</p>
+      <p className="text-xs">{labelForGroomingService(row.service)} · {duration} min</p>
+      <div className="flex flex-wrap gap-1">
+        {paymentLabel !== "—" ? (
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[10px]",
+              groomingBoardPaymentBadgeClass({
+                status: row.status,
+                payment_method: row.payment_method,
+              }),
+            )}
+          >
+            {paymentLabel}
+          </Badge>
+        ) : null}
+        {linkedStay ? (
+          <Badge variant="outline" className="text-[10px] border-slate-300 bg-slate-50 text-slate-800">
+            {linkedStay}
+          </Badge>
+        ) : null}
+      </div>
+
+      <div className="flex items-center gap-1 text-xs">
+        {deadlineLabel ? (
+          <span className="text-muted-foreground">By {deadlineLabel}</span>
+        ) : (
+          <span className="text-muted-foreground">No deadline</span>
+        )}
+        <Popover open={deadlineOpen} onOpenChange={setDeadlineOpen}>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" className="h-6 w-6" aria-label="Edit deadline">
+              <Pencil className="h-3 w-3" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-64 space-y-2" align="start">
+            <Label className="text-xs">Must finish by</Label>
+            <Input
+              type="datetime-local"
+              value={deadlineDraft}
+              onChange={(e) => setDeadlineDraft(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={isSavingDeadline}
+                onClick={() => {
+                  onSaveMustFinishBy(fromDatetimeLocalValue(deadlineDraft));
+                  setDeadlineOpen(false);
+                }}
+              >
+                Save
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isSavingDeadline}
+                onClick={() => {
+                  setDeadlineDraft("");
+                  onSaveMustFinishBy(null);
+                  setDeadlineOpen(false);
+                }}
+              >
+                Clear
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {row.booking_ref && !linkedStay ? (
         <p className="text-[10px] text-muted-foreground">Stay {row.booking_ref}</p>
-      ) : row.source_booking_id ? (
-        <Badge variant="outline" className="text-[10px]">
-          Linked booking
-        </Badge>
       ) : null}
+
       <div className="flex flex-wrap gap-2 items-end">
         <div>
           <Label className="text-[10px]">Duration (min)</Label>
@@ -605,20 +847,13 @@ function FloatingBacklogCard({
             onChange={(e) => setDuration(Number(e.target.value) || defaultDur.data || 45)}
           />
         </div>
-        <div>
-          <Label className="text-[10px]">Groomer</Label>
-          <select
-            className="h-8 max-w-[8rem] rounded border px-2 text-xs truncate"
-            value={groomerId}
-            onChange={(e) => setGroomerId(e.target.value)}
-          >
-            <option value="">—</option>
-            {staffRows.map((s) => (
-              <option key={s.id} value={s.id}>
-                {[s.first_name, s.last_name].filter(Boolean).join(" ")}
-              </option>
-            ))}
-          </select>
+        <div className="min-w-[10rem] flex-1">
+          <GroomingGroomerSelect
+            groomers={groomers}
+            value={groomerName}
+            onChange={setGroomerName}
+            label="Groomer"
+          />
         </div>
         <div>
           <Label className="text-[10px]">Station</Label>
@@ -627,7 +862,7 @@ function FloatingBacklogCard({
             value={stationId}
             onChange={(e) => setStationId(e.target.value)}
           >
-            {stations.map((s) => (
+            {pickStations.map((s) => (
               <option key={s.station_id} value={s.station_id}>
                 {s.station_name}
               </option>
@@ -648,9 +883,7 @@ function FloatingBacklogCard({
           size="sm"
           data-testid="grooming-day-board-place-btn"
           disabled={!stationId}
-          onClick={() =>
-            onPlace(row, stationId, `${time}:00`, duration, groomerId || null)
-          }
+          onClick={() => onPlace(row, stationId, `${time}:00`, duration, groomerName.trim() || null)}
         >
           Place
         </Button>

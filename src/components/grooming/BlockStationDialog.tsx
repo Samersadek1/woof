@@ -78,7 +78,7 @@ export function BlockStationDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="grooming-block-full-day">Full day (8 AM – 6 PM)</Label>
+            <Label htmlFor="grooming-block-full-day">Full day (8 AM – 7 PM)</Label>
             <Switch
               id="grooming-block-full-day"
               checked={isFullDay}

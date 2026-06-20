@@ -1138,6 +1138,7 @@ export type Database = {
           id: string
           in_progress_at: string | null
           invoice_id: string | null
+          must_finish_by: string | null
           no_show: boolean
           notes: string | null
           owner_id: string
@@ -1163,6 +1164,7 @@ export type Database = {
           id?: string
           in_progress_at?: string | null
           invoice_id?: string | null
+          must_finish_by?: string | null
           no_show?: boolean
           notes?: string | null
           owner_id: string
@@ -1188,6 +1190,7 @@ export type Database = {
           id?: string
           in_progress_at?: string | null
           invoice_id?: string | null
+          must_finish_by?: string | null
           no_show?: boolean
           notes?: string | null
           owner_id?: string
@@ -1248,6 +1251,48 @@ export type Database = {
             columns: ["station_id"]
             isOneToOne: false
             referencedRelation: "grooming_stations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pet_grooming_notes: {
+        Row: {
+          appointment_id: string | null
+          created_at: string
+          id: string
+          note: string
+          pet_id: string
+          written_by: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          created_at?: string
+          id?: string
+          note: string
+          pet_id: string
+          written_by: string
+        }
+        Update: {
+          appointment_id?: string | null
+          created_at?: string
+          id?: string
+          note?: string
+          pet_id?: string
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pet_grooming_notes_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pet_grooming_notes_pet_id_fkey"
+            columns: ["pet_id"]
+            isOneToOne: false
+            referencedRelation: "pets"
             referencedColumns: ["id"]
           },
         ]
@@ -1405,6 +1450,30 @@ export type Database = {
         ]
       }
       grooming_stations: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
+      grooming_groomers: {
         Row: {
           created_at: string
           id: string

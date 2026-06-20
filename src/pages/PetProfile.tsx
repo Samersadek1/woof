@@ -12,7 +12,8 @@ import {
 } from "@/hooks/useGrooming";
 import { usePetBookings, type BookingWithDetails } from "@/hooks/useBookings";
 import { calculateNights, ownerDisplayName } from "@/lib/bookingUtils";
-import { labelForGroomingService } from "@/lib/groomingCatalog";
+import { labelForGroomingService, type GroomingService } from "@/lib/groomingCatalog";
+import { usePetGroomingNotesLog } from "@/hooks/usePetGroomingNotes";
 import { boardingCalendarTo, boardingServiceLabel } from "@/lib/boardingLabels";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
@@ -261,6 +262,8 @@ const PetProfilePage = () => {
     petId ?? "",
     80,
   );
+  const { data: petGroomingNotesLog = [], isLoading: petGroomingNotesLoading } =
+    usePetGroomingNotesLog(petId ?? "", !!petId);
   const updatePet = useUpdatePet();
   const updateAssessment = useUpdateAssessment();
   const [editOpen, setEditOpen] = useState(false);
@@ -1026,6 +1029,30 @@ const PetProfilePage = () => {
                 </TableBody>
               </Table>
             </div>
+          )}
+        </section>
+
+        <section>
+          <h3 className="text-lg font-semibold mb-4">Grooming notes</h3>
+          {petGroomingNotesLoading ? (
+            <Skeleton className="h-24 w-full rounded-lg" />
+          ) : petGroomingNotesLog.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No grooming notes yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {petGroomingNotesLog.map((row) => (
+                <li key={row.id} className="rounded-lg border p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mb-1">
+                    <span>{format(parseISO(row.created_at), "d MMM yyyy · HH:mm")}</span>
+                    {row.grooming_appointments?.service ? (
+                      <span>· {labelForGroomingService(row.grooming_appointments.service)}</span>
+                    ) : null}
+                    <span>· {row.written_by}</span>
+                  </div>
+                  <p className="whitespace-pre-wrap">{row.note}</p>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
 

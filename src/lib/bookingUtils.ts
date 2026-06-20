@@ -1,5 +1,7 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { differenceInCalendarDays, addDays, format, parseISO } from "date-fns";
 import { getSupabase } from "@/lib/supabaseRuntime";
+import type { Database } from "@/integrations/supabase/types";
 import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
 import { buildBoardingNightLineItems } from "@/lib/boardingInvoiceLines";
 import { MAX_BOARDING_STAY_NIGHTS } from "@/lib/boardingLimits";
@@ -144,7 +146,11 @@ export interface CreateServiceInvoiceParams {
  * daycare). Writes both `_aed` and non-suffixed columns for backwards
  * compatibility, and creates line items.
  */
-export async function createServiceInvoice(params: CreateServiceInvoiceParams): Promise<string> {
+export async function createServiceInvoice(
+  params: CreateServiceInvoiceParams,
+  client?: SupabaseClient<Database>,
+): Promise<string> {
+  const db = client ?? getSupabase();
   const {
     ownerId,
     serviceType,
@@ -175,7 +181,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   let discountPct = 0;
   let discountAed = 0;
   if (!skipMemberDiscount && subtotal > 0) {
-    const { data: ownerRow } = await getSupabase()
+    const { data: ownerRow } = await db
       .from("owners")
       .select("extra_discount_pct")
       .eq("id", ownerId)
@@ -198,7 +204,7 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   const vatAed = vatAmountFromGrossInclusive(grossTotal);
   const netAfterDiscount = netFromGrossInclusive(grossTotal);
 
-  const { data: inv, error: invErr } = await getSupabase()
+  const { data: inv, error: invErr } = await db
     .from("invoices")
     .insert({
       owner_id: ownerId,
@@ -240,9 +246,9 @@ export async function createServiceInvoice(params: CreateServiceInvoiceParams): 
   });
 
   if (lineRows.length > 0) {
-    const { error: liErr } = await getSupabase().from("invoice_line_items").insert(lineRows);
+    const { error: liErr } = await db.from("invoice_line_items").insert(lineRows);
     if (liErr) {
-      await getSupabase().from("invoices").delete().eq("id", inv.id);
+      await db.from("invoices").delete().eq("id", inv.id);
       throw liErr;
     }
   }

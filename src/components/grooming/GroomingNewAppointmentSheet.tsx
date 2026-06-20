@@ -47,6 +47,7 @@ import { useGroomingManualFeeBounds } from "@/hooks/useGroomingManualFeeBounds";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import {
   groomingBookingLinkPetIds,
+  isGroomingLinkableToBooking,
   type GroomingBookingLinkHit,
 } from "@/lib/groomingBookingLinkSearch";
 import { groomingServiceToPricingKey } from "@/lib/addonPricing";
@@ -144,7 +145,7 @@ export function GroomingNewAppointmentSheet({
   const heavyDefault =
     manualFeeBounds && manualFeeBounds.heavyMin > 0 ? String(manualFeeBounds.heavyMin) : "";
 
-  const [walkInMode, setWalkInMode] = useState(false);
+  const [stayLinkMode, setStayLinkMode] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<GroomingBookingLinkHit | null>(null);
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
@@ -163,7 +164,7 @@ export function GroomingNewAppointmentSheet({
   const { data: ownerForGroomingPref } = useOwner(ownerId ?? "");
 
   const resetForm = useCallback(() => {
-    setWalkInMode(false);
+    setStayLinkMode(false);
     setSelectedBooking(null);
     setOwnerId(null);
     setOwnerLabel(null);
@@ -260,7 +261,7 @@ export function GroomingNewAppointmentSheet({
   const handleBookingSelect = (hit: BookingLinkRow) => {
     setSelectedBooking(hit);
     setBookingId(hit.id);
-    setWalkInMode(false);
+    setStayLinkMode(true);
     setOwnerId(hit.owner_id);
     const ownerName = hit.owners
       ? ownerDisplayName(hit.owners.first_name, hit.owners.last_name)
@@ -275,11 +276,20 @@ export function GroomingNewAppointmentSheet({
   const handleBookingClear = () => {
     setSelectedBooking(null);
     setBookingId(null);
-    setOwnerId(null);
-    setOwnerLabel(null);
-    setSelectedPetIds([]);
-    setDrafts({});
-    slotPrefillAppliedRef.current = false;
+    setStayLinkMode(false);
+  };
+
+  const handleExitStayLinkMode = () => {
+    if (selectedBooking) {
+      setOwnerId(null);
+      setOwnerLabel(null);
+      setSelectedPetIds([]);
+      setDrafts({});
+      slotPrefillAppliedRef.current = false;
+    }
+    setSelectedBooking(null);
+    setBookingId(null);
+    setStayLinkMode(false);
   };
 
   const togglePetSelected = (id: string) => {
@@ -317,10 +327,35 @@ export function GroomingNewAppointmentSheet({
 
   const isComplimentaryPayment = paymentMethod === "complimentary";
 
+  const linkGroomingDate = useMemo(() => {
+    for (const petId of selectedPetIds) {
+      const draft = drafts[petId];
+      if (draft) return format(draft.appointmentDate, "yyyy-MM-dd");
+    }
+    return format(defaultDay, "yyyy-MM-dd");
+  }, [selectedPetIds, drafts, defaultDay]);
+
+  useEffect(() => {
+    if (!open || !selectedBooking || !bookingId) return;
+    const stillValid = selectedPetIds.every((petId) => {
+      const draft = drafts[petId];
+      const groomingDate = draft
+        ? format(draft.appointmentDate, "yyyy-MM-dd")
+        : linkGroomingDate;
+      return isGroomingLinkableToBooking(selectedBooking, groomingDate);
+    });
+    if (!stillValid) {
+      setSelectedBooking(null);
+      setBookingId(null);
+      setStayLinkMode(false);
+      toast.error("Booking link removed — stay must be active and overlap each pet's grooming date.");
+    }
+  }, [open, selectedBooking, bookingId, selectedPetIds, drafts, linkGroomingDate]);
+
   const performCreate = async (overrideReason?: string) => {
     if (createAppt.isPending) return;
     if (!ownerId) {
-      toast.error("Select an owner or booking.");
+      toast.error("Select a client.");
       return;
     }
     if (selectedPetIds.length === 0) {
@@ -328,6 +363,19 @@ export function GroomingNewAppointmentSheet({
         pets.length > 1 ? "Select at least one pet." : "No pet available for this owner.",
       );
       return;
+    }
+    if (bookingId && selectedBooking) {
+      for (const petId of selectedPetIds) {
+        const draft = drafts[petId];
+        if (!draft) continue;
+        const groomingDate = format(draft.appointmentDate, "yyyy-MM-dd");
+        if (!isGroomingLinkableToBooking(selectedBooking, groomingDate)) {
+          toast.error(
+            "Linked booking must be an active boarding or daycare stay overlapping the grooming date.",
+          );
+          return;
+        }
+      }
     }
 
     const warningsByPet: { petId: string; warnings: { code: string; msg: string }[] }[] = [];
@@ -342,14 +390,17 @@ export function GroomingNewAppointmentSheet({
         toast.error(scheduleErr);
         return;
       }
-      const validation = await rpcValidateGroomingAppt({
-        date: format(draft.appointmentDate, "yyyy-MM-dd"),
-        stationId: draft.stationId,
-        start: `${draft.apptTime}:00`,
-        duration: draft.durationMin,
-      });
-      if (!validation.ok && (validation.warnings?.length ?? 0) > 0) {
-        warningsByPet.push({ petId, warnings: validation.warnings });
+      const hasSchedule = draft.apptTime.trim().length > 0 && !!draft.stationId;
+      if (hasSchedule) {
+        const validation = await rpcValidateGroomingAppt({
+          date: format(draft.appointmentDate, "yyyy-MM-dd"),
+          stationId: draft.stationId,
+          start: `${draft.apptTime}:00`,
+          duration: draft.durationMin,
+        });
+        if (!validation.ok && (validation.warnings?.length ?? 0) > 0) {
+          warningsByPet.push({ petId, warnings: validation.warnings });
+        }
       }
     }
 
@@ -449,15 +500,12 @@ export function GroomingNewAppointmentSheet({
       onOpenChange(false);
       setConflictDialogOpen(false);
 
-      createServiceInvoice({
-        ownerId,
-        serviceType: "grooming",
-        referenceId: createdRows[0].id,
-        checkInDate: format(createdRows[0].appointment_date, "yyyy-MM-dd"),
-        notes: paymentMethod
-          ? `Payment method: ${groomingPaymentMethodLabel(paymentMethod)}`
-          : undefined,
-        lineItems: createdRows.map((appt) => {
+      const invoiceNotes = paymentMethod
+        ? `Payment method: ${groomingPaymentMethodLabel(paymentMethod)}`
+        : undefined;
+
+      try {
+        for (const appt of createdRows) {
           const draft = drafts[appt.pet_id];
           const petName = pets.find((p) => p.id === appt.pet_id)?.name ?? "Pet";
           const svcLabel = draft
@@ -470,19 +518,41 @@ export function GroomingNewAppointmentSheet({
               : (appt.price ?? 0);
           const consumed = consumedCreditByPet[appt.pet_id];
           const apptDate = draft?.appointmentDate ?? defaultDay;
-          return {
-            description: consumed
-              ? `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")} (covered by ${consumed.package_name})`
-              : `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")}`,
-            quantity: 1,
-            unitPrice: linePrice,
-            serviceType: "grooming" as const,
-            preserveUnitPrice: true,
-          };
-        }),
-      })
-        .then(() => toast.success("Draft invoice created"))
-        .catch((err) => console.error("Auto-invoice failed:", err));
+
+          const invoiceId = await createServiceInvoice({
+            ownerId,
+            serviceType: "grooming",
+            referenceId: appt.id,
+            checkInDate: format(appt.appointment_date, "yyyy-MM-dd"),
+            notes: invoiceNotes,
+            lineItems: [
+              {
+                description: consumed
+                  ? `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")} (covered by ${consumed.package_name})`
+                  : `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")}`,
+                quantity: 1,
+                unitPrice: linePrice,
+                serviceType: "grooming" as const,
+                preserveUnitPrice: true,
+              },
+            ],
+          });
+
+          const { error: linkErr } = await supabase
+            .from("grooming_appointments")
+            .update({ invoice_id: invoiceId })
+            .eq("id", appt.id);
+          if (linkErr) throw linkErr;
+        }
+        toast.success(
+          createdRows.length === 1
+            ? "Draft invoice created."
+            : `${createdRows.length} draft invoices created.`,
+        );
+      } catch (err) {
+        console.error("Auto-invoice failed:", err);
+        toast.error("Appointment saved, but draft invoice could not be created.");
+      }
     } catch (e) {
       const msg =
         e instanceof Error
@@ -501,49 +571,24 @@ export function GroomingNewAppointmentSheet({
           <SheetHeader>
             <SheetTitle>New appointment</SheetTitle>
             <SheetDescription>
-              Find a boarding booking or add a walk-in, then set details per pet.
+              Select a client and pets, then set grooming details. Optionally link to an active
+              boarding or daycare stay.
             </SheetDescription>
           </SheetHeader>
 
           <div className="mt-6 space-y-8">
             <section className="space-y-4">
               <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Find booking
+                Client
               </h3>
-              {!walkInMode ? (
+              {!stayLinkMode ? (
                 <>
-                  <GroomingBookingSearch
-                    selectedHit={selectedBooking}
-                    onSelect={handleBookingSelect}
-                    onClear={handleBookingClear}
-                  />
-                  <button
-                    type="button"
-                    className="text-sm text-primary underline-offset-4 hover:underline"
-                    data-testid="grooming-walk-in-link"
-                    onClick={() => {
-                      setWalkInMode(true);
-                      setSelectedBooking(null);
-                      setBookingId(null);
-                    }}
-                  >
-                    Walk-in — no booking
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-                    onClick={() => setWalkInMode(false)}
-                  >
-                    ← Back to booking search
-                  </button>
                   <div className="space-y-2">
                     <Label>Owner</Label>
                     <OwnerClientSearch
                       selectedId={ownerId}
                       selectedLabel={ownerLabel}
+                      inputTestId="grooming-owner-search"
                       onSelect={(id, label) => {
                         setOwnerId(id);
                         setOwnerLabel(label);
@@ -560,6 +605,36 @@ export function GroomingNewAppointmentSheet({
                       }}
                     />
                   </div>
+                  {!selectedBooking ? (
+                    <button
+                      type="button"
+                      className="text-sm text-primary underline-offset-4 hover:underline"
+                      data-testid="grooming-stay-link-btn"
+                      onClick={() => setStayLinkMode(true)}
+                    >
+                      Link to boarding or daycare stay
+                    </button>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Find an active boarding or daycare stay to link this grooming appointment.
+                  </p>
+                  <GroomingBookingSearch
+                    selectedHit={selectedBooking}
+                    groomingDate={linkGroomingDate}
+                    onSelect={handleBookingSelect}
+                    onClear={handleBookingClear}
+                  />
+                  <button
+                    type="button"
+                    className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                    data-testid="grooming-client-only-link"
+                    onClick={handleExitStayLinkMode}
+                  >
+                    Client booking only — no stay link
+                  </button>
                 </>
               )}
             </section>
