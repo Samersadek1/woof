@@ -3,10 +3,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   addDays,
   format,
+  isValid,
   parse,
   parseISO,
   subDays,
 } from "date-fns";
+import { isValidIsoDate } from "@/lib/petProfileFields";
 import TopBar from "@/components/dashboard/TopBar";
 import { useAuth } from "@/contexts/AuthContext";
 import { ownerDisplayName } from "@/lib/bookingUtils";
@@ -456,6 +458,11 @@ function AppointmentCard({
 
 const GROOMING_INVOICE_RETURN_TO = "/grooming";
 
+function parseGroomingPageDay(value: string): Date | null {
+  if (!isValidIsoDate(value)) return null;
+  return parseISO(value.slice(0, 10));
+}
+
 const GroomingPage = () => {
   const [searchParams] = useSearchParams();
   const [day, setDay] = useState(() => new Date());
@@ -470,12 +477,12 @@ const GroomingPage = () => {
       });
       return;
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
-      setDay(parseISO(dateParam));
-    }
+    const parsed = parseGroomingPageDay(dateParam);
+    if (parsed) setDay(parsed);
   }, [dateParam]);
 
-  const dateStr = format(day, "yyyy-MM-dd");
+  const safeDay = isValid(day) ? day : new Date();
+  const dateStr = format(safeDay, "yyyy-MM-dd");
   const todayStr = format(new Date(), "yyyy-MM-dd");
 
   const [groomingTab, setGroomingTab] = useState("day");
@@ -634,7 +641,11 @@ const GroomingPage = () => {
   useEffect(() => {
     if (!editAppt) return;
     setEditSelectedServices(serviceCheckboxValuesFromAppointment(editAppt));
-    setEditApptDate(parseISO(editAppt.appointment_date));
+    setEditApptDate(
+      isValidIsoDate(editAppt.appointment_date)
+        ? parseISO(editAppt.appointment_date.slice(0, 10))
+        : new Date(),
+    );
     setEditApptTime(appointmentTimeToInputValue(editAppt.appointment_time));
     setEditDurationMin(editAppt.duration_minutes ?? 60);
     setEditStationId(editAppt.station_id ?? null);
@@ -786,7 +797,7 @@ const GroomingPage = () => {
           <DialogHeader className="border-b px-6 py-4 text-left">
             <DialogTitle className="pr-8">End of Day Report — Grooming</DialogTitle>
             <p className="text-sm text-muted-foreground">
-              {format(day, "EEEE, d MMMM yyyy")} · {eodStatusCounts.total} appointment
+              {format(safeDay, "EEEE, d MMMM yyyy")} · {eodStatusCounts.total} appointment
               {eodStatusCounts.total === 1 ? "" : "s"}
             </p>
           </DialogHeader>
@@ -904,19 +915,19 @@ const GroomingPage = () => {
               variant="outline"
               size="icon"
               aria-label="Previous day"
-              onClick={() => setDay((d) => subDays(d, 1))}
+              onClick={() => setDay((d) => subDays(isValid(d) ? d : new Date(), 1))}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <h2 className="text-xl font-semibold min-w-[12rem]">
-              {format(day, "EEEE, d MMMM yyyy")}
+              {format(safeDay, "EEEE, d MMMM yyyy")}
             </h2>
             <Button
               type="button"
               variant="outline"
               size="icon"
               aria-label="Next day"
-              onClick={() => setDay((d) => addDays(d, 1))}
+              onClick={() => setDay((d) => addDays(isValid(d) ? d : new Date(), 1))}
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
@@ -966,7 +977,10 @@ const GroomingPage = () => {
             ) : (
               <GroomingDayBoard
                 date={dateStr}
-                onDateChange={(d) => setDay(parseISO(d))}
+                onDateChange={(d) => {
+                  const parsed = parseGroomingPageDay(d);
+                  if (parsed) setDay(parsed);
+                }}
                 staffLabel={session?.user?.email ?? "staff"}
                 onEmptySlotClick={openNewSheetFromSlot}
                 onAppointmentClick={(id) => {
@@ -1438,7 +1452,7 @@ const GroomingPage = () => {
       <GroomingNewAppointmentSheet
         open={sheetOpen}
         onOpenChange={setSheetOpen}
-        defaultDay={day}
+        defaultDay={safeDay}
         slotPrefill={slotPrefill}
         groomingStations={groomingStations}
       />

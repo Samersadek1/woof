@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { format, parseISO } from "date-fns";
 import { Trash2 } from "lucide-react";
 import { ownerDisplayName } from "@/lib/bookingUtils";
+import { formatIsoDate } from "@/lib/petProfileFields";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import {
   normalizeGroomingWorkflowStatus,
@@ -217,7 +217,7 @@ export function GroomingHistory({ todayStr, active }: Props) {
                 filtered.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap">
-                      {format(parseISO(r.appointment_date), "d MMM yyyy")}
+                      {formatIsoDate(r.appointment_date, "d MMM yyyy")}
                     </TableCell>
                     <TableCell className="font-medium">{r.pets?.name ?? "—"}</TableCell>
                     <TableCell>

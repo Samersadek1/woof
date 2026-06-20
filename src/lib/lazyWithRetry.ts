@@ -2,14 +2,22 @@ import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 
 const CHUNK_RELOAD_KEY = "woof:chunk-reload";
 
-function isChunkLoadError(error: unknown): boolean {
+export function isChunkLoadError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const msg = error.message.toLowerCase();
   return (
     msg.includes("failed to fetch dynamically imported module") ||
     msg.includes("importing a module script failed") ||
-    msg.includes("error loading dynamically imported module")
+    msg.includes("error loading dynamically imported module") ||
+    msg.includes("dynamically imported module")
   );
+}
+
+/** Hard navigation so the browser picks up a fresh index.html + asset hashes after deploy. */
+export function reloadForStaleChunk(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("_chunk", String(Date.now()));
+  window.location.replace(url.toString());
 }
 
 /**
@@ -25,12 +33,10 @@ export async function importWithChunkReload<T>(
   } catch (error) {
     if (!isChunkLoadError(error)) throw error;
 
-    const alreadyReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1";
-    if (!alreadyReloaded) {
-      sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
-      const url = new URL(window.location.href);
-      url.searchParams.set("_chunk", String(Date.now()));
-      window.location.replace(url.toString());
+    const reloadCount = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "0");
+    if (reloadCount < 2) {
+      sessionStorage.setItem(CHUNK_RELOAD_KEY, String(reloadCount + 1));
+      reloadForStaleChunk();
       throw error;
     }
 
