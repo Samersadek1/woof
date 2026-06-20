@@ -33,9 +33,13 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (id.includes("@supabase")) return "vendor-supabase";
-          if (id.includes("@tanstack")) return "vendor-query";
+          if (id.includes("node_modules")) {
+            if (id.includes("@supabase")) return "vendor-supabase";
+            if (id.includes("@tanstack")) return "vendor-query";
+            return undefined;
+          }
+          // Single app chunk — avoids per-route dynamic import() fetches after deploys.
+          if (id.includes("/src/")) return "app";
           return undefined;
         },
       },

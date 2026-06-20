@@ -5,27 +5,25 @@ import {
   fetchRemoteBuildId,
   getClientBuildId,
 } from "@/lib/appVersion";
+import { reloadForStaleChunk } from "@/lib/lazyWithRetry";
 
 const VERSION_TOAST_ID = "app-version-update";
+const VERSION_RELOAD_KEY = "woof:version-reload";
 
 function showVersionUpdateToast() {
   toast("New version available", {
     id: VERSION_TOAST_ID,
-    description: "Refresh to load the latest woof release.",
-    duration: Number.POSITIVE_INFINITY,
-    action: {
-      label: "Refresh",
-      onClick: () => window.location.reload(),
-    },
+    description: "Refreshing to load the latest woof release…",
+    duration: 4000,
   });
 }
 
 /**
- * Polls `/version.json` and prompts staff to refresh after a new Vercel deploy.
+ * Polls `/version.json` and reloads after a new Vercel deploy.
  * Skipped in dev (no stable build id).
  */
 export function useAppVersionCheck() {
-  const toastShownRef = useRef(false);
+  const reloadScheduledRef = useRef(false);
 
   useEffect(() => {
     if (import.meta.env.DEV) return;
@@ -34,10 +32,18 @@ export function useAppVersionCheck() {
     let cancelled = false;
 
     const check = async () => {
-      if (cancelled || toastShownRef.current) return;
+      if (cancelled || reloadScheduledRef.current) return;
       const remoteBuildId = await fetchRemoteBuildId();
       if (cancelled || !remoteBuildId || remoteBuildId === clientBuildId) return;
-      toastShownRef.current = true;
+      reloadScheduledRef.current = true;
+      sessionStorage.removeItem("woof:chunk-reload");
+      const alreadyReloaded = sessionStorage.getItem(VERSION_RELOAD_KEY) === "1";
+      if (!alreadyReloaded) {
+        sessionStorage.setItem(VERSION_RELOAD_KEY, "1");
+        showVersionUpdateToast();
+        window.setTimeout(() => reloadForStaleChunk(), 1200);
+        return;
+      }
       showVersionUpdateToast();
     };
 
