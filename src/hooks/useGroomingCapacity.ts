@@ -51,8 +51,11 @@ export type GroomingPinnedAppt = Pick<
   | "status"
   | "no_show"
   | "booking_id"
+  | "notes"
+  | "grooming_notes"
 > & {
   pets: { name: string; size: string | null } | null;
+  owners: { first_name: string; last_name: string } | null;
 };
 
 export type GroomingApptValidation = {
@@ -67,7 +70,7 @@ export const groomingCapacityKeys = {
 };
 
 const PINNED_SELECT =
-  "id, pet_id, owner_id, station_id, groomer_id, service, appointment_date, appointment_time, duration_minutes, status, no_show, booking_id, pets(name, size)";
+  "id, pet_id, owner_id, station_id, groomer_id, service, appointment_date, appointment_time, duration_minutes, status, no_show, booking_id, notes, grooming_notes, pets(name, size), owners(first_name, last_name)";
 
 export function useGroomingDay(date: string) {
   return useQuery({
@@ -134,6 +137,41 @@ export class GroomingScheduleNeedsOverrideError extends Error {
     this.name = "GroomingScheduleNeedsOverrideError";
     this.warnings = warnings;
   }
+}
+
+export async function rpcValidateGroomingAppt(params: {
+  date: string;
+  stationId: string | null;
+  start: string | null;
+  duration: number;
+  apptId?: string | null;
+}): Promise<GroomingApptValidation> {
+  const { data, error } = await supabase.rpc("woof_validate_grooming_appt", {
+    p_date: params.date,
+    p_station_id: params.stationId,
+    p_start: params.start,
+    p_duration: params.duration,
+    p_appt_id: params.apptId ?? null,
+  });
+  if (error) throw error;
+  return data as GroomingApptValidation;
+}
+
+export async function logGroomingCapacityOverride(params: {
+  appointmentId: string | null;
+  jobDate: string;
+  warnings: { code: string; msg: string }[];
+  reason: string;
+  staff?: string | null;
+}) {
+  const { error } = await supabase.from("grooming_overrides").insert({
+    appointment_id: params.appointmentId,
+    job_date: params.jobDate,
+    warnings: params.warnings,
+    reason: params.reason.trim(),
+    overridden_by: params.staff ?? null,
+  });
+  if (error) throw error;
 }
 
 export function useScheduleGroomingAppt() {

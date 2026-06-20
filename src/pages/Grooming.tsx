@@ -79,9 +79,7 @@ import {
   resolvePrimaryGroomingCheckbox,
 } from "@/lib/groomingNewAppointmentPricing";
 import { VisitNotesField } from "@/components/grooming/VisitNotesField";
-import { GroomingStationCalendar } from "@/components/grooming/GroomingStationCalendar";
 import { GroomingDayBoard } from "@/components/grooming/GroomingDayBoard";
-import { BlockStationDialog } from "@/components/grooming/BlockStationDialog";
 import { GroomingConflictOverrideDialog } from "@/components/grooming/GroomingConflictOverrideDialog";
 import {
   GroomingNewAppointmentSheet,
@@ -93,20 +91,17 @@ import {
   serviceTokenMatchesSavedOption,
   type GroomingServiceCheckbox,
 } from "@/lib/groomingServiceForm";
+import { useGroomingStations } from "@/hooks/useGroomingStations";
 import {
-  useGroomingStations,
-  useGroomingStationBlocks,
-  useCreateGroomingStationBlock,
-  useDeleteGroomingStationBlock,
-  useLogGroomingScheduleOverrides,
-  type GroomingStationBlockRow,
-} from "@/hooks/useGroomingStations";
+  logGroomingCapacityOverride,
+  rpcValidateGroomingAppt,
+} from "@/hooks/useGroomingCapacity";
 import {
-  findGroomingScheduleConflicts,
   maxDurationMinutesForTimeInput,
   validateGroomingScheduleTime,
+  warningsToScheduleConflicts,
   type GroomingScheduleConflict,
-} from "@/lib/groomingCalendarModel";
+} from "@/lib/groomingScheduleUtils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -482,14 +477,8 @@ const GroomingPage = () => {
   const todayStr = format(new Date(), "yyyy-MM-dd");
 
   const [groomingTab, setGroomingTab] = useState("day");
-  const { data: dayAppointments = [], isLoading: dayLoading } =
-    useGroomingAppointments(dateStr);
-  const { data: groomingStations = [], isLoading: stationsLoading, isError: stationsError } =
-    useGroomingStations();
-  const { data: stationBlocks = [] } = useGroomingStationBlocks(dateStr);
-  const createStationBlock = useCreateGroomingStationBlock();
-  const deleteStationBlock = useDeleteGroomingStationBlock();
-  const logScheduleOverrides = useLogGroomingScheduleOverrides();
+  const { data: dayAppointments = [] } = useGroomingAppointments(dateStr);
+  const { data: groomingStations = [], isLoading: stationsLoading } = useGroomingStations();
   const [historySearch, setHistorySearch] = useState("");
   const historySearchActive = historySearch.trim().length >= 2;
   const { data: historyAppointments = [], isFetching: historyListFetching } =
@@ -499,14 +488,6 @@ const GroomingPage = () => {
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [slotPrefill, setSlotPrefill] = useState<GroomingSlotPrefill | null>(null);
-  const [dayViewLayout, setDayViewLayout] = useState<"calendar" | "list" | "board">("calendar");
-  const [blockDialog, setBlockDialog] = useState<{
-    stationId: string;
-    stationName: string;
-    defaultStart?: string;
-    defaultEnd?: string;
-  } | null>(null);
-  const [unblockTarget, setUnblockTarget] = useState<GroomingStationBlockRow | null>(null);
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [pendingConflicts, setPendingConflicts] = useState<GroomingScheduleConflict[]>([]);
   const [serviceFilter, setServiceFilter] = useState<string>("all");
@@ -601,43 +582,11 @@ const GroomingPage = () => {
     setSheetOpen(true);
   };
 
-  const scheduleConflictSourceAppointments = useMemo(
-    () =>
-      dayAppointments.filter(
-        (a) => normalizeGroomingWorkflowStatus(a.status) !== "cancelled",
-      ),
-    [dayAppointments],
-  );
-
-  const checkScheduleConflicts = (
-    args: {
-      stationId: string | null;
-      appointmentDate: string;
-      appointmentTime: string;
-      durationMinutes: number;
-      excludeAppointmentId?: string;
-    },
-  ) =>
-    findGroomingScheduleConflicts({
-      ...args,
-      appointments: scheduleConflictSourceAppointments,
-      blocks: stationBlocks,
-    });
-
-  const persistScheduleOverrides = async (
-    appointmentId: string,
-    conflicts: GroomingScheduleConflict[],
-    reason: string,
-  ) => {
-    if (conflicts.length === 0) return;
-    await logScheduleOverrides.mutateAsync(
-      conflicts.map((c) => ({
-        appointment_id: appointmentId,
-        conflict_type: c.conflictType,
-        conflicted_with_id: c.conflictedWithId,
-        reason,
-      })),
-    );
+  const timeToDb = (t: string) => {
+    const parts = t.split(":");
+    const h = parts[0] ?? "10";
+    const m = parts[1] ?? "00";
+    return `${h.padStart(2, "0")}:${m.padStart(2, "0")}:00`;
   };
 
   useEffect(() => {
@@ -658,13 +607,6 @@ const GroomingPage = () => {
     const max = maxDurationMinutesForTimeInput(editApptTime);
     if (max > 0 && editDurationMin > max) setEditDurationMin(max);
   }, [editApptTime, editDurationMin]);
-
-  const timeToDb = (t: string) => {
-    const parts = t.split(":");
-    const h = parts[0] ?? "10";
-    const m = parts[1] ?? "00";
-    return `${h.padStart(2, "0")}:${m.padStart(2, "0")}:00`;
-  };
 
   const performSaveEdit = async (overrideReason?: string) => {
     if (!editAppt || updateAppt.isPending) return;
@@ -708,15 +650,17 @@ const GroomingPage = () => {
     ].filter(Boolean);
     const composedNotes = [editVisitNotes.trim(), ...metaNotes].filter(Boolean).join("\n");
 
-    const conflicts = checkScheduleConflicts({
+    const appointmentDate = format(editApptDate, "yyyy-MM-dd");
+    const validation = await rpcValidateGroomingAppt({
+      date: appointmentDate,
       stationId: editStationId,
-      appointmentDate: format(editApptDate, "yyyy-MM-dd"),
-      appointmentTime: editApptTime,
-      durationMinutes: editDurationMin,
-      excludeAppointmentId: editAppt.id,
+      start: timeToDb(editApptTime),
+      duration: editDurationMin,
+      apptId: editAppt.id,
     });
-    if (conflicts.length > 0 && !overrideReason) {
-      setPendingConflicts(conflicts);
+    const warnings = validation.warnings ?? [];
+    if (!validation.ok && warnings.length > 0 && !overrideReason) {
+      setPendingConflicts(warningsToScheduleConflicts(warnings));
       setConflictDialogOpen(true);
       return;
     }
@@ -724,7 +668,7 @@ const GroomingPage = () => {
     updateAppt.mutate(
       {
         id: editAppt.id,
-        appointment_date: format(editApptDate, "yyyy-MM-dd"),
+        appointment_date: appointmentDate,
         appointment_time: timeToDb(editApptTime),
         duration_minutes: editDurationMin,
         station_id: editStationId,
@@ -735,9 +679,15 @@ const GroomingPage = () => {
       },
       {
         onSuccess: async (data) => {
-          if (overrideReason && conflicts.length > 0) {
+          if (overrideReason && warnings.length > 0) {
             try {
-              await persistScheduleOverrides(data.id, conflicts, overrideReason);
+              await logGroomingCapacityOverride({
+                appointmentId: data.id,
+                jobDate: appointmentDate,
+                warnings,
+                reason: overrideReason,
+                staff: session?.user?.email ?? null,
+              });
             } catch (e) {
               toast.error(
                 e instanceof Error ? e.message : "Saved, but override audit log failed.",
@@ -810,19 +760,6 @@ const GroomingPage = () => {
     const byText = !q || labels.some((label) => label.toLowerCase().includes(q));
     return byChip && byText;
   };
-  const filteredDayAppointments = useMemo(
-    () =>
-      dayAppointments
-        .filter((a) => normalizeGroomingWorkflowStatus(a.status) !== "cancelled")
-        .filter((a) => serviceMatches(a, serviceFilter, serviceSearch)),
-    [dayAppointments, serviceFilter, serviceSearch],
-  );
-  const hiddenByFilterCount = useMemo(() => {
-    const active = dayAppointments.filter(
-      (a) => normalizeGroomingWorkflowStatus(a.status) !== "cancelled",
-    );
-    return active.length - filteredDayAppointments.length;
-  }, [dayAppointments, filteredDayAppointments.length]);
   const filteredHistory = useMemo(
     () =>
       sortedHistory.filter((a) =>
@@ -1045,115 +982,19 @@ const GroomingPage = () => {
           </div>
 
           <TabsContent value="day" className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={dayViewLayout === "calendar" ? "default" : "outline"}
-                onClick={() => setDayViewLayout("calendar")}
-              >
-                Calendar
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={dayViewLayout === "list" ? "default" : "outline"}
-                onClick={() => setDayViewLayout("list")}
-              >
-                List
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                data-testid="grooming-day-board-tab"
-                variant={dayViewLayout === "board" ? "default" : "outline"}
-                onClick={() => setDayViewLayout("board")}
-              >
-                Capacity board
-              </Button>
-            </div>
-
-            {dayViewLayout === "board" && (
+            {stationsLoading ? (
+              <Skeleton className="min-h-[480px] w-full" />
+            ) : (
               <GroomingDayBoard
-                initialDate={dateStr}
+                date={dateStr}
+                onDateChange={(d) => setDay(parseISO(d))}
                 staffLabel={session?.user?.email ?? "staff"}
+                onEmptySlotClick={openNewSheetFromSlot}
                 onAppointmentClick={(id) => {
                   const found = dayAppointments.find((a) => a.id === id);
                   if (found) setActionAppt(found);
                 }}
               />
-            )}
-
-            {dayViewLayout === "calendar" && (
-              <>
-                {dayLoading || stationsLoading ? (
-                  <Skeleton className="h-[480px] w-full" />
-                ) : (
-                  <GroomingStationCalendar
-                    stations={groomingStations}
-                    blocks={stationBlocks}
-                    appointments={filteredDayAppointments}
-                    hiddenByFilterCount={hiddenByFilterCount}
-                    stationsUnavailable={stationsError}
-                    onEmptySlotClick={openNewSheetFromSlot}
-                    onAppointmentClick={setActionAppt}
-                    onBlockClick={setUnblockTarget}
-                    onRequestBlockStation={(id, slotTime) => {
-                      const station = groomingStations.find((s) => s.id === id);
-                      if (!station) return;
-                      const endMinutes = slotTime
-                        ? maxDurationMinutesForTimeInput(slotTime)
-                        : 60;
-                      const endHour = slotTime
-                        ? (() => {
-                            const [h, m] = slotTime.split(":").map(Number);
-                            const total = h * 60 + m + Math.min(60, endMinutes);
-                            return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-                          })()
-                        : "17:00";
-                      setBlockDialog({
-                        stationId: id,
-                        stationName: station.name,
-                        defaultStart: slotTime ?? "09:00",
-                        defaultEnd: endHour,
-                      });
-                    }}
-                  />
-                )}
-              </>
-            )}
-
-            {dayViewLayout === "list" && (
-              <>
-                {dayLoading ? (
-                  <div className="space-y-3">
-                    <Skeleton className="h-32 w-full" />
-                    <Skeleton className="h-32 w-full" />
-                  </div>
-                ) : filteredDayAppointments.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-16">
-                    No grooming appointments match the selected service filters for{" "}
-                    {format(day, "EEEE, d MMMM yyyy")}.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {filteredDayAppointments.map((a) => (
-                      <AppointmentCard
-                        key={a.id}
-                        a={a}
-                        onOpenActions={setActionAppt}
-                        onPrint={(appointmentId) =>
-                          window.open(
-                            `/print/grooming-card/${appointmentId}`,
-                            "_blank",
-                            "noopener,noreferrer",
-                          )
-                        }
-                      />
-                    ))}
-                  </div>
-                )}
-              </>
             )}
           </TabsContent>
 
@@ -1944,89 +1785,17 @@ const GroomingPage = () => {
         defaultDay={day}
         slotPrefill={slotPrefill}
         groomingStations={groomingStations}
-        stationBlocks={stationBlocks}
-        dayAppointments={dayAppointments}
-      />
-
-      <BlockStationDialog
-        open={!!blockDialog}
-        onOpenChange={(open) => !open && setBlockDialog(null)}
-        stationName={blockDialog?.stationName ?? ""}
-        blockDate={dateStr}
-        defaultStartTime={blockDialog?.defaultStart}
-        defaultEndTime={blockDialog?.defaultEnd}
-        isPending={createStationBlock.isPending}
-        onSubmit={({ isFullDay, startTime, endTime, reason }) => {
-          if (!blockDialog) return;
-          createStationBlock.mutate(
-            {
-              station_id: blockDialog.stationId,
-              block_date: dateStr,
-              is_full_day: isFullDay,
-              start_time: isFullDay ? null : `${startTime}:00`,
-              end_time: isFullDay ? null : `${endTime}:00`,
-              reason,
-            },
-            {
-              onSuccess: () => {
-                toast.success("Station blocked.");
-                setBlockDialog(null);
-              },
-              onError: (e) =>
-                toast.error(e instanceof Error ? e.message : "Could not block station."),
-            },
-          );
-        }}
       />
 
       <GroomingConflictOverrideDialog
         open={conflictDialogOpen}
         onOpenChange={setConflictDialogOpen}
         conflicts={pendingConflicts}
-        isPending={updateAppt.isPending || logScheduleOverrides.isPending}
+        isPending={updateAppt.isPending}
         onConfirm={(reason) => {
           void performSaveEdit(reason);
         }}
       />
-
-      <AlertDialog
-        open={!!unblockTarget}
-        onOpenChange={(open) => !open && setUnblockTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Unblock station?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {unblockTarget?.reason
-                ? `Remove block: ${unblockTarget.reason}`
-                : "Remove this station block?"}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (!unblockTarget) return;
-                deleteStationBlock.mutate(
-                  { id: unblockTarget.id, blockDate: unblockTarget.block_date },
-                  {
-                    onSuccess: () => {
-                      toast.success("Station unblocked.");
-                      setUnblockTarget(null);
-                    },
-                    onError: (e) =>
-                      toast.error(
-                        e instanceof Error ? e.message : "Could not unblock station.",
-                      ),
-                  },
-                );
-              }}
-            >
-              Unblock
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 };

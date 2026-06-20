@@ -38,13 +38,11 @@ import {
   useCreateGroomingAppointment,
   useLastGroomingDateByPetIds,
   type BookingLinkRow,
-  type GroomingAppointmentWithJoins,
 } from "@/hooks/useGrooming";
 import {
-  useLogGroomingScheduleOverrides,
-  type GroomingStationBlockRow,
-  type GroomingStationRow,
-} from "@/hooks/useGroomingStations";
+  logGroomingCapacityOverride,
+  rpcValidateGroomingAppt,
+} from "@/hooks/useGroomingCapacity";
 import { useGroomingManualFeeBounds } from "@/hooks/useGroomingManualFeeBounds";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import {
@@ -62,11 +60,11 @@ import {
   type PetGroomingDraft,
 } from "@/lib/groomingPetDraft";
 import {
-  findGroomingScheduleConflicts,
   validateGroomingScheduleTime,
+  warningsToScheduleConflicts,
   type GroomingScheduleConflict,
-} from "@/lib/groomingCalendarModel";
-import { normalizeGroomingWorkflowStatus } from "@/lib/groomingWorkflow";
+} from "@/lib/groomingScheduleUtils";
+import type { GroomingStationRow } from "@/hooks/useGroomingStations";
 import {
   GROOMING_PAYMENT_METHOD_NONE,
   GROOMING_PAYMENT_METHOD_OPTIONS,
@@ -127,8 +125,6 @@ type Props = {
   defaultDay: Date;
   slotPrefill?: GroomingSlotPrefill | null;
   groomingStations: GroomingStationRow[];
-  stationBlocks: GroomingStationBlockRow[];
-  dayAppointments: GroomingAppointmentWithJoins[];
 };
 
 export function GroomingNewAppointmentSheet({
@@ -137,11 +133,8 @@ export function GroomingNewAppointmentSheet({
   defaultDay,
   slotPrefill,
   groomingStations,
-  stationBlocks,
-  dayAppointments,
 }: Props) {
   const createAppt = useCreateGroomingAppointment();
-  const logScheduleOverrides = useLogGroomingScheduleOverrides();
   const { data: manualFeeBounds } = useGroomingManualFeeBounds(open);
 
   const mattingDefault =
@@ -168,14 +161,6 @@ export function GroomingNewAppointmentSheet({
 
   const { data: pets = [] } = usePets(ownerId ?? "");
   const { data: ownerForGroomingPref } = useOwner(ownerId ?? "");
-
-  const scheduleConflictSourceAppointments = useMemo(
-    () =>
-      dayAppointments.filter(
-        (a) => normalizeGroomingWorkflowStatus(a.status) !== "cancelled",
-      ),
-    [dayAppointments],
-  );
 
   const resetForm = useCallback(() => {
     setWalkInMode(false);
@@ -332,32 +317,6 @@ export function GroomingNewAppointmentSheet({
 
   const isComplimentaryPayment = paymentMethod === "complimentary";
 
-  const checkScheduleConflicts = (draft: PetGroomingDraft) =>
-    findGroomingScheduleConflicts({
-      stationId: draft.stationId,
-      appointmentDate: format(draft.appointmentDate, "yyyy-MM-dd"),
-      appointmentTime: draft.apptTime,
-      durationMinutes: draft.durationMin,
-      appointments: scheduleConflictSourceAppointments,
-      blocks: stationBlocks,
-    });
-
-  const persistScheduleOverrides = async (
-    appointmentId: string,
-    conflicts: GroomingScheduleConflict[],
-    reason: string,
-  ) => {
-    if (conflicts.length === 0) return;
-    await logScheduleOverrides.mutateAsync(
-      conflicts.map((c) => ({
-        appointment_id: appointmentId,
-        conflict_type: c.conflictType,
-        conflicted_with_id: c.conflictedWithId,
-        reason,
-      })),
-    );
-  };
-
   const performCreate = async (overrideReason?: string) => {
     if (createAppt.isPending) return;
     if (!ownerId) {
@@ -371,7 +330,7 @@ export function GroomingNewAppointmentSheet({
       return;
     }
 
-    const conflictsByPet: { petId: string; conflicts: GroomingScheduleConflict[] }[] = [];
+    const warningsByPet: { petId: string; warnings: { code: string; msg: string }[] }[] = [];
     for (const petId of selectedPetIds) {
       const draft = drafts[petId];
       if (!draft) {
@@ -383,15 +342,20 @@ export function GroomingNewAppointmentSheet({
         toast.error(scheduleErr);
         return;
       }
-      const conflicts = checkScheduleConflicts(draft);
-      if (conflicts.length > 0) {
-        conflictsByPet.push({ petId, conflicts });
+      const validation = await rpcValidateGroomingAppt({
+        date: format(draft.appointmentDate, "yyyy-MM-dd"),
+        stationId: draft.stationId,
+        start: `${draft.apptTime}:00`,
+        duration: draft.durationMin,
+      });
+      if (!validation.ok && (validation.warnings?.length ?? 0) > 0) {
+        warningsByPet.push({ petId, warnings: validation.warnings });
       }
     }
 
-    const allConflicts = conflictsByPet.flatMap((c) => c.conflicts);
-    if (allConflicts.length > 0 && !overrideReason) {
-      setPendingConflicts(allConflicts);
+    const allWarnings = warningsByPet.flatMap((c) => c.warnings);
+    if (allWarnings.length > 0 && !overrideReason) {
+      setPendingConflicts(warningsToScheduleConflicts(allWarnings));
       setConflictDialogOpen(true);
       return;
     }
@@ -418,8 +382,8 @@ export function GroomingNewAppointmentSheet({
     try {
       const createdRows = [];
       const consumedCreditByPet: Record<string, { package_name: string }> = {};
-      const conflictsMap = new Map(
-        conflictsByPet.map((c) => [c.petId, c.conflicts] as const),
+      const warningsMap = new Map(
+        warningsByPet.map((c) => [c.petId, c.warnings] as const),
       );
 
       for (let i = 0; i < selectedPetIds.length; i++) {
@@ -430,12 +394,17 @@ export function GroomingNewAppointmentSheet({
         const appt = await createAppt.mutateAsync(insert);
         createdRows.push(appt);
 
-        const petConflicts = conflictsMap.get(petId) ?? [];
-        if (overrideReason && petConflicts.length > 0) {
-          await persistScheduleOverrides(appt.id, petConflicts, overrideReason);
+        const draft = drafts[petId];
+        const petWarnings = warningsMap.get(petId) ?? [];
+        if (overrideReason && petWarnings.length > 0 && draft) {
+          await logGroomingCapacityOverride({
+            appointmentId: appt.id,
+            jobDate: format(draft.appointmentDate, "yyyy-MM-dd"),
+            warnings: petWarnings,
+            reason: overrideReason,
+          });
         }
 
-        const draft = drafts[petId];
         const useCredit = draft?.useCredit;
         if (useCredit) {
           const primaryService = draft ? draftPrimaryDbService(draft) : null;
@@ -740,7 +709,7 @@ export function GroomingNewAppointmentSheet({
         open={conflictDialogOpen}
         onOpenChange={setConflictDialogOpen}
         conflicts={pendingConflicts}
-        isPending={createAppt.isPending || logScheduleOverrides.isPending}
+        isPending={createAppt.isPending}
         onConfirm={(reason) => void performCreate(reason)}
       />
     </>

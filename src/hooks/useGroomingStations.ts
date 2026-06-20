@@ -95,21 +95,3 @@ export function useDeleteGroomingStationBlock() {
     },
   });
 }
-
-export type GroomingScheduleOverrideInsert = {
-  appointment_id: string;
-  conflict_type: "appointment_overlap" | "station_block_overlap";
-  conflicted_with_id: string;
-  reason: string;
-  created_by?: string | null;
-};
-
-export function useLogGroomingScheduleOverrides() {
-  return useMutation({
-    mutationFn: async (rows: GroomingScheduleOverrideInsert[]) => {
-      if (rows.length === 0) return;
-      const { error } = await supabase.from("grooming_schedule_overrides").insert(rows);
-      if (error) throw error;
-    },
-  });
-}

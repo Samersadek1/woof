@@ -41,7 +41,7 @@ import {
   type GroomingManualFeeBounds,
   type PetGroomingDraft,
 } from "@/lib/groomingPetDraft";
-import { maxDurationMinutesForTimeInput } from "@/lib/groomingCalendarModel";
+import { maxDurationMinutesForTimeInput } from "@/lib/groomingScheduleUtils";
 import { fetchCheckboxBasePriceAed } from "@/lib/groomingNewAppointmentRates";
 import { useNewGroomingAppointmentPrice } from "@/hooks/useNewGroomingAppointmentPrice";
 import type { GroomingStationRow } from "@/hooks/useGroomingStations";

@@ -9,7 +9,7 @@ import {
   isGroomingPricingCheckbox,
   resolvePrimaryGroomingCheckbox,
 } from "@/lib/groomingNewAppointmentPricing";
-import { maxDurationMinutesForTimeInput } from "@/lib/groomingCalendarModel";
+import { maxDurationMinutesForTimeInput } from "@/lib/groomingScheduleUtils";
 import type { GroomingPaymentMethod } from "@/lib/groomingPaymentMethod";
 import {
   estimatedPickupFromStartAndDuration,

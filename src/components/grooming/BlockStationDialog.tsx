@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { validateGroomingScheduleTime } from "@/lib/groomingCalendarModel";
+import { validateGroomingScheduleTime } from "@/lib/groomingScheduleUtils";
 
 export type BlockStationDialogProps = {
   open: boolean;
@@ -78,7 +78,7 @@ export function BlockStationDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="grooming-block-full-day">Full day (7 AM – 7 PM)</Label>
+            <Label htmlFor="grooming-block-full-day">Full day (8 AM – 6 PM)</Label>
             <Switch
               id="grooming-block-full-day"
               checked={isFullDay}

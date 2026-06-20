@@ -7,9 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { GroomingConflictOverrideDialog } from "@/components/grooming/GroomingConflictOverrideDialog";
-import type { GroomingScheduleConflict } from "@/lib/groomingCalendarModel";
+import { ownerDisplayName } from "@/lib/bookingUtils";
+import type { GroomingScheduleConflict } from "@/lib/groomingScheduleUtils";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
+import {
+  workflowStatusLabel,
+  normalizeGroomingWorkflowStatus,
+} from "@/lib/groomingWorkflow";
 import {
   GroomingScheduleNeedsOverrideError,
   useGroomingDay,
@@ -25,13 +36,16 @@ import { toast } from "sonner";
 
 const DAY_START_MIN = 8 * 60;
 const DAY_END_MIN = 18 * 60;
-const TIMELINE_HEIGHT = 480;
+const MIN_TIMELINE_HEIGHT = 480;
 const DRAG_MIME = "application/x-woof-grooming-appt";
 
 type Props = {
   initialDate?: string;
+  date?: string;
+  onDateChange?: (date: string) => void;
   staffLabel?: string;
   onAppointmentClick?: (apptId: string) => void;
+  onEmptySlotClick?: (stationId: string, timeHHMM: string) => void;
 };
 
 function timeToMinutes(t: string | null): number | null {
@@ -51,6 +65,12 @@ function minutesToTimeString(totalMin: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`;
 }
 
+function minutesToHHMM(totalMin: number): string {
+  const h = Math.floor(totalMin / 60);
+  const m = Math.round(totalMin % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 function snapMinutes(min: number): number {
   const snapped = Math.round(min / 15) * 15;
   return Math.max(DAY_START_MIN, Math.min(DAY_END_MIN - 15, snapped));
@@ -68,6 +88,17 @@ function blockStyle(startMin: number, durationMin: number) {
   return { top: `${Math.max(0, top)}%`, height: `${Math.max(2, Math.min(100, height))}%` };
 }
 
+function userVisitNotesFromStored(notes: string | null | undefined): string | null {
+  if (!notes?.trim()) return null;
+  const metaPrefixes = ["services:", "grooming date:", "discount:", "estimated pickup:"];
+  const text = notes
+    .split("\n")
+    .filter((l) => !metaPrefixes.some((p) => l.toLowerCase().trimStart().startsWith(p)))
+    .join("\n")
+    .trim();
+  return text || null;
+}
+
 function toScheduleInput(
   date: string,
   fields: ScheduleGroomingApptInput,
@@ -75,8 +106,19 @@ function toScheduleInput(
   return { ...fields, appointment_date: date };
 }
 
-export function GroomingDayBoard({ initialDate, staffLabel = "staff", onAppointmentClick }: Props) {
-  const [date, setDate] = useState(initialDate ?? format(new Date(), "yyyy-MM-dd"));
+export function GroomingDayBoard({
+  initialDate,
+  date: controlledDate,
+  onDateChange,
+  staffLabel = "staff",
+  onAppointmentClick,
+  onEmptySlotClick,
+}: Props) {
+  const [internalDate, setInternalDate] = useState(initialDate ?? format(new Date(), "yyyy-MM-dd"));
+  const date = controlledDate ?? internalDate;
+  const setDate = onDateChange ?? setInternalDate;
+  const showDateNav = controlledDate == null;
+
   const [placedSession, setPlacedSession] = useState(0);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideConflicts, setOverrideConflicts] = useState<GroomingScheduleConflict[]>([]);
@@ -87,8 +129,16 @@ export function GroomingDayBoard({ initialDate, staffLabel = "staff", onAppointm
   const { data: staffRows = [] } = useStaff();
 
   useEffect(() => {
-    if (initialDate) setDate(initialDate);
-  }, [initialDate]);
+    if (initialDate && controlledDate == null) setInternalDate(initialDate);
+  }, [initialDate, controlledDate]);
+
+  const staffNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of staffRows) {
+      map.set(s.id, [s.first_name, s.last_name].filter(Boolean).join(" "));
+    }
+    return map;
+  }, [staffRows]);
 
   const pinnedByStation = useMemo(() => {
     const pinned = new Map<string, GroomingPinnedAppt[]>();
@@ -175,191 +225,224 @@ export function GroomingDayBoard({ initialDate, staffLabel = "staff", onAppointm
     placeBacklog(row, stationId, minutesToTimeString(startMin), payload.duration, payload.groomerId);
   };
 
+  const onLaneClick = (e: React.MouseEvent<HTMLDivElement>, stationId: string) => {
+    if (!onEmptySlotClick) return;
+    if ((e.target as HTMLElement).closest("[data-pinned-block]")) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const startMin = minutesFromTimelineY(e.clientY, rect);
+    onEmptySlotClick(stationId, minutesToHHMM(startMin));
+  };
+
   return (
-    <div className="space-y-4 p-4" data-testid="grooming-day-board">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={() => setDate(format(subDays(parseISO(date), 1), "yyyy-MM-dd"))}
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <input
-          type="date"
-          className="rounded-md border px-2 py-1 text-sm"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          data-testid="grooming-day-board-date"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={() => setDate(format(addDays(parseISO(date), 1), "yyyy-MM-dd"))}
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+    <TooltipProvider delayDuration={200}>
+      <div
+        className="flex w-full min-h-[calc(100vh-14rem)] flex-col gap-4"
+        data-testid="grooming-day-board"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          {showDateNav ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setDate(format(subDays(parseISO(date), 1), "yyyy-MM-dd"))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <input
+                type="date"
+                className="rounded-md border px-2 py-1 text-sm"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                data-testid="grooming-day-board-date"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setDate(format(addDays(parseISO(date), 1), "yyyy-MM-dd"))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </>
+          ) : null}
+
+          {isLoading ? (
+            <Skeleton className="h-6 w-56" />
+          ) : cap ? (
+            <div className="flex min-w-[12rem] flex-1 flex-col gap-1">
+              <div
+                className={cn(
+                  "flex flex-wrap items-center gap-2 text-xs",
+                  (overBudget || !cap.feasible) && "text-amber-900",
+                )}
+                data-testid="grooming-day-board-meter"
+              >
+                <span className="tabular-nums font-medium">
+                  {cap.committed_minutes}/{cap.total_minutes} min
+                </span>
+                <span className="text-muted-foreground">
+                  pinned {cap.pinned_minutes} · floating {cap.floating_minutes}
+                </span>
+                <span className="text-muted-foreground">
+                  Placed this session · {placedSession}
+                </span>
+                {(overBudget || !cap.feasible) && (
+                  <span className="flex items-center gap-1">
+                    <TriangleAlert className="h-3.5 w-3.5" />
+                    Over daily budget
+                  </span>
+                )}
+              </div>
+              <Progress
+                value={meterPct}
+                className="h-2"
+                indicatorClassName={cn(overBudget && "bg-amber-500")}
+              />
+            </div>
+          ) : null}
+        </div>
 
         {isLoading ? (
-          <Skeleton className="h-6 w-56" />
-        ) : cap ? (
-          <div className="flex min-w-[12rem] flex-1 flex-col gap-1 max-w-md">
-            <div
-              className={cn(
-                "flex flex-wrap items-center gap-2 text-xs",
-                (overBudget || !cap.feasible) && "text-amber-900",
-              )}
-              data-testid="grooming-day-board-meter"
-            >
-              <span className="tabular-nums font-medium">
-                {cap.committed_minutes}/{cap.total_minutes} min
-              </span>
-              <span className="text-muted-foreground">
-                pinned {cap.pinned_minutes} · floating {cap.floating_minutes}
-              </span>
-              <span className="text-muted-foreground">
-                Placed this session · {placedSession}
-              </span>
-              {(overBudget || !cap.feasible) && (
-                <span className="flex items-center gap-1">
-                  <TriangleAlert className="h-3.5 w-3.5" />
-                  Over daily budget
-                </span>
-              )}
-            </div>
-            <Progress
-              value={meterPct}
-              className="h-2"
-              indicatorClassName={cn(overBudget && "bg-amber-500")}
-            />
-          </div>
-        ) : null}
-      </div>
-
-      {isLoading ? (
-        <Skeleton className="h-[420px] w-full" />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <div
-            className="grid min-w-[640px]"
-            style={{
-              gridTemplateColumns: `4rem repeat(${data?.stations.length ?? 0}, minmax(8rem, 1fr))`,
-            }}
-          >
-            <div className="border-b bg-muted/40 p-2 text-xs text-muted-foreground">Time</div>
-            {(data?.stations ?? []).map((st) => (
-              <div key={st.station_id} className="border-b border-l p-2 text-sm font-medium">
-                {st.station_name}
-                <div className="text-[10px] font-normal text-muted-foreground tabular-nums">
-                  {st.used_minutes}/{st.window_minutes} min free
-                </div>
-              </div>
-            ))}
-
-            <div
-              className="relative border-r bg-muted/20"
-              style={{ height: TIMELINE_HEIGHT }}
-            >
-              {[8, 10, 12, 14, 16, 18].map((h) => (
-                <div
-                  key={h}
-                  className="absolute left-0 right-0 border-t border-border/50 text-[10px] text-muted-foreground pl-1"
-                  style={{
-                    top: `${((h * 60 - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100}%`,
-                  }}
-                >
-                  {h === 18 ? "18:00" : `${h}:00`}
-                </div>
-              ))}
-            </div>
-
-            {(data?.stations ?? []).map((st) => (
+          <Skeleton className="min-h-[480px] w-full flex-1" />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
+            <div className="min-h-0 flex-1 overflow-auto">
               <div
-                key={st.station_id}
-                className="relative border-l bg-muted/5"
-                style={{ height: TIMELINE_HEIGHT }}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => onLaneDrop(e, st.station_id)}
-                data-testid={`grooming-day-board-lane-${st.station_id}`}
+                className="grid min-w-[640px]"
+                style={{
+                  gridTemplateColumns: `4rem repeat(${data?.stations.length ?? 0}, minmax(8rem, 1fr))`,
+                  minHeight: MIN_TIMELINE_HEIGHT,
+                }}
               >
+                <div className="sticky top-0 z-20 border-b bg-muted/40 p-2 text-xs text-muted-foreground">
+                  Time
+                </div>
+                {(data?.stations ?? []).map((st) => (
+                  <div
+                    key={st.station_id}
+                    className="sticky top-0 z-20 border-b border-l bg-muted/40 p-2 text-sm font-medium"
+                  >
+                    {st.station_name}
+                    <div className="text-[10px] font-normal text-muted-foreground tabular-nums">
+                      {st.used_minutes}/{st.window_minutes} min free
+                    </div>
+                  </div>
+                ))}
+
                 <div
-                  className="pointer-events-none absolute inset-0 opacity-30"
-                  aria-hidden
+                  className="relative border-r bg-muted/20"
+                  style={{ minHeight: MIN_TIMELINE_HEIGHT }}
                 >
-                  {[8, 10, 12, 14, 16].map((h) => (
+                  {[8, 10, 12, 14, 16, 18].map((h) => (
                     <div
                       key={h}
-                      className="absolute left-0 right-0 border-t border-dashed border-border/40"
+                      className="absolute left-0 right-0 border-t border-border/50 text-[10px] text-muted-foreground pl-1"
                       style={{
                         top: `${((h * 60 - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100}%`,
                       }}
-                    />
+                    >
+                      {h === 18 ? "18:00" : `${h}:00`}
+                    </div>
                   ))}
                 </div>
 
-                {(pinnedByStation.get(st.station_id) ?? []).map((a) => (
-                  <PinnedBlock
-                    key={a.id}
-                    appt={a}
-                    onSave={saveAppt}
-                    onOpen={() => onAppointmentClick?.(a.id)}
-                    isSaving={schedule.isPending}
-                  />
+                {(data?.stations ?? []).map((st) => (
+                  <div
+                    key={st.station_id}
+                    className={cn(
+                      "relative border-l bg-muted/5",
+                      onEmptySlotClick && "cursor-pointer",
+                    )}
+                    style={{ minHeight: MIN_TIMELINE_HEIGHT }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => onLaneDrop(e, st.station_id)}
+                    onClick={(e) => onLaneClick(e, st.station_id)}
+                    data-testid={`grooming-day-board-lane-${st.station_id}`}
+                  >
+                    <div className="pointer-events-none absolute inset-0 opacity-30" aria-hidden>
+                      {[8, 10, 12, 14, 16].map((h) => (
+                        <div
+                          key={h}
+                          className="absolute left-0 right-0 border-t border-dashed border-border/40"
+                          style={{
+                            top: `${((h * 60 - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * 100}%`,
+                          }}
+                        />
+                      ))}
+                    </div>
+
+                    {(pinnedByStation.get(st.station_id) ?? []).map((a) => (
+                      <PinnedBlock
+                        key={a.id}
+                        appt={a}
+                        groomerName={
+                          a.groomer_id
+                            ? staffNameById.get(a.groomer_id) ?? null
+                            : a.grooming_notes?.trim() || null
+                        }
+                        onSave={saveAppt}
+                        onOpen={() => onAppointmentClick?.(a.id)}
+                        isSaving={schedule.isPending}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
-            ))}
+            </div>
           </div>
-        </div>
-      )}
-
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold">
-          Floating backlog
-          <span className="ml-2 font-normal text-muted-foreground">
-            ({data?.backlog.length ?? 0} to place)
-          </span>
-        </h3>
-        {(data?.backlog.length ?? 0) === 0 ? (
-          <p className="text-xs text-muted-foreground">No floating grooming jobs for this day.</p>
-        ) : (
-          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {(data?.backlog ?? []).map((row) => (
-              <FloatingBacklogCard
-                key={row.appt_id}
-                row={row}
-                stations={data?.stations ?? []}
-                staffRows={staffRows}
-                onPlace={placeBacklog}
-                onOpen={() => onAppointmentClick?.(row.appt_id)}
-              />
-            ))}
-          </ul>
         )}
-      </section>
 
-      <GroomingConflictOverrideDialog
-        open={overrideOpen}
-        onOpenChange={setOverrideOpen}
-        conflicts={overrideConflicts}
-        isPending={schedule.isPending}
-        onConfirm={(reason) => {
-          if (!pendingSave) return;
-          void saveAppt({ ...pendingSave, overrideReason: reason });
-        }}
-      />
-    </div>
+        <section className="shrink-0 space-y-2">
+          <h3 className="text-sm font-semibold">
+            Floating backlog
+            <span className="ml-2 font-normal text-muted-foreground">
+              ({data?.backlog.length ?? 0} to place)
+            </span>
+          </h3>
+          {(data?.backlog.length ?? 0) === 0 ? (
+            <p className="text-xs text-muted-foreground">No floating grooming jobs for this day.</p>
+          ) : (
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {(data?.backlog ?? []).map((row) => (
+                <FloatingBacklogCard
+                  key={row.appt_id}
+                  row={row}
+                  stations={data?.stations ?? []}
+                  staffRows={staffRows}
+                  onPlace={placeBacklog}
+                  onOpen={() => onAppointmentClick?.(row.appt_id)}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <GroomingConflictOverrideDialog
+          open={overrideOpen}
+          onOpenChange={setOverrideOpen}
+          conflicts={overrideConflicts}
+          isPending={schedule.isPending}
+          onConfirm={(reason) => {
+            if (!pendingSave) return;
+            void saveAppt({ ...pendingSave, overrideReason: reason });
+          }}
+        />
+      </div>
+    </TooltipProvider>
   );
 }
 
 function PinnedBlock({
   appt,
+  groomerName,
   onSave,
   onOpen,
   isSaving,
 }: {
   appt: GroomingPinnedAppt;
+  groomerName: string | null;
   onSave: (input: ScheduleGroomingApptInput) => void;
   onOpen: () => void;
   isSaving: boolean;
@@ -384,32 +467,69 @@ function PinnedBlock({
   };
 
   const style = blockStyle(start, duration);
+  const ownerName = appt.owners
+    ? ownerDisplayName(appt.owners.first_name, appt.owners.last_name)
+    : null;
+  const visitNotes = userVisitNotesFromStored(appt.notes);
+  const statusLabel = workflowStatusLabel(appt.status);
+  const showStatus =
+    normalizeGroomingWorkflowStatus(appt.status) !== "new" || appt.no_show;
 
   return (
-    <div
-      className="absolute left-0.5 right-0.5 z-10 overflow-hidden rounded border border-primary/30 bg-primary/15 px-1 py-0.5 text-left text-[10px] hover:bg-primary/25"
-      style={style}
-    >
-      <button type="button" className="w-full text-left" onClick={onOpen}>
-        <div className="font-medium truncate">{appt.pets?.name ?? "Pet"}</div>
-        <div className="truncate opacity-80">{labelForGroomingService(appt.service)}</div>
-      </button>
-      <div className="mt-0.5 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        <Input
-          type="number"
-          className="h-5 w-12 px-1 text-[10px]"
-          value={duration}
-          disabled={isSaving}
-          onChange={(e) => setDuration(Number(e.target.value) || 45)}
-          onBlur={persistDuration}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") persistDuration();
-          }}
-          aria-label="Duration minutes"
-        />
-        <span className="text-[9px] text-muted-foreground">min</span>
-      </div>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          data-pinned-block
+          className="absolute left-0.5 right-0.5 z-10 overflow-hidden rounded border border-primary/30 bg-primary/15 px-1 py-0.5 text-left text-[10px] hover:bg-primary/25"
+          style={style}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" className="w-full text-left" onClick={onOpen}>
+            <div className="font-medium truncate">{appt.pets?.name ?? "Pet"}</div>
+            <div className="truncate opacity-80">{labelForGroomingService(appt.service)}</div>
+            <div className="tabular-nums opacity-90">{duration} min</div>
+          </button>
+          <div className="mt-0.5 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <Input
+              type="number"
+              className="h-5 w-12 px-1 text-[10px]"
+              value={duration}
+              disabled={isSaving}
+              onChange={(e) => setDuration(Number(e.target.value) || 45)}
+              onBlur={persistDuration}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") persistDuration();
+              }}
+              aria-label="Duration minutes"
+            />
+            <span className="text-[9px] text-muted-foreground">min</span>
+          </div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-xs space-y-1 text-xs">
+        {ownerName ? (
+          <p>
+            <span className="text-muted-foreground">Owner:</span> {ownerName}
+          </p>
+        ) : null}
+        {groomerName ? (
+          <p>
+            <span className="text-muted-foreground">Groomer:</span> {groomerName}
+          </p>
+        ) : null}
+        {visitNotes ? (
+          <p className="whitespace-pre-wrap">
+            <span className="text-muted-foreground">Notes:</span> {visitNotes}
+          </p>
+        ) : null}
+        {showStatus ? (
+          <p>
+            <span className="text-muted-foreground">Status:</span> {statusLabel}
+            {appt.no_show ? " · No show" : ""}
+          </p>
+        ) : null}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
