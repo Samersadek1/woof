@@ -66,6 +66,7 @@ import {
   type GroomingScheduleConflict,
 } from "@/lib/groomingScheduleUtils";
 import type { GroomingStationRow } from "@/hooks/useGroomingStations";
+import { useStationGroomersForDate } from "@/hooks/useGroomingStationGroomerSchedule";
 import {
   GROOMING_PAYMENT_METHOD_NONE,
   GROOMING_PAYMENT_METHOD_OPTIONS,
@@ -162,6 +163,7 @@ export function GroomingNewAppointmentSheet({
 
   const { data: pets = [] } = usePets(ownerId ?? "");
   const { data: ownerForGroomingPref } = useOwner(ownerId ?? "");
+  const { resolveStationGroomer } = useStationGroomersForDate(format(defaultDay, "yyyy-MM-dd"));
 
   const resetForm = useCallback(() => {
     setStayLinkMode(false);
@@ -209,18 +211,22 @@ export function GroomingNewAppointmentSheet({
     (petId: string, applySlotPrefill: boolean) => {
       const pet = pets.find((p) => p.id === petId);
       const pref = ownerForGroomingPref?.preferred_groomer?.trim() ?? "";
+      const stationGroomer =
+        applySlotPrefill && slotPrefill?.stationId
+          ? resolveStationGroomer(slotPrefill.stationId)?.trim() ?? ""
+          : "";
       return createDefaultPetDraft({
         petId,
         defaultDay,
         mattingDefault,
         heavyDefault,
         dogSizeFromPet: pet ? dogSizeFromPetRecord(pet) : null,
-        groomerName: pref,
+        groomerName: pref || stationGroomer,
         stationId: applySlotPrefill && slotPrefill ? slotPrefill.stationId : null,
         apptTime: applySlotPrefill && slotPrefill ? slotPrefill.time : undefined,
       });
     },
-    [pets, ownerForGroomingPref, defaultDay, mattingDefault, heavyDefault, slotPrefill],
+    [pets, ownerForGroomingPref, defaultDay, mattingDefault, heavyDefault, slotPrefill, resolveStationGroomer],
   );
 
   const ensureDraftsForPets = useCallback(

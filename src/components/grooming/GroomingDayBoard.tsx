@@ -48,6 +48,7 @@ import {
 } from "@/hooks/useGroomingCapacity";
 import { GroomingGroomerSelect } from "@/components/grooming/GroomingGroomerSelect";
 import { useGroomingGroomers, type GroomingGroomerRow } from "@/hooks/useGroomingGroomers";
+import { useStationGroomersForDate } from "@/hooks/useGroomingStationGroomerSchedule";
 import { useStaff } from "@/hooks/useStaff";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -163,6 +164,7 @@ export function GroomingDayBoard({
   const updateMustFinishBy = useUpdateGroomingMustFinishBy();
   const { data: groomers = [] } = useGroomingGroomers();
   const { data: staffRows = [] } = useStaff();
+  const { resolveStationGroomer } = useStationGroomersForDate(date);
 
   const visibleStations = useMemo(
     () => (data?.stations ?? []).filter((s) => !hiddenStations.has(s.station_id)),
@@ -235,6 +237,8 @@ export function GroomingDayBoard({
     duration: number,
     groomerName: string | null,
   ) => {
+    const resolvedGroomer =
+      groomerName?.trim() || resolveStationGroomer(stationId)?.trim() || null;
     void saveAppt(
       {
         id: row.appt_id,
@@ -246,7 +250,7 @@ export function GroomingDayBoard({
         appointment_time: time,
         duration_minutes: duration,
         groomer_id: null,
-        grooming_notes: groomerName?.trim() || null,
+        grooming_notes: resolvedGroomer,
       },
       { countPlaced: true },
     );
@@ -295,6 +299,7 @@ export function GroomingDayBoard({
             <div className="flex flex-wrap gap-2">
               {(data?.stations ?? []).map((st) => {
                 const visible = !hiddenStations.has(st.station_id);
+                const stationGroomer = resolveStationGroomer(st.station_id);
                 return (
                   <label
                     key={st.station_id}
@@ -305,6 +310,11 @@ export function GroomingDayBoard({
                       onCheckedChange={(c) => toggleStation(st.station_id, c === true)}
                     />
                     {st.station_name}
+                    {stationGroomer ? (
+                      <span className="text-muted-foreground">· {stationGroomer.split(" ")[0]}</span>
+                    ) : (
+                      <span className="text-amber-700">· —</span>
+                    )}
                   </label>
                 );
               })}
@@ -361,17 +371,29 @@ export function GroomingDayBoard({
               <div className="sticky top-0 z-20 border-b bg-muted/40 p-2 text-xs text-muted-foreground">
                 Time
               </div>
-              {visibleStations.map((st) => (
+              {visibleStations.map((st) => {
+                const stationGroomer = resolveStationGroomer(st.station_id);
+                return (
                 <div
                   key={st.station_id}
                   className="sticky top-0 z-20 border-b border-l bg-muted/40 p-2 text-sm font-medium"
                 >
                   {st.station_name}
+                  <div
+                    className={cn(
+                      "text-xs font-normal",
+                      stationGroomer ? "text-foreground" : "text-amber-700",
+                    )}
+                    data-testid={`grooming-station-groomer-${st.station_id}`}
+                  >
+                    {stationGroomer ?? "Unassigned"}
+                  </div>
                   <div className="text-[10px] font-normal text-muted-foreground tabular-nums">
                     {st.used_minutes}/{st.window_minutes} min free
                   </div>
                 </div>
-              ))}
+                );
+              })}
 
               <div
                 className="relative border-r bg-muted/20"
@@ -464,6 +486,7 @@ export function GroomingDayBoard({
                 allStations={data?.stations ?? []}
                 groomers={groomers}
                 staffNameById={staffNameById}
+                resolveStationGroomer={resolveStationGroomer}
                 onPlace={placeBacklog}
                 onOpen={() => onAppointmentClick?.(row.appt_id)}
                 onSaveMustFinishBy={(mustFinishBy) =>
@@ -662,6 +685,7 @@ function FloatingBacklogCard({
   allStations,
   groomers,
   staffNameById,
+  resolveStationGroomer,
   onPlace,
   onOpen,
   onSaveMustFinishBy,
@@ -673,6 +697,7 @@ function FloatingBacklogCard({
   allStations: { station_id: string; station_name: string }[];
   groomers: GroomingGroomerRow[];
   staffNameById: Map<string, string>;
+  resolveStationGroomer: (stationId: string) => string | null;
   onPlace: (
     row: GroomingBacklogRow,
     stationId: string,
@@ -707,6 +732,13 @@ function FloatingBacklogCard({
   useEffect(() => {
     setDuration(row.duration_minutes);
   }, [row.duration_minutes]);
+
+  useEffect(() => {
+    setGroomerName((prev) => {
+      if (prev.trim()) return prev;
+      return resolveStationGroomer(stationId) ?? "";
+    });
+  }, [stationId, resolveStationGroomer]);
 
   const ownerName = ownerDisplayName(row.owner_first_name, row.owner_last_name);
   const dueSoon = isGroomingDueSoon(row.must_finish_by);

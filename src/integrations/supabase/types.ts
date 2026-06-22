@@ -1497,6 +1497,109 @@ export type Database = {
         }
         Relationships: []
       }
+      grooming_groomer_leave_periods: {
+        Row: {
+          created_at: string
+          end_date: string
+          groomer_id: string
+          id: string
+          note: string | null
+          start_date: string
+        }
+        Insert: {
+          created_at?: string
+          end_date: string
+          groomer_id: string
+          id?: string
+          note?: string | null
+          start_date: string
+        }
+        Update: {
+          created_at?: string
+          end_date?: string
+          groomer_id?: string
+          id?: string
+          note?: string | null
+          start_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grooming_groomer_leave_periods_groomer_id_fkey"
+            columns: ["groomer_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_groomers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      grooming_groomer_weekly_days_off: {
+        Row: {
+          created_at: string
+          day_of_week: number
+          groomer_id: string
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          day_of_week: number
+          groomer_id: string
+          id?: string
+        }
+        Update: {
+          created_at?: string
+          day_of_week?: number
+          groomer_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grooming_groomer_weekly_days_off_groomer_id_fkey"
+            columns: ["groomer_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_groomers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      grooming_station_weekly_assignments: {
+        Row: {
+          created_at: string
+          day_of_week: number
+          groomer_id: string
+          id: string
+          station_id: string
+        }
+        Insert: {
+          created_at?: string
+          day_of_week: number
+          groomer_id: string
+          id?: string
+          station_id: string
+        }
+        Update: {
+          created_at?: string
+          day_of_week?: number
+          groomer_id?: string
+          id?: string
+          station_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grooming_station_weekly_assignments_groomer_id_fkey"
+            columns: ["groomer_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_groomers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "grooming_station_weekly_assignments_station_id_fkey"
+            columns: ["station_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_stations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       grooming_status_events: {
         Row: {
           appointment_id: string
