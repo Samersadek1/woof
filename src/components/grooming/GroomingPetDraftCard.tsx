@@ -51,6 +51,7 @@ import {
   isGroomingPricingCheckbox,
   resolvePrimaryGroomingCheckbox,
 } from "@/lib/groomingNewAppointmentPricing";
+import { maxDurationMinutesForTimeInput } from "@/lib/groomingScheduleUtils";
 
 type PetRecord = {
   id: string;
