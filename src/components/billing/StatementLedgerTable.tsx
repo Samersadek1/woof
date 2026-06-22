@@ -110,9 +110,11 @@ interface StatementLedgerTableProps {
   rows: EnrichedWalletTransaction[];
   isLoading: boolean;
   ownerName?: string;
+  /** When set, invoice links append ?returnTo=<returnTo> so the invoice back button returns here. */
+  returnTo?: string;
 }
 
-export function StatementLedgerTable({ rows, isLoading, ownerName = "owner" }: StatementLedgerTableProps) {
+export function StatementLedgerTable({ rows, isLoading, ownerName = "owner", returnTo }: StatementLedgerTableProps) {
   const [range, setRange] = useState<DateRangeOption>("90d");
 
   const cutoff = useMemo(() => cutoffForRange(range), [range]);
@@ -251,7 +253,7 @@ export function StatementLedgerTable({ rows, isLoading, ownerName = "owner" }: S
                       <TableCell className="align-top pt-3 whitespace-nowrap">
                         {row.invoice_id ? (
                           <Link
-                            to={`/billing/invoices/${row.invoice_id}`}
+                            to={`/billing/invoices/${row.invoice_id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`}
                             className="text-primary hover:underline font-mono text-xs"
                           >
                             {invoiceNumber ?? row.invoice_id.slice(0, 8)}

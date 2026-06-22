@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import { format } from "date-fns";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import TopBar from "@/components/dashboard/TopBar";
 import { useOwner } from "@/hooks/useOwners";
 import { useStatementOfAccount } from "@/hooks/useStatement";
@@ -20,6 +21,7 @@ function collectableBalance(total: number, amountPaid = 0): number {
 
 export default function OwnerStatementPage() {
   const { ownerId } = useParams<{ ownerId: string }>();
+  const navigate = useNavigate();
   const { data: owner } = useOwner(ownerId || "");
   const { data: statement = [], isLoading: statementLoading } = useStatementOfAccount(ownerId);
   const { data: ledger = [], isLoading: ledgerLoading } = useStatementLedger(ownerId);
@@ -67,11 +69,15 @@ export default function OwnerStatementPage() {
       <TopBar title="Statement of Account" />
       <main className="flex-1 overflow-auto p-8 space-y-6">
         <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
-            <Link to="/billing/invoices" className="text-primary hover:underline">Invoices</Link>
-            {" / "}
-            Statement
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(ownerId ? `/customers/${ownerId}` : "/billing/invoices")}
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {ownerName !== "owner" ? ownerName : "Back"}
+          </Button>
           <Button onClick={printStatement} variant="outline">Print statement</Button>
         </div>
 
@@ -118,7 +124,7 @@ export default function OwnerStatementPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <Link
-                          to={`/billing/invoices/${r.invoice_id}`}
+                          to={`/billing/invoices/${r.invoice_id}?returnTo=${encodeURIComponent(`/billing/statements/${ownerId}`)}`}
                           className="font-mono text-xs text-primary hover:underline"
                         >
                           {r.invoice_number ?? r.invoice_id.slice(0, 8)}
@@ -153,6 +159,7 @@ export default function OwnerStatementPage() {
                 rows={ledger}
                 isLoading={ledgerLoading}
                 ownerName={ownerName}
+                returnTo={ownerId ? `/billing/statements/${ownerId}` : undefined}
               />
             </CardContent>
           </Card>
