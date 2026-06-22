@@ -107,6 +107,7 @@ import {
   type GroomingScheduleConflict,
 } from "@/lib/groomingScheduleUtils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Sheet,
   SheetContent,
@@ -146,6 +147,8 @@ import {
   CalendarIcon,
   ClipboardList,
   FileText,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
@@ -486,6 +489,7 @@ const GroomingPage = () => {
   const todayStr = format(new Date(), "yyyy-MM-dd");
 
   const [groomingTab, setGroomingTab] = useState("day");
+  const [dayViewMode, setDayViewMode] = useState<"calendar" | "list">("calendar");
   const { data: dayAppointments = [] } = useGroomingAppointments(dateStr);
   const { data: groomingStations = [], isLoading: stationsLoading } = useGroomingStations();
   const { staffName } = useCurrentStaffName();
@@ -616,6 +620,25 @@ const GroomingPage = () => {
 
   const eodPaidTotal = useMemo(() => sumGroomingInvoicePaidAed(eodInvoices), [eodInvoices]);
   const eodPendingTotal = useMemo(() => sumGroomingInvoicePendingAed(eodInvoices), [eodInvoices]);
+
+  const visibleDayAppointments = useMemo(
+    () =>
+      [...dayAppointments]
+        .filter(
+          (a) =>
+            normalizeGroomingWorkflowStatus(a.status) !== "cancelled" && !a.no_show,
+        )
+        .sort((a, b) => {
+          const ta = a.appointment_time ?? "99:99:99";
+          const tb = b.appointment_time ?? "99:99:99";
+          return ta.localeCompare(tb);
+        }),
+    [dayAppointments],
+  );
+
+  const openPrintForDay = useCallback(() => {
+    window.open(`/print/grooming-cards?date=${dateStr}`, "_blank", "noopener,noreferrer");
+  }, [dateStr]);
 
   const openNewSheet = () => {
     setSlotPrefill(null);
@@ -972,22 +995,67 @@ const GroomingPage = () => {
           </TabsList>
 
           <TabsContent value="day" className="space-y-4">
-            {stationsLoading ? (
-              <Skeleton className="min-h-[480px] w-full" />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <ToggleGroup
+                type="single"
+                value={dayViewMode}
+                onValueChange={(value) => {
+                  if (value === "calendar" || value === "list") setDayViewMode(value);
+                }}
+                variant="outline"
+                size="sm"
+                data-testid="grooming-day-view-toggle"
+              >
+                <ToggleGroupItem value="calendar" aria-label="Calendar view" data-testid="grooming-day-view-calendar">
+                  <LayoutGrid className="mr-1.5 h-4 w-4" />
+                  Calendar
+                </ToggleGroupItem>
+                <ToggleGroupItem value="list" aria-label="List view" data-testid="grooming-day-view-list">
+                  <List className="mr-1.5 h-4 w-4" />
+                  List
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {visibleDayAppointments.length} active appointment
+                {visibleDayAppointments.length === 1 ? "" : "s"}
+              </p>
+            </div>
+
+            {dayViewMode === "calendar" ? (
+              stationsLoading ? (
+                <Skeleton className="min-h-[480px] w-full" />
+              ) : (
+                <GroomingDayBoard
+                  date={dateStr}
+                  onDateChange={(d) => {
+                    const parsed = parseGroomingPageDay(d);
+                    if (parsed) setDay(parsed);
+                  }}
+                  staffLabel={session?.user?.email ?? "staff"}
+                  onEmptySlotClick={openNewSheetFromSlot}
+                  onAppointmentClick={(id) => {
+                    const found = dayAppointments.find((a) => a.id === id);
+                    if (found) setActionAppt(found);
+                  }}
+                />
+              )
             ) : (
-              <GroomingDayBoard
-                date={dateStr}
-                onDateChange={(d) => {
-                  const parsed = parseGroomingPageDay(d);
-                  if (parsed) setDay(parsed);
-                }}
-                staffLabel={session?.user?.email ?? "staff"}
-                onEmptySlotClick={openNewSheetFromSlot}
-                onAppointmentClick={(id) => {
-                  const found = dayAppointments.find((a) => a.id === id);
-                  if (found) setActionAppt(found);
-                }}
-              />
+              <section className="space-y-3" data-testid="grooming-day-appointment-list">
+                {visibleDayAppointments.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No active appointments for this date.</p>
+                ) : (
+                  <div className="grid gap-3">
+                    {visibleDayAppointments.map((a) => (
+                      <AppointmentCard
+                        key={a.id}
+                        a={a}
+                        onPrint={openPrintForDay}
+                        onOpenActions={setActionAppt}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
             )}
           </TabsContent>
 
