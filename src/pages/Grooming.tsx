@@ -942,9 +942,28 @@ const GroomingPage = () => {
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <h2 className="text-xl font-semibold min-w-[12rem]">
-              {format(safeDay, "EEEE, d MMMM yyyy")}
-            </h2>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-auto min-w-[12rem] justify-center px-3 py-2 text-base font-semibold sm:text-xl"
+                  data-testid="grooming-day-date-picker"
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4 shrink-0 opacity-70" />
+                  {format(safeDay, "EEEE, d MMMM yyyy")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="center">
+                <Calendar
+                  mode="single"
+                  selected={safeDay}
+                  defaultMonth={safeDay}
+                  onSelect={(d) => d && setDay(d)}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
             <Button
               type="button"
               variant="outline"
