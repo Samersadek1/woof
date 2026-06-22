@@ -134,15 +134,17 @@ export async function fetchNewGroomingAppointmentOriginalAed(
     });
   } else {
     const primary = resolvePrimaryGroomingCheckbox(selected);
-    if (!primary) return null;
-    const pkg = primaryCheckboxToPackage(primary, deshedCoat);
-    if (!pkg) return null;
-    base = await resolveGroomingPackageRateAmount(
-      pkg,
-      packageSize,
-      options?.bookingDate,
-      options?.petCoat,
-    );
+    const pkg = primary ? primaryCheckboxToPackage(primary, deshedCoat) : null;
+    if (pkg) {
+      base = await resolveGroomingPackageRateAmount(
+        pkg,
+        packageSize,
+        options?.bookingDate,
+        options?.petCoat,
+      );
+    } else {
+      base = 0;
+    }
   }
 
   if (base == null) return null;

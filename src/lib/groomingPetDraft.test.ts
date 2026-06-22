@@ -51,6 +51,27 @@ describe("groomingPetDraft", () => {
     expect(result.notes).toContain("Services:");
   });
 
+  it("buildInsertFromDraft accepts addon-only service selection", () => {
+    const draft = {
+      ...baseDraft(),
+      selectedServices: ["nail_clip"],
+      price: "45",
+      dogSize: "Medium" as const,
+    };
+    const result = buildInsertFromDraft({
+      draft,
+      ownerId: "owner-1",
+      bookingId: null,
+      paymentMethod: null,
+      manualFeeBounds: null,
+      isComplimentary: false,
+      computedOriginalAed: 45,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.service).toBe("nail_clip");
+  });
+
   it("draftServiceLabels includes matting fee amount", () => {
     const draft = {
       ...baseDraft(),

@@ -75,10 +75,12 @@ const BASE_PRIORITY: GroomingPricingCheckbox[] = [
 /**
  * Primary package checkbox for DB `service` + base price tier.
  * Bath + Blow Dry combo: both `bath_only` and `blow_dry` → treat as fixed-rate package (primary `bath_only`).
+ * When only add-ons are selected (e.g. nail clip), the first selected checkbox becomes primary.
  */
 export function resolvePrimaryGroomingCheckbox(
   selected: readonly GroomingPricingCheckbox[],
 ): GroomingPricingCheckbox | null {
+  if (selected.length === 0) return null;
   const set = new Set(selected);
   if (set.has("bath_only") && set.has("blow_dry")) {
     return "bath_only";
@@ -86,7 +88,7 @@ export function resolvePrimaryGroomingCheckbox(
   for (const p of BASE_PRIORITY) {
     if (set.has(p)) return p;
   }
-  return null;
+  return selected[0];
 }
 
 export function groomingPricingCheckboxToDbService(cb: GroomingPricingCheckbox): GroomingService {
