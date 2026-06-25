@@ -63,6 +63,11 @@ type Props = {
   onSuccess?: (invoiceId: string) => void;
   /** Daycare sell flow: staff can issue custom allowance/price (including AED 0). */
   allowCustomDaycare?: boolean;
+  /**
+   * Restrict the catalog picker to a single package category (e.g. "grooming").
+   * Leave unset to show every category (the OwnerProfile all-category behavior).
+   */
+  categoryFilter?: PackageDef["category"];
 };
 
 function resolvePetAmount(rows: PackagePricing[], pet: Pet): number | null {
@@ -84,6 +89,7 @@ export function PurchasePackageDialog({
   onClose,
   onSuccess,
   allowCustomDaycare = false,
+  categoryFilter,
 }: Props) {
   const queryClient = useQueryClient();
   const issueCustom = useIssueCustomDaycarePackage();
@@ -178,9 +184,14 @@ export function PurchasePackageDialog({
     enabled: isOpen && !!ownerId,
   });
 
+  const availablePackageDefs = useMemo(
+    () => (categoryFilter ? packageDefs.filter((pkg) => pkg.category === categoryFilter) : packageDefs),
+    [packageDefs, categoryFilter],
+  );
+
   const selectedPackage = useMemo(
-    () => packageDefs.find((pkg) => pkg.code === selectedPackageCode) ?? null,
-    [packageDefs, selectedPackageCode],
+    () => availablePackageDefs.find((pkg) => pkg.code === selectedPackageCode) ?? null,
+    [availablePackageDefs, selectedPackageCode],
   );
 
   const selectedGroomingCatalog = useMemo(
@@ -221,12 +232,12 @@ export function PurchasePackageDialog({
 
   const groupedByCategory = useMemo(() => {
     const buckets: Record<string, PackageDef[]> = { daycare: [], grooming: [], treadmill: [] };
-    for (const pkg of packageDefs) {
+    for (const pkg of availablePackageDefs) {
       const key = pkg.category in buckets ? pkg.category : "daycare";
       buckets[key].push(pkg);
     }
     return buckets;
-  }, [packageDefs]);
+  }, [availablePackageDefs]);
 
   const togglePet = (petId: string, checked: boolean) => {
     setSelectedPetIds((prev) => (checked ? Array.from(new Set([...prev, petId])) : prev.filter((id) => id !== petId)));
@@ -583,6 +594,7 @@ export function PurchasePackageDialog({
             ) : (
               <div data-testid="purchase-pkg-definition-select" className="grid gap-3">
                 {Object.entries(groupedByCategory).map(([category, defs]) => (
+                  defs.length === 0 ? null : (
                   <div key={category} className="space-y-2">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">{CATEGORY_LABELS[category] ?? category}</p>
                     <div className="grid gap-2 md:grid-cols-2">
@@ -616,6 +628,7 @@ export function PurchasePackageDialog({
                       })}
                     </div>
                   </div>
+                  )
                 ))}
               </div>
             )}
