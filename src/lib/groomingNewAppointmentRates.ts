@@ -103,12 +103,22 @@ export async function fetchCheckboxBasePriceAed(
   return resolveGroomingPackageRateAmount(pkg, packageSize, bookingDate, petCoat);
 }
 
-export async function fetchNewGroomingAppointmentOriginalAed(
+/** Split of a grooming appointment price into the credit-coverable base vs. add-ons. */
+export type GroomingPriceBreakdown = {
+  /** Primary package rate — the portion a grooming package credit covers. */
+  base: number;
+  /** Add-ons (extra services, matting/heavy fees) — never covered by a credit. */
+  addons: number;
+  /** base + addons. */
+  total: number;
+};
+
+export async function fetchNewGroomingAppointmentPriceBreakdown(
   selectedServices: readonly string[],
   dogSize: DogSizeFormValue | null,
   manualAddons?: ManualGroomingAddonAed | null,
   options?: { deseedCoat?: DeshedCoatTier; petCoat?: PetCoatType | null; bookingDate?: string },
-): Promise<number | null> {
+): Promise<GroomingPriceBreakdown | null> {
   const selected = selectedServices.filter(isGroomingPricingCheckbox);
   if (selected.length === 0) return null;
   if (dogSize == null) return null;
@@ -184,5 +194,26 @@ export async function fetchNewGroomingAppointmentOriginalAed(
     }
   }
 
-  return Number((base + addonSum).toFixed(3));
+  const roundedBase = Number(base.toFixed(3));
+  const roundedAddons = Number(addonSum.toFixed(3));
+  return {
+    base: roundedBase,
+    addons: roundedAddons,
+    total: Number((roundedBase + roundedAddons).toFixed(3)),
+  };
+}
+
+export async function fetchNewGroomingAppointmentOriginalAed(
+  selectedServices: readonly string[],
+  dogSize: DogSizeFormValue | null,
+  manualAddons?: ManualGroomingAddonAed | null,
+  options?: { deseedCoat?: DeshedCoatTier; petCoat?: PetCoatType | null; bookingDate?: string },
+): Promise<number | null> {
+  const breakdown = await fetchNewGroomingAppointmentPriceBreakdown(
+    selectedServices,
+    dogSize,
+    manualAddons,
+    options,
+  );
+  return breakdown ? breakdown.total : null;
 }

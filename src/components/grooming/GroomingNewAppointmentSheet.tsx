@@ -56,10 +56,13 @@ import {
   createDefaultPetDraft,
   dogSizeFromPetRecord,
   draftFinalAed,
+  draftManualAddonAed,
+  draftOriginalAed,
   draftPrimaryDbService,
   draftServiceLabels,
   type PetGroomingDraft,
 } from "@/lib/groomingPetDraft";
+import { fetchNewGroomingAppointmentPriceBreakdown } from "@/lib/groomingNewAppointmentRates";
 import {
   validateGroomingScheduleTime,
   warningsToScheduleConflicts,
@@ -439,6 +442,7 @@ export function GroomingNewAppointmentSheet({
     try {
       const createdRows = [];
       const consumedCreditByPet: Record<string, { package_name: string }> = {};
+      const chargeByPet: Record<string, number> = {};
       const warningsMap = new Map(
         warningsByPet.map((c) => [c.petId, c.warnings] as const),
       );
@@ -462,39 +466,79 @@ export function GroomingNewAppointmentSheet({
           });
         }
 
-        const useCredit = draft?.useCredit;
-        if (useCredit) {
-          const primaryService = draft ? draftPrimaryDbService(draft) : null;
-          const serviceCode = primaryService
-            ? (groomingServiceToPricingKey(primaryService) as
-                | Database["public"]["Enums"]["service_code"]
-                | undefined)
-            : null;
-          if (serviceCode) {
-            const { data: credits, error: creditListErr } = await supabase.rpc(
-              "list_active_credits_for_pet",
-              {
-                p_pet_id: petId,
-                p_service_code: serviceCode,
-              },
-            );
-            if (creditListErr) throw creditListErr;
-            const credit = (credits ?? [])[0] as
-              | { credit_id: string; package_name: string }
-              | undefined;
-            if (credit) {
-              const { error } = await supabase.rpc("consume_service_credit", {
-                p_credit_id: credit.credit_id,
-                p_units: 1,
-                p_consumed_for_ref_id: appt.id,
-                p_consumed_for_ref_type: "grooming_appointment",
-              });
-              if (error) throw error;
-              consumedCreditByPet[petId] = {
-                package_name: credit.package_name ?? "package credit",
-              };
-            }
+        // Consume a grooming credit for the primary service when the toggle is on.
+        const primaryService = draft ? draftPrimaryDbService(draft) : null;
+        const serviceCode = primaryService
+          ? (groomingServiceToPricingKey(primaryService) as
+              | Database["public"]["Enums"]["service_code"]
+              | undefined)
+          : null;
+
+        let creditConsumed = false;
+        if (draft?.useCredit && !isComplimentaryPayment && serviceCode) {
+          const { data: credits, error: creditListErr } = await supabase.rpc(
+            "list_active_credits_for_pet",
+            {
+              p_pet_id: petId,
+              p_service_code: serviceCode,
+            },
+          );
+          if (creditListErr) throw creditListErr;
+          const credit = (credits ?? [])[0] as
+            | { credit_id: string; package_name: string }
+            | undefined;
+          if (credit) {
+            const { error } = await supabase.rpc("consume_service_credit", {
+              p_credit_id: credit.credit_id,
+              p_units: 1,
+              p_consumed_for_ref_id: appt.id,
+              p_consumed_for_ref_type: "grooming_appointment",
+            });
+            if (error) throw error;
+            consumedCreditByPet[petId] = {
+              package_name: credit.package_name ?? "package credit",
+            };
+            creditConsumed = true;
           }
+        }
+
+        // Authoritative charge: the base service is waived only when a credit was
+        // actually consumed; otherwise the client pays the full price. This also
+        // corrects either race (credit vanished, or appeared between render and save).
+        const petRecord = pets.find((p) => p.id === petId);
+        const breakdown =
+          draft?.dogSize != null
+            ? await fetchNewGroomingAppointmentPriceBreakdown(
+                draft.selectedServices,
+                draft.dogSize,
+                draftManualAddonAed(draft, manualFeeBounds),
+                {
+                  petCoat: petRecord?.coat_type,
+                  bookingDate: format(draft.appointmentDate, "yyyy-MM-dd"),
+                },
+              )
+            : null;
+        const originalCharge = creditConsumed
+          ? (breakdown?.addons ?? draftOriginalAed(draft?.price ?? "") ?? 0)
+          : (breakdown?.total ?? draftOriginalAed(draft?.price ?? "") ?? appt.price ?? 0);
+        const finalCharge = draft
+          ? (draftFinalAed(String(originalCharge), draft.discountPct, isComplimentaryPayment) ?? 0)
+          : (appt.price ?? 0);
+        chargeByPet[petId] = finalCharge;
+
+        if ((appt.price ?? 0) !== finalCharge) {
+          const { error: priceErr } = await supabase
+            .from("grooming_appointments")
+            .update({ price: finalCharge })
+            .eq("id", appt.id);
+          if (priceErr) throw priceErr;
+          appt.price = finalCharge;
+        }
+
+        if (draft?.useCredit && !creditConsumed && !isComplimentaryPayment && serviceCode) {
+          toast.warning(
+            `${petRecord?.name ?? "Pet"}: no usable credit found — charged the full price.`,
+          );
         }
       }
 
@@ -517,11 +561,11 @@ export function GroomingNewAppointmentSheet({
           const svcLabel = draft
             ? draftServiceLabels(draft, manualFeeBounds)
             : "Grooming";
-          const linePrice = consumedCreditByPet[appt.pet_id]
-            ? 0
-            : draft
+          const linePrice =
+            chargeByPet[appt.pet_id] ??
+            (draft
               ? (draftFinalAed(draft.price, draft.discountPct, isComplimentaryPayment) ?? 0)
-              : (appt.price ?? 0);
+              : (appt.price ?? 0));
           const consumed = consumedCreditByPet[appt.pet_id];
           const apptDate = draft?.appointmentDate ?? defaultDay;
 
@@ -534,7 +578,7 @@ export function GroomingNewAppointmentSheet({
             lineItems: [
               {
                 description: consumed
-                  ? `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")} (covered by ${consumed.package_name})`
+                  ? `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")} (base covered by ${consumed.package_name})`
                   : `${svcLabel} — ${petName} — ${format(apptDate, "d MMM yyyy")}`,
                 quantity: 1,
                 unitPrice: linePrice,
