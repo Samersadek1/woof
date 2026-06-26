@@ -84,6 +84,7 @@ import {
   GroomingNewAppointmentSheet,
   type GroomingSlotPrefill,
 } from "@/components/grooming/GroomingNewAppointmentSheet";
+import { GroomingPackagesTab } from "@/components/grooming/GroomingPackagesTab";
 import {
   GROOMING_SERVICE_CHECKBOX_OPTIONS,
   estimatedPickupFromStartAndDuration,
@@ -1011,6 +1012,7 @@ const GroomingPage = () => {
           <TabsList>
             <TabsTrigger value="day">Day View</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
+            <TabsTrigger value="packages">Packages</TabsTrigger>
           </TabsList>
 
           <TabsContent value="day" className="space-y-4">
@@ -1080,6 +1082,10 @@ const GroomingPage = () => {
 
           <TabsContent value="history" className="space-y-4">
             <GroomingHistory todayStr={todayStr} active={groomingTab === "history"} />
+          </TabsContent>
+
+          <TabsContent value="packages" className="space-y-4">
+            <GroomingPackagesTab />
           </TabsContent>
         </Tabs>
       </main>

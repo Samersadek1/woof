@@ -52,13 +52,15 @@ export function pricingForPackageSize(
   packageDefId: string,
   size: PetSize,
 ): PackagePricing | null {
+  // A grooming package definition carries a single coat tier (Summer Splash is
+  // split into separate short/long definitions), so matching on package + size
+  // is unambiguous. Filtering on coat_type here wrongly hid the coat-tiered rows.
   return (
     pricing.find(
       (row) =>
         row.package_def_id === packageDefId &&
         row.is_active &&
-        row.pet_size === size &&
-        row.coat_type == null,
+        row.pet_size === size,
     ) ?? null
   );
 }

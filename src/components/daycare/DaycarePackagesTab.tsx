@@ -457,6 +457,7 @@ export function DaycarePackagesTab() {
         ownerId={sellOwnerId ?? ""}
         isOpen={!!sellOwnerId && !sellOpen}
         allowCustomDaycare
+        categoryFilter="daycare"
         onClose={() => setSellOwnerId(undefined)}
         onSuccess={() => setSellOwnerId(undefined)}
       />

@@ -43,7 +43,10 @@ import {
 import { GroomingGroomerSelect } from "@/components/grooming/GroomingGroomerSelect";
 import { useGroomingGroomers } from "@/hooks/useGroomingGroomers";
 import { fetchCheckboxBasePriceAed } from "@/lib/groomingNewAppointmentRates";
-import { useNewGroomingAppointmentPrice } from "@/hooks/useNewGroomingAppointmentPrice";
+import {
+  useNewGroomingAppointmentPrice,
+  useNewGroomingAppointmentPriceBreakdown,
+} from "@/hooks/useNewGroomingAppointmentPrice";
 import type { GroomingStationRow } from "@/hooks/useGroomingStations";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -109,7 +112,7 @@ export function GroomingPetDraftCard({
 
   useEffect(() => {
     priceManualRef.current = false;
-  }, [draft.selectedServices, draft.dogSize, pet.coat_type]);
+  }, [draft.selectedServices, draft.dogSize, draft.useCredit, pet.coat_type]);
 
   useEffect(() => {
     if (!enabled || dogSizeManualRef.current) return;
@@ -131,14 +134,47 @@ export function GroomingPetDraftCard({
     [draft, manualFeeBounds],
   );
 
-  const { data: computedOriginalAed, isFetching: priceFetching } = useNewGroomingAppointmentPrice({
-    selectedServices: draft.selectedServices,
-    dogSize: draft.dogSize,
-    manualAddons,
-    petCoat: pet.coat_type,
-    bookingDate: format(draft.appointmentDate, "yyyy-MM-dd"),
-    enabled,
+  const selectedPrimaryServiceCode = useMemo(() => {
+    const primaryCb = resolvePrimaryGroomingCheckbox(
+      draft.selectedServices.filter(isGroomingPricingCheckbox),
+    );
+    const primaryService = primaryCb ? groomingPricingCheckboxToDbService(primaryCb) : null;
+    return (primaryService ? groomingServiceToPricingKey(primaryService) : null) as
+      | Database["public"]["Enums"]["service_code"]
+      | null;
+  }, [draft.selectedServices]);
+
+  const { data: groomingCredit } = useQuery({
+    queryKey: ["grooming_credits", pet.id, selectedPrimaryServiceCode],
+    enabled: !!selectedPrimaryServiceCode && enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("list_active_credits_for_pet", {
+        p_pet_id: pet.id,
+        p_service_code: selectedPrimaryServiceCode,
+      });
+      if (error) throw error;
+      const first = (data ?? [])[0] as
+        | { credit_id: string; package_name: string; units_remaining: number; expires_at: string }
+        | undefined;
+      return first ?? null;
+    },
   });
+
+  const { data: priceBreakdown, isFetching: priceFetching } =
+    useNewGroomingAppointmentPriceBreakdown({
+      selectedServices: draft.selectedServices,
+      dogSize: draft.dogSize,
+      manualAddons,
+      petCoat: pet.coat_type,
+      bookingDate: format(draft.appointmentDate, "yyyy-MM-dd"),
+      enabled,
+    });
+  const computedOriginalAed = priceBreakdown?.total ?? null;
+  const computedAddonsAed = priceBreakdown?.addons ?? null;
+  const computedBaseAed = priceBreakdown?.base ?? null;
+
+  /** Credit available, toggle on, and not a complimentary visit → base is waived. */
+  const creditActive = !!groomingCredit && draft.useCredit && !isComplimentary;
 
   useEffect(() => {
     if (!enabled) return;
@@ -146,14 +182,26 @@ export function GroomingPetDraftCard({
       if (draft.price !== "0") onChange({ price: "0" });
       return;
     }
-    if (priceManualRef.current) return;
     if (computedOriginalAed == null) {
+      // Toggle drives the price when a credit is active; otherwise respect manual edits.
+      if (!creditActive && priceManualRef.current) return;
       if (draft.price !== "") onChange({ price: "" });
       return;
     }
-    const next = String(computedOriginalAed);
+    // When a credit is active the base is covered, so only add-ons are charged.
+    const target = creditActive ? (computedAddonsAed ?? 0) : computedOriginalAed;
+    if (!creditActive && priceManualRef.current) return;
+    const next = String(target);
     if (draft.price !== next) onChange({ price: next });
-  }, [enabled, isComplimentary, computedOriginalAed, draft.price, onChange]);
+  }, [
+    enabled,
+    isComplimentary,
+    creditActive,
+    computedOriginalAed,
+    computedAddonsAed,
+    draft.price,
+    onChange,
+  ]);
 
   const { data: servicePriceHints = {} } = useQuery({
     queryKey: [
@@ -180,32 +228,6 @@ export function GroomingPetDraftCard({
         }),
       );
       return Object.fromEntries(entries) as Partial<Record<GroomingServiceCheckbox, number | null>>;
-    },
-  });
-
-  const selectedPrimaryServiceCode = useMemo(() => {
-    const primaryCb = resolvePrimaryGroomingCheckbox(
-      draft.selectedServices.filter(isGroomingPricingCheckbox),
-    );
-    const primaryService = primaryCb ? groomingPricingCheckboxToDbService(primaryCb) : null;
-    return (primaryService ? groomingServiceToPricingKey(primaryService) : null) as
-      | Database["public"]["Enums"]["service_code"]
-      | null;
-  }, [draft.selectedServices]);
-
-  const { data: groomingCredit } = useQuery({
-    queryKey: ["grooming_credits", pet.id, selectedPrimaryServiceCode],
-    enabled: !!selectedPrimaryServiceCode && enabled,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("list_active_credits_for_pet", {
-        p_pet_id: pet.id,
-        p_service_code: selectedPrimaryServiceCode,
-      });
-      if (error) throw error;
-      const first = (data ?? [])[0] as
-        | { credit_id: string; package_name: string; units_remaining: number; expires_at: string }
-        | undefined;
-      return first ?? null;
     },
   });
 
@@ -243,6 +265,13 @@ export function GroomingPetDraftCard({
               Use credit
             </label>
           </div>
+          {creditActive ? (
+            <p className="text-xs text-emerald-900">
+              {computedBaseAed != null
+                ? `Base service AED ${computedBaseAed.toFixed(2)} covered by ${groomingCredit.package_name} — add-ons still charged.`
+                : `Base service covered by ${groomingCredit.package_name} — add-ons still charged.`}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -441,13 +470,18 @@ export function GroomingPetDraftCard({
             min={0}
             step={1}
             value={draft.price}
-            disabled={isComplimentary}
+            disabled={isComplimentary || creditActive}
             onChange={(e) => {
               priceManualRef.current = true;
               onChange({ price: e.target.value });
             }}
             placeholder="0"
           />
+          {creditActive ? (
+            <p className="text-xs text-muted-foreground">
+              Base covered by credit — add-ons only. Turn off "Use credit" to charge the full price.
+            </p>
+          ) : null}
         </div>
       </div>
 

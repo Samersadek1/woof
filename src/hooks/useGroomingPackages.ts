@@ -8,8 +8,11 @@ import {
   type PackagePricing,
   pricingForPackageSize,
 } from "@/lib/packageCatalog";
+import { ownerMemberTierFromFlags } from "@/lib/memberTier";
+import type { PackageWithDetails } from "@/hooks/useDaycare";
 
 type PetSize = Database["public"]["Enums"]["pet_size"];
+type ServiceCode = Database["public"]["Enums"]["service_code"];
 
 export type GroomingPackageCatalogRow = PackageDefinition & {
   includes: string;
@@ -72,6 +75,125 @@ export function useUpdateGroomingPackagePrice() {
       queryClient.invalidateQueries({ queryKey: groomingPackageQueryKeys.catalog });
       queryClient.invalidateQueries({ queryKey: ["package_pricing"] });
       queryClient.invalidateQueries({ queryKey: ["package_definitions"] });
+    },
+  });
+}
+
+// ── useAllGroomingPackages ───────────────────────────────────────────────────
+
+/**
+ * Distinct service codes granted by active grooming package definitions.
+ * Derived from package_credit_grants so the sold-credits list stays in sync
+ * with the catalog instead of hardcoding (e.g. grooming_full_service, grooming_splash).
+ */
+async function fetchGroomingCreditCodes(): Promise<ServiceCode[]> {
+  const { data: defs, error: defsErr } = await supabase
+    .from("package_definitions")
+    .select("id")
+    .eq("category", "grooming");
+  if (defsErr) throw defsErr;
+
+  const defIds = (defs ?? []).map((d) => d.id);
+  if (defIds.length === 0) return [];
+
+  const { data: grants, error: grantsErr } = await supabase
+    .from("package_credit_grants")
+    .select("service_code")
+    .in("package_def_id", defIds);
+  if (grantsErr) throw grantsErr;
+
+  const codes = new Set<ServiceCode>();
+  for (const grant of (grants ?? []) as Pick<PackageCreditGrant, "service_code">[]) {
+    if (grant.service_code) codes.add(grant.service_code);
+  }
+  return Array.from(codes);
+}
+
+type SoldCreditPetJoin = {
+  name: string;
+  owner_id: string;
+  owners: {
+    first_name: string;
+    last_name: string | null;
+    is_elite: boolean | null;
+    is_vip: boolean;
+  } | null;
+};
+
+type SoldCreditPurchaseGroupJoin = {
+  staff_label?: string | null;
+  package_definitions?: { display_name?: string | null } | null;
+} | null;
+
+/**
+ * Cross-owner list of sold grooming credits (mirror of useAllDaycarePackages).
+ * Returns the shared PackageWithDetails shape so the daycare Excel export and
+ * card UI patterns can be reused. units_total/units_consumed map to
+ * total_days/days_used (grooming credits are session-unit based).
+ */
+export function useAllGroomingPackages() {
+  return useQuery({
+    queryKey: ["service_credits", "grooming", "all_with_details"] as const,
+    queryFn: async (): Promise<PackageWithDetails[]> => {
+      const groomingCodes = await fetchGroomingCreditCodes();
+      if (groomingCodes.length === 0) return [];
+
+      const { data, error } = await supabase
+        .from("service_credits")
+        .select(
+          "*, pets!inner(name, owner_id, owners(first_name, last_name, is_elite, is_vip)), purchase_groups(staff_label, package_definitions(display_name))",
+        )
+        .in("service_code", groomingCodes)
+        .eq("is_bonus", false)
+        .neq("status", "revoked")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      return (data ?? []).map((row) => {
+        const r = row as unknown as Database["public"]["Tables"]["service_credits"]["Row"] & {
+          pets: SoldCreditPetJoin | null;
+          purchase_groups?: SoldCreditPurchaseGroupJoin;
+        };
+        const pet = r.pets;
+        const ownerJoin = pet?.owners ?? null;
+        const pg = r.purchase_groups ?? null;
+        const packageName =
+          pg?.staff_label?.trim() || pg?.package_definitions?.display_name || null;
+        const expiry = r.expires_at;
+
+        return {
+          id: r.id,
+          owner_id: pet?.owner_id ?? "",
+          pet_id: r.pet_id,
+          total_days: r.units_total,
+          days_used: r.units_consumed,
+          expiry_date: expiry,
+          purchase_date: r.created_at,
+          package_name: packageName,
+          service_code: r.service_code as ServiceCode,
+          is_bonus: r.is_bonus,
+          status: r.status,
+          units_remaining: r.units_total - r.units_consumed,
+          is_expired: !!expiry && expiry < today,
+          source_ref_id: r.source_ref_id,
+          redemption_group_id: r.redemption_group_id,
+          is_shared_pool: false,
+          shared_pool_pets_label: null,
+          anchor_pet_name: pet?.name ?? null,
+          pets: { name: pet?.name ?? "Pet" },
+          owners: ownerJoin
+            ? {
+                first_name: ownerJoin.first_name,
+                last_name: ownerJoin.last_name,
+                is_elite: ownerJoin.is_elite,
+                is_vip: ownerJoin.is_vip,
+                member_tier: ownerMemberTierFromFlags(ownerJoin),
+              }
+            : null,
+        } satisfies PackageWithDetails;
+      });
     },
   });
 }
