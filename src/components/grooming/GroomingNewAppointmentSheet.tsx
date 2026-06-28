@@ -57,9 +57,9 @@ import {
   dogSizeFromPetRecord,
   draftFinalAed,
   draftManualAddonAed,
-  draftOriginalAed,
   draftPrimaryDbService,
   draftServiceLabels,
+  resolveGroomingAppointmentFinalCharge,
   type PetGroomingDraft,
 } from "@/lib/groomingPetDraft";
 import { fetchNewGroomingAppointmentPriceBreakdown } from "@/lib/groomingNewAppointmentRates";
@@ -502,9 +502,8 @@ export function GroomingNewAppointmentSheet({
           }
         }
 
-        // Authoritative charge: the base service is waived only when a credit was
-        // actually consumed; otherwise the client pays the full price. This also
-        // corrects either race (credit vanished, or appeared between render and save).
+        // Authoritative charge: buildInsertFromDraft already respects manual price
+        // overrides; adjust only for credit consumption edge cases.
         const petRecord = pets.find((p) => p.id === petId);
         const breakdown =
           draft?.dogSize != null
@@ -518,12 +517,13 @@ export function GroomingNewAppointmentSheet({
                 },
               )
             : null;
-        const originalCharge = creditConsumed
-          ? (breakdown?.addons ?? draftOriginalAed(draft?.price ?? "") ?? 0)
-          : (breakdown?.total ?? draftOriginalAed(draft?.price ?? "") ?? appt.price ?? 0);
-        const finalCharge = draft
-          ? (draftFinalAed(String(originalCharge), draft.discountPct, isComplimentaryPayment) ?? 0)
-          : (appt.price ?? 0);
+        const finalCharge = resolveGroomingAppointmentFinalCharge({
+          insertPrice: insert.price,
+          draft,
+          creditConsumed,
+          breakdown,
+          isComplimentary: isComplimentaryPayment,
+        });
         chargeByPet[petId] = finalCharge;
 
         if ((appt.price ?? 0) !== finalCharge) {

@@ -236,6 +236,17 @@ async function linkAppointmentInvoice(
   if (error) throw error;
 }
 
+/** Sync draft invoice line items from the current grooming appointment price. */
+export async function syncGroomingDraftInvoiceFromAppointment(
+  supabase: Client,
+  appointmentId: string,
+): Promise<void> {
+  const appt = await loadAppointment(supabase, appointmentId);
+  const invoice = await resolveInvoice(supabase, appt);
+  if (!invoice) return;
+  await syncDraftLineFromAppointment(supabase, invoice.id, appt);
+}
+
 /**
  * Ensure a grooming appointment has an invoice, sync draft lines from the
  * appointment price, flip draft → outstanding at checkout (or paid when zero),

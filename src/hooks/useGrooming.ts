@@ -9,7 +9,7 @@ import {
   groomingCapacityKeys,
 } from "@/hooks/useGroomingCapacity";
 import { mergeGroomingBookingLinkHits, type GroomingBookingLinkHit } from "@/lib/groomingBookingLinkSearch";
-import { finalizeGroomingCheckoutInvoice } from "@/lib/groomingCheckoutInvoice";
+import { finalizeGroomingCheckoutInvoice, syncGroomingDraftInvoiceFromAppointment } from "@/lib/groomingCheckoutInvoice";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
@@ -274,14 +274,23 @@ export function useUpdateGroomingAppointment() {
         .single();
 
       if (error) throw error;
+
+      if (updates.price !== undefined) {
+        await syncGroomingDraftInvoiceFromAppointment(supabase, id);
+      }
+
       return data as GroomingRow;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       invalidateGrooming(qc, {
         appointmentDate: data.appointment_date,
         petId: data.pet_id,
         ownerId: data.owner_id,
       });
+      if (variables.price !== undefined) {
+        qc.invalidateQueries({ queryKey: ["invoice", "grooming", data.id] });
+        qc.invalidateQueries({ queryKey: ["grooming", "dayInvoices"] });
+      }
     },
   });
 }

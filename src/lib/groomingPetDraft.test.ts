@@ -5,6 +5,7 @@ import {
   createDefaultPetDraft,
   draftServiceLabels,
   normalizedDiscountPct,
+  resolveGroomingAppointmentFinalCharge,
 } from "./groomingPetDraft";
 
 describe("groomingPetDraft", () => {
@@ -83,5 +84,44 @@ describe("groomingPetDraft", () => {
       { mattingMin: 50, mattingMax: 100, heavyMin: 0, heavyMax: 0 },
     );
     expect(labels).toContain("Matting fee (AED 80)");
+  });
+
+  it("resolveGroomingAppointmentFinalCharge keeps manual price override", () => {
+    const draft = { ...baseDraft(), price: "150", dogSize: "Medium" as const, useCredit: false };
+    expect(
+      resolveGroomingAppointmentFinalCharge({
+        insertPrice: 150,
+        draft,
+        creditConsumed: false,
+        breakdown: { total: 120, addons: 0 },
+        isComplimentary: false,
+      }),
+    ).toBe(150);
+  });
+
+  it("resolveGroomingAppointmentFinalCharge charges full catalog price when credit vanished", () => {
+    const draft = { ...baseDraft(), price: "30", dogSize: "Medium" as const, useCredit: true };
+    expect(
+      resolveGroomingAppointmentFinalCharge({
+        insertPrice: 30,
+        draft,
+        creditConsumed: false,
+        breakdown: { total: 120, addons: 30 },
+        isComplimentary: false,
+      }),
+    ).toBe(120);
+  });
+
+  it("resolveGroomingAppointmentFinalCharge uses addons when credit consumed", () => {
+    const draft = { ...baseDraft(), price: "35", dogSize: "Medium" as const, useCredit: true };
+    expect(
+      resolveGroomingAppointmentFinalCharge({
+        insertPrice: 35,
+        draft,
+        creditConsumed: true,
+        breakdown: { total: 120, addons: 35 },
+        isComplimentary: false,
+      }),
+    ).toBe(35);
   });
 });

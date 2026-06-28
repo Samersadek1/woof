@@ -102,6 +102,31 @@ export function draftFinalAed(
   return Number((original * (1 - pct / 100)).toFixed(2));
 }
 
+/** Authoritative charge after insert — keeps manual price overrides; adjusts only for credit edge cases. */
+export function resolveGroomingAppointmentFinalCharge(args: {
+  insertPrice: number;
+  draft: PetGroomingDraft | null | undefined;
+  creditConsumed: boolean;
+  breakdown: { total: number; addons: number } | null;
+  isComplimentary: boolean;
+}): number {
+  const { insertPrice, draft, creditConsumed, breakdown, isComplimentary } = args;
+  if (!draft) return insertPrice;
+
+  if (creditConsumed) {
+    const manualOriginal = draftOriginalAed(draft.price);
+    const addonBase = manualOriginal ?? breakdown?.addons ?? insertPrice;
+    return draftFinalAed(String(addonBase), draft.discountPct, isComplimentary) ?? addonBase;
+  }
+
+  if (draft.useCredit && !isComplimentary) {
+    const fullBase = breakdown?.total ?? draftOriginalAed(draft.price) ?? insertPrice;
+    return draftFinalAed(String(fullBase), draft.discountPct, isComplimentary) ?? fullBase;
+  }
+
+  return insertPrice;
+}
+
 export function draftManualAddonAed(
   draft: PetGroomingDraft,
   manualFeeBounds: GroomingManualFeeBounds | null | undefined,
