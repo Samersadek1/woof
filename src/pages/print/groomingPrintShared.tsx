@@ -71,6 +71,7 @@ const GROOMING_APPOINTMENT_PRINT_SELECT = `
 const PACKAGE_LABEL: Partial<Record<GroomingService, string>> = {
   full_groom: "Grande - Full Groom",
   full_bath: "Bijoux - Full Bath",
+  tidy: "Tidy",
   deshedding: "Deshedding",
   brushing: "Brushing",
   nail_clip: "Nail Clip",

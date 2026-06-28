@@ -27,5 +27,6 @@ describe("addonPricing legacy key bridge", () => {
   it("GROOMING_SERVICE_TO_SERVICE_CODE covers primary grooming form services", () => {
     expect(GROOMING_SERVICE_TO_SERVICE_CODE.full_groom).toBe("grooming_full_service");
     expect(GROOMING_SERVICE_TO_SERVICE_CODE.deshedding).toBe("grooming_hair_no_more");
+    expect(GROOMING_SERVICE_TO_SERVICE_CODE.tidy).toBe("grooming_tidy");
   });
 });

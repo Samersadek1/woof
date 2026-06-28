@@ -50,6 +50,7 @@ import {
 import type { GroomingStationRow } from "@/hooks/useGroomingStations";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  GROOMING_BASE_PACKAGE_CHECKBOXES,
   groomingPricingCheckboxToDbService,
   isGroomingPricingCheckbox,
   resolvePrimaryGroomingCheckbox,
@@ -214,7 +215,7 @@ export function GroomingPetDraftCard({
     enabled: enabled && draft.dogSize != null,
     queryFn: async () => {
       const baseOptions = GROOMING_SERVICE_CHECKBOX_OPTIONS.filter((o) =>
-        ["full_groom", "deshedding", "bath_only", "full_bath_full"].includes(o.value),
+        GROOMING_BASE_PACKAGE_CHECKBOXES.includes(o.value),
       );
       const entries = await Promise.all(
         baseOptions.map(async (option) => {
@@ -351,10 +352,7 @@ export function GroomingPetDraftCard({
                   />
                   <span className="flex min-w-0 flex-col">
                     <span>{o.label}</span>
-                    {draft.dogSize &&
-                    ["full_groom", "deshedding", "bath_only", "full_bath_full"].includes(
-                      o.value,
-                    ) ? (
+                    {draft.dogSize && GROOMING_BASE_PACKAGE_CHECKBOXES.includes(o.value) ? (
                       <span className="text-[11px] text-muted-foreground tabular-nums">
                         {servicePriceHints[o.value] == null
                           ? "Rate not configured"

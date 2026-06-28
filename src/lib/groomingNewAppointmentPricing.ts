@@ -6,6 +6,7 @@ import type { GroomingManualFeeBounds } from "@/lib/groomingNewAppointmentRates"
 export type GroomingPricingCheckbox =
   | "full_groom"
   | "deshedding"
+  | "tidy"
   | "bath_only"
   | "full_bath_full"
   | "fur_brushing"
@@ -22,6 +23,7 @@ export type GroomingPricingCheckbox =
 const ALL_PRICING_CHECKBOXES: readonly GroomingPricingCheckbox[] = [
   "full_groom",
   "deshedding",
+  "tidy",
   "bath_only",
   "full_bath_full",
   "fur_brushing",
@@ -68,9 +70,19 @@ export function isGroomingPricingCheckbox(v: string): v is GroomingPricingCheckb
 const BASE_PRIORITY: GroomingPricingCheckbox[] = [
   "full_groom",
   "deshedding",
+  "tidy",
   "bath_only",
   "full_bath_full",
 ];
+
+/** Primary package checkboxes that show live rate hints on the new-appointment form. */
+export const GROOMING_BASE_PACKAGE_CHECKBOXES: readonly GroomingPricingCheckbox[] = [
+  "full_groom",
+  "deshedding",
+  "tidy",
+  "bath_only",
+  "full_bath_full",
+] as const;
 
 /**
  * Primary package checkbox for DB `service` + base price tier.
@@ -97,6 +109,8 @@ export function groomingPricingCheckboxToDbService(cb: GroomingPricingCheckbox):
       return "full_groom";
     case "deshedding":
       return "deshedding";
+    case "tidy":
+      return "tidy";
     case "bath_only":
     case "full_bath_full":
     case "blow_dry":

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { ownerDisplayName } from "@/lib/bookingUtils";
 import { formatIsoDate } from "@/lib/petProfileFields";
-import { labelForGroomingService } from "@/lib/groomingCatalog";
+import { labelForGroomingService, GROOMING_SERVICE_OPTIONS } from "@/lib/groomingCatalog";
 import {
   normalizeGroomingWorkflowStatus,
   workflowStatusBadgeClass,
@@ -160,12 +160,11 @@ export function GroomingHistory({ todayStr, active }: Props) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All services</SelectItem>
-              <SelectItem value="full_groom">Full groom</SelectItem>
-              <SelectItem value="full_bath">Full bath</SelectItem>
-              <SelectItem value="nail_clip">Nail clip</SelectItem>
-              <SelectItem value="deshedding">Deshedding</SelectItem>
-              <SelectItem value="brushing">Brushing</SelectItem>
-              <SelectItem value="pawdicure">Pawdicure</SelectItem>
+              {GROOMING_SERVICE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

@@ -4112,6 +4112,7 @@ export type Database = {
       grooming_service:
         | "full_groom"
         | "full_bath"
+        | "tidy"
         | "nail_clip"
         | "deshedding"
         | "brushing"
@@ -4203,6 +4204,7 @@ export type Database = {
         | "cat_grooming_full_no_bath"
         | "cat_grooming_full_with_bath"
         | "grooming_bath_brush_tidy"
+        | "grooming_tidy"
         | "grooming_nail_ear_teeth"
         | "cat_grooming_nail_ear"
         | "grooming_hair_no_more"
@@ -4416,6 +4418,7 @@ export const Constants = {
       grooming_service: [
         "full_groom",
         "full_bath",
+        "tidy",
         "nail_clip",
         "deshedding",
         "brushing",
@@ -4512,6 +4515,7 @@ export const Constants = {
         "cat_grooming_full_no_bath",
         "cat_grooming_full_with_bath",
         "grooming_bath_brush_tidy",
+        "grooming_tidy",
         "grooming_nail_ear_teeth",
         "cat_grooming_nail_ear",
         "grooming_hair_no_more",

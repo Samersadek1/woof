@@ -4,6 +4,7 @@ import type { GroomingService } from "@/lib/groomingCatalog";
 export type GroomingServiceCheckbox =
   | "full_groom"
   | "deshedding"
+  | "tidy"
   | "bath_only"
   | "full_bath_full"
   | "fur_brushing"
@@ -27,6 +28,7 @@ export const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
 }> = [
   { value: "full_groom", label: "Full groom", mapsTo: "full_groom" },
   { value: "deshedding", label: "Deshedding", mapsTo: "deshedding" },
+  { value: "tidy", label: "Tidy", mapsTo: "tidy" },
   { value: "bath_only", label: "Bath only", mapsTo: "full_bath" },
   { value: "full_bath_full", label: "Full bath", mapsTo: "full_bath" },
   { value: "fur_brushing", label: "Fur brushing", mapsTo: "brushing" },

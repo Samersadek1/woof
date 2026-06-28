@@ -48,6 +48,20 @@ const ZERO_AED_CHECKBOXES = new Set<GroomingPricingCheckbox>([
   "blow_dry",
 ]);
 
+function dogSizeFormToDbPetSize(
+  dogSize: DogSizeFormValue,
+): Database["public"]["Enums"]["pet_size"] {
+  switch (dogSize) {
+    case "Small":
+      return "small";
+    case "Medium":
+      return "medium";
+    case "Large":
+    case "Extra Large":
+      return "large";
+  }
+}
+
 function primaryCheckboxToPackage(
   primary: GroomingPricingCheckbox,
   deshedCoat: DeshedCoatTier,
@@ -89,6 +103,14 @@ export async function fetchCheckboxBasePriceAed(
 ): Promise<number | null> {
   const packageSize = dogSizeFormToPackageSize(dogSize);
   const deshedCoat = deseedTierFromPetCoat(petCoat);
+
+  if (checkbox === "tidy") {
+    return resolveWoofServiceRateAmount({
+      service_code: "grooming_tidy",
+      pet_size: dogSizeFormToDbPetSize(dogSize),
+      booking_date: bookingDate,
+    });
+  }
 
   if (checkbox === "deshedding") {
     return resolveWoofServiceRateAmount({
@@ -140,6 +162,12 @@ export async function fetchNewGroomingAppointmentPriceBreakdown(
     base = await resolveWoofServiceRateAmount({
       service_code: "grooming_hair_no_more",
       coat_type: deshedCoatTypeFromPetCoat(options?.petCoat),
+      booking_date: options?.bookingDate,
+    });
+  } else if (set.has("tidy")) {
+    base = await resolveWoofServiceRateAmount({
+      service_code: "grooming_tidy",
+      pet_size: dogSizeFormToDbPetSize(dogSize),
       booking_date: options?.bookingDate,
     });
   } else {
