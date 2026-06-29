@@ -19,6 +19,12 @@ export type FinalizeGroomingCheckoutResult = {
   amountPaid: number;
 };
 
+export type GroomingInvoicePriceSyncResult =
+  | { kind: "no_invoice" }
+  | { kind: "skipped"; reason: string }
+  | { kind: "unchanged" }
+  | { kind: "synced"; invoiceId: string; total: number };
+
 type GroomingApptForCheckout = {
   id: string;
   owner_id: string;
@@ -54,6 +60,19 @@ export function groomingInvoiceLineDescription(args: {
     dateLabel = args.appointmentDate;
   }
   return `${svcLabel} — ${args.petName} — ${dateLabel}`;
+}
+
+/** Whether a grooming appointment price change may update the linked invoice line. */
+export function canSyncGroomingAppointmentPriceToInvoice(
+  status: string,
+  amountPaid: number | null | undefined,
+): boolean {
+  if (["voided", "cancelled", "paid", "partially_paid"].includes(status)) return false;
+  if (status === "draft") return true;
+  if (status === "outstanding" || status === "overdue") {
+    return roundAed(amountPaid ?? 0) <= 0;
+  }
+  return false;
 }
 
 /** Status patch applied at grooming checkout based on invoice total. */
@@ -152,18 +171,26 @@ async function createInvoiceForAppointment(
   );
 }
 
-async function syncDraftLineFromAppointment(
+async function syncAppointmentPriceToInvoiceLine(
   supabase: Client,
   invoiceId: string,
-  appt: GroomingApptForCheckout,
-): Promise<void> {
+  appt: Pick<GroomingApptForCheckout, "price">,
+): Promise<GroomingInvoicePriceSyncResult> {
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
-    .select("status")
+    .select("status, amount_paid, total")
     .eq("id", invoiceId)
     .single();
   if (invErr) throw invErr;
-  if (invoice.status !== "draft") return;
+  if (!canSyncGroomingAppointmentPriceToInvoice(invoice.status, invoice.amount_paid)) {
+    return {
+      kind: "skipped",
+      reason:
+        invoice.status === "partially_paid" || roundAed(invoice.amount_paid ?? 0) > 0
+          ? "Invoice already has payments — update the invoice manually."
+          : `Invoice status is ${invoice.status.replace(/_/g, " ")} — update the invoice manually.`,
+    };
+  }
 
   const targetPrice = Math.max(0, appt.price ?? 0);
   const { data: lines, error: linesErr } = await supabase
@@ -174,10 +201,10 @@ async function syncDraftLineFromAppointment(
   if (linesErr) throw linesErr;
 
   const primary = lines?.[0];
-  if (!primary) return;
+  if (!primary) return { kind: "no_invoice" };
 
   const currentTotal = roundAed(primary.unit_price * Math.max(1, primary.quantity));
-  if (currentTotal === roundAed(targetPrice)) return;
+  if (currentTotal === roundAed(targetPrice)) return { kind: "unchanged" };
 
   const lineTotal = roundAed(targetPrice);
   const { error: updErr } = await supabase
@@ -191,6 +218,19 @@ async function syncDraftLineFromAppointment(
   if (updErr) throw updErr;
 
   await recalculateInvoiceTotals(invoiceId);
+
+  const { data: refreshed, error: refreshErr } = await supabase
+    .from("invoices")
+    .select("total")
+    .eq("id", invoiceId)
+    .single();
+  if (refreshErr) throw refreshErr;
+
+  return {
+    kind: "synced",
+    invoiceId,
+    total: roundAed(refreshed.total ?? targetPrice),
+  };
 }
 
 async function finalizeInvoiceStatus(
@@ -236,15 +276,25 @@ async function linkAppointmentInvoice(
   if (error) throw error;
 }
 
-/** Sync draft invoice line items from the current grooming appointment price. */
+/** Sync invoice line items from the current grooming appointment price when allowed. */
+export async function syncGroomingInvoicePriceFromAppointment(
+  supabase: Client,
+  appointmentId: string,
+  knownPrice?: number | null,
+): Promise<GroomingInvoicePriceSyncResult> {
+  const appt = await loadAppointment(supabase, appointmentId);
+  if (knownPrice !== undefined) appt.price = knownPrice;
+  const invoice = await resolveInvoice(supabase, appt);
+  if (!invoice) return { kind: "no_invoice" };
+  return syncAppointmentPriceToInvoiceLine(supabase, invoice.id, appt);
+}
+
+/** @deprecated Use syncGroomingInvoicePriceFromAppointment */
 export async function syncGroomingDraftInvoiceFromAppointment(
   supabase: Client,
   appointmentId: string,
 ): Promise<void> {
-  const appt = await loadAppointment(supabase, appointmentId);
-  const invoice = await resolveInvoice(supabase, appt);
-  if (!invoice) return;
-  await syncDraftLineFromAppointment(supabase, invoice.id, appt);
+  await syncGroomingInvoicePriceFromAppointment(supabase, appointmentId);
 }
 
 /**
@@ -267,7 +317,7 @@ export async function finalizeGroomingCheckoutInvoice(
     if (!invoice) throw new Error("Invoice was created but could not be loaded.");
   }
 
-  await syncDraftLineFromAppointment(supabase, invoice.id, appt);
+  await syncAppointmentPriceToInvoiceLine(supabase, invoice.id, appt);
 
   const dueDate = invoiceDueDateAtCheckIn(appt.appointment_date);
   invoice = await finalizeInvoiceStatus(supabase, invoice.id, dueDate);

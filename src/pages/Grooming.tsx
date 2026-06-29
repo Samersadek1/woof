@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   addDays,
@@ -19,6 +20,7 @@ import {
   useInvoiceForGroomingAppointment,
   useGroomingDayInvoices,
   useFinalizeGroomingCheckout,
+  invalidateGrooming,
   sumGroomingInvoicePaidAed,
   sumGroomingInvoicePendingAed,
   type GroomingAppointmentWithJoins,
@@ -505,6 +507,7 @@ const GroomingPage = () => {
   const [actionGroomingNote, setActionGroomingNote] = useState("");
 
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { session } = useAuth();
   const statusTransition = useGroomingStatusTransition();
   const finalizeCheckout = useFinalizeGroomingCheckout();
@@ -748,6 +751,8 @@ const GroomingPage = () => {
       }
     }
 
+    const priorAppointmentDate = editAppt.appointment_date;
+
     updateAppt.mutate(
       {
         id: editAppt.id,
@@ -761,7 +766,14 @@ const GroomingPage = () => {
         notes: composedNotes || null,
       },
       {
-        onSuccess: async (data) => {
+        onSuccess: async ({ row: data, invoiceSync }) => {
+          if (priorAppointmentDate !== data.appointment_date) {
+            invalidateGrooming(queryClient, {
+              appointmentDate: priorAppointmentDate,
+              petId: data.pet_id,
+              ownerId: data.owner_id,
+            });
+          }
           if (overrideReason && warnings.length > 0) {
             try {
               await logGroomingCapacityOverride({
@@ -778,6 +790,13 @@ const GroomingPage = () => {
             }
           }
           toast.success("Appointment updated.");
+          if (invoiceSync?.kind === "synced") {
+            toast.success(`Invoice updated to AED ${invoiceSync.total.toFixed(2)}.`);
+          } else if (invoiceSync?.kind === "skipped") {
+            toast.warning(`Appointment saved, but invoice was not updated: ${invoiceSync.reason}`);
+          } else if (invoiceSync?.kind === "no_invoice") {
+            toast.warning("Appointment saved, but no linked invoice was found to update.");
+          }
           setEditAppt(null);
           setActionAppt(null);
           setConflictDialogOpen(false);

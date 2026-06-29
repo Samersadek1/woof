@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canSyncGroomingAppointmentPriceToInvoice,
   checkoutInvoiceFinalizePatch,
   groomingInvoiceLineDescription,
 } from "./groomingCheckoutInvoice";
@@ -14,6 +15,20 @@ describe("groomingInvoiceLineDescription", () => {
         appointmentDate: "2026-06-20",
       }),
     ).toBe("Full Groom + Nail Clip — Bella — 20 Jun 2026");
+  });
+});
+
+describe("canSyncGroomingAppointmentPriceToInvoice", () => {
+  it("allows draft and unpaid outstanding invoices", () => {
+    expect(canSyncGroomingAppointmentPriceToInvoice("draft", 0)).toBe(true);
+    expect(canSyncGroomingAppointmentPriceToInvoice("outstanding", 0)).toBe(true);
+    expect(canSyncGroomingAppointmentPriceToInvoice("overdue", null)).toBe(true);
+  });
+
+  it("blocks paid or partially paid invoices", () => {
+    expect(canSyncGroomingAppointmentPriceToInvoice("paid", 0)).toBe(false);
+    expect(canSyncGroomingAppointmentPriceToInvoice("partially_paid", 50)).toBe(false);
+    expect(canSyncGroomingAppointmentPriceToInvoice("outstanding", 10)).toBe(false);
   });
 });
 

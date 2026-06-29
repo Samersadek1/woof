@@ -111,9 +111,17 @@ export function GroomingPetDraftCard({
   const dogSizeManualRef = useRef(false);
   const { data: groomers = [] } = useGroomingGroomers();
 
+  const primaryPricingCheckbox = useMemo(
+    () =>
+      resolvePrimaryGroomingCheckbox(
+        draft.selectedServices.filter(isGroomingPricingCheckbox),
+      ),
+    [draft.selectedServices],
+  );
+
   useEffect(() => {
     priceManualRef.current = false;
-  }, [draft.selectedServices, draft.dogSize, draft.useCredit, pet.coat_type]);
+  }, [primaryPricingCheckbox, draft.dogSize, draft.useCredit, pet.coat_type]);
 
   useEffect(() => {
     if (!enabled || dogSizeManualRef.current) return;

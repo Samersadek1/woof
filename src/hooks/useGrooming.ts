@@ -9,7 +9,11 @@ import {
   groomingCapacityKeys,
 } from "@/hooks/useGroomingCapacity";
 import { mergeGroomingBookingLinkHits, type GroomingBookingLinkHit } from "@/lib/groomingBookingLinkSearch";
-import { finalizeGroomingCheckoutInvoice, syncGroomingDraftInvoiceFromAppointment } from "@/lib/groomingCheckoutInvoice";
+import {
+  finalizeGroomingCheckoutInvoice,
+  syncGroomingInvoicePriceFromAppointment,
+  type GroomingInvoicePriceSyncResult,
+} from "@/lib/groomingCheckoutInvoice";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
@@ -50,7 +54,7 @@ export const queryKeys = {
   ownerGrooming: (ownerId: string) => ["grooming", "owner", ownerId] as const,
 };
 
-function invalidateGrooming(
+export function invalidateGrooming(
   qc: QueryClient,
   opts: { appointmentDate?: string; petId?: string; ownerId?: string },
 ) {
@@ -260,11 +264,19 @@ export function useOwnerGroomingAppointments(ownerId: string) {
   });
 }
 
+export type UpdateGroomingAppointmentResult = {
+  row: GroomingRow;
+  invoiceSync: GroomingInvoicePriceSyncResult | null;
+};
+
 export function useUpdateGroomingAppointment() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: GroomingUpdate & { id: string }) => {
+    mutationFn: async ({
+      id,
+      ...updates
+    }: GroomingUpdate & { id: string }): Promise<UpdateGroomingAppointmentResult> => {
       const payload = withoutDogSizeColumn(updates);
       const { data, error } = await supabase
         .from("grooming_appointments")
@@ -275,13 +287,28 @@ export function useUpdateGroomingAppointment() {
 
       if (error) throw error;
 
+      let invoiceSync: GroomingInvoicePriceSyncResult | null = null;
       if (updates.price !== undefined) {
-        await syncGroomingDraftInvoiceFromAppointment(supabase, id);
+        try {
+          invoiceSync = await syncGroomingInvoicePriceFromAppointment(
+            supabase,
+            id,
+            data.price,
+          );
+        } catch (syncErr) {
+          invoiceSync = {
+            kind: "skipped",
+            reason:
+              syncErr instanceof Error
+                ? syncErr.message
+                : "Linked invoice could not be updated.",
+          };
+        }
       }
 
-      return data as GroomingRow;
+      return { row: data as GroomingRow, invoiceSync };
     },
-    onSuccess: (data, variables) => {
+    onSuccess: ({ row: data, invoiceSync }, variables) => {
       invalidateGrooming(qc, {
         appointmentDate: data.appointment_date,
         petId: data.pet_id,
@@ -290,6 +317,7 @@ export function useUpdateGroomingAppointment() {
       if (variables.price !== undefined) {
         qc.invalidateQueries({ queryKey: ["invoice", "grooming", data.id] });
         qc.invalidateQueries({ queryKey: ["grooming", "dayInvoices"] });
+        qc.invalidateQueries({ queryKey: ["invoices"] });
       }
     },
   });
