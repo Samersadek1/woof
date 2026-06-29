@@ -9,14 +9,14 @@ import { useStatementLedger } from "@/hooks/useWallet";
 import { StatementLedgerTable } from "@/components/billing/StatementLedgerTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { invoiceBalanceDue } from "@/lib/invoiceStatus";
 
 function aed(v: number) {
   return `AED ${v.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function collectableBalance(total: number, amountPaid = 0): number {
-  return Math.max(0, total - amountPaid);
+function collectableBalance(status: string, total: number, amountPaid = 0): number {
+  return invoiceBalanceDue(status, total, amountPaid);
 }
 
 export default function OwnerStatementPage() {
@@ -33,13 +33,13 @@ export default function OwnerStatementPage() {
     () =>
       statement
         .filter((r) => ["outstanding", "overdue", "partially_paid"].includes(r.status))
-        .filter((r) => collectableBalance(r.total, r.amount_paid ?? 0) > 0)
+        .filter((r) => collectableBalance(r.status, r.total, r.amount_paid ?? 0) > 0)
         .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")),
     [statement],
   );
 
   const outstandingTotal = useMemo(
-    () => outstanding.reduce((sum, r) => sum + collectableBalance(r.total, r.amount_paid ?? 0), 0),
+    () => outstanding.reduce((sum, r) => sum + collectableBalance(r.status, r.total, r.amount_paid ?? 0), 0),
     [outstanding],
   );
 
@@ -137,7 +137,7 @@ export default function OwnerStatementPage() {
                     </div>
                     <div className="text-right">
                       <p className="font-semibold tabular-nums">
-                        {aed(collectableBalance(r.total, r.amount_paid ?? 0))}
+                        {aed(collectableBalance(r.status, r.total, r.amount_paid ?? 0))}
                       </p>
                       {r.days_overdue > 0 && (
                         <p className="text-xs text-red-600">Overdue {r.days_overdue}d</p>

@@ -13,6 +13,7 @@ import {
   invoicePaymentMethodToTransactionType,
 } from "@/lib/paymentMethod";
 import { invoiceDueDateToday } from "@/lib/invoiceDueDate";
+import { invoiceBalanceDue } from "@/lib/invoiceStatus";
 import {
   invoiceAmountDue,
   invoiceDisplayTotals,
@@ -37,6 +38,7 @@ export type InvoiceStatus =
   | "outstanding"
   | "overdue"
   | "voided"
+  | "consolidated"
   | "cancelled";
 
 export type PaymentMethod = import("@/lib/paymentMethod").PaymentMethod;
@@ -131,7 +133,7 @@ export interface StatementRow {
 }
 
 function statementBalanceDue(row: StatementRow): number {
-  return Math.max(0, row.total - (row.amount_paid ?? 0));
+  return invoiceBalanceDue(row.status, row.total, row.amount_paid ?? 0);
 }
 
 export interface BillingAdjustment {

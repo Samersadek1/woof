@@ -66,6 +66,7 @@ async function findExistingHourlyDraft(
     .eq("status", "draft")
     .eq("issue_date", sessionDate)
     .neq("status", "voided")
+    .neq("status", "consolidated")
     .order("created_at", { ascending: true })
     .limit(1);
   if (error) throw error;

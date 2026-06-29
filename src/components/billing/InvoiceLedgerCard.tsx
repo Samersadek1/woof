@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { formatAed, roundAed } from "@/lib/money";
+import { invoiceBalanceDue } from "@/lib/invoiceStatus";
 import {
   paymentMethodLabel,
   INVOICE_PAYMENT_METHOD_OPTIONS,
@@ -94,9 +95,12 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
   const { invoice, lines, payments, amendments, charges, totalPaid } = ledger;
   const walletBalance = account?.walletBalance ?? 0;
   const accountBalance = account?.accountBalance ?? 0;
-  const balanceDue = Math.max(0, charges - totalPaid);
+  const balanceDue = invoiceBalanceDue(invoice.status, charges, totalPaid);
   const invoiceSettled = balanceDue < 0.01;
-  const canVoid = invoice.status !== "finalised" && invoice.status !== "voided";
+  const canVoid =
+    invoice.status !== "finalised" &&
+    invoice.status !== "voided" &&
+    invoice.status !== "consolidated";
   const hasPayments = payments.length > 0;
 
   // This invoice's contribution to outstanding debt, used to detect whether the
@@ -383,6 +387,11 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
               ? ` on ${format(new Date(invoice.voided_at), "d MMM yyyy, HH:mm")}`
               : ""}
             . {invoice.voided_reason ?? ""}
+          </p>
+        ) : invoice.status === "consolidated" ? (
+          <p className="text-sm text-muted-foreground pt-2 border-t">
+            This invoice was consolidated into another invoice. Balance due is zero; line items are
+            read-only.
           </p>
         ) : (
           <p className="text-sm text-muted-foreground pt-2 border-t">

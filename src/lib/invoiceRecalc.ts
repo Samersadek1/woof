@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { deriveInvoiceStatusAfterRecalc } from "@/lib/boardingInvoiceLineUtils";
+import { isInactiveInvoiceStatus } from "@/lib/invoiceStatus";
 import { roundAed } from "@/lib/money";
 import { invoiceDisplayTotals, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
 
@@ -33,7 +34,7 @@ export function isDiscountAdjustmentType(type: string): boolean {
 }
 
 export function canEditInvoiceLineItems(status: string): boolean {
-  return !["voided", "cancelled", "paid"].includes(status);
+  return !isInactiveInvoiceStatus(status) && status !== "paid";
 }
 
 export function canDeleteInvoiceLineItems(status: string): boolean {
@@ -41,7 +42,7 @@ export function canDeleteInvoiceLineItems(status: string): boolean {
 }
 
 export function canDeleteInvoiceAdjustments(status: string): boolean {
-  return !["voided", "cancelled", "paid"].includes(status);
+  return !isInactiveInvoiceStatus(status) && status !== "paid";
 }
 
 function totalsFromLines(

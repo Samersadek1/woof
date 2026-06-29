@@ -66,6 +66,7 @@ export function CancelBookingDialog({ open, onOpenChange, booking, onCancelled }
           .select("id, status, amount_paid")
           .eq("booking_id", booking.id)
           .neq("status", "voided")
+          .neq("status", "consolidated")
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();

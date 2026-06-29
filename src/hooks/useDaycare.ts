@@ -898,7 +898,8 @@ export function usePendingHourlyDaycareForOwner(ownerId: string) {
           .from("invoices")
           .select("id, service_id")
           .in("service_id", sessionIds)
-          .neq("status", "voided");
+          .neq("status", "voided")
+          .neq("status", "consolidated");
         if (invErr) throw invErr;
         for (const inv of invoices ?? []) {
           if (inv.service_id) invoiceIdByServiceId.set(inv.service_id, inv.id);

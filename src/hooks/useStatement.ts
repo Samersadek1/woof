@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { isInactiveInvoiceStatus } from "@/lib/invoiceStatus";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
 
 export type StatementRow = {
@@ -16,7 +17,7 @@ export type StatementRow = {
 
 function daysOverdueFor(dueDate: string | null, status: string): number {
   if (!dueDate) return 0;
-  if (["paid", "voided", "cancelled"].includes(status)) return 0;
+  if (isInactiveInvoiceStatus(status)) return 0;
   const due = new Date(`${dueDate}T00:00:00`);
   const today = new Date();
   today.setHours(0, 0, 0, 0);

@@ -116,6 +116,7 @@ export async function syncBoardingBookingInvoice(
     .select("*")
     .eq("booking_id", bookingId)
     .neq("status", "voided")
+    .neq("status", "consolidated")
     .order("created_at", { ascending: false })
     .limit(1);
 
@@ -304,7 +305,8 @@ export async function listBoardingBookingsMissingInvoice(): Promise<BoardingBook
     .from("invoices")
     .select("booking_id")
     .not("booking_id", "is", null)
-    .neq("status", "voided");
+    .neq("status", "voided")
+    .neq("status", "consolidated");
   if (invErr) throw invErr;
 
   const invoicedBookingIds = new Set(
@@ -390,7 +392,8 @@ export async function listBoardingBookingsWithInvoice(): Promise<BoardingBooking
     .from("invoices")
     .select("booking_id")
     .not("booking_id", "is", null)
-    .neq("status", "voided");
+    .neq("status", "voided")
+    .neq("status", "consolidated");
   if (invErr) throw invErr;
 
   const invoicedBookingIds = new Set(

@@ -136,6 +136,7 @@ async function fetchInvoicePrintable(invoiceId: string) {
 function watermark(status: string): { text: string; className: string } | null {
   if (status === "paid") return { text: "PAID", className: "text-slate-300" };
   if (status === "voided" || status === "cancelled") return { text: "VOIDED", className: "text-red-300" };
+  if (status === "consolidated") return { text: "CONSOLIDATED", className: "text-indigo-300" };
   return null;
 }
 

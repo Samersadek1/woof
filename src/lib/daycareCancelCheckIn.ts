@@ -18,6 +18,7 @@ async function creditUnitsToRestore(
     .select("id")
     .eq("service_id", sessionId)
     .neq("status", "voided")
+    .neq("status", "consolidated")
     .limit(1);
 
   const invoiceId = invoices?.[0]?.id;
@@ -98,6 +99,7 @@ export async function cancelDaycareCheckIn(sessionId: string): Promise<void> {
     .eq("service_id", sessionId)
     .eq("status", "draft")
     .neq("status", "voided")
+    .neq("status", "consolidated")
     .limit(1);
   const draftIdViaService = draftViaServiceId?.[0]?.id ?? null;
   const draftInvoiceId = draftIdFromNotes ?? draftIdViaService;
@@ -157,6 +159,7 @@ export async function cancelDaycareCheckIn(sessionId: string): Promise<void> {
     .select("*")
     .eq("service_id", sessionId)
     .neq("status", "voided")
+    .neq("status", "consolidated")
     .neq("status", "draft");
 
   if (invErr) throw invErr;

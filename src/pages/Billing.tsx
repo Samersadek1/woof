@@ -140,6 +140,7 @@ const INVOICE_STATUS_BADGE: Record<string, { label: string; className: string }>
   outstanding: { label: "Outstanding", className: "bg-orange-50 text-orange-700 border-orange-200" },
   overdue: { label: "Overdue", className: "bg-red-50 text-red-700 border-red-200" },
   voided: { label: "Voided", className: "bg-gray-100 text-gray-500 border-gray-200" },
+  consolidated: { label: "Consolidated", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   cancelled: { label: "Cancelled", className: "bg-gray-100 text-gray-500 border-gray-200" },
 };
 
@@ -1000,6 +1001,7 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
             <SelectItem value="outstanding">Outstanding</SelectItem>
             <SelectItem value="overdue">Overdue</SelectItem>
             <SelectItem value="voided">Voided</SelectItem>
+            <SelectItem value="consolidated">Consolidated</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
@@ -1051,7 +1053,7 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                   const sb = INVOICE_STATUS_BADGE[inv.status] ?? INVOICE_STATUS_BADGE.draft;
                   const canFinalise = inv.status === "draft";
                   const canPay = ["finalised", "issued", "outstanding", "overdue", "partially_paid"].includes(inv.status);
-                  const canVoid = !["cancelled", "voided", "paid"].includes(inv.status);
+                  const canVoid = !["cancelled", "voided", "consolidated", "paid"].includes(inv.status);
                   const canSelect = canConsolidateInvoiceStatus(inv.status);
                   return (
                     <TableRow key={inv.id}>

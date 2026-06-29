@@ -187,6 +187,7 @@ const INVOICE_STATUS_BADGE: Record<string, { label: string; className: string }>
   outstanding: { label: "Outstanding", className: "bg-amber-50 text-amber-700 border-amber-200" },
   overdue: { label: "Overdue", className: "bg-red-50 text-red-700 border-red-200" },
   voided: { label: "Voided", className: "bg-gray-100 text-gray-500 border-gray-200 line-through" },
+  consolidated: { label: "Consolidated", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   cancelled: { label: "Cancelled", className: "bg-gray-100 text-gray-500 border-gray-200" },
 };
 

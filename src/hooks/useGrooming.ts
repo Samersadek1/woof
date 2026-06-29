@@ -453,6 +453,7 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
           .select(invoiceSelect)
           .eq("id", appt.invoice_id)
           .neq("status", "voided")
+          .neq("status", "consolidated")
           .maybeSingle();
         data = res.data as Record<string, unknown> | null;
         error = res.error;
@@ -465,6 +466,7 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
           .eq("service_id", appointmentId!)
           .eq("service_type", "grooming")
           .neq("status", "voided")
+          .neq("status", "consolidated")
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();

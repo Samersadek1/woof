@@ -16,7 +16,7 @@ export function deriveInvoiceStatusAfterRecalc(
   amountPaid: number,
   grandTotal: number,
 ): string {
-  if (currentStatus === "voided" || currentStatus === "cancelled") return currentStatus;
+  if (isInactiveInvoiceStatus(currentStatus)) return currentStatus;
 
   const paid = roundAed(amountPaid);
   const total = roundAed(grandTotal);

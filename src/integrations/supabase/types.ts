@@ -4127,6 +4127,7 @@ export type Database = {
         | "outstanding"
         | "overdue"
         | "voided"
+        | "consolidated"
       payment_method:
         | "wallet"
         | "card"
@@ -4434,6 +4435,7 @@ export const Constants = {
         "outstanding",
         "overdue",
         "voided",
+        "consolidated",
       ],
       payment_method: [
         "wallet",

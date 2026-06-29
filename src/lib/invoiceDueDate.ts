@@ -25,6 +25,7 @@ export async function syncInvoiceDueDateForBooking(
     .from("invoices")
     .update({ due_date: dueDate })
     .eq("booking_id", bookingId)
-    .neq("status", "voided");
+    .neq("status", "voided")
+    .neq("status", "consolidated");
   if (error) throw error;
 }

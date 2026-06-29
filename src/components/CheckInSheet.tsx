@@ -175,6 +175,7 @@ export function CheckInSheet({
         )
         .eq("booking_id", bookingId)
         .neq("status", "voided")
+        .neq("status", "consolidated")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();

@@ -39,6 +39,7 @@ const STATUSES: InvoiceStatus[] = [
   "partially_paid",
   "paid",
   "voided",
+  "consolidated",
   "cancelled",
 ];
 
@@ -48,7 +49,7 @@ const STATUS_PRESETS: { label: string; statuses: InvoiceStatus[] }[] = [
     statuses: ["finalised", "issued", "outstanding", "overdue", "partially_paid"],
   },
   { label: "Settled", statuses: ["paid"] },
-  { label: "Closed", statuses: ["voided", "cancelled"] },
+  { label: "Closed", statuses: ["voided", "cancelled", "consolidated"] },
 ];
 
 const WHATSAPP_REMINDER_STATUSES: InvoiceStatus[] = [
@@ -77,6 +78,7 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: "border-slate-300 text-slate-500 bg-slate-100 line-through",
   paid: "border-emerald-300 text-emerald-700 bg-emerald-50",
   voided: "border-slate-300 text-slate-500 bg-slate-100 line-through",
+  consolidated: "border-indigo-300 text-indigo-700 bg-indigo-50",
 };
 
 function renderBranchCode(branchCode: string | null) {

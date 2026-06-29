@@ -97,6 +97,7 @@ export function CheckOutSheet({
         .select("id, total, vat_aed, service_type, notes, status, amount_paid")
         .eq("booking_id", bookingId)
         .neq("status", "voided")
+        .neq("status", "consolidated")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();

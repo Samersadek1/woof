@@ -74,7 +74,7 @@ export function canSyncGroomingAppointmentPriceToInvoice(
   status: string,
   amountPaid: number | null | undefined,
 ): boolean {
-  if (["voided", "cancelled", "paid", "partially_paid"].includes(status)) return false;
+  if (["voided", "consolidated", "cancelled", "paid", "partially_paid"].includes(status)) return false;
   if (status === "draft") return true;
   if (status === "outstanding" || status === "overdue") {
     return roundAed(amountPaid ?? 0) <= 0;
@@ -123,6 +123,7 @@ async function resolveInvoice(
       .select("id, status, total, amount_paid, due_date")
       .eq("id", appt.invoice_id)
       .neq("status", "voided")
+      .neq("status", "consolidated")
       .maybeSingle();
     if (error) throw error;
     if (data) return data;
@@ -134,6 +135,7 @@ async function resolveInvoice(
     .eq("service_type", "grooming")
     .eq("service_id", appt.id)
     .neq("status", "voided")
+    .neq("status", "consolidated")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

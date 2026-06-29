@@ -73,6 +73,7 @@ const STATUS_COLOR: Record<string, string> = {
   overdue: "bg-red-50 text-red-700 border-red-300",
   paid: "bg-emerald-50 text-emerald-700 border-emerald-300",
   voided: "bg-slate-100 text-slate-500 border-slate-300 line-through",
+  consolidated: "bg-indigo-50 text-indigo-700 border-indigo-300",
 };
 
 function aed(v: number) {
@@ -609,7 +610,7 @@ export default function InvoiceDetailPage() {
 
         <Card>
           <CardContent className="p-4 flex flex-wrap gap-2">
-            {status !== "voided" && status !== "cancelled" && (
+            {status !== "voided" && status !== "consolidated" && status !== "cancelled" && (
               <Button variant="outline" onClick={handlePrint} data-testid="invoice-detail-print-btn">
                 <Printer className="mr-2 h-4 w-4" />
                 Print
@@ -689,6 +690,11 @@ export default function InvoiceDetailPage() {
               <Button variant="destructive" onClick={doVoid}>Void</Button>
             )}
             {status === "voided" && <p className="text-sm text-muted-foreground">Voided invoice is read-only.</p>}
+            {status === "consolidated" && (
+              <p className="text-sm text-muted-foreground">
+                Consolidated invoice is read-only. Its balance was moved to a merged invoice.
+              </p>
+            )}
             <Button type="button" variant="destructive" onClick={() => setDeleteOpen(true)}>
               Delete invoice
             </Button>

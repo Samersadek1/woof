@@ -268,7 +268,7 @@ export async function removeUnpaidServiceInvoice(invoiceId: string): Promise<voi
   if (Number(inv.amount_paid ?? 0) > 0) {
     throw new Error("Invoice already has payments and cannot be rolled back automatically.");
   }
-  if (inv.status === "voided") return;
+  if (inv.status === "voided" || inv.status === "consolidated") return;
 
   const { error: lineErr } = await getSupabase()
     .from("invoice_line_items")

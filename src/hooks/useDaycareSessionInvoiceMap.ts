@@ -11,7 +11,8 @@ export function useDaycareSessionInvoiceMap(sessionIds: string[]) {
         .from("invoices")
         .select("id, service_id")
         .in("service_id", sessionIds)
-        .neq("status", "voided");
+        .neq("status", "voided")
+        .neq("status", "consolidated");
       if (error) throw error;
       const map = new Map<string, string>();
       for (const row of data ?? []) {

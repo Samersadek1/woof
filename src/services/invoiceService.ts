@@ -1,6 +1,7 @@
 import { supabase as defaultClient } from "@/integrations/supabase/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { isInactiveInvoiceStatus } from "@/lib/invoiceStatus";
 import { roundAed } from "@/lib/money";
 import { invoiceAmountDue } from "@/lib/vatConfig";
 import { type PaymentMethod } from "@/lib/paymentMethod";
@@ -153,8 +154,8 @@ export async function recordPayment(
     .single();
   if (invErr) return { success: false, error: invErr.message };
 
-  if (invoice.status === "voided") {
-    return { success: false, error: "Cannot record a payment on a voided invoice." };
+  if (isInactiveInvoiceStatus(invoice.status)) {
+    return { success: false, error: "Cannot record a payment on a closed invoice." };
   }
 
   const { data: owner, error: ownerErr } = await supabase
@@ -258,6 +259,9 @@ export async function voidInvoice(
 
   if (invoice.status === "finalised") {
     return { success: false, error: "Finalised invoices cannot be voided." };
+  }
+  if (invoice.status === "consolidated") {
+    return { success: false, error: "Consolidated invoices cannot be voided." };
   }
 
   let notes = invoice.notes ?? "";
