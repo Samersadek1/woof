@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { deriveInvoiceStatusAfterRecalc } from "@/lib/boardingInvoiceLineUtils";
@@ -56,9 +57,12 @@ function totalsFromLines(
   return { subtotal: roundAed(subtotal), grossTotal, vatAed };
 }
 
-async function effectiveAmountPaid(invoice: InvoiceRow): Promise<number> {
+async function effectiveAmountPaid(
+  invoice: InvoiceRow,
+  client: SupabaseClient<Database> = supabase,
+): Promise<number> {
   const stored = roundAed(invoice.amount_paid ?? 0);
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("wallet_transactions")
     .select("amount, transaction_type")
     .eq("invoice_id", invoice.id);
@@ -73,15 +77,18 @@ async function effectiveAmountPaid(invoice: InvoiceRow): Promise<number> {
 }
 
 /** Recompute invoice header totals from line items; preserves discount_amount. */
-export async function recalculateInvoiceTotals(invoiceId: string): Promise<void> {
-  const { data: invoice, error: invErr } = await supabase
+export async function recalculateInvoiceTotals(
+  invoiceId: string,
+  client: SupabaseClient<Database> = supabase,
+): Promise<void> {
+  const { data: invoice, error: invErr } = await client
     .from("invoices")
     .select("*")
     .eq("id", invoiceId)
     .single();
   if (invErr) throw invErr;
 
-  const { data: lines, error: linesErr } = await supabase
+  const { data: lines, error: linesErr } = await client
     .from("invoice_line_items")
     .select("quantity, unit_price")
     .eq("invoice_id", invoiceId);
@@ -89,7 +96,7 @@ export async function recalculateInvoiceTotals(invoiceId: string): Promise<void>
 
   const discountAmount = roundAed(invoice.discount_amount ?? 0);
   const { subtotal, grossTotal, vatAed } = totalsFromLines(lines ?? [], discountAmount);
-  const amountPaid = await effectiveAmountPaid(invoice);
+  const amountPaid = await effectiveAmountPaid(invoice, client);
   const { grandTotal } = invoiceDisplayTotals({
     total: grossTotal,
     vat_aed: vatAed,
@@ -112,7 +119,7 @@ export async function recalculateInvoiceTotals(invoiceId: string): Promise<void>
     updatePayload.paid_at = null;
   }
 
-  const { error: updErr } = await supabase
+  const { error: updErr } = await client
     .from("invoices")
     .update(updatePayload)
     .eq("id", invoiceId);

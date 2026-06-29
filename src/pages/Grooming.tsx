@@ -21,6 +21,7 @@ import {
   useGroomingDayInvoices,
   useFinalizeGroomingCheckout,
   invalidateGrooming,
+  useSyncGroomingInvoicePrice,
   sumGroomingInvoicePaidAed,
   sumGroomingInvoicePendingAed,
   type GroomingAppointmentWithJoins,
@@ -41,6 +42,7 @@ import {
 import {
   groomingPaymentMethodLabel,
 } from "@/lib/groomingPaymentMethod";
+import { groomingPriceAed } from "@/lib/groomingCheckoutInvoice";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -512,6 +514,7 @@ const GroomingPage = () => {
   const statusTransition = useGroomingStatusTransition();
   const finalizeCheckout = useFinalizeGroomingCheckout();
   const updateAppt = useUpdateGroomingAppointment();
+  const syncInvoicePrice = useSyncGroomingInvoicePrice();
 
   const [actionAppt, setActionAppt] = useState<GroomingAppointmentWithJoins | null>(null);
   const [editAppt, setEditAppt] = useState<GroomingAppointmentWithJoins | null>(null);
@@ -527,6 +530,7 @@ const GroomingPage = () => {
   const [editGroomerName, setEditGroomerName] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editVisitNotes, setEditVisitNotes] = useState("");
+  const [editFormApptId, setEditFormApptId] = useState<string | null>(null);
 
   const { data: groomers = [] } = useGroomingGroomers();
 
@@ -610,6 +614,13 @@ const GroomingPage = () => {
     };
   }, [panelInvoice]);
 
+  const actionApptPriceMismatch = useMemo(() => {
+    if (!actionAppt || !panelInvoiceTotals) return false;
+    return (
+      Math.abs(groomingPriceAed(actionAppt.price) - panelInvoiceTotals.grandTotal) > 0.001
+    );
+  }, [actionAppt, panelInvoiceTotals]);
+
   const eodStatusCounts = useMemo(() => {
     let completed = 0;
     let pending = 0;
@@ -667,7 +678,12 @@ const GroomingPage = () => {
   }, [existingPetGroomingNote?.note, actionAppt?.id]);
 
   useEffect(() => {
-    if (!editAppt) return;
+    if (!editAppt) {
+      setEditFormApptId(null);
+      return;
+    }
+    if (editAppt.id === editFormApptId) return;
+    setEditFormApptId(editAppt.id);
     setEditSelectedServices(serviceCheckboxValuesFromAppointment(editAppt));
     setEditApptDate(
       isValidIsoDate(editAppt.appointment_date)
@@ -680,7 +696,7 @@ const GroomingPage = () => {
     setEditGroomerName(editAppt.grooming_notes ?? "");
     setEditPrice(editAppt.price != null ? String(editAppt.price) : "");
     setEditVisitNotes(userVisitNotesFromStored(editAppt.notes));
-  }, [editAppt]);
+  }, [editAppt, editFormApptId]);
 
   useEffect(() => {
     const max = maxDurationMinutesForTimeInput(editApptTime);
@@ -1338,6 +1354,60 @@ const GroomingPage = () => {
                       <p className="text-xs text-muted-foreground capitalize">
                         Status: {panelInvoice.status.replace(/_/g, " ")}
                       </p>
+                      {actionApptPriceMismatch ? (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-2">
+                          <p>
+                            Appointment price is {formatAed(groomingPriceAed(actionAppt.price))} but
+                            invoice total is {formatAed(panelInvoiceTotals?.grandTotal ?? 0)}.
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="bg-white"
+                            disabled={syncInvoicePrice.isPending}
+                            data-testid="grooming-sync-invoice-price-btn"
+                            onClick={() => {
+                              syncInvoicePrice.mutate(
+                                {
+                                  appointmentId: actionAppt.id,
+                                  price: actionAppt.price,
+                                  invoiceId: panelInvoice.id,
+                                  appointmentDate: actionAppt.appointment_date,
+                                  petId: actionAppt.pet_id,
+                                  ownerId: actionAppt.owner_id,
+                                },
+                                {
+                                  onSuccess: (result) => {
+                                    if (result.kind === "synced") {
+                                      toast.success(
+                                        `Invoice synced to ${formatAed(result.total)}.`,
+                                      );
+                                    } else if (result.kind === "skipped") {
+                                      toast.warning(result.reason);
+                                    } else if (result.kind === "no_invoice") {
+                                      toast.warning("No linked invoice found to sync.");
+                                    } else {
+                                      toast.success("Invoice already matches appointment price.");
+                                    }
+                                  },
+                                  onError: (e) =>
+                                    toast.error(
+                                      e instanceof Error
+                                        ? e.message
+                                        : "Could not sync invoice price.",
+                                    ),
+                                },
+                              );
+                            }}
+                          >
+                            {syncInvoicePrice.isPending && (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Sync invoice to appointment price
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   )}
                   <Button

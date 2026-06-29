@@ -62,6 +62,13 @@ export function groomingInvoiceLineDescription(args: {
   return `${svcLabel} — ${args.petName} — ${dateLabel}`;
 }
 
+/** Coerce Postgres numeric / string appointment prices to AED. */
+export function groomingPriceAed(value: number | string | null | undefined): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return roundAed(parsed);
+}
+
 /** Whether a grooming appointment price change may update the linked invoice line. */
 export function canSyncGroomingAppointmentPriceToInvoice(
   status: string,
@@ -192,7 +199,7 @@ async function syncAppointmentPriceToInvoiceLine(
     };
   }
 
-  const targetPrice = Math.max(0, appt.price ?? 0);
+  const targetPrice = groomingPriceAed(appt.price);
   const { data: lines, error: linesErr } = await supabase
     .from("invoice_line_items")
     .select("id, unit_price, quantity, sort_order")
@@ -203,10 +210,10 @@ async function syncAppointmentPriceToInvoiceLine(
   const primary = lines?.[0];
   if (!primary) return { kind: "no_invoice" };
 
-  const currentTotal = roundAed(primary.unit_price * Math.max(1, primary.quantity));
-  if (currentTotal === roundAed(targetPrice)) return { kind: "unchanged" };
+  const currentTotal = groomingPriceAed(primary.unit_price * Math.max(1, primary.quantity));
+  if (currentTotal === targetPrice) return { kind: "unchanged" };
 
-  const lineTotal = roundAed(targetPrice);
+  const lineTotal = targetPrice;
   const { error: updErr } = await supabase
     .from("invoice_line_items")
     .update({
@@ -217,7 +224,7 @@ async function syncAppointmentPriceToInvoiceLine(
     .eq("id", primary.id);
   if (updErr) throw updErr;
 
-  await recalculateInvoiceTotals(invoiceId);
+  await recalculateInvoiceTotals(invoiceId, supabase);
 
   const { data: refreshed, error: refreshErr } = await supabase
     .from("invoices")
@@ -283,7 +290,7 @@ export async function syncGroomingInvoicePriceFromAppointment(
   knownPrice?: number | null,
 ): Promise<GroomingInvoicePriceSyncResult> {
   const appt = await loadAppointment(supabase, appointmentId);
-  if (knownPrice !== undefined) appt.price = knownPrice;
+  if (knownPrice !== undefined) appt.price = groomingPriceAed(knownPrice);
   const invoice = await resolveInvoice(supabase, appt);
   if (!invoice) return { kind: "no_invoice" };
   return syncAppointmentPriceToInvoiceLine(supabase, invoice.id, appt);

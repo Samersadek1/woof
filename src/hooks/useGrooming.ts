@@ -11,6 +11,7 @@ import {
 import { mergeGroomingBookingLinkHits, type GroomingBookingLinkHit } from "@/lib/groomingBookingLinkSearch";
 import {
   finalizeGroomingCheckoutInvoice,
+  groomingPriceAed,
   syncGroomingInvoicePriceFromAppointment,
   type GroomingInvoicePriceSyncResult,
 } from "@/lib/groomingCheckoutInvoice";
@@ -288,22 +289,20 @@ export function useUpdateGroomingAppointment() {
       if (error) throw error;
 
       let invoiceSync: GroomingInvoicePriceSyncResult | null = null;
-      if (updates.price !== undefined) {
-        try {
-          invoiceSync = await syncGroomingInvoicePriceFromAppointment(
-            supabase,
-            id,
-            data.price,
-          );
-        } catch (syncErr) {
-          invoiceSync = {
-            kind: "skipped",
-            reason:
-              syncErr instanceof Error
-                ? syncErr.message
-                : "Linked invoice could not be updated.",
-          };
-        }
+      try {
+        invoiceSync = await syncGroomingInvoicePriceFromAppointment(
+          supabase,
+          id,
+          groomingPriceAed(data.price),
+        );
+      } catch (syncErr) {
+        invoiceSync = {
+          kind: "skipped",
+          reason:
+            syncErr instanceof Error
+              ? syncErr.message
+              : "Linked invoice could not be updated.",
+        };
       }
 
       return { row: data as GroomingRow, invoiceSync };
@@ -314,10 +313,49 @@ export function useUpdateGroomingAppointment() {
         petId: data.pet_id,
         ownerId: data.owner_id,
       });
-      if (variables.price !== undefined) {
-        qc.invalidateQueries({ queryKey: ["invoice", "grooming", data.id] });
-        qc.invalidateQueries({ queryKey: ["grooming", "dayInvoices"] });
-        qc.invalidateQueries({ queryKey: ["invoices"] });
+      qc.invalidateQueries({ queryKey: ["invoice", "grooming", data.id] });
+      qc.invalidateQueries({ queryKey: ["grooming", "dayInvoices"] });
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      if (data.invoice_id) {
+        qc.invalidateQueries({ queryKey: ["invoice", data.invoice_id] });
+      }
+      void variables;
+      void invoiceSync;
+    },
+  });
+}
+
+export function useSyncGroomingInvoicePrice() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: {
+      appointmentId: string;
+      price: number | null;
+      invoiceId?: string | null;
+      appointmentDate?: string;
+      petId?: string;
+      ownerId?: string;
+    }) =>
+      syncGroomingInvoicePriceFromAppointment(
+        supabase,
+        params.appointmentId,
+        groomingPriceAed(params.price),
+      ),
+    onSuccess: (result, params) => {
+      invalidateGrooming(qc, {
+        appointmentDate: params.appointmentDate,
+        petId: params.petId,
+        ownerId: params.ownerId,
+      });
+      qc.invalidateQueries({ queryKey: ["invoice", "grooming", params.appointmentId] });
+      qc.invalidateQueries({ queryKey: ["grooming", "dayInvoices"] });
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      if (params.invoiceId) {
+        qc.invalidateQueries({ queryKey: ["invoice", params.invoiceId] });
+      }
+      if (result.kind === "synced" && result.invoiceId) {
+        qc.invalidateQueries({ queryKey: ["invoice", result.invoiceId] });
       }
     },
   });

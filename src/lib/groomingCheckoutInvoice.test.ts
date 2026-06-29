@@ -3,6 +3,7 @@ import {
   canSyncGroomingAppointmentPriceToInvoice,
   checkoutInvoiceFinalizePatch,
   groomingInvoiceLineDescription,
+  groomingPriceAed,
 } from "./groomingCheckoutInvoice";
 
 describe("groomingInvoiceLineDescription", () => {
@@ -15,6 +16,13 @@ describe("groomingInvoiceLineDescription", () => {
         appointmentDate: "2026-06-20",
       }),
     ).toBe("Full Groom + Nail Clip — Bella — 20 Jun 2026");
+  });
+});
+
+describe("groomingPriceAed", () => {
+  it("coerces postgres numeric strings", () => {
+    expect(groomingPriceAed("315")).toBe(315);
+    expect(groomingPriceAed("236.25")).toBe(236.25);
   });
 });
 
