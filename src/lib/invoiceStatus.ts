@@ -26,9 +26,13 @@ export function invoiceBalanceDue(
 /** Statuses excluded when finding the current (non-superseded) invoice for a booking/owner. */
 export const SUPERSEDED_INVOICE_STATUSES = ["voided", "consolidated"] as const;
 
-type NeqQuery<T> = { neq: (column: string, value: string) => T };
+type SupersededFilterQuery<T> = {
+  not: (column: string, operator: string, value: string) => T;
+};
 
-/** Exclude voided and consolidated invoices from an active-invoice lookup. */
-export function withoutSupersededInvoices<T extends NeqQuery<T>>(query: T): T {
-  return query.neq("status", "voided").neq("status", "consolidated");
+export const SUPERSEDED_INVOICE_STATUS_FILTER = "(voided,consolidated)" as const;
+
+/** Exclude superseded invoices from an active-invoice lookup. */
+export function withoutSupersededInvoices<T extends SupersededFilterQuery<T>>(query: T): T {
+  return query.not("status", "in", SUPERSEDED_INVOICE_STATUS_FILTER);
 }

@@ -28,6 +28,7 @@ import { useAccountBalance, accountBalanceQueryKey } from "@/hooks/useAccountBal
 import { formatAed } from "@/hooks/useBilling";
 import { recordExternalInvoicePayment } from "@/lib/recordExternalInvoicePayment";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 import { WALLET_TOPUP_PAYMENT_METHOD_OPTIONS } from "@/lib/paymentMethod";
 import type { ExternalPaymentMethod } from "@/lib/paymentMethod";
 import {
@@ -168,17 +169,17 @@ export function CheckInSheet({
         .eq("id", bookingId)
         .maybeSingle();
       const ownerId = (booking?.owner_id as string | undefined) ?? undefined;
-      const { data: inv } = await supabase
-        .from("invoices")
-        .select(
-          "id, total, vat_aed, service_type, notes, status, amount_paid, deposit_bypassed, deposit_bypass_reason",
-        )
-        .eq("booking_id", bookingId)
-        .neq("status", "voided")
-        .neq("status", "consolidated")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: inv } = await withoutSupersededInvoices(
+        supabase
+          .from("invoices")
+          .select(
+            "id, total, vat_aed, service_type, notes, status, amount_paid, deposit_bypassed, deposit_bypass_reason",
+          )
+          .eq("booking_id", bookingId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      );
       return { ownerId, invoice: inv ?? null };
     },
   });

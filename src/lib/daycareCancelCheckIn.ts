@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { HOURLY_PLACEHOLDER_SERVICE_TYPE, removeSingleSessionFromDraft } from "@/lib/daycareHourlyDraftInvoice";
 import { parseHourlyDraftId } from "@/lib/daycareSessionMeta";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -13,13 +14,9 @@ async function creditUnitsToRestore(
 ): Promise<number> {
   if (serviceCode !== "daycare_hourly") return 1;
 
-  const { data: invoices } = await supabase
-    .from("invoices")
-    .select("id")
-    .eq("service_id", sessionId)
-    .neq("status", "voided")
-    .neq("status", "consolidated")
-    .limit(1);
+  const { data: invoices } = await withoutSupersededInvoices(
+    supabase.from("invoices").select("id").eq("service_id", sessionId).limit(1),
+  );
 
   const invoiceId = invoices?.[0]?.id;
   if (!invoiceId) return 1;
@@ -98,8 +95,6 @@ export async function cancelDaycareCheckIn(sessionId: string): Promise<void> {
     .select("id, service_id, status")
     .eq("service_id", sessionId)
     .eq("status", "draft")
-    .neq("status", "voided")
-    .neq("status", "consolidated")
     .limit(1);
   const draftIdViaService = draftViaServiceId?.[0]?.id ?? null;
   const draftInvoiceId = draftIdFromNotes ?? draftIdViaService;
@@ -154,13 +149,13 @@ export async function cancelDaycareCheckIn(sessionId: string): Promise<void> {
   }
 
   // ── Non-draft invoice handling (finalised/paid) ──────────────────────────
-  const { data: otherInvoices, error: invErr } = await supabase
-    .from("invoices")
-    .select("*")
-    .eq("service_id", sessionId)
-    .neq("status", "voided")
-    .neq("status", "consolidated")
-    .neq("status", "draft");
+  const { data: otherInvoices, error: invErr } = await withoutSupersededInvoices(
+    supabase
+      .from("invoices")
+      .select("*")
+      .eq("service_id", sessionId)
+      .neq("status", "draft"),
+  );
 
   if (invErr) throw invErr;
   for (const invoice of otherInvoices ?? []) {

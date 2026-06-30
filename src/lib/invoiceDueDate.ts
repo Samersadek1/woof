@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 
 import { getSupabase } from "@/lib/supabaseRuntime";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 
 /** Normalise any ISO or YYYY-MM-DD string to a date-only due date. */
 export function invoiceDueDateAtCheckIn(checkInDate: string): string {
@@ -21,11 +22,11 @@ export async function syncInvoiceDueDateForBooking(
   checkInDate: string,
 ): Promise<void> {
   const dueDate = invoiceDueDateAtCheckIn(checkInDate);
-  const { error } = await getSupabase()
-    .from("invoices")
-    .update({ due_date: dueDate })
-    .eq("booking_id", bookingId)
-    .neq("status", "voided")
-    .neq("status", "consolidated");
+  const { error } = await withoutSupersededInvoices(
+    getSupabase()
+      .from("invoices")
+      .update({ due_date: dueDate })
+      .eq("booking_id", bookingId),
+  );
   if (error) throw error;
 }

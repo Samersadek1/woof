@@ -22,12 +22,12 @@ describe("invoiceStatus", () => {
   it("chains superseded status filters", () => {
     const calls: string[] = [];
     const query = {
-      neq: (column: string, value: string) => {
-        calls.push(`${column}:${value}`);
+      not: (column: string, operator: string, value: string) => {
+        calls.push(`${column}.${operator}.${value}`);
         return query;
       },
     };
     withoutSupersededInvoices(query);
-    expect(calls).toEqual(["status:voided", "status:consolidated"]);
+    expect(calls).toEqual(["status.in.(voided,consolidated)"]);
   });
 });

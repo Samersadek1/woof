@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 
 /** Maps daycare session id → non-voided invoice id (via service_id on invoices). */
 export function useDaycareSessionInvoiceMap(sessionIds: string[]) {
@@ -7,12 +8,9 @@ export function useDaycareSessionInvoiceMap(sessionIds: string[]) {
     queryKey: ["daycare_sessions", "invoice_map", sessionIds],
     enabled: sessionIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("invoices")
-        .select("id, service_id")
-        .in("service_id", sessionIds)
-        .neq("status", "voided")
-        .neq("status", "consolidated");
+      const { data, error } = await withoutSupersededInvoices(
+        supabase.from("invoices").select("id, service_id").in("service_id", sessionIds),
+      );
       if (error) throw error;
       const map = new Map<string, string>();
       for (const row of data ?? []) {

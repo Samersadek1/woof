@@ -7,6 +7,7 @@ import { parseGroomingMeta } from "@/lib/groomingAppointmentMeta";
 import { labelForGroomingService } from "@/lib/groomingCatalog";
 import { groomingPaymentMethodLabel } from "@/lib/groomingPaymentMethod";
 import { invoiceDueDateAtCheckIn } from "@/lib/invoiceDueDate";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 import { recalculateInvoiceTotals } from "@/lib/invoiceRecalc";
 import { roundAed } from "@/lib/money";
 
@@ -118,27 +119,27 @@ async function resolveInvoice(
   appt: GroomingApptForCheckout,
 ): Promise<InvoiceRow | null> {
   if (appt.invoice_id) {
-    const { data, error } = await supabase
-      .from("invoices")
-      .select("id, status, total, amount_paid, due_date")
-      .eq("id", appt.invoice_id)
-      .neq("status", "voided")
-      .neq("status", "consolidated")
-      .maybeSingle();
+    const { data, error } = await withoutSupersededInvoices(
+      supabase
+        .from("invoices")
+        .select("id, status, total, amount_paid, due_date")
+        .eq("id", appt.invoice_id)
+        .maybeSingle(),
+    );
     if (error) throw error;
     if (data) return data;
   }
 
-  const { data, error } = await supabase
-    .from("invoices")
-    .select("id, status, total, amount_paid, due_date")
-    .eq("service_type", "grooming")
-    .eq("service_id", appt.id)
-    .neq("status", "voided")
-    .neq("status", "consolidated")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await withoutSupersededInvoices(
+    supabase
+      .from("invoices")
+      .select("id, status, total, amount_paid, due_date")
+      .eq("service_type", "grooming")
+      .eq("service_id", appt.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  );
   if (error) throw error;
   return data;
 }

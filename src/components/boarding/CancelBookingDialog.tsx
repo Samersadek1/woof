@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 import type { BookingWithDetails } from "@/hooks/useBookings";
 import { useUpdateBooking } from "@/hooks/useBookings";
 
@@ -61,15 +62,15 @@ export function CancelBookingDialog({ open, onOpenChange, booking, onCancelled }
       await updateBooking.mutateAsync({ id: booking.id, ...patch });
 
       if (voidInvoice) {
-        const { data: invoice } = await supabase
-          .from("invoices")
-          .select("id, status, amount_paid")
-          .eq("booking_id", booking.id)
-          .neq("status", "voided")
-          .neq("status", "consolidated")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const { data: invoice } = await withoutSupersededInvoices(
+          supabase
+            .from("invoices")
+            .select("id, status, amount_paid")
+            .eq("booking_id", booking.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        );
 
         if (invoice) {
           if ((invoice.amount_paid ?? 0) > 0) {

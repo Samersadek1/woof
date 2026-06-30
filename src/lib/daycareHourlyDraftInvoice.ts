@@ -18,6 +18,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { recalculateInvoiceTotals } from "@/lib/invoiceRecalc";
 import { composeNotesWithHourlyDraft } from "@/lib/daycareSessionMeta";
 import { invoiceDueDateAtCheckIn } from "@/lib/invoiceDueDate";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 import {
   netFromGrossInclusive,
   vatAmountFromGrossInclusive,
@@ -58,17 +59,17 @@ async function findExistingHourlyDraft(
   ownerId: string,
   sessionDate: string,
 ): Promise<string | null> {
-  const { data, error } = await supabase
-    .from("invoices")
-    .select("id")
-    .eq("owner_id", ownerId)
-    .eq("service_type", "daycare")
-    .eq("status", "draft")
-    .eq("issue_date", sessionDate)
-    .neq("status", "voided")
-    .neq("status", "consolidated")
-    .order("created_at", { ascending: true })
-    .limit(1);
+  const { data, error } = await withoutSupersededInvoices(
+    supabase
+      .from("invoices")
+      .select("id")
+      .eq("owner_id", ownerId)
+      .eq("service_type", "daycare")
+      .eq("status", "draft")
+      .eq("issue_date", sessionDate)
+      .order("created_at", { ascending: true })
+      .limit(1),
+  );
   if (error) throw error;
   return data?.[0]?.id ?? null;
 }

@@ -15,6 +15,7 @@ import {
   syncGroomingInvoicePriceFromAppointment,
   type GroomingInvoicePriceSyncResult,
 } from "@/lib/groomingCheckoutInvoice";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
@@ -448,28 +449,28 @@ export function useInvoiceForGroomingAppointment(appointmentId: string | null) {
       let error: { message: string } | null = null;
 
       if (appt?.invoice_id) {
-        const res = await supabase
-          .from("invoices")
-          .select(invoiceSelect)
-          .eq("id", appt.invoice_id)
-          .neq("status", "voided")
-          .neq("status", "consolidated")
-          .maybeSingle();
+        const res = await withoutSupersededInvoices(
+          supabase
+            .from("invoices")
+            .select(invoiceSelect)
+            .eq("id", appt.invoice_id)
+            .maybeSingle(),
+        );
         data = res.data as Record<string, unknown> | null;
         error = res.error;
       }
 
       if (!data && !error) {
-        const res = await supabase
-          .from("invoices")
-          .select(invoiceSelect)
-          .eq("service_id", appointmentId!)
-          .eq("service_type", "grooming")
-          .neq("status", "voided")
-          .neq("status", "consolidated")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const res = await withoutSupersededInvoices(
+          supabase
+            .from("invoices")
+            .select(invoiceSelect)
+            .eq("service_id", appointmentId!)
+            .eq("service_type", "grooming")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        );
         data = res.data as Record<string, unknown> | null;
         error = res.error;
       }

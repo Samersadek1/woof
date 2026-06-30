@@ -12,6 +12,7 @@ import { formatAed, roundAed } from "@/lib/money";
 import { invoiceDueDateAtCheckIn } from "@/lib/invoiceDueDate";
 import { invoiceAdjustmentDiscountTotal } from "@/lib/invoiceRecalc";
 import { invoiceDisplayTotals, vatAmountFromGrossInclusive } from "@/lib/vatConfig";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 type LineRow = Database["public"]["Tables"]["invoice_line_items"]["Row"];
@@ -111,14 +112,14 @@ export async function syncBoardingBookingInvoice(
     return { kind: "skipped", reason: "Cancelled booking" };
   }
 
-  const { data: invoices, error: invListErr } = await getSupabase()
-    .from("invoices")
-    .select("*")
-    .eq("booking_id", bookingId)
-    .neq("status", "voided")
-    .neq("status", "consolidated")
-    .order("created_at", { ascending: false })
-    .limit(1);
+  const { data: invoices, error: invListErr } = await withoutSupersededInvoices(
+    getSupabase()
+      .from("invoices")
+      .select("*")
+      .eq("booking_id", bookingId)
+      .order("created_at", { ascending: false })
+      .limit(1),
+  );
 
   if (invListErr) throw invListErr;
 
@@ -301,12 +302,12 @@ export type BackfillBoardingInvoicesResult = {
 
 /** Active boarding stays with no non-voided invoice (eligible for draft invoice creation). */
 export async function listBoardingBookingsMissingInvoice(): Promise<BoardingBookingMissingInvoice[]> {
-  const { data: invoicedRows, error: invErr } = await getSupabase()
-    .from("invoices")
-    .select("booking_id")
-    .not("booking_id", "is", null)
-    .neq("status", "voided")
-    .neq("status", "consolidated");
+  const { data: invoicedRows, error: invErr } = await withoutSupersededInvoices(
+    getSupabase()
+      .from("invoices")
+      .select("booking_id")
+      .not("booking_id", "is", null),
+  );
   if (invErr) throw invErr;
 
   const invoicedBookingIds = new Set(
@@ -388,12 +389,12 @@ export type BoardingBookingWithInvoice = {
 
 /** Active boarding stays that already have a non-voided invoice (eligible for night-line repricing). */
 export async function listBoardingBookingsWithInvoice(): Promise<BoardingBookingWithInvoice[]> {
-  const { data: invoicedRows, error: invErr } = await getSupabase()
-    .from("invoices")
-    .select("booking_id")
-    .not("booking_id", "is", null)
-    .neq("status", "voided")
-    .neq("status", "consolidated");
+  const { data: invoicedRows, error: invErr } = await withoutSupersededInvoices(
+    getSupabase()
+      .from("invoices")
+      .select("booking_id")
+      .not("booking_id", "is", null),
+  );
   if (invErr) throw invErr;
 
   const invoicedBookingIds = new Set(

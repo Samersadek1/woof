@@ -11,6 +11,7 @@ import {
   sharedPoolPetLabel,
 } from "@/lib/daycareSharedPool";
 import { ownerMemberTierFromFlags, type OwnerMemberTier } from "@/lib/memberTier";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 
 type DaycareSession = Database["public"]["Tables"]["daycare_sessions"]["Row"];
 type DaycareSessionInsert = Database["public"]["Tables"]["daycare_sessions"]["Insert"];
@@ -894,12 +895,9 @@ export function usePendingHourlyDaycareForOwner(ownerId: string) {
       const sessionIds = sessions.map((s) => s.id);
       const invoiceIdByServiceId = new Map<string, string>();
       if (sessionIds.length > 0) {
-        const { data: invoices, error: invErr } = await supabase
-          .from("invoices")
-          .select("id, service_id")
-          .in("service_id", sessionIds)
-          .neq("status", "voided")
-          .neq("status", "consolidated");
+        const { data: invoices, error: invErr } = await withoutSupersededInvoices(
+          supabase.from("invoices").select("id, service_id").in("service_id", sessionIds),
+        );
         if (invErr) throw invErr;
         for (const inv of invoices ?? []) {
           if (inv.service_id) invoiceIdByServiceId.set(inv.service_id, inv.id);

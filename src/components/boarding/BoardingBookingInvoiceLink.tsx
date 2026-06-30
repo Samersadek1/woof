@@ -11,6 +11,7 @@ import {
   syncBoardingBookingInvoice,
 } from "@/lib/boardingInvoiceSync";
 import { formatAed } from "@/lib/money";
+import { withoutSupersededInvoices } from "@/lib/invoiceStatus";
 
 type Props = {
   bookingId: string;
@@ -24,15 +25,15 @@ export function BoardingBookingInvoiceLink({ bookingId, bookingRef }: Props) {
   const { data: invoice, isLoading } = useQuery({
     queryKey: ["invoice", "byBooking", bookingId] as const,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("invoices")
-        .select("id, status, total")
-        .eq("booking_id", bookingId)
-        .neq("status", "voided")
-        .neq("status", "consolidated")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data, error } = await withoutSupersededInvoices(
+        supabase
+          .from("invoices")
+          .select("id, status, total")
+          .eq("booking_id", bookingId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      );
       if (error) throw error;
       return data;
     },
