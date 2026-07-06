@@ -118,8 +118,8 @@ DROP FUNCTION IF EXISTS public.get_statement_of_account(uuid);
 CREATE OR REPLACE FUNCTION public.get_statement_of_account(p_owner_id uuid)
 RETURNS TABLE (
   invoice_id uuid,
-  invoice_number character varying,
-  service_type character varying,
+  invoice_number text,
+  service_type text,
   status text,
   total numeric,
   amount_paid numeric,
@@ -187,8 +187,8 @@ RETURNS TABLE (
   is_visible boolean,
   transaction_type text,
   invoice_id uuid,
-  invoice_number character varying,
-  service_type character varying,
+  invoice_number text,
+  service_type text,
   due_date date,
   payment_method public.payment_method,
   notes text
@@ -340,8 +340,8 @@ BEGIN
     true,
     'opening_balance'::text,
     NULL::uuid,
-    NULL::character varying,
-    NULL::character varying,
+    NULL::text,
+    NULL::text,
     NULL::date,
     NULL::public.payment_method,
     'Opening balance'::text
