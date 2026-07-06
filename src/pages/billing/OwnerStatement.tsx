@@ -1,169 +1,385 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useState } from "react";
 import { format } from "date-fns";
-import { Link, useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { Link, useParams } from "react-router-dom";
+import { ChevronDown, Download } from "lucide-react";
 import TopBar from "@/components/dashboard/TopBar";
-import { useOwner } from "@/hooks/useOwners";
-import { useStatementOfAccount } from "@/hooks/useStatement";
-import { useStatementLedger } from "@/hooks/useWallet";
-import { StatementLedgerTable } from "@/components/billing/StatementLedgerTable";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { invoiceBalanceDue } from "@/lib/invoiceStatus";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { useOwner } from "@/hooks/useOwners";
+import { useOwnerBalances } from "@/hooks/useBilling";
+import { useStatementOfAccount, useLedgerStatement } from "@/hooks/useStatement";
+import {
+  StatementLedgerTable,
+  exportStatementCsv,
+} from "@/components/billing/StatementLedgerTable";
+import {
+  WalletBalanceDisplay,
+  OutstandingAmountBadge,
+} from "@/components/billing/WalletBalanceDisplay";
+import {
+  computePeriodTotals,
+  invoiceRemainingTotal,
+} from "@/lib/ownerBalances";
+import { formatWalletAed } from "@/lib/money";
+import {
+  defaultStatementRange,
+  getDubaiTodayDate,
+  presetToFromDate,
+  statementRangeFromDates,
+  type StatementDatePreset,
+} from "@/lib/statementDates";
+import { cn } from "@/lib/utils";
+import type { StatementRow } from "@/hooks/useStatement";
 
-function aed(v: number) {
-  return `AED ${v.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const PRESETS: { value: StatementDatePreset; label: string }[] = [
+  { value: "30d", label: "30d" },
+  { value: "90d", label: "90d" },
+  { value: "180d", label: "180d" },
+  { value: "1y", label: "1y" },
+];
+
+const STATUS_BADGE: Record<string, string> = {
+  outstanding: "border-slate-300 text-slate-700 bg-slate-50",
+  overdue: "border-red-300 text-red-700 bg-red-50",
+  partially_paid: "border-amber-300 text-amber-700 bg-amber-50",
+};
+
+function deriveBranchCode(invoiceNumber: string | null | undefined): string | null {
+  const normalized = invoiceNumber?.trim();
+  if (!normalized) return null;
+  const match = normalized.match(/^([A-Za-z]{2,8})[-/]/);
+  return match ? match[1].toUpperCase() : null;
 }
 
-function collectableBalance(status: string, total: number, amountPaid = 0): number {
-  return invoiceBalanceDue(status, total, amountPaid);
+function ownerTierLabel(owner: { is_vip?: boolean; is_elite?: boolean | null } | null | undefined): string {
+  if (owner?.is_elite) return "Elite";
+  if (owner?.is_vip) return "VIP";
+  return "Standard";
+}
+
+function serviceLabel(type: string | null | undefined): string {
+  if (!type) return "—";
+  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function OutstandingInvoiceRow({
+  row,
+  ownerId,
+}: {
+  row: StatementRow;
+  ownerId: string;
+}) {
+  const branch = deriveBranchCode(row.invoice_number);
+  const statusClass = STATUS_BADGE[row.status] ?? STATUS_BADGE.outstanding;
+
+  return (
+    <div className="flex items-center justify-between gap-4 border-t px-4 py-3 first:border-t-0">
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to={`/billing/invoices/${row.invoice_id}?returnTo=${encodeURIComponent(`/billing/statements/${ownerId}`)}`}
+            className="font-mono text-xs text-orange-600 hover:underline dark:text-orange-400"
+          >
+            {row.invoice_number ?? row.invoice_id.slice(0, 8)}
+          </Link>
+          {branch ? (
+            <Badge variant="outline" className="text-[10px] font-semibold px-1.5 py-0">
+              {branch}
+            </Badge>
+          ) : null}
+          {row.service_type ? (
+            <Badge variant="outline" className="text-[10px] font-normal capitalize">
+              {serviceLabel(row.service_type)}
+            </Badge>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Due{" "}
+          {row.due_date
+            ? format(new Date(`${row.due_date}T00:00:00`), "d MMM yyyy")
+            : "—"}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <span className="font-semibold tabular-nums">{formatWalletAed(row.total)}</span>
+        <Badge variant="outline" className={cn("text-[10px] capitalize", statusClass)}>
+          {row.status.replace(/_/g, " ")}
+        </Badge>
+      </div>
+    </div>
+  );
 }
 
 export default function OwnerStatementPage() {
   const { ownerId } = useParams<{ ownerId: string }>();
-  const navigate = useNavigate();
-  const { data: owner } = useOwner(ownerId || "");
-  const { data: statement = [], isLoading: statementLoading } = useStatementOfAccount(ownerId);
-  const { data: ledger = [], isLoading: ledgerLoading } = useStatementLedger(ownerId);
-  const printRef = useRef<HTMLDivElement>(null);
+  const returnTo = ownerId ? `/billing/statements/${ownerId}` : undefined;
 
-  const ownerName = owner ? `${owner.first_name} ${owner.last_name ?? ""}`.trim() : "owner";
+  const initialRange = useMemo(() => defaultStatementRange(), []);
+  const [fromDate, setFromDate] = useState(initialRange.fromDate);
+  const [toDate, setToDate] = useState(initialRange.toDate);
+  const [outstandingOpen, setOutstandingOpen] = useState(true);
+  const [payAllPending, setPayAllPending] = useState(false);
+
+  const { fromIso, toIso } = useMemo(
+    () => statementRangeFromDates(fromDate, toDate),
+    [fromDate, toDate],
+  );
+
+  const dubaiToday = getDubaiTodayDate();
+  const statementAsOf = format(new Date(`${dubaiToday}T12:00:00`), "d MMMM yyyy");
+
+  const { data: owner } = useOwner(ownerId || "");
+  const ownerBalances = useOwnerBalances(ownerId || "");
+  const { data: statement = [], isLoading: statementLoading } = useStatementOfAccount(ownerId);
+  const { data: ledger = [], isLoading: ledgerLoading } = useLedgerStatement(ownerId, fromIso, toIso);
+
+  const ownerName = owner ? `${owner.first_name} ${owner.last_name ?? ""}`.trim() : "Owner";
+  const balances = ownerBalances.balances;
 
   const outstanding = useMemo(
-    () =>
-      statement
-        .filter((r) => ["outstanding", "overdue", "partially_paid"].includes(r.status))
-        .filter((r) => collectableBalance(r.status, r.total, r.amount_paid ?? 0) > 0)
-        .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")),
+    () => [...statement].sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")),
     [statement],
   );
 
-  const outstandingTotal = useMemo(
-    () => outstanding.reduce((sum, r) => sum + collectableBalance(r.status, r.total, r.amount_paid ?? 0), 0),
-    [outstanding],
-  );
+  const outstandingTotal = useMemo(() => invoiceRemainingTotal(statement), [statement]);
+  const periodTotals = useMemo(() => computePeriodTotals(ledger), [ledger]);
+  const headerLoading = statementLoading || ownerBalances.isLoading;
 
-  const lifetimeSpend = useMemo(
-    () => statement.filter((r) => r.status === "paid").reduce((sum, r) => sum + r.total, 0),
-    [statement],
-  );
-
-  const printStatement = () => {
-    if (!printRef.current) return;
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Statement — ${ownerName}</title><style>
-      body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:32px;color:#111}
-      table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
-      th{background:#f6f6f6;font-size:12px;color:#666;text-transform:uppercase}
-      .debit{color:#dc2626}.credit{color:#059669}.balance{font-weight:600}
-      .muted{color:#6b7280;font-size:11px}
-    </style></head><body>${printRef.current.innerHTML}</body></html>`);
-    win.document.close();
-    win.focus();
-    win.print();
+  const applyPreset = (preset: StatementDatePreset) => {
+    const today = getDubaiTodayDate();
+    setFromDate(presetToFromDate(preset, today));
+    setToDate(today);
   };
+
+  const debtAmount =
+    balances.outstandingDebt > 0
+      ? balances.outstandingDebt
+      : outstandingTotal > 0 && balances.netPosition >= 0
+        ? outstandingTotal
+        : 0;
 
   return (
     <>
       <TopBar title="Statement of Account" />
-      <main className="flex-1 overflow-auto p-8 space-y-6">
-        <div className="flex items-center justify-between">
+      <main className="flex-1 overflow-auto p-6 md:p-8 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to="/billing/invoices" className="text-orange-600 hover:text-orange-700 dark:text-orange-400">
+                    Invoices
+                  </Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to="/billing" className="text-orange-600 hover:text-orange-700 dark:text-orange-400">
+                    Billing
+                  </Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>Statement</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            onClick={() => navigate(ownerId ? `/customers/${ownerId}` : "/billing/invoices")}
-            className="gap-1.5 text-muted-foreground hover:text-foreground"
+            className="gap-1.5"
+            disabled={ledger.length === 0}
+            onClick={() => exportStatementCsv(ledger, ownerName, periodTotals)}
           >
-            <ArrowLeft className="h-4 w-4" />
-            {ownerName !== "owner" ? ownerName : "Back"}
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
           </Button>
-          <Button onClick={printStatement} variant="outline">Print statement</Button>
         </div>
 
-        <div ref={printRef} className="space-y-6">
-          {/* ── Summary header ── */}
-          <Card>
-            <CardContent className="p-5 grid gap-4 sm:grid-cols-3">
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Client</p>
-                <p className="text-xl font-semibold">{ownerName || "—"}</p>
-                <div className="flex items-center gap-2 mt-2">
-                  <Badge variant="outline">Woof</Badge>
-                </div>
+        <Card>
+          <CardContent className="p-5 grid gap-6 md:grid-cols-2">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Account holder
+              </p>
+              <p className="text-2xl font-bold mt-1">{ownerName}</p>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <Badge variant="outline" className="text-xs font-normal">
+                  {ownerTierLabel(owner)}
+                </Badge>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Wallet balance</p>
-                <p className="text-2xl font-bold tabular-nums">{aed(owner?.wallet_balance ?? 0)}</p>
-                <p className="text-xs text-muted-foreground mt-1">Lifetime spend {aed(lifetimeSpend)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Outstanding</p>
-                <p className={`text-2xl font-bold tabular-nums ${outstandingTotal > 0 ? "text-red-600 dark:text-red-400" : ""}`}>
-                  {aed(outstandingTotal)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {outstanding.length} unpaid invoice{outstanding.length !== 1 ? "s" : ""}
-                </p>
-              </div>
+              <p className="text-sm text-muted-foreground mt-2">Statement as of {statementAsOf}</p>
+            </div>
+
+            <div className="md:text-right">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Account balance (SOA)
+              </p>
+              {headerLoading ? (
+                <p className="text-3xl font-bold mt-1">—</p>
+              ) : (
+                <>
+                  <WalletBalanceDisplay
+                    accountBalance={balances.netPosition}
+                    amountClassName={
+                      balances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
+                    }
+                    className="md:flex md:flex-col md:items-end"
+                  />
+                  {balances.netPosition >= 0 && outstandingTotal > 0 && (
+                    <OutstandingAmountBadge
+                      amount={outstandingTotal}
+                      className="md:ml-auto"
+                    />
+                  )}
+                  {debtAmount > 0 && balances.netPosition < 0 && (
+                    <div className="mt-3 md:ml-auto md:inline-block md:text-right">
+                      <p className="text-xs text-muted-foreground">Outstanding (debt)</p>
+                      <p className="text-lg font-bold tabular-nums text-red-600 dark:text-red-400">
+                        {formatWalletAed(debtAmount)}
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {!headerLoading && ownerBalances.canPayAll && (
+          <Card className="border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20">
+            <CardContent className="p-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm">
+                Wallet credit ({formatWalletAed(balances.wallet)}) can cover all open invoices (
+                {formatWalletAed(outstandingTotal)}).
+              </p>
+              <Button
+                size="sm"
+                disabled={payAllPending}
+                onClick={async () => {
+                  setPayAllPending(true);
+                  try {
+                    await ownerBalances.payAllOutstanding("bulk_payment");
+                  } finally {
+                    setPayAllPending(false);
+                  }
+                }}
+              >
+                {payAllPending ? "Processing…" : "Pay all outstanding"}
+              </Button>
             </CardContent>
           </Card>
+        )}
 
-          {/* ── Outstanding invoices ── */}
-          {!statementLoading && outstanding.length > 0 && (
+        {!statementLoading && outstanding.length > 0 && (
+          <Collapsible open={outstandingOpen} onOpenChange={setOutstandingOpen}>
             <Card>
-              <CardHeader className="pb-2 pt-4 px-5">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Outstanding invoices</CardTitle>
-                  <span className="text-sm font-semibold tabular-nums">{aed(outstandingTotal)}</span>
-                </div>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-2">
-                {outstanding.map((r) => (
-                  <div key={r.invoice_id} className="rounded-md border p-3 flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Link
-                          to={`/billing/invoices/${r.invoice_id}?returnTo=${encodeURIComponent(`/billing/statements/${ownerId}`)}`}
-                          className="font-mono text-xs text-primary hover:underline"
-                        >
-                          {r.invoice_number ?? r.invoice_id.slice(0, 8)}
-                        </Link>
-                      </div>
-                      <p className="text-sm capitalize mt-0.5">{r.service_type?.replace(/_/g, " ") ?? "—"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Due {r.due_date ? format(new Date(`${r.due_date}T00:00:00`), "d MMM yyyy") : "—"}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold tabular-nums">
-                        {aed(collectableBalance(r.status, r.total, r.amount_paid ?? 0))}
-                      </p>
-                      {r.days_overdue > 0 && (
-                        <p className="text-xs text-red-600">Overdue {r.days_overdue}d</p>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-muted/30 transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 text-muted-foreground transition-transform",
+                        outstandingOpen && "rotate-180",
                       )}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
+                    />
+                    <span className="font-semibold">Outstanding invoices</span>
+                    <Badge className="h-5 min-w-5 rounded-full bg-red-600 px-1.5 text-[10px] font-bold text-white hover:bg-red-600">
+                      {outstanding.length}
+                    </Badge>
+                  </span>
+                  <span className="font-bold tabular-nums text-red-600 dark:text-red-400">
+                    {formatWalletAed(outstandingTotal)}
+                  </span>
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="border-t">
+                  {outstanding.map((row) => (
+                    <OutstandingInvoiceRow key={row.invoice_id} row={row} ownerId={ownerId!} />
+                  ))}
+                </div>
+              </CollapsibleContent>
             </Card>
-          )}
+          </Collapsible>
+        )}
 
-          {/* ── Bank-statement ledger ── */}
-          <Card>
-            <CardHeader className="pb-2 pt-4 px-5">
-              <CardTitle className="text-base">Transaction history</CardTitle>
-            </CardHeader>
-            <CardContent className="px-5 pb-5">
-              <StatementLedgerTable
-                rows={ledger}
-                isLoading={ledgerLoading}
-                ownerName={ownerName}
-                returnTo={ownerId ? `/billing/statements/${ownerId}` : undefined}
-              />
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardContent className="p-5 space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="soa-from" className="text-xs">
+                  From
+                </Label>
+                <Input
+                  id="soa-from"
+                  type="date"
+                  className="h-9 w-36"
+                  value={fromDate}
+                  max={toDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="soa-to" className="text-xs">
+                  To
+                </Label>
+                <Input
+                  id="soa-to"
+                  type="date"
+                  className="h-9 w-36"
+                  value={toDate}
+                  min={fromDate}
+                  max={dubaiToday}
+                  onChange={(e) => setToDate(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5 pb-0.5">
+                {PRESETS.map((p) => (
+                  <Button
+                    key={p.value}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 px-3 text-xs"
+                    onClick={() => applyPreset(p.value)}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <StatementLedgerTable
+              rows={ledger}
+              isLoading={ledgerLoading}
+              returnTo={returnTo}
+              periodTotals={periodTotals}
+            />
+          </CardContent>
+        </Card>
       </main>
     </>
   );

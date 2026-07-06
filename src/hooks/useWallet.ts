@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { invalidateOwnerStatementQueries } from "@/lib/statementQueryKeys";
 
 type WalletTransaction = Database["public"]["Tables"]["wallet_transactions"]["Row"];
 type TransactionType = Database["public"]["Enums"]["transaction_type"];
@@ -94,6 +95,7 @@ function invalidateWalletQueries(
     queryKey: walletQueryKeys.topupReceipts(ownerId),
   });
   queryClient.invalidateQueries({ queryKey: ["owners"] });
+  invalidateOwnerStatementQueries(queryClient, ownerId);
   if (options?.includeOwnerWallet) {
     queryClient.invalidateQueries({ queryKey: ["owner_wallet", ownerId] });
   }

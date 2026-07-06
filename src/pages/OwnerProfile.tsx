@@ -30,15 +30,18 @@ import { VaccinationEditor } from "@/components/VaccinationEditor";
 import type { VaccinationRow } from "@/components/VaccinationEditor";
 import {
   useInvoicesForOwner,
-  useOwnerStatement,
+  useOwnerBalances,
   useBillingAdjustments,
   useCollectPayment,
   formatAed,
   type InvoiceWithItems,
   type InvoiceStatus,
 } from "@/hooks/useBilling";
+import { formatWalletAed } from "@/lib/money";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
+import { WalletBalanceDisplay, OutstandingAmountBadge } from "@/components/billing/WalletBalanceDisplay";
+import { ClearOutstandingAfterTopUpDialog } from "@/components/billing/ClearOutstandingAfterTopUpDialog";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import { usePendingHourlyDaycareForOwner } from "@/hooks/useDaycare";
@@ -103,7 +106,6 @@ import {
   Cat,
   Trash2,
   CalendarDays,
-  AlertTriangle,
   BedDouble,
   ExternalLink,
   FileText,
@@ -282,7 +284,8 @@ function makePetForm(ownerId: string): PetInsert {
 function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const navigate = useNavigate();
   const { staffName } = useCurrentStaffName();
-  const statement = useOwnerStatement(ownerId);
+  const ownerBalances = useOwnerBalances(ownerId);
+  const [payAllPending, setPayAllPending] = useState(false);
   const { data: pendingHourly = [], isLoading: pendingHourlyLoading } =
     usePendingHourlyDaycareForOwner(ownerId);
   const { data: invoices = [], isLoading: invoicesLoading, refetch: refetchInvoices } =
@@ -299,6 +302,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const [topUpAmount, setTopUpAmount] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [consolidateOpen, setConsolidateOpen] = useState(false);
+  const [clearOutstandingOpen, setClearOutstandingOpen] = useState(false);
   const topUp = useTopUpWallet();
   const overdueCount = invoices.filter((inv) => inv.status === "overdue").length;
 
@@ -370,33 +374,36 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
         </div>
       </div>
 
-      {/* Summary cards */}
-      {!statement.isLoading && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="mb-6">
+        {!ownerBalances.isLoading && (
           <Card>
             <CardContent className="p-4">
-              <p className="text-xs uppercase text-muted-foreground">Wallet</p>
-              <p className="text-2xl font-bold tabular-nums mt-1">{formatAed(statement.walletBalance)}</p>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Account balance (SOA)</p>
+                  <WalletBalanceDisplay
+                    accountBalance={ownerBalances.netPosition}
+                    size="compact"
+                    amountClassName={
+                      ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
+                    }
+                  />
+                  {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.netPosition >= 0 && (
+                    <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate(`/billing/statements/${ownerId}`)}
+                >
+                  View statement
+                </Button>
+              </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs uppercase text-muted-foreground">Outstanding</p>
-              <p className={`text-2xl font-bold tabular-nums mt-1 ${statement.totalOutstanding > 0 ? "text-red-600" : ""}`}>
-                {formatAed(statement.totalOutstanding)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs uppercase text-muted-foreground">Net Position</p>
-              <p className={`text-2xl font-bold tabular-nums mt-1 ${statement.netPosition < 0 ? "text-red-600" : "text-emerald-600"}`}>
-                {formatAed(statement.netPosition)}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+        )}
+      </div>
 
       {!pendingHourlyLoading && pendingHourly.length > 0 && (
         <Card className="mb-4 border-orange-200 bg-orange-50/40">
@@ -696,6 +703,7 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                       });
                       setTopUpAmount("");
                       setTopUpOpen(false);
+                      setClearOutstandingOpen(true);
                     },
                     onError: (err) => toast.error(err.message || "Top up failed."),
                   },
@@ -708,6 +716,22 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ClearOutstandingAfterTopUpDialog
+        open={clearOutstandingOpen && ownerBalances.balances.canPayAll}
+        onOpenChange={setClearOutstandingOpen}
+        balances={ownerBalances.balances}
+        pending={payAllPending}
+        onConfirm={async () => {
+          setPayAllPending(true);
+          try {
+            await ownerBalances.payAllOutstanding(staffName.trim() || "reception");
+            setClearOutstandingOpen(false);
+          } finally {
+            setPayAllPending(false);
+          }
+        }}
+      />
 
       <ConsolidateInvoicesDialog
         open={consolidateOpen}
@@ -747,7 +771,9 @@ const OwnerProfilePage = () => {
   const { data: ownerBookings = [], isLoading: bookingsLoading } = useOwnerBookings(id!);
   const { data: ownerGrooming = [], isLoading: groomingHistoryLoading } =
     useOwnerGroomingAppointments(id!);
-  const ownerStatement = useOwnerStatement(id!);
+  const ownerBalances = useOwnerBalances(id!);
+  const [payAllPending, setPayAllPending] = useState(false);
+  const [payFromWalletOpen, setPayFromWalletOpen] = useState(false);
   const updateOwner = useUpdateOwner();
   const deleteOwner = useDeleteOwner();
   const createPet = useCreatePet();
@@ -1036,35 +1062,51 @@ const OwnerProfilePage = () => {
               ) : null}
             </div>
 
-            <div className="flex items-center gap-6">
-              {!ownerStatement.isLoading && ownerStatement.totalOutstanding > 0 && (
-                <div className="text-right">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-amber-600">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    Outstanding
-                  </div>
-                  <p className={`mt-1 text-3xl font-bold tabular-nums ${ownerStatement.totalOutstanding > 500 ? "text-red-600" : "text-amber-600"}`}>
-                    AED {ownerStatement.totalOutstanding.toFixed(2)}
-                  </p>
-                </div>
-              )}
+            <div className="flex flex-wrap items-start gap-6">
               <div className="text-right">
-                <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-wide">
+                <div className="flex items-center justify-end gap-1 text-xs uppercase tracking-wide text-muted-foreground">
                   <Wallet className="h-3.5 w-3.5" />
-                  Wallet Balance
+                  Account balance (SOA)
                 </div>
-                <p className="mt-1 text-3xl font-bold tabular-nums">
-                  AED {owner.wallet_balance.toFixed(2)}
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-2"
-                  onClick={() => setAddBalanceOpen(true)}
-                >
-                  Add Balance
-                </Button>
+                {ownerBalances.isLoading ? (
+                  <Skeleton className="mt-1 ml-auto h-9 w-28" />
+                ) : (
+                  <WalletBalanceDisplay
+                    accountBalance={ownerBalances.netPosition}
+                    amountClassName={
+                      ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
+                    }
+                  />
+                )}
+                {!ownerBalances.isLoading &&
+                  ownerBalances.invoiceRemainingTotal > 0 &&
+                  ownerBalances.netPosition >= 0 && (
+                    <div className="mt-1 flex justify-end">
+                      <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
+                    </div>
+                  )}
+                <div className="mt-2 flex flex-col items-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAddBalanceOpen(true)}
+                  >
+                    Add Balance
+                  </Button>
+                  {!ownerBalances.isLoading &&
+                    ownerBalances.invoiceRemainingTotal > 0 &&
+                    ownerBalances.combinedWallet > 0 && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={payAllPending}
+                        onClick={() => setPayFromWalletOpen(true)}
+                      >
+                        {payAllPending ? "Processing…" : "Pay from Wallet"}
+                      </Button>
+                    )}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={openEditDrawer}>
@@ -1111,6 +1153,36 @@ const OwnerProfilePage = () => {
             </>
           )}
         </Card>
+
+        {!ownerBalances.isLoading &&
+          ownerBalances.invoiceRemainingTotal > 0 &&
+          ownerBalances.combinedWallet > 0 && (
+            <Card className="mb-6 border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20">
+              <CardContent className="p-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm">
+                  {ownerBalances.canPayAll ? (
+                    <>
+                      Wallet credit ({formatWalletAed(ownerBalances.combinedWallet)}) can cover all
+                      open invoices ({formatWalletAed(ownerBalances.invoiceRemainingTotal)}).
+                    </>
+                  ) : (
+                    <>
+                      Wallet credit ({formatWalletAed(ownerBalances.combinedWallet)}) is available
+                      toward open invoices (
+                      {formatWalletAed(ownerBalances.invoiceRemainingTotal)} total).
+                    </>
+                  )}
+                </p>
+                <Button
+                  size="sm"
+                  disabled={payAllPending}
+                  onClick={() => setPayFromWalletOpen(true)}
+                >
+                  {ownerBalances.canPayAll ? "Pay all outstanding" : "Pay from Wallet"}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
         {/* ─── Pets Section ─── */}
         <section>
@@ -1979,6 +2051,38 @@ const OwnerProfilePage = () => {
           setPackageDialogOpen(false);
         }}
       />
+
+      {/* ─── Pay from Wallet Confirmation ─── */}
+      <AlertDialog open={payFromWalletOpen} onOpenChange={setPayFromWalletOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Pay from wallet?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Apply wallet credit ({formatWalletAed(ownerBalances.combinedWallet)}) toward open
+              invoices ({formatWalletAed(ownerBalances.invoiceRemainingTotal)})? Invoices are paid
+              oldest due date first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={payAllPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={payAllPending}
+              onClick={(e) => {
+                e.preventDefault();
+                setPayAllPending(true);
+                void ownerBalances
+                  .payAllOutstanding(staffName.trim() || "reception")
+                  .finally(() => {
+                    setPayAllPending(false);
+                    setPayFromWalletOpen(false);
+                  });
+              }}
+            >
+              {payAllPending ? "Processing…" : "Confirm payment"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ─── Delete Confirmation Dialog ─── */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>

@@ -5,6 +5,10 @@ import { isInactiveInvoiceStatus } from "@/lib/invoiceStatus";
 import { roundAed } from "@/lib/money";
 import { invoiceAmountDue } from "@/lib/vatConfig";
 import { type PaymentMethod } from "@/lib/paymentMethod";
+import {
+  orphanWalletDeductions,
+  syntheticWalletPaymentsFromDeductions,
+} from "@/lib/walletDeductionPayments";
 
 type Client = SupabaseClient<Database>;
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -412,7 +416,8 @@ export async function getInvoiceLedger(
 ): Promise<InvoiceLedger | null> {
   const supabase = client ?? defaultClient;
 
-  const [invoiceRes, linesRes, paymentsRes, amendmentsRes] = await Promise.all([
+  const [invoiceRes, linesRes, paymentsRes, amendmentsRes, walletDeductionsRes] =
+    await Promise.all([
     supabase.from("invoices").select("*").eq("id", invoiceId).maybeSingle(),
     supabase
       .from("invoice_line_items")
@@ -430,18 +435,35 @@ export async function getInvoiceLedger(
       .select("*")
       .eq("invoice_id", invoiceId)
       .order("amended_at", { ascending: false }),
+    supabase
+      .from("wallet_transactions")
+      .select("id, invoice_id, amount, created_at, notes, payment_method, transaction_type")
+      .eq("invoice_id", invoiceId)
+      .eq("transaction_type", "deduction")
+      .order("created_at", { ascending: true }),
   ]);
 
   if (invoiceRes.error) throw invoiceRes.error;
   if (linesRes.error) throw linesRes.error;
   if (paymentsRes.error) throw paymentsRes.error;
   if (amendmentsRes.error) throw amendmentsRes.error;
+  if (walletDeductionsRes.error) throw walletDeductionsRes.error;
 
   const invoice = invoiceRes.data as InvoiceRow | null;
   if (!invoice) return null;
 
   const lines = (linesRes.data ?? []) as LineRow[];
-  const payments = (paymentsRes.data ?? []) as PaymentRow[];
+  const basePayments = (paymentsRes.data ?? []) as PaymentRow[];
+  const orphanDeductions = orphanWalletDeductions(
+    basePayments,
+    walletDeductionsRes.data ?? [],
+  );
+  const syntheticPayments = syntheticWalletPaymentsFromDeductions(
+    orphanDeductions,
+  ) as PaymentRow[];
+  const payments = [...basePayments, ...syntheticPayments].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
   const amendments = (amendmentsRes.data ?? []) as AmendmentRow[];
 
   const openingBalance = roundAed(invoice.opening_balance ?? 0);

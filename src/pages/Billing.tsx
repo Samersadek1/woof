@@ -20,7 +20,7 @@ import {
   useProcessPayment,
   useVoidInvoice,
   useCalculateCancellationRefund,
-  useOwnerStatement,
+  useOwnerBalances,
   usePricing,
   formatAed,
   type InvoiceStatus,
@@ -29,12 +29,14 @@ import {
   type ServiceType,
 } from "@/hooks/useBilling";
 import { invoiceDiscountPercent, invoiceDisplayTotals, vatLineLabel } from "@/lib/vatConfig";
+import { formatWalletAed } from "@/lib/money";
 import {
   INVOICE_PAYMENT_METHOD_OPTIONS,
   WALLET_TOPUP_PAYMENT_METHOD_OPTIONS,
 } from "@/lib/paymentMethod";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
+import { WalletBalanceDisplay, OutstandingAmountBadge } from "@/components/billing/WalletBalanceDisplay";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
 import { DuplicatePaymentConfirmDialog } from "@/components/billing/DuplicatePaymentConfirmDialog";
@@ -925,7 +927,8 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
   const filters = statusFilter !== "all" ? { status: statusFilter as InvoiceStatus } : undefined;
   const { data: invoices = [], isLoading, refetch: refetchInvoices } = useInvoicesForOwner(ownerId, filters);
 
-  const statement = useOwnerStatement(ownerId);
+  const ownerBalances = useOwnerBalances(ownerId);
+  const [payAllPending, setPayAllPending] = useState(false);
 
   const consolidatableCount = useMemo(
     () => invoices.filter((inv) => canConsolidateInvoiceStatus(inv.status)).length,
@@ -953,32 +956,22 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
 
   return (
     <>
-      {/* Statement summary */}
-      {!statement.isLoading && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs uppercase text-muted-foreground">Wallet Balance</p>
-              <p className="text-2xl font-bold tabular-nums mt-1">{formatAed(statement.walletBalance)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs uppercase text-muted-foreground">Outstanding</p>
-              <p className={`text-2xl font-bold tabular-nums mt-1 ${statement.totalOutstanding > 0 ? "text-red-600" : ""}`}>
-                {formatAed(statement.totalOutstanding)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs uppercase text-muted-foreground">Net Position</p>
-              <p className={`text-2xl font-bold tabular-nums mt-1 ${statement.netPosition < 0 ? "text-red-600" : "text-emerald-600"}`}>
-                {formatAed(statement.netPosition)}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+      {!ownerBalances.isLoading && (
+        <Card className="mb-4">
+          <CardContent className="p-4">
+            <p className="text-xs uppercase text-muted-foreground">Account balance (SOA)</p>
+            <WalletBalanceDisplay
+              accountBalance={ownerBalances.netPosition}
+              size="compact"
+              amountClassName={
+                ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
+              }
+            />
+            {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.netPosition >= 0 && (
+              <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Filter + actions bar */}
@@ -1017,10 +1010,22 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
           </Button>
         )}
 
-        {statement.totalOutstanding > 0 && (
-          <Button size="sm" variant="outline" onClick={statement.payAllOutstanding}>
+        {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.combinedWallet > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={payAllPending}
+            onClick={async () => {
+              setPayAllPending(true);
+              try {
+                await ownerBalances.payAllOutstanding("bulk_payment");
+              } finally {
+                setPayAllPending(false);
+              }
+            }}
+          >
             <CheckCircle2 className="mr-1.5 h-4 w-4" />
-            Pay all outstanding ({formatAed(statement.totalOutstanding)})
+            Pay all outstanding ({formatWalletAed(ownerBalances.invoiceRemainingTotal)})
           </Button>
         )}
       </div>

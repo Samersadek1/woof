@@ -18,6 +18,14 @@ export function formatAed(amount: number): string {
   return `AED ${formatAedAmount(amount)}`;
 }
 
+/** SOA profile display — always 2 decimal places (en-AE). */
+export function formatWalletAed(amount: number): string {
+  return `AED ${amount.toLocaleString("en-AE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 export function parseBoundedDecimalInput(
   raw: string,
   fallback: number,

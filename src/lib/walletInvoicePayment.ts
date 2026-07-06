@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { resolveWalletChargeAmount } from "@/lib/accountBalance";
+import { fetchLedgerClosingK } from "@/lib/ledgerClosingBalance";
+import { spendableWalletFromK } from "@/lib/ownerBalances";
 import { roundAed } from "@/lib/money";
 import { invoiceAmountDue } from "@/lib/vatConfig";
 import { recordPayment } from "@/services/invoiceService";
@@ -15,18 +17,9 @@ export type WalletPaymentResult = {
   partial?: boolean;
 };
 
-type RpcWalletResult = {
-  success?: boolean;
-  error?: string;
-  amount_charged?: number;
-  new_balance?: number;
-  shortfall?: number;
-};
-
 /**
- * Pay an invoice from the owner's wallet. Tries `process_wallet_payment` RPC for
- * simple full payments; falls back to client-side logic for partial payments or
- * when the RPC is unavailable.
+ * Pay an invoice from the owner's wallet via recordPayment — writes
+ * invoice_payments + wallet_transactions and lets the DB trigger update status.
  */
 export async function payInvoiceFromWallet(
   supabase: SupabaseClient<Database>,
@@ -65,7 +58,15 @@ export async function payInvoiceFromWallet(
   if (ownerErr) return { success: false, error: ownerErr.message, ownerId };
 
   const walletBalance = roundAed(owner.wallet_balance ?? 0);
-  const chargeAmount = resolveWalletChargeAmount(amountAed, walletBalance, balanceDue);
+  let soaSpendable = walletBalance;
+  try {
+    const k = await fetchLedgerClosingK(supabase, ownerId);
+    soaSpendable = roundAed(Math.min(walletBalance, spendableWalletFromK(k)));
+  } catch {
+    // Ledger RPC not deployed yet — fall back to cached wallet balance.
+  }
+
+  const chargeAmount = resolveWalletChargeAmount(amountAed, soaSpendable, balanceDue);
 
   if (chargeAmount <= 0) {
     return {
@@ -74,68 +75,6 @@ export async function payInvoiceFromWallet(
       shortfall: balanceDue,
       ownerId,
     };
-  }
-
-  const useRpcFastPath =
-    amountAed == null &&
-    chargeAmount >= balanceDue &&
-    walletBalance >= balanceDue &&
-    alreadyPaid <= 0;
-
-  // Full payment on a clean invoice — prefer RPC when deployed.
-  if (useRpcFastPath) {
-    const { data, error: rpcErr } = await supabase.rpc("process_wallet_payment", {
-      p_invoice_id: invoiceId,
-      p_performed_by: performedBy,
-    });
-
-    if (!rpcErr && data) {
-      const rpc = data as RpcWalletResult;
-      if (rpc.success) {
-        const amount = rpc.amount_charged ?? balanceDue;
-        // RPC already debited the wallet + wrote wallet_transactions; only the
-        // invoice_payments row is still needed. Best-effort dual-write.
-        try {
-          const dual = await recordPayment({
-            invoiceId,
-            amount,
-            method: "wallet",
-            recordedBy: performedBy,
-            skipWalletDeduction: true,
-            client: supabase,
-          });
-          if (!dual.success) {
-            console.error("[invoice_payments dual-write failed]", {
-              invoiceId,
-              amount,
-              err: dual.error,
-            });
-            // Non-fatal — legacy path already recorded payment
-          }
-        } catch (err) {
-          console.error("[invoice_payments dual-write failed]", {
-            invoiceId,
-            amount,
-            err,
-          });
-          // Non-fatal — legacy path already recorded payment
-        }
-        return {
-          success: true,
-          amountCharged: amount,
-          newWalletBalance: rpc.new_balance,
-          ownerId,
-        };
-      }
-      if (rpc.success === false) {
-        return {
-          success: false,
-          error: rpc.error ?? "Wallet payment failed",
-          shortfall: rpc.shortfall ?? balanceDue,
-          ownerId,
-        };
-      }
-    }
   }
 
   const newAmountPaid = roundAed(alreadyPaid + chargeAmount);

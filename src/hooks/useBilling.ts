@@ -13,7 +13,6 @@ import {
   invoicePaymentMethodToTransactionType,
 } from "@/lib/paymentMethod";
 import { invoiceDueDateToday } from "@/lib/invoiceDueDate";
-import { invoiceBalanceDue } from "@/lib/invoiceStatus";
 import {
   invoiceAmountDue,
   invoiceDisplayTotals,
@@ -22,6 +21,10 @@ import {
 } from "@/lib/vatConfig";
 import { formatAed, roundAed, AED_DECIMAL_DIGITS } from "@/lib/money";
 import { payInvoiceFromWallet } from "@/lib/walletInvoicePayment";
+import { invalidateOwnerStatementQueries } from "@/lib/statementQueryKeys";
+import { deriveOwnerBalances } from "@/lib/ownerBalances";
+import { useLedgerClosing } from "@/hooks/useLedgerClosing";
+import { useStatementOfAccount } from "@/hooks/useStatement";
 import {
   recordExternalInvoicePayment,
   type DuplicatePaymentInfo,
@@ -132,10 +135,6 @@ export interface StatementRow {
   days_overdue: number;
 }
 
-function statementBalanceDue(row: StatementRow): number {
-  return invoiceBalanceDue(row.status, row.total, row.amount_paid ?? 0);
-}
-
 export interface BillingAdjustment {
   id: string;
   owner_id: string;
@@ -192,12 +191,13 @@ function invalidateAfterInvoicePayment(
   queryClient.invalidateQueries({ queryKey: ["wallet_transactions"] });
   queryClient.invalidateQueries({ queryKey: ["owners"] });
   if (!ownerId) return;
+  invalidateOwnerStatementQueries(queryClient, ownerId);
   queryClient.invalidateQueries({ queryKey: billingKeys.statement(ownerId) });
   queryClient.invalidateQueries({ queryKey: billingKeys.invoices(ownerId) });
   queryClient.invalidateQueries({ queryKey: ["owners", ownerId] });
-  queryClient.invalidateQueries({ queryKey: ["owner_wallet", ownerId] });
-  queryClient.invalidateQueries({ queryKey: walletQueryKeys.transactions(ownerId) });
 }
+
+export { invalidateOwnerStatementQueries };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Hook 1: usePricing
@@ -253,7 +253,7 @@ export function usePricing() {
         .order("service_code");
       if (error) throw error;
       return (data ?? []).map((r) => {
-        const category = r.service_code.startsWith("boarding")
+        const category = r.service_code.startsWith("boarding") || r.service_code === "board_and_train_night"
           ? "boarding"
           : r.service_code.startsWith("daycare")
             ? "daycare"
@@ -833,91 +833,22 @@ export function useCalculateCancellationRefund(
 export { useTopUpWallet as useWalletTopUp } from "@/hooks/useWallet";
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Hook 9: useOwnerStatement
+// Hook 9: useOwnerBalances + useOwnerStatement
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function useOwnerStatement(ownerId: string) {
+export function useOwnerBalances(ownerId: string) {
   const queryClient = useQueryClient();
-
-  const statementQuery = useQuery({
-    queryKey: billingKeys.statement(ownerId),
-    enabled: !!ownerId,
-    queryFn: async () => {
-      const { data: paidRows, error: paidErr } = await supabase
-        .from("invoices")
-        .select("id, amount_paid")
-        .eq("owner_id", ownerId);
-      if (paidErr) throw paidErr;
-      const paidById = new Map(
-        (paidRows ?? []).map((r) => [r.id, Number(r.amount_paid ?? 0)]),
-      );
-
-      const { data, error } = await supabase.rpc("get_statement_of_account", {
-        p_owner_id: ownerId,
-      });
-      // Fall back to direct query if RPC not yet deployed
-      if (error) {
-        const { data: rows, error: qErr } = await supabase
-          .from("invoices")
-          .select("id, invoice_number, status, total, vat_aed, service_type, notes, amount_paid, created_at, due_date, booking_id")
-          .eq("owner_id", ownerId)
-          .order("created_at", { ascending: false });
-        if (qErr) throw qErr;
-        return (rows ?? []).map((r) => ({
-          invoice_id: r.id,
-          invoice_number: r.invoice_number,
-          service_type: null as string | null,
-          status: r.status,
-          total: invoiceDisplayTotals({
-            total: r.total,
-            vat_aed: r.vat_aed,
-            service_type: r.service_type,
-            notes: r.notes,
-          }).grandTotal,
-          amount_paid: Number(r.amount_paid ?? 0),
-          created_at: r.created_at,
-          due_date: r.due_date,
-          days_overdue: 0,
-        })) as StatementRow[];
-      }
-      return ((data ?? []) as StatementRow[]).map((r) => ({
-        ...r,
-        amount_paid: paidById.get(r.invoice_id) ?? 0,
-      }));
-    },
-  });
-
-  const ownerQuery = useQuery({
-    queryKey: ["owner_wallet", ownerId],
-    enabled: !!ownerId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("owners")
-        .select("wallet_balance")
-        .eq("id", ownerId)
-        .single();
-      if (error) throw error;
-      return data;
-    },
-  });
+  const statementQuery = useStatementOfAccount(ownerId);
+  const closingQuery = useLedgerClosing(ownerId);
 
   const invoices = statementQuery.data ?? [];
-  const walletBalance = ownerQuery.data?.wallet_balance ?? 0;
+  const k = closingQuery.data ?? 0;
+  const balances = deriveOwnerBalances(k, invoices);
 
-  const UNPAID: string[] = ["outstanding", "overdue", "partially_paid"];
-  const totalOutstanding = invoices
-    .filter((i) => UNPAID.includes(i.status))
-    .reduce((sum, i) => sum + statementBalanceDue(i), 0);
-
-  const netPosition = walletBalance - totalOutstanding;
-
-  const payAllOutstanding = async () => {
-    const unpaid = invoices
-      .filter((i) => UNPAID.includes(i.status))
-      .sort(
-        (a, b) =>
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-      );
+  const payAllOutstanding = async (performedBy = "bulk_payment") => {
+    const unpaid = [...invoices].sort((a, b) =>
+      (a.due_date || a.created_at).localeCompare(b.due_date || b.created_at),
+    );
 
     let cleared = 0;
     let totalDeducted = 0;
@@ -925,7 +856,7 @@ export function useOwnerStatement(ownerId: string) {
     for (const inv of unpaid) {
       const result = await payInvoiceFromWallet(supabase, {
         invoiceId: inv.invoice_id,
-        performedBy: "bulk_payment",
+        performedBy,
       });
 
       if (!result.success) {
@@ -951,19 +882,30 @@ export function useOwnerStatement(ownerId: string) {
     }
 
     queryClient.invalidateQueries({ queryKey: ["invoices"] });
-    queryClient.invalidateQueries({ queryKey: ["statement"] });
-    queryClient.invalidateQueries({ queryKey: ["owners"] });
-    queryClient.invalidateQueries({ queryKey: ["wallet_transactions"] });
+    invalidateOwnerStatementQueries(queryClient, ownerId);
   };
 
   return {
+    ...balances,
+    balances,
     invoices,
-    walletBalance,
-    totalOutstanding,
-    netPosition,
     payAllOutstanding,
-    isLoading: statementQuery.isLoading || ownerQuery.isLoading,
-    error: statementQuery.error || ownerQuery.error,
+    isLoading: statementQuery.isLoading || closingQuery.isLoading,
+    error: statementQuery.error || closingQuery.error,
+  };
+}
+
+/** @deprecated Prefer useOwnerBalances — kept for existing call sites. */
+export function useOwnerStatement(ownerId: string) {
+  const result = useOwnerBalances(ownerId);
+  return {
+    invoices: result.invoices,
+    walletBalance: result.combinedWallet,
+    totalOutstanding: result.invoiceRemainingTotal,
+    netPosition: result.netPosition,
+    payAllOutstanding: result.payAllOutstanding,
+    isLoading: result.isLoading,
+    error: result.error,
   };
 }
 

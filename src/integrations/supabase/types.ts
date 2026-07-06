@@ -686,6 +686,7 @@ export type Database = {
           actual_check_out_at: string | null
           add_ons: string[] | null
           agent_notes: string | null
+          boarding_type: Database["public"]["Enums"]["boarding_type"]
           booking_ref: string | null
           booking_type: Database["public"]["Enums"]["booking_type"] | null
           camera_link: string | null
@@ -717,6 +718,7 @@ export type Database = {
           actual_check_out_at?: string | null
           add_ons?: string[] | null
           agent_notes?: string | null
+          boarding_type?: Database["public"]["Enums"]["boarding_type"]
           booking_ref?: string | null
           booking_type?: Database["public"]["Enums"]["booking_type"] | null
           camera_link?: string | null
@@ -750,6 +752,7 @@ export type Database = {
           actual_check_out_at?: string | null
           add_ons?: string[] | null
           agent_notes?: string | null
+          boarding_type?: Database["public"]["Enums"]["boarding_type"]
           booking_ref?: string | null
           booking_type?: Database["public"]["Enums"]["booking_type"] | null
           camera_link?: string | null
@@ -816,65 +819,6 @@ export type Database = {
           },
         ]
       }
-      daily_notes: {
-        Row: {
-          booking_id: string | null
-          created_at: string
-          id: string
-          note_date: string
-          note_text: string
-          pet_id: string
-          staff_id: string | null
-        }
-        Insert: {
-          booking_id?: string | null
-          created_at?: string
-          id?: string
-          note_date: string
-          note_text: string
-          pet_id: string
-          staff_id?: string | null
-        }
-        Update: {
-          booking_id?: string | null
-          created_at?: string
-          id?: string
-          note_date?: string
-          note_text?: string
-          pet_id?: string
-          staff_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "daily_notes_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "daily_notes_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "woof_v_booking_required_class"
-            referencedColumns: ["booking_id"]
-          },
-          {
-            foreignKeyName: "daily_notes_pet_id_fkey"
-            columns: ["pet_id"]
-            isOneToOne: false
-            referencedRelation: "pets"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "daily_notes_staff_id_fkey"
-            columns: ["staff_id"]
-            isOneToOne: false
-            referencedRelation: "staff"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       daily_checklists: {
         Row: {
           checklist_date: string
@@ -929,6 +873,65 @@ export type Database = {
           {
             foreignKeyName: "daily_checklists_reviewed_by_fkey"
             columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      daily_notes: {
+        Row: {
+          booking_id: string | null
+          created_at: string
+          id: string
+          note_date: string
+          note_text: string
+          pet_id: string
+          staff_id: string | null
+        }
+        Insert: {
+          booking_id?: string | null
+          created_at?: string
+          id?: string
+          note_date: string
+          note_text: string
+          pet_id: string
+          staff_id?: string | null
+        }
+        Update: {
+          booking_id?: string | null
+          created_at?: string
+          id?: string
+          note_date?: string
+          note_text?: string
+          pet_id?: string
+          staff_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_notes_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_notes_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "woof_v_booking_required_class"
+            referencedColumns: ["booking_id"]
+          },
+          {
+            foreignKeyName: "daily_notes_pet_id_fkey"
+            columns: ["pet_id"]
+            isOneToOne: false
+            referencedRelation: "pets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_notes_staff_id_fkey"
+            columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "staff"
             referencedColumns: ["id"]
@@ -1255,47 +1258,93 @@ export type Database = {
           },
         ]
       }
-      pet_grooming_notes: {
+      grooming_groomer_leave_periods: {
         Row: {
-          appointment_id: string | null
           created_at: string
+          end_date: string
+          groomer_id: string
           id: string
-          note: string
-          pet_id: string
-          written_by: string
+          note: string | null
+          start_date: string
         }
         Insert: {
-          appointment_id?: string | null
           created_at?: string
+          end_date: string
+          groomer_id: string
           id?: string
-          note: string
-          pet_id: string
-          written_by: string
+          note?: string | null
+          start_date: string
         }
         Update: {
-          appointment_id?: string | null
           created_at?: string
+          end_date?: string
+          groomer_id?: string
           id?: string
-          note?: string
-          pet_id?: string
-          written_by?: string
+          note?: string | null
+          start_date?: string
         }
         Relationships: [
           {
-            foreignKeyName: "pet_grooming_notes_appointment_id_fkey"
-            columns: ["appointment_id"]
+            foreignKeyName: "grooming_groomer_leave_periods_groomer_id_fkey"
+            columns: ["groomer_id"]
             isOneToOne: false
-            referencedRelation: "grooming_appointments"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "pet_grooming_notes_pet_id_fkey"
-            columns: ["pet_id"]
-            isOneToOne: false
-            referencedRelation: "pets"
+            referencedRelation: "grooming_groomers"
             referencedColumns: ["id"]
           },
         ]
+      }
+      grooming_groomer_weekly_days_off: {
+        Row: {
+          created_at: string
+          day_of_week: number
+          groomer_id: string
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          day_of_week: number
+          groomer_id: string
+          id?: string
+        }
+        Update: {
+          created_at?: string
+          day_of_week?: number
+          groomer_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grooming_groomer_weekly_days_off_groomer_id_fkey"
+            columns: ["groomer_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_groomers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      grooming_groomers: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
       }
       grooming_overrides: {
         Row: {
@@ -1449,118 +1498,6 @@ export type Database = {
           },
         ]
       }
-      grooming_stations: {
-        Row: {
-          created_at: string
-          id: string
-          is_active: boolean
-          name: string
-          sort_order: number
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          name: string
-          sort_order?: number
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          name?: string
-          sort_order?: number
-        }
-        Relationships: []
-      }
-      grooming_groomers: {
-        Row: {
-          created_at: string
-          id: string
-          is_active: boolean
-          name: string
-          sort_order: number
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          name: string
-          sort_order?: number
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          name?: string
-          sort_order?: number
-        }
-        Relationships: []
-      }
-      grooming_groomer_leave_periods: {
-        Row: {
-          created_at: string
-          end_date: string
-          groomer_id: string
-          id: string
-          note: string | null
-          start_date: string
-        }
-        Insert: {
-          created_at?: string
-          end_date: string
-          groomer_id: string
-          id?: string
-          note?: string | null
-          start_date: string
-        }
-        Update: {
-          created_at?: string
-          end_date?: string
-          groomer_id?: string
-          id?: string
-          note?: string | null
-          start_date?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "grooming_groomer_leave_periods_groomer_id_fkey"
-            columns: ["groomer_id"]
-            isOneToOne: false
-            referencedRelation: "grooming_groomers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      grooming_groomer_weekly_days_off: {
-        Row: {
-          created_at: string
-          day_of_week: number
-          groomer_id: string
-          id: string
-        }
-        Insert: {
-          created_at?: string
-          day_of_week: number
-          groomer_id: string
-          id?: string
-        }
-        Update: {
-          created_at?: string
-          day_of_week?: number
-          groomer_id?: string
-          id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "grooming_groomer_weekly_days_off_groomer_id_fkey"
-            columns: ["groomer_id"]
-            isOneToOne: false
-            referencedRelation: "grooming_groomers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       grooming_station_weekly_assignments: {
         Row: {
           created_at: string
@@ -1599,6 +1536,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      grooming_stations: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
       }
       grooming_status_events: {
         Row: {
@@ -1926,6 +1887,69 @@ export type Database = {
           invoice_id?: string
           old_status?: string | null
           payment_id?: string
+        }
+        Relationships: []
+      }
+      invoice_payments_fix_emma_procter_20260606: {
+        Row: {
+          amount: number
+          archived_at: string
+          created_at: string
+          invoice_id: string
+          payment_id: string
+          payment_method: string
+        }
+        Insert: {
+          amount: number
+          archived_at?: string
+          created_at: string
+          invoice_id: string
+          payment_id: string
+          payment_method: string
+        }
+        Update: {
+          amount?: number
+          archived_at?: string
+          created_at?: string
+          invoice_id?: string
+          payment_id?: string
+          payment_method?: string
+        }
+        Relationships: []
+      }
+      invoice_payments_reverted_archive: {
+        Row: {
+          amount: number
+          archived_at: string
+          archived_reason: string
+          created_at: string | null
+          invoice_id: string
+          owner_id: string | null
+          payment_id: string
+          payment_method: string | null
+          recorded_by: string | null
+        }
+        Insert: {
+          amount: number
+          archived_at?: string
+          archived_reason?: string
+          created_at?: string | null
+          invoice_id: string
+          owner_id?: string | null
+          payment_id: string
+          payment_method?: string | null
+          recorded_by?: string | null
+        }
+        Update: {
+          amount?: number
+          archived_at?: string
+          archived_reason?: string
+          created_at?: string | null
+          invoice_id?: string
+          owner_id?: string | null
+          payment_id?: string
+          payment_method?: string | null
+          recorded_by?: string | null
         }
         Relationships: []
       }
@@ -2457,6 +2481,48 @@ export type Database = {
           start_month?: number
         }
         Relationships: []
+      }
+      pet_grooming_notes: {
+        Row: {
+          appointment_id: string | null
+          created_at: string
+          id: string
+          note: string
+          pet_id: string
+          written_by: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          created_at?: string
+          id?: string
+          note: string
+          pet_id: string
+          written_by: string
+        }
+        Update: {
+          appointment_id?: string | null
+          created_at?: string
+          id?: string
+          note?: string
+          pet_id?: string
+          written_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pet_grooming_notes_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "grooming_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pet_grooming_notes_pet_id_fkey"
+            columns: ["pet_id"]
+            isOneToOne: false
+            referencedRelation: "pets"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       pets: {
         Row: {
@@ -3522,6 +3588,36 @@ export type Database = {
           },
         ]
       }
+      wallet_transactions_fix_emma_procter_20260606: {
+        Row: {
+          amount: number
+          archived_at: string
+          created_at: string
+          invoice_id: string | null
+          payment_method: string | null
+          transaction_id: string
+          transaction_type: string
+        }
+        Insert: {
+          amount: number
+          archived_at?: string
+          created_at: string
+          invoice_id?: string | null
+          payment_method?: string | null
+          transaction_id: string
+          transaction_type: string
+        }
+        Update: {
+          amount?: number
+          archived_at?: string
+          created_at?: string
+          invoice_id?: string | null
+          payment_method?: string | null
+          transaction_id?: string
+          transaction_type?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       agent_capability_gaps: {
@@ -3673,34 +3769,20 @@ export type Database = {
         }
         Returns: string
       }
-      consume_service_credit:
-        | {
-            Args: {
-              p_consumed_for_ref_id?: string
-              p_consumed_for_ref_type?: string
-              p_credit_id: string
-              p_units?: number
-            }
-            Returns: {
-              credit_id: string
-              new_status: string
-              units_remaining: number
-            }[]
-          }
-        | {
-            Args: {
-              p_allow_expired?: boolean
-              p_consumed_for_ref_id?: string
-              p_consumed_for_ref_type?: string
-              p_credit_id: string
-              p_units?: number
-            }
-            Returns: {
-              credit_id: string
-              new_status: string
-              units_remaining: number
-            }[]
-          }
+      consume_service_credit: {
+        Args: {
+          p_allow_expired?: boolean
+          p_consumed_for_ref_id?: string
+          p_consumed_for_ref_type?: string
+          p_credit_id: string
+          p_units?: number
+        }
+        Returns: {
+          credit_id: string
+          new_status: string
+          units_remaining: number
+        }[]
+      }
       create_assessment_booking: {
         Args: {
           p_notes?: string
@@ -3820,6 +3902,27 @@ export type Database = {
               total_amount_aed: number
             }[]
           }
+        | {
+            Args: {
+              p_amount_aed?: number
+              p_issue_date?: string
+              p_label?: string
+              p_line_items?: Json
+              p_owner_id: string
+              p_payment_method?: Database["public"]["Enums"]["payment_method"]
+              p_pet_ids: string[]
+              p_service_code?: Database["public"]["Enums"]["service_code"]
+              p_units: number
+              p_validity_months?: number
+            }
+            Returns: {
+              credits_granted: number
+              discount_applied_aed: number
+              invoice_id: string
+              purchase_group_id: string
+              total_amount_aed: number
+            }[]
+          }
       list_active_credits_for_pet: {
         Args: {
           p_pet_id: string
@@ -3850,38 +3953,22 @@ export type Database = {
         Args: { p_invoice_id: string; p_performed_by?: string }
         Returns: Json
       }
-      purchase_package:
-        | {
-            Args: {
-              p_owner_id: string
-              p_package_code: string
-              p_payment_method?: Database["public"]["Enums"]["payment_method"]
-              p_pet_ids: string[]
-            }
-            Returns: {
-              credits_granted: number
-              discount_applied_aed: number
-              invoice_id: string
-              purchase_group_id: string
-              total_amount_aed: number
-            }[]
-          }
-        | {
-            Args: {
-              p_issue_date?: string
-              p_owner_id: string
-              p_package_code: string
-              p_payment_method?: Database["public"]["Enums"]["payment_method"]
-              p_pet_ids: string[]
-            }
-            Returns: {
-              credits_granted: number
-              discount_applied_aed: number
-              invoice_id: string
-              purchase_group_id: string
-              total_amount_aed: number
-            }[]
-          }
+      purchase_package: {
+        Args: {
+          p_issue_date?: string
+          p_owner_id: string
+          p_package_code: string
+          p_payment_method?: Database["public"]["Enums"]["payment_method"]
+          p_pet_ids: string[]
+        }
+        Returns: {
+          credits_granted: number
+          discount_applied_aed: number
+          invoice_id: string
+          purchase_group_id: string
+          total_amount_aed: number
+        }[]
+      }
       resolve_woof_service_rate: {
         Args: {
           p_booking_date?: string
@@ -4085,6 +4172,7 @@ export type Database = {
         | "grooming_brushing"
         | "other"
       assessment_status: "not_assessed" | "passed" | "failed" | "scheduled"
+      boarding_type: "boarding_only" | "board_and_train"
       booking_status:
         | "enquiry"
         | "confirmed"
@@ -4112,11 +4200,11 @@ export type Database = {
       grooming_service:
         | "full_groom"
         | "full_bath"
-        | "tidy"
         | "nail_clip"
         | "deshedding"
         | "brushing"
         | "pawdicure"
+        | "tidy"
       invoice_status:
         | "draft"
         | "issued"
@@ -4205,7 +4293,6 @@ export type Database = {
         | "cat_grooming_full_no_bath"
         | "cat_grooming_full_with_bath"
         | "grooming_bath_brush_tidy"
-        | "grooming_tidy"
         | "grooming_nail_ear_teeth"
         | "cat_grooming_nail_ear"
         | "grooming_hair_no_more"
@@ -4222,6 +4309,8 @@ export type Database = {
         | "treadmill_hourly_addon"
         | "assessment_with_first_hour"
         | "daycare_half_day"
+        | "grooming_tidy"
+        | "board_and_train_night"
       service_unit:
         | "per_night"
         | "per_day"
@@ -4389,6 +4478,7 @@ export const Constants = {
         "other",
       ],
       assessment_status: ["not_assessed", "passed", "failed", "scheduled"],
+      boarding_type: ["boarding_only", "board_and_train"],
       booking_status: [
         "enquiry",
         "confirmed",
@@ -4419,11 +4509,11 @@ export const Constants = {
       grooming_service: [
         "full_groom",
         "full_bath",
-        "tidy",
         "nail_clip",
         "deshedding",
         "brushing",
         "pawdicure",
+        "tidy",
       ],
       invoice_status: [
         "draft",
@@ -4517,7 +4607,6 @@ export const Constants = {
         "cat_grooming_full_no_bath",
         "cat_grooming_full_with_bath",
         "grooming_bath_brush_tidy",
-        "grooming_tidy",
         "grooming_nail_ear_teeth",
         "cat_grooming_nail_ear",
         "grooming_hair_no_more",
@@ -4534,6 +4623,8 @@ export const Constants = {
         "treadmill_hourly_addon",
         "assessment_with_first_hour",
         "daycare_half_day",
+        "grooming_tidy",
+        "board_and_train_night",
       ],
       service_unit: [
         "per_night",
