@@ -58,6 +58,22 @@ describe("resolve_woof_service_rate", () => {
     expect(rows[0].is_peak).toBe(false);
   });
 
+  it("returns flat board_and_train rate on peak and off-peak dates", async () => {
+    const peak = await resolveRate({
+      serviceCode: "board_and_train_night",
+      bookingDate: "2026-07-15",
+    });
+    expect(peak).toHaveLength(1);
+    expect(peak[0].amount_aed).toBe(170);
+
+    const offPeak = await resolveRate({
+      serviceCode: "board_and_train_night",
+      bookingDate: "2026-03-15",
+    });
+    expect(offPeak).toHaveLength(1);
+    expect(offPeak[0].amount_aed).toBe(170);
+  });
+
   it("resolves medium full service grooming", async () => {
     const rows = await resolveRate({ serviceCode: "grooming_full_service", petSize: "medium" });
     expect(rows[0].amount_aed).toBe(236.25);

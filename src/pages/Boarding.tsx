@@ -69,6 +69,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -179,7 +180,7 @@ import {
   resolveDogSizeForSelectedPets,
   type DogSizeFormValue,
 } from "@/lib/dogSizeForm";
-import { resolveBoardingStayRates } from "@/lib/boardingPricing";
+import { resolveBoardingStayRates, BOARD_AND_TRAIN_NIGHT_AED, type BoardingType } from "@/lib/boardingPricing";
 import { calculateDoubleOccupancyDiscountAed } from "@/lib/doubleOccupancyDiscount";
 import {
   Check,
@@ -932,7 +933,17 @@ type NewBookingForm = {
   >;
   /** From pet profile when set; required on save when any selected dog lacks `size`. */
   dog_size: DogSizeFormValue | null;
+  boarding_type: BoardingType;
 };
+
+const BOARDING_TYPE_OPTIONS: { value: BoardingType; label: string }[] = [
+  { value: "boarding_only", label: "Boarding only" },
+  { value: "board_and_train", label: "Board & Train" },
+];
+
+function boardingTypeLabel(type: BoardingType): string {
+  return BOARDING_TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type;
+}
 
 const BLANK_FORM: NewBookingForm = {
   owner_id: "",
@@ -953,6 +964,7 @@ const BLANK_FORM: NewBookingForm = {
   addon_price_aed: {},
   pet_care_by_pet_id: {},
   dog_size: null,
+  boarding_type: "boarding_only",
 };
 
 const BOARDING_DRAFT_KEY = "boarding-new-booking-draft";
@@ -960,7 +972,13 @@ const BOARDING_DRAFT_KEY = "boarding-new-booking-draft";
 function loadBoardingDraft(): NewBookingForm | null {
   try {
     const raw = sessionStorage.getItem(BOARDING_DRAFT_KEY);
-    return raw ? (JSON.parse(raw) as NewBookingForm) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<NewBookingForm>;
+    return {
+      ...BLANK_FORM,
+      ...parsed,
+      boarding_type: parsed.boarding_type ?? "boarding_only",
+    };
   } catch {
     return null;
   }
@@ -1786,6 +1804,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
       dogRatePetCount,
       form.check_in_date,
       form.check_out_date,
+      form.boarding_type,
     ],
     enabled: Boolean(form.check_in_date && form.check_out_date && !dogDateRangeError),
     queryFn: async () =>
@@ -1794,6 +1813,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
         dogRatePetCount,
         form.check_in_date,
         form.check_out_date,
+        form.boarding_type,
       ),
   });
 
@@ -2104,6 +2124,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
         dogRatePreview.data
           ? `Rate: ${dogRatePreview.data.seasonSummary}`
           : "",
+        `Boarding type: ${boardingTypeLabel(form.boarding_type)}`,
         `Dog size: ${resolvedDogSize}`,
         addons ? `Add-ons: ${addons}` : "",
       ]
@@ -2115,6 +2136,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
       staff_id: null,
       status: "confirmed",
       booking_type: "boarding",
+      boarding_type: form.boarding_type,
     };
 
     createBooking.mutate(payload, {
@@ -2196,6 +2218,7 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
           })),
           checkInDate: form.check_in_date,
           checkOutDate: form.check_out_date,
+          boardingType: form.boarding_type,
           addons: addonItems,
         })
           .then(() => {
@@ -2722,9 +2745,15 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
                       </p>
                       <p className="text-sm font-medium">
                         {formatAed(dogRatePreview.data.totalAed)}{" "}
-                        <span className="text-xs text-muted-foreground">(standard boarding / night)</span>
+                        <span className="text-xs text-muted-foreground">
+                          {form.boarding_type === "board_and_train"
+                            ? `(Board & Train — ${formatAed(BOARD_AND_TRAIN_NIGHT_AED)} / night)`
+                            : "(boarding only / night)"}
+                        </span>
                       </p>
-                      {dogRatePreview.data.peakNights > 0 && dogRatePreview.data.offPeakNights > 0 ? (
+                      {form.boarding_type === "boarding_only" &&
+                      dogRatePreview.data.peakNights > 0 &&
+                      dogRatePreview.data.offPeakNights > 0 ? (
                         <p className="text-xs text-muted-foreground">
                           Peak and off-peak nights are priced separately on the invoice.
                         </p>
@@ -2835,6 +2864,34 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
                 {dogNights} night{dogNights !== 1 ? "s" : ""} (check-out day is departure, not charged)
               </p>
             ) : null}
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Boarding type</Label>
+              <RadioGroup
+                value={form.boarding_type}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, boarding_type: v as BoardingType }))
+                }
+                className="flex flex-wrap gap-x-6 gap-y-2"
+              >
+                {BOARDING_TYPE_OPTIONS.map((opt) => (
+                  <div key={opt.value} className="flex items-center gap-2">
+                    <RadioGroupItem
+                      value={opt.value}
+                      id={`boarding-type-${opt.value}`}
+                      data-testid={
+                        opt.value === "boarding_only"
+                          ? "boarding-type-boarding-only"
+                          : "boarding-type-board-and-train"
+                      }
+                    />
+                    <Label htmlFor={`boarding-type-${opt.value}`} className="font-normal cursor-pointer">
+                      {opt.label}
+                    </Label>
+                  </div>
+                ))}
+              </RadioGroup>
+            </div>
 
             <div className="space-y-2">
               <Label className="text-sm font-medium">Transport</Label>
@@ -2992,7 +3049,8 @@ export const DogBoardingCalendar = memo(function DogBoardingCalendar({
                     {dogRatePreview.data && dogNights > 0 && (
                       <div className="flex justify-between gap-4">
                         <span className="text-muted-foreground">
-                          Boarding ({dogNights} night{dogNights !== 1 ? "s" : ""}
+                          {form.boarding_type === "board_and_train" ? "Board & Train" : "Boarding only"} (
+                          {dogNights} night{dogNights !== 1 ? "s" : ""}
                           {dogRatePetCount > 1 ? `, ${dogRatePetCount} pets` : ""})
                         </span>
                         <span className="tabular-nums font-medium">

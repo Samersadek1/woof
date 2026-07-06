@@ -26,6 +26,13 @@ describe("boardingInvoiceLines", () => {
     expect(
       isBoardingNightLineItem({
         service_type: "boarding",
+        description: "Max — Board & Train — 1 Dec – 5 Dec 2025 (4 nights)",
+        pricing_key: "board_and_train_night",
+      }),
+    ).toBe(true);
+    expect(
+      isBoardingNightLineItem({
+        service_type: "boarding",
         description: "Pickup — Dubai",
         pricing_key: "transport_dubai",
       }),
@@ -111,5 +118,42 @@ describe("buildBoardingNightLineItems", () => {
 
     expect(lines).toHaveLength(1);
     expect(lines[0].description).toBe("Max — Boarding — Peak — 4 Dec 2025 (1 night)");
+  });
+
+  it("creates one flat board_and_train line per pet", async () => {
+    mockedResolveBoardingStayRates.mockResolvedValue({
+      nights: [
+        { date: "2025-12-01", unitPrice: 170, pricingKey: "board_and_train_night", season: "off_peak", isPeak: false },
+        { date: "2025-12-02", unitPrice: 170, pricingKey: "board_and_train_night", season: "off_peak", isPeak: false },
+        { date: "2025-12-03", unitPrice: 170, pricingKey: "board_and_train_night", season: "off_peak", isPeak: false },
+      ],
+      totalAed: 510,
+      peakNights: 0,
+      offPeakNights: 3,
+      seasonSummary: "Board & Train — flat rate",
+    });
+
+    const lines = await buildBoardingNightLineItems({
+      roomId: "room-1",
+      roomName: "A12",
+      petCount: 2,
+      pets: [
+        { id: "pet-max", name: "Max" },
+        { id: "pet-buddy", name: "Buddy" },
+      ],
+      checkInDate: "2025-12-01",
+      checkOutDate: "2025-12-04",
+      boardingType: "board_and_train",
+    });
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({
+      description: "Max — A12 — Board & Train — 1 Dec – 3 Dec 2025 (3 nights)",
+      quantity: 3,
+      unitPrice: 170,
+      pricingKey: "board_and_train_night",
+      serviceType: "boarding",
+    });
+    expect(lines[1].description).toBe("Buddy — A12 — Board & Train — 1 Dec – 3 Dec 2025 (3 nights)");
   });
 });

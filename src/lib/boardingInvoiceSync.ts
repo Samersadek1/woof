@@ -80,7 +80,7 @@ async function loadBookingForInvoice(bookingId: string) {
   const { data, error } = await getSupabase()
     .from("bookings")
     .select(
-      "id, owner_id, room_id, check_in_date, check_out_date, status, rooms(room_number, display_name, room_type), booking_pets(pet_id, pets(name))",
+      "id, owner_id, room_id, check_in_date, check_out_date, status, boarding_type, rooms(room_number, display_name, room_type), booking_pets(pet_id, pets(name))",
     )
     .eq("id", bookingId)
     .single();
@@ -129,6 +129,7 @@ export async function syncBoardingBookingInvoice(
     booking.booking_pets as Array<{ pet_id: string; pets: { name: string } | null }> | null,
   );
   const petCount = Math.max(1, pets.length);
+  const boardingType = (booking.boarding_type as "boarding_only" | "board_and_train" | null) ?? "boarding_only";
 
   if (!invoice) {
     await createBookingInvoice({
@@ -142,6 +143,7 @@ export async function syncBoardingBookingInvoice(
       pets,
       checkInDate: booking.check_in_date,
       checkOutDate: booking.check_out_date,
+      boardingType,
     });
     const { data: created } = await getSupabase()
       .from("invoices")
@@ -172,6 +174,7 @@ export async function syncBoardingBookingInvoice(
     pets,
     checkInDate: booking.check_in_date,
     checkOutDate: booking.check_out_date,
+    boardingType,
   });
 
   const merged: BoardingInvoiceLineItem[] = [...nightLines, ...preserved.map(lineRowToServiceItem)];

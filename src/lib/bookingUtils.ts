@@ -4,6 +4,7 @@ import { getSupabase } from "@/lib/supabaseRuntime";
 import type { Database } from "@/integrations/supabase/types";
 import type { BillingBreakdown, LineItem, ServiceType } from "@/hooks/useBilling";
 import { buildBoardingNightLineItems } from "@/lib/boardingInvoiceLines";
+import type { BoardingType } from "@/lib/boardingPricing";
 import { MAX_BOARDING_STAY_NIGHTS } from "@/lib/boardingLimits";
 import { resolveAddonPricesForKeys } from "@/lib/addonPricing";
 import { serviceTypeForBoardingAddonKey } from "@/lib/groomingCatalog";
@@ -294,6 +295,7 @@ interface AutoInvoiceParams {
   checkInDate: string;
   checkOutDate: string;
   roomRateType?: "peak" | "off_peak";
+  boardingType?: BoardingType;
   /** When `unitPriceAed` is set, that amount is used (staff override per booking) instead of resolving `key` from the pricing tables. */
   addons?: { key: string; label: string; quantity?: number; unitPriceAed?: number }[];
 }
@@ -310,6 +312,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
     checkInDate,
     checkOutDate,
     roomRateType = "off_peak",
+    boardingType = "boarding_only",
     addons = [],
   } = params;
 
@@ -328,6 +331,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
       pets,
       checkInDate,
       checkOutDate,
+      boardingType,
     }),
   ]);
 

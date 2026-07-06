@@ -82,19 +82,23 @@ export function PricingTab() {
 
   const boardingNightSeasonRows = useMemo(() => {
     const isBoardingNight = (key: string) => key.startsWith("boarding_night:");
+    const isBoardAndTrainNight = (key: string) => key.startsWith("board_and_train_night:");
     const seasonOf = (key: string) => {
       const part = key.split(":")[3];
       return part && part !== "*" ? part : null;
     };
     const nightRows = boardingRateRows.filter((r) => isBoardingNight(r.key));
+    const boardAndTrain = boardingRateRows.find((r) => isBoardAndTrainNight(r.key));
     const peak = nightRows.find((r) => seasonOf(r.key) === "peak");
     const offPeak = nightRows.find((r) => seasonOf(r.key) === "off_peak");
     const other = nightRows.filter((r) => {
       const s = seasonOf(r.key);
       return s !== "peak" && s !== "off_peak";
     });
-    const nonNight = boardingRateRows.filter((r) => !isBoardingNight(r.key));
-    return { peak, offPeak, other, nonNight };
+    const nonNight = boardingRateRows.filter(
+      (r) => !isBoardingNight(r.key) && !isBoardAndTrainNight(r.key),
+    );
+    return { peak, offPeak, other, nonNight, boardAndTrain };
   }, [boardingRateRows]);
   const canonicalByKey = useMemo(
     () => new Map((allRows ?? []).map((r) => [r.key, r])),
@@ -550,6 +554,34 @@ export function PricingTab() {
                             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                           }}
                           disabled={saving === `key:${boardingNightSeasonRows.offPeak.key}`}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                  {boardingNightSeasonRows.boardAndTrain ? (
+                    <TableRow key={boardingNightSeasonRows.boardAndTrain.key}>
+                      <TableCell className="text-sm font-medium">Board & Train (per night)</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {boardingNightSeasonRows.boardAndTrain.key}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          className="w-[140px] ml-auto text-right h-8 text-sm"
+                          defaultValue={boardingNightSeasonRows.boardAndTrain.amount_aed}
+                          onBlur={(e) =>
+                            saveCanonicalKey(boardingNightSeasonRows.boardAndTrain!.key, e.target.value, {
+                              label:
+                                boardingNightSeasonRows.boardAndTrain!.label || "Board & Train (per night)",
+                              category: boardingNightSeasonRows.boardAndTrain!.category,
+                            })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                          disabled={saving === `key:${boardingNightSeasonRows.boardAndTrain.key}`}
                         />
                       </TableCell>
                     </TableRow>

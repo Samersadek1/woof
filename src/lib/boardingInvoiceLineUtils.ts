@@ -9,6 +9,7 @@ export function isBoardingNightLineItem(line: {
 }): boolean {
   if (line.service_type !== "boarding") return false;
   if (line.pricing_key === "boarding_night") return true;
+  if (line.pricing_key === "board_and_train_night") return true;
   return /\snight(s)?(\s|$)/i.test(line.description);
 }
 
