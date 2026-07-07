@@ -12,6 +12,8 @@ export type LedgerRowLike = {
   amount: number;
   balance_after: number;
   is_opening_balance?: boolean;
+  /** When false, row affects balance but is omitted from credit/debit summaries (wallet payments). */
+  is_visible?: boolean;
 };
 
 export function isOpenInvoiceStatus(status: string): boolean {
@@ -88,7 +90,7 @@ export type PeriodTotals = {
   closing: number;
 };
 
-/** Period stats excluding opening row amounts from credit/debit sums. */
+/** Period stats: visible credits/debits; net movement always reconciles to closing K. */
 export function computePeriodTotals(rows: LedgerRowLike[]): PeriodTotals {
   const openingRow = rows.find((r) => r.is_opening_balance);
   const opening = roundAed(openingRow?.balance_after ?? 0);
@@ -97,6 +99,7 @@ export function computePeriodTotals(rows: LedgerRowLike[]): PeriodTotals {
   let credits = 0;
   let debits = 0;
   for (const row of movementRows) {
+    if (row.is_visible === false) continue;
     if (row.amount > 0) credits += row.amount;
     else if (row.amount < 0) debits += Math.abs(row.amount);
   }
@@ -112,7 +115,7 @@ export function computePeriodTotals(rows: LedgerRowLike[]): PeriodTotals {
     opening,
     credits,
     debits,
-    netMovement: roundAed(credits - debits),
+    netMovement: roundAed(closing - opening),
     closing,
   };
 }

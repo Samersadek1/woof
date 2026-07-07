@@ -37,8 +37,7 @@ export function orphanWalletDeductions(
       (p) =>
         p.invoice_id === wt.invoice_id &&
         p.payment_method === "wallet" &&
-        roundAed(p.amount) === wtAmount &&
-        Math.abs(new Date(p.created_at).getTime() - new Date(wt.created_at).getTime()) < 5000,
+        roundAed(p.amount) === wtAmount,
     );
     return !matchedByAmount;
   });

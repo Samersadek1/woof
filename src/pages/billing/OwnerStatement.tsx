@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Link, useParams } from "react-router-dom";
-import { ChevronDown, Download } from "lucide-react";
+import { ChevronDown, Download, Printer } from "lucide-react";
 import TopBar from "@/components/dashboard/TopBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -167,6 +167,10 @@ export default function OwnerStatementPage() {
     setToDate(today);
   };
 
+  const handlePrintStatement = () => {
+    window.print();
+  };
+
   const debtAmount =
     balances.outstandingDebt > 0
       ? balances.outstandingDebt
@@ -177,8 +181,41 @@ export default function OwnerStatementPage() {
   return (
     <>
       <TopBar title="Statement of Account" />
-      <main className="flex-1 overflow-auto p-6 md:p-8 space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <style>{`
+        @media print {
+          @page { size: A4 portrait; margin: 12mm; }
+          html, body { background: white !important; color: #111827 !important; }
+          header, aside, .soa-no-print { display: none !important; }
+          .soa-print-root {
+            display: block !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            background: white !important;
+          }
+          .soa-print-card {
+            border: 0 !important;
+            box-shadow: none !important;
+            break-inside: avoid;
+          }
+          .soa-print-table {
+            overflow: visible !important;
+            border-color: #d1d5db !important;
+          }
+          .soa-print-table table {
+            font-size: 10px !important;
+          }
+          .soa-print-table th,
+          .soa-print-table td {
+            padding: 6px 8px !important;
+          }
+          .soa-print-table a {
+            color: #111827 !important;
+            text-decoration: none !important;
+          }
+        }
+      `}</style>
+      <main className="soa-print-root flex-1 overflow-auto p-6 md:p-8 space-y-5">
+        <div className="soa-no-print flex flex-wrap items-center justify-between gap-3">
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem>
@@ -203,19 +240,31 @@ export default function OwnerStatementPage() {
             </BreadcrumbList>
           </Breadcrumb>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={ledger.length === 0}
-            onClick={() => exportStatementCsv(ledger, ownerName, periodTotals)}
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={ledger.length === 0 || ledgerLoading}
+              onClick={handlePrintStatement}
+            >
+              <Printer className="h-3.5 w-3.5" />
+              Print statement
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={ledger.length === 0}
+              onClick={() => exportStatementCsv(ledger, ownerName, periodTotals)}
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </Button>
+          </div>
         </div>
 
-        <Card>
+        <Card className="soa-print-card">
           <CardContent className="p-5 grid gap-6 md:grid-cols-2">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -266,7 +315,7 @@ export default function OwnerStatementPage() {
         </Card>
 
         {!headerLoading && ownerBalances.canPayAll && (
-          <Card className="border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20">
+          <Card className="soa-no-print border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20">
             <CardContent className="p-4 flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm">
                 Wallet credit ({formatWalletAed(balances.wallet)}) can cover all open invoices (
@@ -292,7 +341,7 @@ export default function OwnerStatementPage() {
 
         {!statementLoading && outstanding.length > 0 && (
           <Collapsible open={outstandingOpen} onOpenChange={setOutstandingOpen}>
-            <Card>
+            <Card className="soa-no-print">
               <CollapsibleTrigger asChild>
                 <button
                   type="button"
@@ -326,9 +375,9 @@ export default function OwnerStatementPage() {
           </Collapsible>
         )}
 
-        <Card>
+        <Card className="soa-print-card">
           <CardContent className="p-5 space-y-4">
-            <div className="flex flex-wrap items-end gap-3">
+            <div className="soa-no-print flex flex-wrap items-end gap-3">
               <div className="space-y-1">
                 <Label htmlFor="soa-from" className="text-xs">
                   From
@@ -372,12 +421,14 @@ export default function OwnerStatementPage() {
               </div>
             </div>
 
-            <StatementLedgerTable
-              rows={ledger}
-              isLoading={ledgerLoading}
-              returnTo={returnTo}
-              periodTotals={periodTotals}
-            />
+            <div className="soa-print-table">
+              <StatementLedgerTable
+                rows={ledger}
+                isLoading={ledgerLoading}
+                returnTo={returnTo}
+                periodTotals={periodTotals}
+              />
+            </div>
           </CardContent>
         </Card>
       </main>

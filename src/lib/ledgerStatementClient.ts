@@ -106,9 +106,9 @@ export async function loadLedgerStatementClient(
     if (!isSoaInvoiceStatus(i.status)) continue;
     const gross = roundAed(invoiceGross(i));
     if (gross <= 0) continue;
-    const eventAt =
-      i.became_outstanding_at ??
-      (i.issue_date ? `${i.issue_date}T00:00:00.000Z` : i.created_at);
+    const eventAt = i.issue_date
+      ? `${i.issue_date}T00:00:00.000Z`
+      : (i.became_outstanding_at ?? i.created_at);
     events.push({
       row_id: `inv:${i.id}`,
       event_at: eventAt,
@@ -201,29 +201,29 @@ export async function loadLedgerStatementClient(
     return a.row_id.localeCompare(b.row_id);
   });
 
+  // Visible events only: wallet top-ups are credited when received, so
+  // wallet-paid invoices must not credit the same money a second time.
   let running = 0;
-  const withBalance = events.map((e) => {
-    running = roundAed(running + e.amount);
-    return { ...e, balance_after: running };
-  });
+  const withBalance = events
+    .filter((e) => e.is_visible)
+    .map((e) => {
+      running = roundAed(running + e.amount);
+      return { ...e, balance_after: running };
+    });
 
   const openingK = (() => {
     const before = withBalance.filter((e) => new Date(e.event_at).getTime() < fromMs);
-    if (before.length > 0) return before[before.length - 1].balance_after;
-    const sumBefore = events
-      .filter((e) => new Date(e.event_at).getTime() < fromMs)
-      .reduce((s, e) => s + e.amount, 0);
-    return roundAed(sumBefore);
+    return before.length > 0 ? before[before.length - 1].balance_after : 0;
   })();
 
-  const windowVisible = withBalance.filter((e) => {
+  const windowRows = withBalance.filter((e) => {
     const ms = new Date(e.event_at).getTime();
-    return e.is_visible && ms >= fromMs && ms <= toMs;
+    return ms >= fromMs && ms <= toMs;
   });
 
   const rows: LedgerStatementRow[] = [];
 
-  if (openingK !== 0 || windowVisible.length > 0) {
+  if (openingK !== 0 || windowRows.length > 0) {
     rows.push({
       row_id: "opening",
       created_at: fromIso,
@@ -241,7 +241,7 @@ export async function loadLedgerStatementClient(
     });
   }
 
-  for (const e of windowVisible) {
+  for (const e of windowRows) {
     rows.push({
       row_id: e.row_id,
       created_at: e.event_at,

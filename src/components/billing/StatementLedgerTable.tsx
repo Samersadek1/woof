@@ -1,7 +1,5 @@
 import { format } from "date-fns";
 import { Link } from "react-router-dom";
-import { Download } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -36,10 +34,13 @@ const TRANSACTION_LABELS: Record<string, string> = {
 
 function txLabel(row: LedgerStatementRow): string {
   if (row.is_opening_balance) return "Opening balance";
-  if (row.notes?.trim() && row.transaction_type === "invoice") {
-    return row.notes.length > 80 ? `${row.notes.slice(0, 80)}…` : row.notes;
-  }
   return TRANSACTION_LABELS[row.transaction_type] ?? row.transaction_type.replace(/_/g, " ");
+}
+
+function invoiceDetail(row: LedgerStatementRow): string | null {
+  if (row.transaction_type !== "invoice") return null;
+  const detail = row.notes?.trim();
+  return detail ? detail : null;
 }
 
 function serviceLabel(type: string | null | undefined): string {
@@ -75,7 +76,9 @@ export function exportStatementCsv(
     "Balance (AED)",
     "Notes",
   ];
-  const lines = rows.map((r) => {
+  const lines = rows
+    .filter((r) => r.is_opening_balance || r.is_visible)
+    .map((r) => {
     const isCredit = r.is_opening_balance || r.amount > 0;
     const isDebit = !r.is_opening_balance && r.amount < 0;
     return [
@@ -130,6 +133,8 @@ export function StatementLedgerTable({
   returnTo,
   periodTotals,
 }: StatementLedgerTableProps) {
+  const displayRows = rows.filter((r) => r.is_opening_balance || r.is_visible);
+
   if (isLoading) {
     return (
       <div className="space-y-2">
@@ -170,7 +175,7 @@ export function StatementLedgerTable({
         </div>
       )}
 
-      {rows.length === 0 ? (
+      {displayRows.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center">
           No transactions in this period.
         </p>
@@ -204,15 +209,12 @@ export function StatementLedgerTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => {
+              {displayRows.map((row) => {
                 const isOpening = row.is_opening_balance;
                 const isCredit = isOpening || row.amount > 0;
                 const isDebit = !isOpening && row.amount < 0;
                 const absAmount = Math.abs(row.amount);
-                const showNotesSubline =
-                  Boolean(row.notes?.trim()) &&
-                  !isOpening &&
-                  row.transaction_type === "invoice";
+                const detail = !isOpening ? invoiceDetail(row) : null;
 
                 return (
                   <TableRow
@@ -227,9 +229,9 @@ export function StatementLedgerTable({
                       <div className={cn("font-medium", isOpening && "italic text-muted-foreground")}>
                         {txLabel(row)}
                       </div>
-                      {showNotesSubline && (
-                        <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                          {row.notes}
+                      {detail && (
+                        <div className="mt-1 text-xs leading-snug text-muted-foreground">
+                          {detail}
                         </div>
                       )}
                     </TableCell>
