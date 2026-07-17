@@ -9,6 +9,8 @@ type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
 
 export interface UseInvoicesFilters {
   ownerId?: string;
+  /** Partial match on invoice_number (e.g. "04647" or "INV-2026-04647"). */
+  invoiceNumber?: string;
   status?: InvoiceStatus[];
   from?: string;
   to?: string;
@@ -54,6 +56,12 @@ export function useInvoices(filters: UseInvoicesFilters = {}) {
         .or("receipt_only.is.null,receipt_only.eq.false")
         .order("created_at", { ascending: false });
       if (filters.ownerId) q = q.eq("owner_id", filters.ownerId);
+      const invoiceNumber = filters.invoiceNumber?.trim();
+      if (invoiceNumber) {
+        // Escape LIKE wildcards so staff can paste full numbers safely.
+        const pattern = `%${invoiceNumber.replace(/([\\%_])/g, "\\$1")}%`;
+        q = q.ilike("invoice_number", pattern);
+      }
       if (filters.status?.length) q = q.in("status", filters.status);
       if (filters.from) q = q.gte("created_at", `${filters.from}T00:00:00`);
       if (filters.to) q = q.lte("created_at", `${filters.to}T23:59:59`);

@@ -94,6 +94,7 @@ export default function InvoiceListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<InvoiceStatus[]>([]);
+  const [invoiceNumber, setInvoiceNumber] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [serviceType, setServiceType] = useState("all");
@@ -104,6 +105,7 @@ export default function InvoiceListPage() {
   const [consolidateOpen, setConsolidateOpen] = useState(false);
   const { data: invoices = [], isLoading } = useInvoices({
     ownerId,
+    invoiceNumber: invoiceNumber.trim() || undefined,
     status,
     from: from || undefined,
     to: to || undefined,
@@ -163,7 +165,7 @@ export default function InvoiceListPage() {
 
         <Card>
           <CardContent className="p-4 space-y-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
               <OwnerSearchPopover
                 ownerId={ownerId}
                 ownerLabel={ownerLabel}
@@ -178,6 +180,16 @@ export default function InvoiceListPage() {
                   setOwnerLabel("");
                 }}
               />
+              <div className="space-y-1">
+                <Label htmlFor="billing-invoice-list-number-search">Invoice #</Label>
+                <Input
+                  id="billing-invoice-list-number-search"
+                  data-testid="billing-invoice-list-number-search"
+                  placeholder="e.g. 04647 or INV-2026-04647"
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                />
+              </div>
               <div className="space-y-1">
                 <Label>From</Label>
                 <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -207,6 +219,7 @@ export default function InvoiceListPage() {
                     className="w-full"
                     onClick={() => {
                       setStatus([]);
+                      setInvoiceNumber("");
                       setFrom("");
                       setTo("");
                       setServiceType("all");
