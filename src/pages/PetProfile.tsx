@@ -96,6 +96,7 @@ type PetUpdate = Database["public"]["Tables"]["pets"]["Update"];
 type AssessmentStatus = Database["public"]["Enums"]["assessment_status"];
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
 type PetSize = Database["public"]["Enums"]["pet_size"];
+type PetCoatType = Database["public"]["Enums"]["coat_type"];
 type AssessmentBookingRpcRow =
   Database["public"]["Functions"]["create_assessment_booking"]["Returns"][number];
 type ActiveCreditRow = Database["public"]["Tables"]["service_credits"]["Row"] & {
@@ -154,6 +155,12 @@ const PET_SIZE_LABEL: Record<PetSize, string> = {
   medium: "Medium",
   large: "Large",
 };
+
+/** Matches pets.coat_type / package pricing tiers (Summer Splash short vs long). */
+const PET_COAT_TYPE_OPTIONS: { value: PetCoatType; label: string }[] = [
+  { value: "short", label: "Short hair" },
+  { value: "long", label: "Long hair" },
+];
 
 const BOOKING_STATUS_BADGE: Record<BookingStatus, string> = {
   draft: "bg-slate-100 text-slate-600 border-slate-200",
@@ -382,6 +389,7 @@ const PetProfilePage = () => {
       date_of_birth: pet.date_of_birth,
       weight_kg: pet.weight_kg,
       gender: pet.gender,
+      coat_type: pet.coat_type,
       spayed_neutered: pet.spayed_neutered,
       microchip_number: pet.microchip_number,
       feeding_notes: petFeedingNotes(pet) || null,
@@ -1456,6 +1464,35 @@ const PetProfilePage = () => {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit_coat_type">Coat type</Label>
+              <Select
+                value={editForm.coat_type ?? "__unset__"}
+                onValueChange={(v) =>
+                  handleField("coat_type", v === "__unset__" ? null : (v as PetCoatType))
+                }
+              >
+                <SelectTrigger id="edit_coat_type" data-testid="pet-edit-coat-type">
+                  <SelectValue placeholder="Not set" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__unset__">Not set</SelectItem>
+                  {PET_COAT_TYPE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                  {/* Preserve legacy mid_length if already stored; not offered for new picks. */}
+                  {editForm.coat_type === "mid_length" ? (
+                    <SelectItem value="mid_length">Mid-length</SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Required for coat-dependent grooming package pricing (e.g. Summer Splash).
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

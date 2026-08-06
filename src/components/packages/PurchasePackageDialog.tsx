@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Plus, Trash2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
@@ -17,6 +18,11 @@ import { toast } from "sonner";
 import { useIssueCustomDaycarePackage, type CustomPackageLineItem } from "@/hooks/useDaycare";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { PET_SIZE_COLUMNS, formatPackageIncludes } from "@/lib/packageCatalog";
+import {
+  hasUnresolvedPackagePricing,
+  isMissingCoatTypePricingMatch,
+  resolvePetPackageAmount,
+} from "@/lib/packagePurchasePricing";
 import { useGroomingPackageCatalog } from "@/hooks/useGroomingPackages";
 import {
   Table,
@@ -69,19 +75,6 @@ type Props = {
    */
   categoryFilter?: PackageDef["category"];
 };
-
-function resolvePetAmount(rows: PackagePricing[], pet: Pet): number | null {
-  const candidates = rows
-    .filter((r) => r.is_active)
-    .filter((r) => r.pet_size === null || r.pet_size === pet.size)
-    .filter((r) => r.coat_type === null || r.coat_type === pet.coat_type)
-    .sort((a, b) => {
-      const aScore = Number(a.pet_size !== null) + Number(a.coat_type !== null);
-      const bScore = Number(b.pet_size !== null) + Number(b.coat_type !== null);
-      return bScore - aScore;
-    });
-  return candidates[0]?.amount_aed ?? null;
-}
 
 export function PurchasePackageDialog({
   ownerId,
@@ -214,11 +207,20 @@ export function PurchasePackageDialog({
     if (!selectedPackage) return [];
     return pets
       .filter((pet) => selectedPetIds.includes(pet.id))
-      .map((pet) => ({
-        pet,
-        amount: resolvePetAmount(packagePrices, pet),
-      }));
+      .map((pet) => {
+        const amount = resolvePetPackageAmount(packagePrices, pet);
+        return {
+          pet,
+          amount,
+          missingCoatType: isMissingCoatTypePricingMatch(packagePrices, pet, amount),
+        };
+      });
   }, [pets, selectedPetIds, packagePrices, selectedPackage]);
+
+  const hasUnresolvedPricing = useMemo(
+    () => hasUnresolvedPackagePricing(perPetPreview),
+    [perPetPreview],
+  );
 
   const subtotal = useMemo(
     () => perPetPreview.reduce((sum, row) => sum + (row.amount ?? 0), 0),
@@ -367,6 +369,15 @@ export function PurchasePackageDialog({
     }
     if (selectedPetIds.length === 0) {
       toast.error("Select at least one pet.");
+      return;
+    }
+    if (hasUnresolvedPricing) {
+      const missingCoatPet = perPetPreview.find((row) => row.missingCoatType)?.pet;
+      toast.error(
+        missingCoatPet
+          ? `Coat type not set for ${missingCoatPet.name} — set it on the pet's profile to see pricing.`
+          : "One or more selected pets have no pricing match. Fix pet details before purchasing.",
+      );
       return;
     }
 
@@ -767,9 +778,40 @@ export function PurchasePackageDialog({
               ) : (
                 <>
                   {perPetPreview.map((row) => (
-                    <div key={row.pet.id} className="flex items-center justify-between">
-                      <span>{row.pet.name}</span>
-                      <span>{row.amount == null ? "No pricing match" : `AED ${row.amount.toFixed(2)}`}</span>
+                    <div
+                      key={row.pet.id}
+                      className="space-y-0.5"
+                      data-testid={`purchase-pkg-price-row-${row.pet.id}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span>{row.pet.name}</span>
+                        <span
+                          className={row.amount == null ? "text-destructive" : undefined}
+                          data-testid={`purchase-pkg-price-amount-${row.pet.id}`}
+                        >
+                          {row.amount == null ? "—" : `AED ${row.amount.toFixed(2)}`}
+                        </span>
+                      </div>
+                      {row.missingCoatType ? (
+                        <p
+                          className="text-xs text-destructive"
+                          data-testid={`purchase-pkg-missing-coat-${row.pet.id}`}
+                        >
+                          Coat type not set for {row.pet.name} — set it on the pet&apos;s profile to see
+                          pricing.{" "}
+                          <Link
+                            to={`/customers/${ownerId}/pets/${row.pet.id}`}
+                            className="font-medium underline underline-offset-2"
+                            target="_blank"
+                            rel="noreferrer"
+                            data-testid={`purchase-pkg-pet-profile-link-${row.pet.id}`}
+                          >
+                            Open pet profile
+                          </Link>
+                        </p>
+                      ) : row.amount == null ? (
+                        <p className="text-xs text-destructive">No pricing match</p>
+                      ) : null}
                     </div>
                   ))}
                   <Separator />
@@ -787,6 +829,14 @@ export function PurchasePackageDialog({
                     <span>Total</span>
                     <span>AED {total.toFixed(2)}</span>
                   </div>
+                  {hasUnresolvedPricing ? (
+                    <p
+                      className="text-xs text-destructive pt-1"
+                      data-testid="purchase-pkg-unresolved-pricing-hint"
+                    >
+                      Purchase is blocked until every selected pet has a matched price.
+                    </p>
+                  ) : null}
                 </>
               )}
             </div>
@@ -835,7 +885,12 @@ export function PurchasePackageDialog({
                 <Button
                   data-testid="purchase-pkg-confirm-btn"
                   onClick={handlePurchase}
-                  disabled={busy || !selectedPackageCode || selectedPetIds.length === 0}
+                  disabled={
+                    busy ||
+                    !selectedPackageCode ||
+                    selectedPetIds.length === 0 ||
+                    hasUnresolvedPricing
+                  }
                 >
                   {isSubmitting ? "Purchasing..." : "Purchase"}
                 </Button>
