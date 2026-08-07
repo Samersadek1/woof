@@ -75,7 +75,7 @@ const PACKAGE_LABEL: Partial<Record<GroomingService, string>> = {
   deshedding: "Deshedding",
   brushing: "Brushing",
   nail_clip: "Nail Clip",
-  gland_expression: "Anal gland expansion",
+  gland_expression: "Anal Gland Expression",
   pawdicure: "Pawdicure",
 };
 

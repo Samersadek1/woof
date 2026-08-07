@@ -35,7 +35,7 @@ export const GROOMING_SERVICE_CHECKBOX_OPTIONS: Array<{
   { value: "fur_brushing", label: "Fur brushing", mapsTo: "brushing" },
   { value: "teeth_brushing", label: "Teeth brushing", mapsTo: "brushing" },
   { value: "nail_clip", label: "Nail clip", mapsTo: "nail_clip" },
-  { value: "gland_expression", label: "Anal gland expansion", mapsTo: "gland_expression" },
+  { value: "gland_expression", label: "Anal Gland Expression", mapsTo: "gland_expression" },
   { value: "blow_dry", label: "Blow dry", mapsTo: "full_bath" },
   { value: "ear_cleaning", label: "Ear cleaning", mapsTo: "brushing" },
   { value: "pawdicure", label: "Pawdicure", mapsTo: "pawdicure" },

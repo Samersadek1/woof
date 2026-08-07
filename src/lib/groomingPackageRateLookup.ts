@@ -85,8 +85,9 @@ export async function resolveWoofServiceRateAmount(args: {
 }): Promise<number | null> {
   const { data, error } = await supabase.rpc("resolve_woof_service_rate", {
     p_service_code: args.service_code,
-    p_pet_size: args.pet_size ?? undefined,
-    p_coat_type: args.coat_type ?? undefined,
+    // Pass explicit null (not omitted) so flat rates with NULL size/coat match.
+    p_pet_size: args.pet_size ?? null,
+    p_coat_type: args.coat_type ?? null,
     p_booking_date: args.booking_date,
   });
   if (error) throw error;

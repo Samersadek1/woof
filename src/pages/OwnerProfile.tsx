@@ -137,7 +137,7 @@ function serviceCodeLabel(serviceCode: Database["public"]["Enums"]["service_code
     cat_grooming_full_with_bath: "cat full service (with bath)",
     grooming_bath_brush_tidy: "bath, brush and tidy sessions",
     grooming_tidy: "tidy sessions",
-    grooming_gland_expression: "gland expansion",
+    grooming_gland_expression: "gland expression",
     grooming_nail_ear_teeth: "nail/ear/teeth sessions",
     cat_grooming_nail_ear: "cat nail/ear sessions",
     grooming_hair_no_more: "hair-no-more sessions",

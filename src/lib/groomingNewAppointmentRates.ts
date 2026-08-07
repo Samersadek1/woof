@@ -128,8 +128,11 @@ export async function fetchCheckboxBasePriceAed(
   }
 
   if (checkbox === "gland_expression") {
+    // Flat rate (no size/coat) — same resolve path as other addon-style services.
     return resolveWoofServiceRateAmount({
       service_code: "grooming_gland_expression",
+      pet_size: null,
+      coat_type: null,
       booking_date: bookingDate,
     });
   }
@@ -192,12 +195,6 @@ export async function fetchNewGroomingAppointmentPriceBreakdown(
       pet_size: dogSizeFormToDbPetSize(dogSize),
       booking_date: options?.bookingDate,
     });
-  } else if (set.has("gland_expression") && !hasPackagePrimary(set)) {
-    // Standalone glands booking → 52.50 rate (not the 36.75 add-on).
-    base = await resolveWoofServiceRateAmount({
-      service_code: "grooming_gland_expression",
-      booking_date: options?.bookingDate,
-    });
   } else {
     const primary = resolvePrimaryGroomingCheckbox(selected);
     const pkg = primary ? primaryCheckboxToPackage(primary, deshedCoat) : null;
@@ -209,6 +206,7 @@ export async function fetchNewGroomingAppointmentPriceBreakdown(
         options?.petCoat,
       );
     } else {
+      // Addon-only selection (nail clip, standalone glands, etc.): base 0, price from addons.
       base = 0;
     }
   }
@@ -223,9 +221,9 @@ export async function fetchNewGroomingAppointmentPriceBreakdown(
     if (bathAndBlow && key === "blow_dry") continue;
     if (key === "matting_fee" || key === "heavy_dog_fee") continue;
     if (ZERO_AED_CHECKBOXES.has(key)) continue;
-    // Standalone glands priced as base above; with a package use add-on rate.
+    // Standalone → 52.50 (grooming_gland_expression); with a package → 36.75 add-on.
     if (key === "gland_expression") {
-      if (packagePrimary) serviceCodes.push("addon_glands");
+      serviceCodes.push(packagePrimary ? "addon_glands" : "grooming_gland_expression");
       continue;
     }
     const legacy = WOOF_ADDON_LEGACY_KEYS[key];
@@ -236,7 +234,20 @@ export async function fetchNewGroomingAppointmentPriceBreakdown(
 
   const [legacyPrices, serviceAmounts] = await Promise.all([
     resolveAddonPricesForKeys(legacyKeys),
-    Promise.all(serviceCodes.map((code) => resolveWoofServiceRateAmount({ service_code: code }))),
+    Promise.all(
+      serviceCodes.map(async (code) => {
+        try {
+          return await resolveWoofServiceRateAmount({
+            service_code: code,
+            pet_size: null,
+            coat_type: null,
+            booking_date: options?.bookingDate,
+          });
+        } catch {
+          return null;
+        }
+      }),
+    ),
   ]);
 
   let addonSum = 0;

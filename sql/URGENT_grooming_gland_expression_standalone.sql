@@ -1,4 +1,4 @@
--- Standalone "Anal gland expansion" bookable service (AED 52.50).
+-- Standalone "Anal Gland Expression" bookable service (AED 52.50).
 -- Distinct from addon_glands (AED 36.75), which remains the grooming add-on rate.
 -- Enum additions are separate statements (idempotent) before use.
 
@@ -15,10 +15,10 @@ END $$;
 INSERT INTO public.service_code_meta (service_code, display_name, unit, applicable_species, description)
 VALUES (
   'grooming_gland_expression',
-  'Anal gland expansion',
+  'Anal Gland Expression',
   'each',
   ARRAY['dog']::species[],
-  'Standalone anal gland expansion (not the grooming add-on)'
+  'Standalone anal gland expression (not the grooming add-on)'
 )
 ON CONFLICT (service_code) DO NOTHING;
 
@@ -27,7 +27,7 @@ SELECT
   'grooming_gland_expression'::public.service_code,
   52.50,
   true,
-  'Standalone anal gland expansion'
+  'Standalone anal gland expression'
 WHERE NOT EXISTS (
   SELECT 1
   FROM public.service_rates sr
