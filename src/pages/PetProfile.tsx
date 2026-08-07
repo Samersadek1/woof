@@ -156,6 +156,12 @@ const PET_SIZE_LABEL: Record<PetSize, string> = {
   large: "Large",
 };
 
+const PET_SIZE_OPTIONS: { value: PetSize; label: string }[] = [
+  { value: "small", label: "Small" },
+  { value: "medium", label: "Medium" },
+  { value: "large", label: "Large" },
+];
+
 /** Matches pets.coat_type / package pricing tiers (Summer Splash short vs long). */
 const PET_COAT_TYPE_OPTIONS: { value: PetCoatType; label: string }[] = [
   { value: "short", label: "Short hair" },
@@ -389,6 +395,7 @@ const PetProfilePage = () => {
       date_of_birth: pet.date_of_birth,
       weight_kg: pet.weight_kg,
       gender: pet.gender,
+      size: pet.size,
       coat_type: pet.coat_type,
       spayed_neutered: pet.spayed_neutered,
       microchip_number: pet.microchip_number,
@@ -1466,33 +1473,59 @@ const PetProfilePage = () => {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="edit_coat_type">Coat type</Label>
-              <Select
-                value={editForm.coat_type ?? "__unset__"}
-                onValueChange={(v) =>
-                  handleField("coat_type", v === "__unset__" ? null : (v as PetCoatType))
-                }
-              >
-                <SelectTrigger id="edit_coat_type" data-testid="pet-edit-coat-type">
-                  <SelectValue placeholder="Not set" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__unset__">Not set</SelectItem>
-                  {PET_COAT_TYPE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                  {/* Preserve legacy mid_length if already stored; not offered for new picks. */}
-                  {editForm.coat_type === "mid_length" ? (
-                    <SelectItem value="mid_length">Mid-length</SelectItem>
-                  ) : null}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Required for coat-dependent grooming package pricing (e.g. Summer Splash).
-              </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit_size">Size</Label>
+                <Select
+                  value={editForm.size ?? "__unset__"}
+                  onValueChange={(v) =>
+                    handleField("size", v === "__unset__" ? null : (v as PetSize))
+                  }
+                >
+                  <SelectTrigger id="edit_size" data-testid="pet-edit-size">
+                    <SelectValue placeholder="Not set" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__unset__">Not set</SelectItem>
+                    {PET_SIZE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Used for size-tiered boarding and grooming package pricing.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit_coat_type">Coat type</Label>
+                <Select
+                  value={editForm.coat_type ?? "__unset__"}
+                  onValueChange={(v) =>
+                    handleField("coat_type", v === "__unset__" ? null : (v as PetCoatType))
+                  }
+                >
+                  <SelectTrigger id="edit_coat_type" data-testid="pet-edit-coat-type">
+                    <SelectValue placeholder="Not set" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__unset__">Not set</SelectItem>
+                    {PET_COAT_TYPE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                    {/* Preserve legacy mid_length if already stored; not offered for new picks. */}
+                    {editForm.coat_type === "mid_length" ? (
+                      <SelectItem value="mid_length">Mid-length</SelectItem>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Required for coat-dependent grooming package pricing (e.g. Summer Splash).
+                </p>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

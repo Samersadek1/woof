@@ -261,7 +261,7 @@ function makePetForm(ownerId: string): PetInsert {
     breed: "",
     colour: "",
     date_of_birth: null,
-    size: "medium",
+    size: null,
     weight_kg: undefined,
     gender: undefined,
     spayed_neutered: false,
@@ -909,6 +909,10 @@ const OwnerProfilePage = () => {
 
   const handlePetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!petForm.size) {
+      toast.error("Select a size (Small, Medium, or Large).");
+      return;
+    }
     const photoUrl = await uploadPhoto();
     createPet.mutate({ ...petForm, photo_url: photoUrl }, {
       onSuccess: async (newPet) => {
@@ -1945,6 +1949,28 @@ const OwnerProfilePage = () => {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="pet_size">
+                  Size <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={petForm.size ?? ""}
+                  onValueChange={(v) => handlePetField("size", v as Database["public"]["Enums"]["pet_size"])}
+                >
+                  <SelectTrigger id="pet_size" data-testid="owner-add-pet-size">
+                    <SelectValue placeholder="Select size" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="small">Small</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="large">Large</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Required for size-tiered boarding and grooming package pricing.
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="pet_microchip">Microchip number</Label>
@@ -2034,7 +2060,12 @@ const OwnerProfilePage = () => {
                 onChange={setVaccinationRows}
               />
 
-              <Button type="submit" className="w-full" disabled={createPet.isPending || photoUploading}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={createPet.isPending || photoUploading || !petForm.size}
+                data-testid="owner-add-pet-submit"
+              >
                 {(createPet.isPending || photoUploading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {photoUploading ? "Uploading photo…" : "Add Pet"}
               </Button>
