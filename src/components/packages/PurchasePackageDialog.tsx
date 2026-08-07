@@ -100,6 +100,7 @@ export function PurchasePackageDialog({
     "daycare_full_day",
   );
   const [issueDate, setIssueDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const [applyMultiPetDiscount, setApplyMultiPetDiscount] = useState(false);
   const [payment, setPayment] = useState<{ invoiceId: string; total: number; ownerId: string } | null>(null);
   const [payOpen, setPayOpen] = useState(false);
 
@@ -226,10 +227,14 @@ export function PurchasePackageDialog({
     () => perPetPreview.reduce((sum, row) => sum + (row.amount ?? 0), 0),
     [perPetPreview],
   );
+  const multiPetEligible = selectedPetIds.length >= 2;
+  /** Daycare catalog/custom: opt-in. Grooming (and other categories): auto-apply. */
+  const isDaycareCatalogPackage = selectedPackage?.category === "daycare";
   const discount = useMemo(() => {
-    if (!selectedPackage || selectedPetIds.length < 2) return 0;
+    if (!selectedPackage || !multiPetEligible) return 0;
+    if (isDaycareCatalogPackage && !applyMultiPetDiscount) return 0;
     return Math.round((subtotal * selectedPackage.multi_pet_discount_pct) * 100) / 10000;
-  }, [selectedPackage, selectedPetIds.length, subtotal]);
+  }, [selectedPackage, multiPetEligible, isDaycareCatalogPackage, applyMultiPetDiscount, subtotal]);
   const total = subtotal - discount;
 
   const groupedByCategory = useMemo(() => {
@@ -270,9 +275,9 @@ export function PurchasePackageDialog({
     [resolvedCustomLines],
   );
   const customDiscount = useMemo(() => {
-    if (selectedPetIds.length < 2 || customDaycareSubtotal === 0) return 0;
+    if (!applyMultiPetDiscount || selectedPetIds.length < 2 || customDaycareSubtotal === 0) return 0;
     return Math.round((customDaycareSubtotal * CUSTOM_MULTI_PET_DISCOUNT_PCT) * 100) / 10000;
-  }, [selectedPetIds.length, customDaycareSubtotal]);
+  }, [applyMultiPetDiscount, selectedPetIds.length, customDaycareSubtotal]);
   const customTotal = customDaycareSubtotal - customDiscount + customAddonsSubtotal;
 
   const patchCustomLine = (id: string, patch: Partial<CustomLineDraft>) => {
@@ -299,6 +304,7 @@ export function PurchasePackageDialog({
     setCustomValidityMonths("6");
     setCustomServiceCode("daycare_full_day");
     setIssueDate(format(new Date(), "yyyy-MM-dd"));
+    setApplyMultiPetDiscount(false);
   };
 
   const handleCustomIssue = async () => {
@@ -338,6 +344,7 @@ export function PurchasePackageDialog({
         payment_method: paymentMethod,
         service_code: customServiceCode,
         issue_date: issueDate,
+        apply_multi_pet_discount: applyMultiPetDiscount && selectedPetIds.length >= 2,
       },
       {
         onSuccess: async (result) => {
@@ -388,6 +395,12 @@ export function PurchasePackageDialog({
       p_pet_ids: selectedPetIds,
       p_payment_method: paymentMethod,
       p_issue_date: issueDate,
+      ...(selectedPackage.category === "daycare"
+        ? {
+            p_apply_multi_pet_discount:
+              applyMultiPetDiscount && selectedPetIds.length >= 2,
+          }
+        : {}),
     });
     setIsSubmitting(false);
     if (error) {
@@ -758,7 +771,23 @@ export function PurchasePackageDialog({
                     <span>Daycare subtotal</span>
                     <span>AED {customDaycareSubtotal.toFixed(2)}</span>
                   </div>
-                  {selectedPetIds.length >= 2 && customDiscount > 0 ? (
+                  {selectedPetIds.length >= 2 ? (
+                    <div className="flex items-start gap-2 pt-1">
+                      <Checkbox
+                        id="purchase-pkg-apply-multi-pet-discount-custom"
+                        data-testid="purchase-pkg-apply-multi-pet-discount"
+                        checked={applyMultiPetDiscount}
+                        onCheckedChange={(v) => setApplyMultiPetDiscount(v === true)}
+                      />
+                      <Label
+                        htmlFor="purchase-pkg-apply-multi-pet-discount-custom"
+                        className="text-sm font-normal leading-snug cursor-pointer"
+                      >
+                        Apply multi-pet {CUSTOM_MULTI_PET_DISCOUNT_PCT}% discount
+                      </Label>
+                    </div>
+                  ) : null}
+                  {selectedPetIds.length >= 2 && applyMultiPetDiscount && customDiscount > 0 ? (
                     <div data-testid="purchase-pkg-discount" className="flex items-center justify-between text-emerald-700">
                       <span>Multi-pet {CUSTOM_MULTI_PET_DISCOUNT_PCT}% discount (daycare only)</span>
                       <span>- AED {customDiscount.toFixed(2)}</span>
@@ -819,7 +848,23 @@ export function PurchasePackageDialog({
                     <span>Subtotal</span>
                     <span>AED {subtotal.toFixed(2)}</span>
                   </div>
-                  {selectedPetIds.length >= 2 ? (
+                  {multiPetEligible && isDaycareCatalogPackage ? (
+                    <div className="flex items-start gap-2 pt-1">
+                      <Checkbox
+                        id="purchase-pkg-apply-multi-pet-discount"
+                        data-testid="purchase-pkg-apply-multi-pet-discount"
+                        checked={applyMultiPetDiscount}
+                        onCheckedChange={(v) => setApplyMultiPetDiscount(v === true)}
+                      />
+                      <Label
+                        htmlFor="purchase-pkg-apply-multi-pet-discount"
+                        className="text-sm font-normal leading-snug cursor-pointer"
+                      >
+                        Apply multi-pet {selectedPackage?.multi_pet_discount_pct ?? 10}% discount
+                      </Label>
+                    </div>
+                  ) : null}
+                  {multiPetEligible && discount > 0 ? (
                     <div data-testid="purchase-pkg-discount" className="flex items-center justify-between text-emerald-700">
                       <span>Multi-pet {selectedPackage?.multi_pet_discount_pct ?? 10}% discount</span>
                       <span>- AED {discount.toFixed(2)}</span>

@@ -792,6 +792,8 @@ export type IssueCustomDaycarePackageInput = {
   payment_method?: Database["public"]["Enums"]["payment_method"];
   service_code?: Extract<ServiceCode, "daycare_full_day" | "daycare_hourly">;
   issue_date?: string;
+  /** Opt-in; when false/omitted for multi-pet, RPC default still applies unless false is passed. */
+  apply_multi_pet_discount?: boolean;
 };
 
 export function useIssueCustomDaycarePackage() {
@@ -810,6 +812,9 @@ export function useIssueCustomDaycarePackage() {
         p_service_code: input.service_code ?? "daycare_full_day",
         p_issue_date: input.issue_date,
         p_line_items: input.line_items?.length ? input.line_items : null,
+        ...(typeof input.apply_multi_pet_discount === "boolean"
+          ? { p_apply_multi_pet_discount: input.apply_multi_pet_discount }
+          : {}),
       } as Database["public"]["Functions"]["issue_custom_daycare_package"]["Args"]);
       if (error) throw error;
       return (data as {

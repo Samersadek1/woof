@@ -3905,6 +3905,7 @@ export type Database = {
         | {
             Args: {
               p_amount_aed?: number
+              p_apply_multi_pet_discount?: boolean
               p_issue_date?: string
               p_label?: string
               p_line_items?: Json
@@ -3955,6 +3956,7 @@ export type Database = {
       }
       purchase_package: {
         Args: {
+          p_apply_multi_pet_discount?: boolean
           p_issue_date?: string
           p_owner_id: string
           p_package_code: string
