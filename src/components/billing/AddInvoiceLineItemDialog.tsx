@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAddInvoiceLineItem } from "@/hooks/useAddInvoiceLineItem";
 import { useInvoicePricingRows } from "@/hooks/useInvoicePricingRows";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,12 +15,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
+import { vatAmountFromGrossInclusive, vatLineLabel } from "@/lib/vatConfig";
 
 export interface AddInvoiceLineItemDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   invoiceId: string;
   ownerId: string;
+  /** Retained for call-site compatibility; retail lines always use service_type "retail". */
   serviceType?: string | null;
   invoiceLabel?: string;
   onAdded?: () => void;
@@ -31,7 +33,6 @@ export function AddInvoiceLineItemDialog({
   onOpenChange,
   invoiceId,
   ownerId,
-  serviceType,
   invoiceLabel,
   onAdded,
 }: AddInvoiceLineItemDialogProps) {
@@ -51,6 +52,13 @@ export function AddInvoiceLineItemDialog({
     setQuantity("1");
     setUnitPrice("");
   }, [open]);
+
+  const vatPreview = useMemo(() => {
+    const qty = parseInt(quantity, 10);
+    const price = parseFloat(unitPrice);
+    if (!qty || qty < 1 || Number.isNaN(price) || price < 0) return null;
+    return vatAmountFromGrossInclusive(qty * price);
+  }, [quantity, unitPrice]);
 
   const handlePricingKeyChange = async (key: string) => {
     setPricingKey(key);
@@ -90,7 +98,7 @@ export function AddInvoiceLineItemDialog({
       quantity: qty,
       unitPrice: price,
       pricingKey: customMode ? null : pricingKey || null,
-      serviceType: serviceType ?? "other",
+      serviceType: "retail",
     });
     onOpenChange(false);
     onAdded?.();
@@ -100,11 +108,11 @@ export function AddInvoiceLineItemDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md" data-testid="add-invoice-line-dialog">
         <DialogHeader>
-          <DialogTitle>Add line item</DialogTitle>
+          <DialogTitle>Add retail item</DialogTitle>
           <DialogDescription>
             {invoiceLabel
-              ? `Add a charge to invoice ${invoiceLabel}.`
-              : "Add a charge to this invoice."}
+              ? `Add a retail charge to invoice ${invoiceLabel}. Price is VAT-inclusive.`
+              : "Add a retail charge to this invoice. Price is VAT-inclusive."}
           </DialogDescription>
         </DialogHeader>
 
@@ -116,7 +124,7 @@ export function AddInvoiceLineItemDialog({
               value={pricingKey}
               onChange={(e) => void handlePricingKeyChange(e.target.value)}
             >
-              <option value="">Custom line…</option>
+              <option value="">Retail / custom…</option>
               {pricingRows.map((r) => (
                 <option key={r.key} value={r.key}>
                   {r.label} — AED {r.amount_aed.toFixed(2)}
@@ -127,12 +135,12 @@ export function AddInvoiceLineItemDialog({
 
           <div className="space-y-1">
             <Label>
-              Description <span className="text-destructive">*</span>
+              Product name <span className="text-destructive">*</span>
             </Label>
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. Extra grooming"
+              placeholder="e.g. Dog shampoo"
               data-testid="add-invoice-line-description"
             />
           </div>
@@ -150,7 +158,7 @@ export function AddInvoiceLineItemDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label>Unit price (AED)</Label>
+              <Label>Unit price (AED, incl. VAT)</Label>
               <Input
                 type="number"
                 min={0}
@@ -164,6 +172,15 @@ export function AddInvoiceLineItemDialog({
               />
             </div>
           </div>
+
+          {vatPreview != null ? (
+            <p
+              className="text-sm text-muted-foreground tabular-nums"
+              data-testid="add-invoice-line-vat-preview"
+            >
+              {vatLineLabel()}: AED {vatPreview.toFixed(2)}
+            </p>
+          ) : null}
         </div>
 
         <DialogFooter className="gap-2 pt-2">
@@ -176,7 +193,7 @@ export function AddInvoiceLineItemDialog({
             data-testid="add-invoice-line-submit"
           >
             {addLine.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Add line
+            Add retail item
           </Button>
         </DialogFooter>
       </DialogContent>

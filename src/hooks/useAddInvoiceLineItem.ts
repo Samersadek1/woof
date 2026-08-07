@@ -43,7 +43,7 @@ export function useAddInvoiceLineItem() {
         unit_price: unitPrice,
         total_price: lineTotal,
         line_total: lineTotal,
-        service_type: input.serviceType ?? "other",
+        service_type: input.serviceType ?? "retail",
         sort_order: sortOrder,
       };
 
@@ -61,7 +61,11 @@ export function useAddInvoiceLineItem() {
         queryKey: billingKeys.statement(variables.ownerId),
       });
       queryClient.invalidateQueries({ queryKey: ["invoice", variables.invoiceId] });
-      toast.success("Line item added");
+      toast.success(
+        variables.serviceType === "retail" || variables.serviceType == null
+          ? "Retail item added"
+          : "Line item added",
+      );
     },
     onError: (err: Error) => {
       toast.error(err.message || "Failed to add line item");
