@@ -132,7 +132,14 @@ function trendFromDelta(current: number, previous: number): { kind: TrendKind; l
   return { kind: "down", label: `${pct.toFixed(0)}% vs prior` };
 }
 
-const OTHER_GROOMING = new Set(["nail_clip", "deshedding", "brushing", "pawdicure", "tidy"]);
+const OTHER_GROOMING = new Set([
+  "nail_clip",
+  "gland_expression",
+  "deshedding",
+  "brushing",
+  "pawdicure",
+  "tidy",
+]);
 
 type DashboardInsights = {
   revenue: {

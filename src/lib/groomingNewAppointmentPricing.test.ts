@@ -32,6 +32,7 @@ describe("groomingNewAppointmentPricing", () => {
   it("groomingPricingCheckboxToDbService maps nail_clip to nail_clip service", () => {
     expect(groomingPricingCheckboxToDbService("nail_clip")).toBe("nail_clip");
     expect(groomingPricingCheckboxToDbService("tidy")).toBe("tidy");
+    expect(groomingPricingCheckboxToDbService("gland_expression")).toBe("gland_expression");
   });
 
   it("resolvePrimaryGroomingCheckbox includes tidy in base priority", () => {

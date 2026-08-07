@@ -12,6 +12,7 @@ export type GroomingPricingCheckbox =
   | "fur_brushing"
   | "teeth_brushing"
   | "nail_clip"
+  | "gland_expression"
   | "blow_dry"
   | "ear_cleaning"
   | "pawdicure"
@@ -29,6 +30,7 @@ const ALL_PRICING_CHECKBOXES: readonly GroomingPricingCheckbox[] = [
   "fur_brushing",
   "teeth_brushing",
   "nail_clip",
+  "gland_expression",
   "blow_dry",
   "ear_cleaning",
   "pawdicure",
@@ -122,6 +124,8 @@ export function groomingPricingCheckboxToDbService(cb: GroomingPricingCheckbox):
       return "brushing";
     case "nail_clip":
       return "nail_clip";
+    case "gland_expression":
+      return "gland_expression";
     case "pawdicure":
     case "paw_wash":
       return "pawdicure";

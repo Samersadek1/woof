@@ -4207,6 +4207,7 @@ export type Database = {
         | "brushing"
         | "pawdicure"
         | "tidy"
+        | "gland_expression"
       invoice_status:
         | "draft"
         | "issued"
@@ -4303,6 +4304,7 @@ export type Database = {
         | "cat_grooming_splash"
         | "addon_nails"
         | "addon_glands"
+        | "grooming_gland_expression"
         | "addon_dematting"
         | "addon_teeth_cleaning"
         | "addon_flea_tick_bath"
@@ -4516,6 +4518,7 @@ export const Constants = {
         "brushing",
         "pawdicure",
         "tidy",
+        "gland_expression",
       ],
       invoice_status: [
         "draft",
@@ -4617,6 +4620,7 @@ export const Constants = {
         "cat_grooming_splash",
         "addon_nails",
         "addon_glands",
+        "grooming_gland_expression",
         "addon_dematting",
         "addon_teeth_cleaning",
         "addon_flea_tick_bath",

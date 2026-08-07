@@ -171,6 +171,7 @@ const SERVICE_BADGE: Record<GroomingService, string> = {
   full_bath: "bg-blue-100 text-blue-800 border-blue-200",
   tidy: "bg-sky-100 text-sky-800 border-sky-200",
   nail_clip: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  gland_expression: "bg-lime-100 text-lime-800 border-lime-200",
   deshedding: "bg-orange-100 text-orange-800 border-orange-200",
   brushing: "bg-teal-100 text-teal-800 border-teal-200",
   pawdicure: "bg-pink-100 text-pink-800 border-pink-200",

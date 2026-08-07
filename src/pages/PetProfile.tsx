@@ -115,6 +115,7 @@ function creditServiceLabel(serviceCode: Database["public"]["Enums"]["service_co
     cat_grooming_full_with_bath: "cat full service (with bath)",
     grooming_bath_brush_tidy: "bath, brush and tidy",
     grooming_tidy: "tidy",
+    grooming_gland_expression: "gland expansion",
     grooming_nail_ear_teeth: "nail/ear/teeth care",
     cat_grooming_nail_ear: "cat nail/ear care",
     grooming_hair_no_more: "hair-no-more",

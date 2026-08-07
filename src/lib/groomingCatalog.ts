@@ -16,6 +16,7 @@ export const GROOMING_SERVICE_OPTIONS: { value: GroomingService; label: string }
   { value: "full_bath", label: "Full Bath" },
   { value: "tidy", label: "Tidy" },
   { value: "nail_clip", label: "Nail Clip" },
+  { value: "gland_expression", label: "Anal gland expansion" },
   { value: "deshedding", label: "Deshedding" },
   { value: "brushing", label: "Brushing" },
   { value: "pawdicure", label: "Pawdicure" },

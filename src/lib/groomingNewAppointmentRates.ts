@@ -48,6 +48,21 @@ const ZERO_AED_CHECKBOXES = new Set<GroomingPricingCheckbox>([
   "blow_dry",
 ]);
 
+const PACKAGE_PRIMARY_CHECKBOXES = new Set<GroomingPricingCheckbox>([
+  "full_groom",
+  "deshedding",
+  "tidy",
+  "bath_only",
+  "full_bath_full",
+]);
+
+function hasPackagePrimary(selected: Set<GroomingPricingCheckbox>): boolean {
+  for (const key of PACKAGE_PRIMARY_CHECKBOXES) {
+    if (selected.has(key)) return true;
+  }
+  return false;
+}
+
 function dogSizeFormToDbPetSize(
   dogSize: DogSizeFormValue,
 ): Database["public"]["Enums"]["pet_size"] {
@@ -112,6 +127,13 @@ export async function fetchCheckboxBasePriceAed(
     });
   }
 
+  if (checkbox === "gland_expression") {
+    return resolveWoofServiceRateAmount({
+      service_code: "grooming_gland_expression",
+      booking_date: bookingDate,
+    });
+  }
+
   if (checkbox === "deshedding") {
     return resolveWoofServiceRateAmount({
       service_code: "grooming_hair_no_more",
@@ -170,6 +192,12 @@ export async function fetchNewGroomingAppointmentPriceBreakdown(
       pet_size: dogSizeFormToDbPetSize(dogSize),
       booking_date: options?.bookingDate,
     });
+  } else if (set.has("gland_expression") && !hasPackagePrimary(set)) {
+    // Standalone glands booking → 52.50 rate (not the 36.75 add-on).
+    base = await resolveWoofServiceRateAmount({
+      service_code: "grooming_gland_expression",
+      booking_date: options?.bookingDate,
+    });
   } else {
     const primary = resolvePrimaryGroomingCheckbox(selected);
     const pkg = primary ? primaryCheckboxToPackage(primary, deshedCoat) : null;
@@ -189,11 +217,17 @@ export async function fetchNewGroomingAppointmentPriceBreakdown(
 
   const legacyKeys: string[] = [];
   const serviceCodes: Database["public"]["Enums"]["service_code"][] = [];
+  const packagePrimary = bathAndBlow || hasPackagePrimary(set);
 
   for (const key of selected) {
     if (bathAndBlow && key === "blow_dry") continue;
     if (key === "matting_fee" || key === "heavy_dog_fee") continue;
     if (ZERO_AED_CHECKBOXES.has(key)) continue;
+    // Standalone glands priced as base above; with a package use add-on rate.
+    if (key === "gland_expression") {
+      if (packagePrimary) serviceCodes.push("addon_glands");
+      continue;
+    }
     const legacy = WOOF_ADDON_LEGACY_KEYS[key];
     if (legacy) legacyKeys.push(legacy);
     const code = WOOF_ADDON_SERVICE_CODES[key];
