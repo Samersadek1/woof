@@ -3,6 +3,13 @@ import {
   formatDeleteBlockedMessage,
   getOwnerDeleteBlockers,
 } from "@/lib/customerDeleteBlockers";
+import {
+  buildOwnerColumnOrFilter,
+  buildPetNameOrFilter,
+  ownerMatchesSearch,
+  ownerSearchScore,
+  ownerSearchTokens,
+} from "@/lib/ownerSearch";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -23,33 +30,6 @@ export const queryKeys = {
   owner: (id: string) => ["owners", id] as const,
 };
 
-function ownerSearchScore(owner: OwnerWithPetCount, term: string): number {
-  const first = (owner.first_name ?? "").toLowerCase();
-  const last = (owner.last_name ?? "").toLowerCase();
-  const full = `${first} ${last}`.trim();
-  const phone = (owner.phone ?? "").toLowerCase();
-  const petNames = (owner.pets ?? []).map((p) => (p.name ?? "").toLowerCase());
-  const joinedPetNames = petNames.join(" ");
-
-  if (full.startsWith(term)) return 0;
-  if (petNames.some((name) => name.startsWith(term))) return 1;
-  if (first.startsWith(term) || last.startsWith(term)) return 2;
-  if (phone.startsWith(term)) return 3;
-  if (full.includes(term)) return 4;
-  if (joinedPetNames.includes(term)) return 5;
-  if (phone.includes(term)) return 6;
-  return 9;
-}
-
-function ownerMatchesTerm(owner: OwnerWithPetCount, term: string): boolean {
-  const first = (owner.first_name ?? "").toLowerCase();
-  const last = (owner.last_name ?? "").toLowerCase();
-  const full = `${first} ${last}`.trim();
-  const phone = (owner.phone ?? "").toLowerCase();
-  const petNames = (owner.pets ?? []).map((p) => (p.name ?? "").toLowerCase()).join(" ");
-  return full.includes(term) || first.includes(term) || last.includes(term) || phone.includes(term) || petNames.includes(term);
-}
-
 export function useOwners(searchTerm?: string) {
   return useQuery({
     queryKey: queryKeys.owners(searchTerm),
@@ -67,16 +47,27 @@ export function useOwners(searchTerm?: string) {
           return data as OwnerWithPetCount[];
         }
 
-        const ilike = `%${trimmed}%`;
+        // Multi-word queries must not ILIKE the whole string against first_name /
+        // last_name alone ("John Smith" never appears in either column). Tokenize
+        // and OR each token across columns, then require all tokens client-side.
+        const tokens = ownerSearchTokens(trimmed);
+        if (tokens.length === 0) {
+          const { data, error } = await baseQuery;
+          if (error) throw error;
+          return data as OwnerWithPetCount[];
+        }
+
+        const ownerOr = buildOwnerColumnOrFilter(tokens);
+        const petOr = buildPetNameOrFilter(tokens);
         const [ownersRes, petsRes] = await Promise.all([
           supabase
             .from("owners")
             .select("*, pets(name, breed)")
-            .or(`first_name.ilike.${ilike},last_name.ilike.${ilike},phone.ilike.${ilike}`),
+            .or(ownerOr),
           supabase
             .from("pets")
             .select("owner_id")
-            .ilike("name", ilike),
+            .or(petOr),
         ]);
 
         if (ownersRes.error) throw ownersRes.error;
@@ -101,15 +92,14 @@ export function useOwners(searchTerm?: string) {
           }
         }
 
-        const lowered = trimmed.toLowerCase();
         return Array.from(merged.values())
-          .filter((owner) => ownerMatchesTerm(owner, lowered))
+          .filter((owner) => ownerMatchesSearch(owner, trimmed))
           .sort((a, b) => {
-          const scoreDiff = ownerSearchScore(a, lowered) - ownerSearchScore(b, lowered);
-          if (scoreDiff !== 0) return scoreDiff;
-          const lastDiff = (a.last_name ?? "").localeCompare(b.last_name ?? "");
-          if (lastDiff !== 0) return lastDiff;
-          return (a.first_name ?? "").localeCompare(b.first_name ?? "");
+            const scoreDiff = ownerSearchScore(a, trimmed) - ownerSearchScore(b, trimmed);
+            if (scoreDiff !== 0) return scoreDiff;
+            const lastDiff = (a.last_name ?? "").localeCompare(b.last_name ?? "");
+            if (lastDiff !== 0) return lastDiff;
+            return (a.first_name ?? "").localeCompare(b.first_name ?? "");
           });
       }
 
