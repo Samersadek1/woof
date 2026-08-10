@@ -40,7 +40,7 @@ import {
 import { formatWalletAed } from "@/lib/money";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
-import { WalletBalanceDisplay } from "@/components/billing/WalletBalanceDisplay";
+import { WalletBalanceDisplay, OutstandingAmountBadge } from "@/components/billing/WalletBalanceDisplay";
 import { ClearOutstandingAfterTopUpDialog } from "@/components/billing/ClearOutstandingAfterTopUpDialog";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
@@ -389,6 +389,9 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
                       ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
                     }
                   />
+                  {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.netPosition >= 0 && (
+                    <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
+                  )}
                 </div>
                 <Button
                   size="sm"
@@ -1080,6 +1083,13 @@ const OwnerProfilePage = () => {
                     }
                   />
                 )}
+                {!ownerBalances.isLoading &&
+                  ownerBalances.invoiceRemainingTotal > 0 &&
+                  ownerBalances.netPosition >= 0 && (
+                    <div className="mt-1 flex justify-end">
+                      <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
+                    </div>
+                  )}
                 <div className="mt-2 flex flex-col items-end gap-2">
                   <Button
                     type="button"
