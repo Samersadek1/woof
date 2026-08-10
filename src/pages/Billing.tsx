@@ -36,7 +36,7 @@ import {
 } from "@/lib/paymentMethod";
 import { StaffNameSelect } from "@/components/staff/StaffNameSelect";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
-import { WalletBalanceDisplay, OutstandingAmountBadge } from "@/components/billing/WalletBalanceDisplay";
+import { WalletBalanceDisplay } from "@/components/billing/WalletBalanceDisplay";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { WalletCreditExternalPaymentDialog } from "@/components/billing/WalletCreditExternalPaymentDialog";
 import { DuplicatePaymentConfirmDialog } from "@/components/billing/DuplicatePaymentConfirmDialog";
@@ -967,9 +967,6 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
                 ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
               }
             />
-            {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.netPosition >= 0 && (
-              <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
-            )}
           </CardContent>
         </Card>
       )}

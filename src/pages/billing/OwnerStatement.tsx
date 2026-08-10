@@ -28,10 +28,7 @@ import {
   StatementLedgerTable,
   exportStatementCsv,
 } from "@/components/billing/StatementLedgerTable";
-import {
-  WalletBalanceDisplay,
-  OutstandingAmountBadge,
-} from "@/components/billing/WalletBalanceDisplay";
+import { WalletBalanceDisplay } from "@/components/billing/WalletBalanceDisplay";
 import {
   computePeriodTotals,
   invoiceRemainingTotal,
@@ -294,12 +291,6 @@ export default function OwnerStatementPage() {
                     }
                     className="md:flex md:flex-col md:items-end"
                   />
-                  {balances.netPosition >= 0 && outstandingTotal > 0 && (
-                    <OutstandingAmountBadge
-                      amount={outstandingTotal}
-                      className="md:ml-auto"
-                    />
-                  )}
                   {debtAmount > 0 && balances.netPosition < 0 && (
                     <div className="mt-3 md:ml-auto md:inline-block md:text-right">
                       <p className="text-xs text-muted-foreground">Outstanding (debt)</p>
