@@ -15,6 +15,9 @@ type CreditWalletTopupRpcResult = {
   receipt_id: string;
   receipt_number: string | null;
   balance_after: number;
+  /** Amount of this top-up applied to open invoices (server-side). */
+  auto_applied?: number;
+  invoices_affected?: number;
 };
 
 // ── Query keys ────────────────────────────────────────────────────────────────
@@ -70,6 +73,7 @@ async function creditWalletTopup(
     owner_id: payload.owner_id,
     transaction_type,
     amount,
+    // Post-auto-apply wallet balance (incoming top-up minus amounts applied to invoices).
     balance_after: result.balance_after,
     notes: payload.notes ?? null,
     payment_method: payload.payment_method ?? null,
@@ -95,6 +99,8 @@ function invalidateWalletQueries(
     queryKey: walletQueryKeys.topupReceipts(ownerId),
   });
   queryClient.invalidateQueries({ queryKey: ["owners"] });
+  // Top-ups may auto-apply to open invoices — refresh invoice lists too.
+  queryClient.invalidateQueries({ queryKey: ["invoices"] });
   invalidateOwnerStatementQueries(queryClient, ownerId);
   if (options?.includeOwnerWallet) {
     queryClient.invalidateQueries({ queryKey: ["owner_wallet", ownerId] });
