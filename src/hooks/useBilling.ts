@@ -845,10 +845,18 @@ export function useOwnerBalances(ownerId: string) {
   const k = closingQuery.data ?? 0;
   const balances = deriveOwnerBalances(k, invoices);
 
-  const payAllOutstanding = async (performedBy = "bulk_payment") => {
-    const unpaid = [...invoices].sort((a, b) =>
+  const payAllOutstanding = async (
+    performedBy = "bulk_payment",
+    options?: { invoiceIds?: string[] },
+  ) => {
+    let unpaid = [...invoices].sort((a, b) =>
       (a.due_date || a.created_at).localeCompare(b.due_date || b.created_at),
     );
+
+    if (options?.invoiceIds) {
+      const allow = new Set(options.invoiceIds);
+      unpaid = unpaid.filter((inv) => allow.has(inv.invoice_id));
+    }
 
     let cleared = 0;
     let totalDeducted = 0;

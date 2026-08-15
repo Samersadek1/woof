@@ -44,6 +44,10 @@ import type { DuplicatePaymentInfo } from "@/lib/recordExternalInvoicePayment";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
 import { ownerHasWalletCredit, ownerWalletCredit } from "@/lib/walletCredit";
 import { canDeleteInvoiceLineItems, canEditInvoiceLineItems } from "@/lib/invoiceRecalc";
+import {
+  bulkWalletPayableTotal,
+  filterBulkWalletPayableInvoices,
+} from "@/lib/bulkWalletPayEligibility";
 import { AddInvoiceLineItemDialog } from "@/components/billing/AddInvoiceLineItemDialog";
 import { DeleteInvoiceLineItemDialog } from "@/components/billing/DeleteInvoiceLineItemDialog";
 import { InvoiceDeletionLogPanel } from "@/components/billing/InvoiceDeletionLogPanel";
@@ -929,6 +933,20 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
 
   const ownerBalances = useOwnerBalances(ownerId);
   const [payAllPending, setPayAllPending] = useState(false);
+  const [payAllConfirmOpen, setPayAllConfirmOpen] = useState(false);
+
+  const bulkPayableInvoices = useMemo(
+    () => filterBulkWalletPayableInvoices(ownerBalances.invoices),
+    [ownerBalances.invoices],
+  );
+  const bulkPayableTotal = useMemo(
+    () => bulkWalletPayableTotal(bulkPayableInvoices),
+    [bulkPayableInvoices],
+  );
+  const skippedFutureBoardingCount = Math.max(
+    0,
+    ownerBalances.invoices.length - bulkPayableInvoices.length,
+  );
 
   const consolidatableCount = useMemo(
     () => invoices.filter((inv) => canConsolidateInvoiceStatus(inv.status)).length,
@@ -1010,25 +1028,71 @@ function InvoicesTab({ ownerId, ownerName }: { ownerId: string; ownerName: strin
           </Button>
         )}
 
-        {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.combinedWallet > 0 && (
+        {bulkPayableTotal > 0 && ownerBalances.combinedWallet > 0 && (
           <Button
             size="sm"
             variant="outline"
             disabled={payAllPending}
-            onClick={async () => {
-              setPayAllPending(true);
-              try {
-                await ownerBalances.payAllOutstanding("bulk_payment");
-              } finally {
-                setPayAllPending(false);
-              }
-            }}
+            data-testid="billing-pay-all-outstanding-btn"
+            onClick={() => setPayAllConfirmOpen(true)}
           >
             <CheckCircle2 className="mr-1.5 h-4 w-4" />
-            Pay all outstanding ({formatWalletAed(ownerBalances.invoiceRemainingTotal)})
+            Pay all outstanding ({formatWalletAed(bulkPayableTotal)})
           </Button>
         )}
       </div>
+
+      <AlertDialog open={payAllConfirmOpen} onOpenChange={setPayAllConfirmOpen}>
+        <AlertDialogContent data-testid="billing-pay-all-confirm-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Pay outstanding from wallet?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  Apply wallet credit toward{" "}
+                  <span className="font-medium text-foreground">
+                    {bulkPayableInvoices.length} invoice
+                    {bulkPayableInvoices.length !== 1 ? "s" : ""}
+                  </span>{" "}
+                  totaling{" "}
+                  <span className="font-medium text-foreground">
+                    {formatWalletAed(bulkPayableTotal)}
+                  </span>
+                  ? Invoices are paid oldest due date first.
+                </p>
+                {skippedFutureBoardingCount > 0 && (
+                  <p>
+                    {skippedFutureBoardingCount} future-dated boarding invoice
+                    {skippedFutureBoardingCount !== 1 ? "s are" : " is"} skipped — pay
+                    those individually if needed.
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={payAllPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={payAllPending || bulkPayableInvoices.length === 0}
+              data-testid="billing-pay-all-confirm-btn"
+              onClick={(e) => {
+                e.preventDefault();
+                setPayAllPending(true);
+                void ownerBalances
+                  .payAllOutstanding("bulk_payment", {
+                    invoiceIds: bulkPayableInvoices.map((inv) => inv.invoice_id),
+                  })
+                  .finally(() => {
+                    setPayAllPending(false);
+                    setPayAllConfirmOpen(false);
+                  });
+              }}
+            >
+              {payAllPending ? "Processing…" : "Confirm payment"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Invoice list */}
       <Card>
