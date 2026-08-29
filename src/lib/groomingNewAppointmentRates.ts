@@ -8,6 +8,7 @@ import {
   dogSizeFormToPackageSize,
   resolveGroomingPackageRateAmount,
   resolveWoofServiceRateAmount,
+  splashCoatTypeFromPetCoat,
 } from "@/lib/groomingPackageRateLookup";
 import type {
   GroomingPricingCheckbox,
@@ -52,6 +53,7 @@ const PACKAGE_PRIMARY_CHECKBOXES = new Set<GroomingPricingCheckbox>([
   "full_groom",
   "deshedding",
   "tidy",
+  "splash",
   "bath_only",
   "full_bath_full",
 ]);
@@ -145,6 +147,15 @@ export async function fetchCheckboxBasePriceAed(
     });
   }
 
+  if (checkbox === "splash") {
+    return resolveWoofServiceRateAmount({
+      service_code: "grooming_splash",
+      pet_size: dogSizeFormToDbPetSize(dogSize),
+      coat_type: splashCoatTypeFromPetCoat(petCoat),
+      booking_date: bookingDate,
+    });
+  }
+
   const pkg = primaryCheckboxToPackage(checkbox, deshedCoat);
   if (!pkg) return null;
   return resolveGroomingPackageRateAmount(pkg, packageSize, bookingDate, petCoat);
@@ -193,6 +204,13 @@ export async function fetchNewGroomingAppointmentPriceBreakdown(
     base = await resolveWoofServiceRateAmount({
       service_code: "grooming_tidy",
       pet_size: dogSizeFormToDbPetSize(dogSize),
+      booking_date: options?.bookingDate,
+    });
+  } else if (set.has("splash")) {
+    base = await resolveWoofServiceRateAmount({
+      service_code: "grooming_splash",
+      pet_size: dogSizeFormToDbPetSize(dogSize),
+      coat_type: splashCoatTypeFromPetCoat(options?.petCoat),
       booking_date: options?.bookingDate,
     });
   } else {

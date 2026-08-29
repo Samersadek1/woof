@@ -7,6 +7,7 @@ export type GroomingPricingCheckbox =
   | "full_groom"
   | "deshedding"
   | "tidy"
+  | "splash"
   | "bath_only"
   | "full_bath_full"
   | "fur_brushing"
@@ -25,6 +26,7 @@ const ALL_PRICING_CHECKBOXES: readonly GroomingPricingCheckbox[] = [
   "full_groom",
   "deshedding",
   "tidy",
+  "splash",
   "bath_only",
   "full_bath_full",
   "fur_brushing",
@@ -73,6 +75,7 @@ const BASE_PRIORITY: GroomingPricingCheckbox[] = [
   "full_groom",
   "deshedding",
   "tidy",
+  "splash",
   "bath_only",
   "full_bath_full",
 ];
@@ -82,6 +85,7 @@ export const GROOMING_BASE_PACKAGE_CHECKBOXES: readonly GroomingPricingCheckbox[
   "full_groom",
   "deshedding",
   "tidy",
+  "splash",
   "bath_only",
   "full_bath_full",
 ] as const;
@@ -113,6 +117,8 @@ export function groomingPricingCheckboxToDbService(cb: GroomingPricingCheckbox):
       return "deshedding";
     case "tidy":
       return "tidy";
+    case "splash":
+      return "splash";
     case "bath_only":
     case "full_bath_full":
     case "blow_dry":

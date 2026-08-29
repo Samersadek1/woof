@@ -4202,6 +4202,7 @@ export type Database = {
       grooming_service:
         | "full_groom"
         | "full_bath"
+        | "splash"
         | "nail_clip"
         | "deshedding"
         | "brushing"
@@ -4513,6 +4514,7 @@ export const Constants = {
       grooming_service: [
         "full_groom",
         "full_bath",
+        "splash",
         "nail_clip",
         "deshedding",
         "brushing",

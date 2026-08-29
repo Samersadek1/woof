@@ -33,10 +33,12 @@ describe("groomingNewAppointmentPricing", () => {
     expect(groomingPricingCheckboxToDbService("nail_clip")).toBe("nail_clip");
     expect(groomingPricingCheckboxToDbService("tidy")).toBe("tidy");
     expect(groomingPricingCheckboxToDbService("gland_expression")).toBe("gland_expression");
+    expect(groomingPricingCheckboxToDbService("splash")).toBe("splash");
   });
 
-  it("resolvePrimaryGroomingCheckbox includes tidy in base priority", () => {
+  it("resolvePrimaryGroomingCheckbox includes tidy and splash in base priority", () => {
     expect(resolvePrimaryGroomingCheckbox(["nail_clip", "tidy"])).toBe("tidy");
+    expect(resolvePrimaryGroomingCheckbox(["nail_clip", "splash"])).toBe("splash");
   });
 
   it("clampMattingFeeAed respects bounds", () => {
