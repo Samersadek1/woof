@@ -121,6 +121,11 @@ export interface RecordPaymentParams {
   skipWalletDeduction?: boolean;
   /** Link an existing wallet_transactions row to the payment. Default null. */
   walletTransactionId?: string | null;
+  /**
+   * Staff confirmed a recent same-amount payment is intentional. Passed through
+   * to insert_invoice_payment so the short-window DB guard allows the insert.
+   */
+  confirmDuplicate?: boolean;
 }
 
 export interface RecordPaymentResult {
@@ -207,27 +212,24 @@ export async function recordPayment(
     }
   }
 
-  const { data: payment, error: payErr } = await supabase
-    .from("invoice_payments")
-    .insert({
-      invoice_id: params.invoiceId,
-      owner_id: invoice.owner_id,
-      amount,
-      payment_method: params.method,
-      wallet_transaction_id: walletTransactionId,
-      opening_balance: openingBalance,
-      closing_balance: closingBalance,
-      notes: params.notes?.trim() || null,
-      recorded_by: recordedBy,
-    })
-    .select("id")
-    .single();
+  const { data: paymentId, error: payErr } = await supabase.rpc("insert_invoice_payment", {
+    p_invoice_id: params.invoiceId,
+    p_owner_id: invoice.owner_id,
+    p_amount: amount,
+    p_payment_method: params.method,
+    p_opening_balance: openingBalance,
+    p_closing_balance: closingBalance,
+    p_recorded_by: recordedBy,
+    p_notes: params.notes?.trim() || null,
+    p_wallet_transaction_id: walletTransactionId,
+    p_confirm_duplicate: params.confirmDuplicate ?? false,
+  });
 
   if (payErr) return { success: false, error: payErr.message };
 
   return {
     success: true,
-    paymentId: payment.id,
+    paymentId: paymentId as string,
     openingBalance,
     closingBalance,
     walletTransactionId,

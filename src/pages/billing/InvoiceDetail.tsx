@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import TopBar from "@/components/dashboard/TopBar";
@@ -124,6 +124,9 @@ export default function InvoiceDetailPage() {
   const [markDueOpen, setMarkDueOpen] = useState(false);
   const [markDueReason, setMarkDueReason] = useState("");
   const [markDueBusy, setMarkDueBusy] = useState(false);
+  /** Sync guard — isPending alone loses to double-clicks before re-render. */
+  const externalPayBusyRef = useRef(false);
+  const [externalPayBusy, setExternalPayBusy] = useState(false);
 
   const handlePrint = useCallback(() => {
     if (!id) return;
@@ -286,10 +289,13 @@ export default function InvoiceDetailPage() {
   };
 
   const submitExternal = async (confirmDuplicate: boolean) => {
+    if (externalPayBusyRef.current) return;
     if (!externalPayOpen) return;
     if (!performedBy.trim()) return toast.error("Staff name is required.");
     const amount = parseFloat(payAmount || "0");
     if (!amount || Number.isNaN(amount)) return toast.error("Enter a valid payment amount.");
+    externalPayBusyRef.current = true;
+    setExternalPayBusy(true);
     try {
       const result = await externalPay.mutateAsync({
         invoiceId: inv.id,
@@ -315,10 +321,14 @@ export default function InvoiceDetailPage() {
       refetch();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Could not record payment.");
+    } finally {
+      externalPayBusyRef.current = false;
+      setExternalPayBusy(false);
     }
   };
 
   const doRecordExternal = () => submitExternal(false);
+  const externalPaySubmitting = externalPayBusy || externalPay.isPending;
 
   const doWalletPay = async () => {
     if (!performedBy.trim()) return toast.error("Staff name is required.");
@@ -771,7 +781,7 @@ export default function InvoiceDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setExternalPayOpen(null)}>Cancel</Button>
-            <Button onClick={doRecordExternal} disabled={externalPay.isPending}>{externalPay.isPending ? "Saving..." : "Confirm"}</Button>
+            <Button onClick={doRecordExternal} disabled={externalPaySubmitting}>{externalPaySubmitting ? "Saving..." : "Confirm"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -779,7 +789,7 @@ export default function InvoiceDetailPage() {
       <DuplicatePaymentConfirmDialog
         open={!!duplicatePayment}
         duplicate={duplicatePayment}
-        submitting={externalPay.isPending}
+        submitting={externalPaySubmitting}
         onConfirm={() => submitExternal(true)}
         onCancel={() => setDuplicatePayment(null)}
       />

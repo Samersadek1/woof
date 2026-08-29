@@ -3849,6 +3849,21 @@ export type Database = {
           total: number
         }[]
       }
+      insert_invoice_payment: {
+        Args: {
+          p_amount: number
+          p_closing_balance: number
+          p_confirm_duplicate?: boolean
+          p_invoice_id: string
+          p_notes?: string | null
+          p_opening_balance: number
+          p_owner_id: string
+          p_payment_method: Database["public"]["Enums"]["payment_method"]
+          p_recorded_by: string
+          p_wallet_transaction_id?: string | null
+        }
+        Returns: string
+      }
       is_boarding_import_placeholder_room: {
         Args: { p_room: Database["public"]["Tables"]["rooms"]["Row"] }
         Returns: boolean
