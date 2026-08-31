@@ -29,7 +29,7 @@ BEGIN
     WHERE p.invoice_id = NEW.invoice_id
       AND p.amount = NEW.amount
       AND p.payment_method = NEW.payment_method
-      AND p.created_at > (timezone('utc', now()) - interval '5 seconds')
+      AND p.created_at > (now() - interval '5 seconds')
   ) THEN
     RAISE EXCEPTION
       'DUPLICATE_PAYMENT_REJECTED: identical invoice_id+amount+payment_method within 5 seconds'
