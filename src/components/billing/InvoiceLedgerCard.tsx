@@ -92,10 +92,10 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
     );
   }
 
-  const { invoice, lines, payments, amendments, charges, totalPaid } = ledger;
+  const { invoice, lines, payments, amendments, charges, totalPaid, openingBalance } = ledger;
   const walletBalance = account?.walletBalance ?? 0;
   const accountBalance = account?.accountBalance ?? 0;
-  const balanceDue = invoiceBalanceDue(invoice.status, charges, totalPaid);
+  const balanceDue = invoiceBalanceDue(invoice.status, charges, totalPaid, openingBalance);
   const invoiceSettled = balanceDue < 0.01;
   const canVoid =
     invoice.status !== "finalised" &&
@@ -107,7 +107,7 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
   // owner has *other* unpaid invoices on their account.
   const thisOutstanding =
     !invoice.receipt_only && UNPAID_STATUSES.has(invoice.status)
-      ? Math.max(0, charges - totalPaid)
+      ? balanceDue
       : 0;
   const otherOutstanding = Math.max(0, (account?.outstandingDebt ?? 0) - thisOutstanding);
   const hasOtherUnpaid = otherOutstanding > 0.01;
@@ -253,6 +253,12 @@ export function InvoiceLedgerCard({ invoiceId, onChanged }: InvoiceLedgerCardPro
               <span className="text-muted-foreground">Charges</span>
               <span className="tabular-nums text-red-700">- {formatAed(charges)}</span>
             </div>
+            {openingBalance > 0 ? (
+              <div className="flex justify-between py-0.5">
+                <span className="text-muted-foreground">Deposit / opening balance</span>
+                <span className="tabular-nums text-emerald-700">+ {formatAed(openingBalance)}</span>
+              </div>
+            ) : null}
             {payments.length > 0
               ? payments.map((p) => {
                   const editable =

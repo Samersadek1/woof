@@ -171,8 +171,10 @@ export default function InvoiceDetailPage() {
     // invoice.amount_paid is maintained by both wallet and cash/card payment flows.
     // Summing wallet_transactions directly doesn't work because wallet deductions
     // are stored as negative amounts (Math.max(0, amount) would skip them).
+    // opening_balance is the deposit / opening credit applied to this invoice.
     const amountPaid = roundMoney2(Math.max(0, invoice?.amount_paid ?? 0));
-    const outstanding = Math.max(0, resolved.display.grandTotal - amountPaid);
+    const openingBalance = roundMoney2(Math.max(0, invoice?.opening_balance ?? 0));
+    const outstanding = Math.max(0, resolved.display.grandTotal - amountPaid - openingBalance);
     return {
       lineSubtotal,
       totalDiscount: resolved.totalDiscount,
@@ -180,6 +182,7 @@ export default function InvoiceDetailPage() {
       vat: resolved.display.vat,
       grandTotal: resolved.display.grandTotal,
       amountPaid,
+      openingBalance,
       outstanding,
     };
   }, [data]);
@@ -613,6 +616,9 @@ export default function InvoiceDetailPage() {
             <div className="flex justify-between"><span className="text-muted-foreground">Subtotal (ex VAT)</span><span>{aed(computed.netExVat)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">{vatLineLabel()}</span><span>{aed(computed.vat)}</span></div>
             <div className="flex justify-between font-semibold text-base pt-2 border-t"><span>Grand total (incl. VAT)</span><span>{aed(computed.grandTotal)}</span></div>
+            {computed.openingBalance > 0 ? (
+              <div className="flex justify-between"><span className="text-muted-foreground">Deposit / opening balance</span><span>- {aed(computed.openingBalance)}</span></div>
+            ) : null}
             <div className="flex justify-between"><span className="text-muted-foreground">Amount paid</span><span>{aed(computed.amountPaid)}</span></div>
             <div className="flex justify-between font-semibold"><span>Balance outstanding</span><span>{aed(computed.outstanding)}</span></div>
           </CardContent>
