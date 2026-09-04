@@ -9,6 +9,10 @@ import {
   orphanWalletDeductions,
   syntheticWalletPaymentsFromDeductions,
 } from "@/lib/walletDeductionPayments";
+import {
+  isPaidWithoutSettlement,
+  PAID_WITHOUT_SETTLEMENT_NOTE,
+} from "@/lib/paidWithoutSettlement";
 
 type Client = SupabaseClient<Database>;
 
@@ -152,26 +156,55 @@ export async function loadLedgerStatementClient(
     if (i.receipt_only) continue;
     if (invoicesWithPayments.has(i.id)) continue;
     const paid = roundAed(Number(i.amount_paid ?? 0));
-    if (paid <= 0) continue;
-    const isWallet = i.payment_method === "wallet";
-    events.push({
-      row_id: `legacy_pay:${i.id}`,
-      event_at: i.paid_at ?? i.updated_at ?? i.created_at,
-      sort_seq: 2,
-      amount: paid,
-      is_visible: !isWallet,
-      transaction_type: isWallet
-        ? "wallet_payment"
-        : i.payment_method
-          ? invoicePaymentMethodToTransactionType(i.payment_method)
-          : "manual_topup",
-      invoice_id: i.id,
-      invoice_number: i.invoice_number,
-      service_type: i.service_type,
-      due_date: i.due_date,
-      payment_method: i.payment_method,
-      notes: "Legacy settled amount",
-    });
+    if (paid > 0) {
+      const isWallet = i.payment_method === "wallet";
+      events.push({
+        row_id: `legacy_pay:${i.id}`,
+        event_at: i.paid_at ?? i.updated_at ?? i.created_at,
+        sort_seq: 2,
+        amount: paid,
+        is_visible: !isWallet,
+        transaction_type: isWallet
+          ? "wallet_payment"
+          : i.payment_method
+            ? invoicePaymentMethodToTransactionType(i.payment_method)
+            : "manual_topup",
+        invoice_id: i.id,
+        invoice_number: i.invoice_number,
+        service_type: i.service_type,
+        due_date: i.due_date,
+        payment_method: i.payment_method,
+        notes: "Legacy settled amount",
+      });
+      continue;
+    }
+
+    // status=paid + amount_paid=0 + no invoice_payments (legacy import): credit
+    // the gross so SOA K is not inflated. Do not invent amount_paid — flag for review.
+    const gross = roundAed(invoiceGross(i));
+    if (
+      isPaidWithoutSettlement({
+        status: i.status,
+        amountPaid: i.amount_paid,
+        grossTotal: gross,
+        hasPaymentRows: false,
+      })
+    ) {
+      events.push({
+        row_id: `paid_no_settle:${i.id}`,
+        event_at: i.paid_at ?? i.updated_at ?? i.created_at,
+        sort_seq: 2,
+        amount: gross,
+        is_visible: true,
+        transaction_type: "manual_topup",
+        invoice_id: i.id,
+        invoice_number: i.invoice_number,
+        service_type: i.service_type,
+        due_date: i.due_date,
+        payment_method: i.payment_method,
+        notes: PAID_WITHOUT_SETTLEMENT_NOTE,
+      });
+    }
   }
 
   for (const wt of walletRes.data ?? []) {
