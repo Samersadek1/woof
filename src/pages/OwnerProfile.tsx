@@ -1071,25 +1071,16 @@ const OwnerProfilePage = () => {
               <div className="text-right">
                 <div className="flex items-center justify-end gap-1 text-xs uppercase tracking-wide text-muted-foreground">
                   <Wallet className="h-3.5 w-3.5" />
-                  Account balance (SOA)
+                  Wallet balance
                 </div>
-                {ownerBalances.isLoading ? (
-                  <Skeleton className="mt-1 ml-auto h-9 w-28" />
-                ) : (
-                  <WalletBalanceDisplay
-                    accountBalance={ownerBalances.netPosition}
-                    amountClassName={
-                      ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
-                    }
-                  />
+                <p className="mt-1 text-3xl font-bold tabular-nums">
+                  {formatWalletAed(owner.wallet_balance ?? 0)}
+                </p>
+                {!ownerBalances.isLoading && ownerBalances.invoiceRemainingTotal > 0 && (
+                  <div className="mt-1 flex justify-end">
+                    <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
+                  </div>
                 )}
-                {!ownerBalances.isLoading &&
-                  ownerBalances.invoiceRemainingTotal > 0 &&
-                  ownerBalances.netPosition >= 0 && (
-                    <div className="mt-1 flex justify-end">
-                      <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
-                    </div>
-                  )}
                 <div className="mt-2 flex flex-col items-end gap-2">
                   <Button
                     type="button"
