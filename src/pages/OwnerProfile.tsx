@@ -285,7 +285,6 @@ function makePetForm(ownerId: string): PetInsert {
 function OwnerBillingSection({ ownerId }: { ownerId: string }) {
   const navigate = useNavigate();
   const { staffName } = useCurrentStaffName();
-  const { data: billingOwner } = useOwner(ownerId);
   const ownerBalances = useOwnerBalances(ownerId);
   const [payAllPending, setPayAllPending] = useState(false);
   const { data: pendingHourly = [], isLoading: pendingHourlyLoading } =
@@ -381,26 +380,18 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-start justify-between gap-2">
-                <div className="flex flex-wrap items-start gap-6">
-                  <div>
-                    <p className="text-xs uppercase text-muted-foreground">Account balance (SOA)</p>
-                    <WalletBalanceDisplay
-                      accountBalance={ownerBalances.netPosition}
-                      size="compact"
-                      amountClassName={
-                        ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
-                      }
-                    />
-                    {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.netPosition >= 0 && (
-                      <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase text-muted-foreground">Wallet balance</p>
-                    <p className="mt-1 text-2xl font-bold tabular-nums">
-                      {formatWalletAed(billingOwner?.wallet_balance ?? 0)}
-                    </p>
-                  </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Account balance (SOA)</p>
+                  <WalletBalanceDisplay
+                    accountBalance={ownerBalances.netPosition}
+                    size="compact"
+                    amountClassName={
+                      ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
+                    }
+                  />
+                  {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.netPosition >= 0 && (
+                    <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
+                  )}
                 </div>
                 <Button
                   size="sm"
@@ -1099,19 +1090,6 @@ const OwnerProfilePage = () => {
                       <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
                     </div>
                   )}
-              </div>
-              <div className="text-right">
-                <div className="flex items-center justify-end gap-1 text-xs uppercase tracking-wide text-muted-foreground">
-                  <Wallet className="h-3.5 w-3.5" />
-                  Wallet balance
-                </div>
-                {ownerLoading ? (
-                  <Skeleton className="mt-1 ml-auto h-9 w-28" />
-                ) : (
-                  <p className="mt-1 text-3xl font-bold tabular-nums">
-                    {formatWalletAed(owner?.wallet_balance ?? 0)}
-                  </p>
-                )}
                 <div className="mt-2 flex flex-col items-end gap-2">
                   <Button
                     type="button"
