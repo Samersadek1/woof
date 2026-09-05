@@ -1076,43 +1076,23 @@ const OwnerProfilePage = () => {
                 <p className="mt-1 text-3xl font-bold tabular-nums">
                   {formatWalletAed(owner.wallet_balance ?? 0)}
                 </p>
-                <div className="mt-3 space-y-2">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                      Outstanding debt
+                <div className="mt-3">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Outstanding debt
+                  </p>
+                  {ownerBalances.isLoading ? (
+                    <Skeleton className="mt-0.5 ml-auto h-5 w-24" />
+                  ) : (
+                    <p
+                      className={
+                        ownerBalances.invoiceRemainingTotal > 0
+                          ? "mt-0.5 text-sm font-semibold tabular-nums text-red-600 dark:text-red-400"
+                          : "mt-0.5 text-sm font-semibold tabular-nums text-muted-foreground"
+                      }
+                    >
+                      {formatWalletAed(ownerBalances.invoiceRemainingTotal)}
                     </p>
-                    {ownerBalances.isLoading ? (
-                      <Skeleton className="mt-0.5 ml-auto h-5 w-24" />
-                    ) : (
-                      <p
-                        className={
-                          ownerBalances.invoiceRemainingTotal > 0
-                            ? "mt-0.5 text-sm font-semibold tabular-nums text-red-600 dark:text-red-400"
-                            : "mt-0.5 text-sm font-semibold tabular-nums text-muted-foreground"
-                        }
-                      >
-                        {formatWalletAed(ownerBalances.invoiceRemainingTotal)}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                      Account Balance (SOA)
-                    </p>
-                    {ownerBalances.isLoading ? (
-                      <Skeleton className="mt-0.5 ml-auto h-5 w-24" />
-                    ) : (
-                      <p
-                        className={
-                          ownerBalances.netPosition < 0
-                            ? "mt-0.5 text-sm font-semibold tabular-nums text-red-600 dark:text-red-400"
-                            : "mt-0.5 text-sm font-semibold tabular-nums text-muted-foreground"
-                        }
-                      >
-                        {formatWalletAed(ownerBalances.netPosition)}
-                      </p>
-                    )}
-                  </div>
+                  )}
                 </div>
                 <div className="mt-3 flex flex-col items-end gap-2">
                   <Button
