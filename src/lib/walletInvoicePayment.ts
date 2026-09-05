@@ -1,11 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { resolveWalletChargeAmount } from "@/lib/accountBalance";
-import { fetchLedgerClosingK } from "@/lib/ledgerClosingBalance";
-import { spendableWalletFromK } from "@/lib/ownerBalances";
 import { roundAed } from "@/lib/money";
 import { invoiceAmountDue } from "@/lib/vatConfig";
 import { recordPayment } from "@/services/invoiceService";
+
+/** Float tolerance matching collect_account_payment / ledger settled checks. */
+const WALLET_BALANCE_TOLERANCE_AED = 0.01;
 
 export type WalletPaymentResult = {
   success: boolean;
@@ -20,6 +21,10 @@ export type WalletPaymentResult = {
 /**
  * Pay an invoice from the owner's wallet via recordPayment — writes
  * invoice_payments + wallet_transactions and lets the DB trigger update status.
+ *
+ * Spendable funds are owners.wallet_balance only (same figure staff see in the
+ * wallet modal / Customer Profile). Do not cap with SOA ledger K — K intentionally
+ * excludes wallet-payment rows and can be ≤ 0 while the wallet still has credit.
  */
 export async function payInvoiceFromWallet(
   supabase: SupabaseClient<Database>,
@@ -63,15 +68,15 @@ export async function payInvoiceFromWallet(
   if (ownerErr) return { success: false, error: ownerErr.message, ownerId };
 
   const walletBalance = roundAed(owner.wallet_balance ?? 0);
-  let soaSpendable = walletBalance;
-  try {
-    const k = await fetchLedgerClosingK(supabase, ownerId);
-    soaSpendable = roundAed(Math.min(walletBalance, spendableWalletFromK(k)));
-  } catch {
-    // Ledger RPC not deployed yet — fall back to cached wallet balance.
-  }
-
-  const chargeAmount = resolveWalletChargeAmount(amountAed, soaSpendable, balanceDue);
+  // Allow 0.01 AED slack so float noise does not block an otherwise full cover.
+  const spendable = roundAed(walletBalance + WALLET_BALANCE_TOLERANCE_AED);
+  const chargeAmount = roundAed(
+    Math.min(
+      resolveWalletChargeAmount(amountAed, spendable, balanceDue),
+      walletBalance,
+      balanceDue,
+    ),
+  );
 
   if (chargeAmount <= 0) {
     return {
