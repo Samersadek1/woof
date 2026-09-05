@@ -9,6 +9,17 @@ export function isInactiveInvoiceStatus(status: string): boolean {
   return (INACTIVE_INVOICE_STATUSES as readonly string[]).includes(status);
 }
 
+/**
+ * Invoices that participate in the SOA / ledger running balance.
+ * Drafts are excluded — not finalized, so they must not debit customer debt.
+ * Mirrors public.is_soa_invoice_status.
+ */
+export function isSoaInvoiceStatus(status: string): boolean {
+  return (
+    !isInactiveInvoiceStatus(status) && status !== "draft"
+  );
+}
+
 export function canEditInvoice(status: string): boolean {
   return !isInactiveInvoiceStatus(status) && status !== "paid";
 }

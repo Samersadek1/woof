@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { LedgerStatementRow } from "@/hooks/useStatement";
-import { isInactiveInvoiceStatus } from "@/lib/invoiceStatus";
+import { isSoaInvoiceStatus } from "@/lib/invoiceStatus";
 import { invoicePaymentMethodToTransactionType } from "@/lib/paymentMethod";
 import { roundAed } from "@/lib/money";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
@@ -51,10 +51,6 @@ function invoiceGross(invoice: {
     service_type: invoice.service_type,
     notes: invoice.notes,
   }).grandTotal;
-}
-
-function isSoaInvoiceStatus(status: string): boolean {
-  return !isInactiveInvoiceStatus(status);
 }
 
 /** Client-side reconstruction when get_ledger_statement RPC is unavailable. */

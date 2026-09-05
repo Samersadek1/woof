@@ -2,12 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   invoiceBalanceDue,
   isInactiveInvoiceStatus,
+  isSoaInvoiceStatus,
   withoutSupersededInvoices,
 } from "@/lib/invoiceStatus";
 
 describe("invoiceStatus", () => {
   it("treats consolidated as inactive", () => {
     expect(isInactiveInvoiceStatus("consolidated")).toBe(true);
+  });
+
+  it("excludes draft from SOA ledger statuses", () => {
+    expect(isSoaInvoiceStatus("draft")).toBe(false);
+    expect(isSoaInvoiceStatus("voided")).toBe(false);
+    expect(isSoaInvoiceStatus("outstanding")).toBe(true);
+    expect(isSoaInvoiceStatus("paid")).toBe(true);
   });
 
   it("returns zero balance for consolidated invoices", () => {
