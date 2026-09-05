@@ -40,7 +40,6 @@ import {
 import { formatWalletAed } from "@/lib/money";
 import { invoiceDisplayTotals } from "@/lib/vatConfig";
 import { ConsolidateInvoicesDialog } from "@/components/billing/ConsolidateInvoicesDialog";
-import { WalletBalanceDisplay, OutstandingAmountBadge } from "@/components/billing/WalletBalanceDisplay";
 import { ClearOutstandingAfterTopUpDialog } from "@/components/billing/ClearOutstandingAfterTopUpDialog";
 import { PaymentSplitDialog } from "@/components/billing/PaymentSplitDialog";
 import { canConsolidateInvoiceStatus } from "@/lib/invoiceConsolidation";
@@ -381,17 +380,16 @@ function OwnerBillingSection({ ownerId }: { ownerId: string }) {
             <CardContent className="p-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs uppercase text-muted-foreground">Account balance (SOA)</p>
-                  <WalletBalanceDisplay
-                    accountBalance={ownerBalances.netPosition}
-                    size="compact"
-                    amountClassName={
-                      ownerBalances.netPosition < 0 ? "text-red-600 dark:text-red-400" : undefined
+                  <p className="text-xs uppercase text-muted-foreground">Outstanding debt</p>
+                  <p
+                    className={
+                      ownerBalances.invoiceRemainingTotal > 0
+                        ? "mt-1 text-2xl font-bold tabular-nums text-red-600 dark:text-red-400"
+                        : "mt-1 text-2xl font-bold tabular-nums"
                     }
-                  />
-                  {ownerBalances.invoiceRemainingTotal > 0 && ownerBalances.netPosition >= 0 && (
-                    <OutstandingAmountBadge amount={ownerBalances.invoiceRemainingTotal} />
-                  )}
+                  >
+                    {formatWalletAed(ownerBalances.invoiceRemainingTotal)}
+                  </p>
                 </div>
                 <Button
                   size="sm"
