@@ -30,7 +30,7 @@ export async function payInvoiceFromWallet(
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
     .select(
-      "id, owner_id, total, vat_aed, service_type, notes, amount_paid, opening_balance, status",
+      "id, owner_id, total, vat_aed, service_type, notes, amount_paid, status",
     )
     .eq("id", invoiceId)
     .single();
@@ -44,11 +44,15 @@ export async function payInvoiceFromWallet(
     notes: invoice.notes,
   });
   const alreadyPaid = roundAed(invoice.amount_paid ?? 0);
-  const openingBalance = roundAed(Math.max(0, invoice.opening_balance ?? 0));
-  const balanceDue = roundAed(Math.max(0, grandTotal - alreadyPaid - openingBalance));
+  const balanceDue = roundAed(Math.max(0, grandTotal - alreadyPaid));
 
   if (balanceDue <= 0) {
-    return { success: true, amountCharged: 0, ownerId };
+    return {
+      success: false,
+      error: "This invoice has no outstanding balance",
+      amountCharged: 0,
+      ownerId,
+    };
   }
 
   const { data: owner, error: ownerErr } = await supabase
@@ -79,7 +83,7 @@ export async function payInvoiceFromWallet(
   }
 
   const newAmountPaid = roundAed(alreadyPaid + chargeAmount);
-  const partial = roundAed(newAmountPaid + openingBalance) < grandTotal;
+  const partial = newAmountPaid < grandTotal;
 
   // recordPayment owns the wallet deduction (wallet_transactions + balance
   // decrement), the invoice_payments row, and — via the

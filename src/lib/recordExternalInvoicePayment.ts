@@ -106,7 +106,7 @@ export async function recordExternalInvoicePayment(
   const { data: invoice, error: invoiceErr } = await supabase
     .from("invoices")
     .select(
-      "id, owner_id, total, vat_aed, service_type, notes, amount_paid, opening_balance, status",
+      "id, owner_id, total, vat_aed, service_type, notes, amount_paid, status",
     )
     .eq("id", invoiceId)
     .single();
@@ -120,8 +120,7 @@ export async function recordExternalInvoicePayment(
   });
 
   const alreadyPaid = roundAed(Math.max(0, invoice.amount_paid ?? 0));
-  const openingBalance = roundAed(Math.max(0, invoice.opening_balance ?? 0));
-  const outstanding = roundAed(Math.max(0, grandTotal - alreadyPaid - openingBalance));
+  const outstanding = roundAed(Math.max(0, grandTotal - alreadyPaid));
   if (outstanding <= 0) {
     return { success: false, error: "Invoice has no outstanding balance." };
   }
@@ -154,9 +153,8 @@ export async function recordExternalInvoicePayment(
 
   const txType = invoicePaymentMethodToTransactionType(method);
   const newAmountPaid = roundAed(alreadyPaid + amount);
-  const covered = roundAed(newAmountPaid + openingBalance);
-  const partial = covered < grandTotal;
-  const newStatus = deriveInvoiceStatusAfterRecalc(invoice.status, covered, grandTotal);
+  const partial = newAmountPaid < grandTotal;
+  const newStatus = deriveInvoiceStatusAfterRecalc(invoice.status, newAmountPaid, grandTotal);
 
   // Write invoice_payments first (DB short-window reject + advisory lock). If a
   // concurrent double-click loses the race, we fail before the legacy audit row.

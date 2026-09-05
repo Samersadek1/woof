@@ -24,18 +24,16 @@ export function canEditInvoice(status: string): boolean {
   return !isInactiveInvoiceStatus(status) && status !== "paid";
 }
 
-/** Returns 0 for consolidated/voided/cancelled; otherwise max(0, total - amountPaid - openingBalance).
- * `openingBalance` is the invoice deposit / opening credit (invoices.opening_balance). */
+/** Returns 0 for consolidated/voided/cancelled; otherwise max(0, total - amountPaid).
+ * Do not subtract invoices.opening_balance — that column is a wallet snapshot at
+ * issue time (trg_invoice_opening_balance), not a deposit toward this invoice. */
 export function invoiceBalanceDue(
   status: string,
   total: number,
   amountPaid = 0,
-  openingBalance = 0,
 ): number {
   if (isInactiveInvoiceStatus(status)) return 0;
-  return roundAed(
-    Math.max(0, total - amountPaid - Math.max(0, openingBalance)),
-  );
+  return roundAed(Math.max(0, total - amountPaid));
 }
 
 /** Statuses excluded when finding the current (non-superseded) invoice for a booking/owner. */
